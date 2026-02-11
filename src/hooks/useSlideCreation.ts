@@ -1,0 +1,378 @@
+import { useCallback } from 'react'
+import { useAppStore } from '../store/appStore'
+import type {
+    Slide,
+    Scripture,
+    Hymn,
+    Song,
+    Countdown,
+    ExtendedFileT,
+    SlideStyle
+} from '../types'
+import {
+    slideTypes,
+    slideLayoutTypes,
+    backgroundTypes,
+    backgroundFillTypes
+} from '../types'
+import { saveMedia } from './useIndexedDB'
+
+// Generate a unique ObjectID-style ID
+export function generateObjectId(): string {
+    const timestamp = Math.floor(Date.now() / 1000).toString(16).padStart(8, '0')
+    const machineId = Math.floor(Math.random() * 16777216).toString(16).padStart(6, '0')
+    const processId = Math.floor(Math.random() * 65536).toString(16).padStart(4, '0')
+    const counter = Math.floor(Math.random() * 16777216).toString(16).padStart(6, '0')
+    return timestamp + machineId + processId + counter
+}
+
+// Calculate font size based on screen and content
+export function calculateScreenFontSize(content: string): number {
+    const length = content?.length || 0
+    if (length === 0) return 3.5
+    if (length < 100) return 8
+    if (length < 200) return 6.5
+    if (length < 300) return 5.5
+    if (length < 400) return 4.5
+    if (length < 500) return 4
+    return 3.5
+}
+
+// Generate slide content from data
+export function generateSlideContent(
+    slide: Slide,
+    data?: Scripture | Hymn | Song | Countdown | ExtendedFileT,
+    currentVerse?: string
+): string[] {
+    if (!data) return slide.contents || []
+
+    switch (slide.type) {
+        case slideTypes.bible: {
+            const scripture = data as Scripture
+            if (typeof scripture.content === 'string') {
+                return [scripture.content]
+            }
+            return Array.isArray(scripture.content)
+                ? scripture.content.map((verse: { scripture: string }) => verse.scripture)
+                : []
+        }
+        case slideTypes.hymn: {
+            const hymn = data as Hymn
+            if (currentVerse) {
+                return [currentVerse]
+            }
+            return hymn.verses?.[0] ? [hymn.verses[0]] : []
+        }
+        case slideTypes.song: {
+            const song = data as Song
+            if (currentVerse) {
+                return [currentVerse]
+            }
+            return song.verses?.[0] ? [song.verses[0]] : []
+        }
+        case slideTypes.countdown: {
+            const countdown = data as Countdown
+            return [countdown.content, countdown.timeLeft || countdown.time]
+        }
+        case slideTypes.media: {
+            return []
+        }
+        default:
+            return slide.contents || []
+    }
+}
+
+// Generate slide name
+export function generateSlideName(slide: Slide): string {
+    if (slide.name && slide.name !== 'Untitled') return slide.name
+
+    switch (slide.type) {
+        case slideTypes.bible:
+            return slide.title || 'Bible Slide'
+        case slideTypes.hymn:
+            return slide.title ? `Hymn: ${slide.title}` : 'Hymn Slide'
+        case slideTypes.song:
+            return slide.data ? `Song: ${(slide.data as Song).title}` : 'Song Slide'
+        case slideTypes.media:
+            return 'Media Slide'
+        case slideTypes.countdown:
+            return 'Countdown'
+        default:
+            return 'Text Slide'
+    }
+}
+
+// Generate a simple ID
+export function generateId(): string {
+    return `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+export function useSlideCreation() {
+    const activeSlides = useAppStore((state) => state.activeSlides)
+    const settings = useAppStore((state) => state.settings)
+    const activeSchedule = useAppStore((state) => state.activeSchedule)
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+
+    const preSlideCreation = useCallback((): Slide => {
+        const tempSlide: Slide = {
+            id: generateObjectId(),
+            index: activeSlides.length,
+            name: 'Untitled',
+            type: slideTypes.text,
+            layout: slideLayoutTypes.full_text,
+            contents: [],
+            userId: '', // Will be set by auth
+            churchId: '', // Will be set by auth
+            scheduleId: activeSchedule?._id || '',
+            ...(settings.defaultBackground?.default && {
+                backgroundType: settings.defaultBackground.default.backgroundType,
+                background: settings.defaultBackground.default.background,
+                backgroundVideoKey: settings.defaultBackground.default.backgroundVideoKey,
+            }),
+            slideStyle: {
+                alignment: settings.slideStyles.alignment,
+                fontSizePercent: settings.slideStyles.fontSizePercent,
+                font: settings.defaultFont,
+                isMediaMuted: true,
+                isMediaPlaying: false,
+                lettercase: settings.slideStyles.lettercase,
+                lineSpacing: settings.slideStyles.lineSpacing,
+                textOutlined: settings.slideStyles.textOutlined,
+            },
+        }
+        return tempSlide
+    }, [activeSlides.length, settings, activeSchedule])
+
+    const createTextSlide = useCallback((): Slide => {
+        const tempSlide = preSlideCreation()
+
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            alignment: 'left'
+        }
+        tempSlide.background =
+            settings.defaultBackground.default?.background ||
+            settings.defaultBackground.text?.background
+        tempSlide.backgroundType =
+            settings.defaultBackground.default?.backgroundType ||
+            settings.defaultBackground.text?.backgroundType
+        tempSlide.id = generateObjectId()
+
+        return tempSlide
+    }, [preSlideCreation, settings])
+
+    const duplicateSlide = useCallback((slideToDuplicate?: Slide): Slide | null => {
+        if (!slideToDuplicate) return null
+
+        const tempSlide = { ...slideToDuplicate }
+        delete (tempSlide as Record<string, unknown>)._id
+        tempSlide.id = generateObjectId()
+
+        return tempSlide
+    }, [])
+
+    const createBibleSlide = useCallback((
+        scripture: Scripture,
+        options?: { fromWholeBibleSearch?: boolean }
+    ): Slide => {
+        const tempSlide = preSlideCreation()
+        tempSlide.layout = slideLayoutTypes.bible
+        tempSlide.type = slideTypes.bible
+        tempSlide.background =
+            settings.defaultBackground.default?.background ||
+            settings.defaultBackground.bible?.background
+        tempSlide.backgroundVideoKey =
+            settings.defaultBackground.default?.backgroundVideoKey ||
+            settings.defaultBackground.bible?.backgroundVideoKey
+        tempSlide.backgroundType =
+            settings.defaultBackground.default?.backgroundType ||
+            settings.defaultBackground.bible?.backgroundType
+        tempSlide.title = scripture?.label
+        tempSlide.name = generateSlideName(tempSlide)
+
+        const contentString = typeof scripture?.content === 'string'
+            ? scripture?.content
+            : Array.isArray(scripture?.content)
+                ? scripture?.content.map((v: { scripture: string }) => v.scripture).join(' ')
+                : ''
+        const fontSize = calculateScreenFontSize(contentString)
+
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            fontSize: Number(fontSize),
+            font: settings.defaultFont,
+        }
+        tempSlide.contents = generateSlideContent(tempSlide, scripture)
+
+        return tempSlide
+    }, [preSlideCreation, settings])
+
+    const createHymnSlide = useCallback((hymn: Hymn): Slide => {
+        const tempSlide = preSlideCreation()
+        tempSlide.layout = slideLayoutTypes.bible
+        tempSlide.type = slideTypes.hymn
+        tempSlide.background =
+            settings.defaultBackground.default?.background ||
+            settings.defaultBackground.hymn?.background
+        tempSlide.backgroundVideoKey =
+            settings.defaultBackground.default?.backgroundVideoKey ||
+            settings.defaultBackground.hymn?.backgroundVideoKey
+        tempSlide.backgroundType =
+            settings.defaultBackground.default?.backgroundType ||
+            settings.defaultBackground.hymn?.backgroundType
+        tempSlide.songId = hymn.number
+        tempSlide.hasChorus = hymn.chorus === 'false' ? false : !!hymn.chorus
+        tempSlide.title = 'Verse 1'
+
+        const currentHymnVerse = hymn.verses?.[0]?.trim()
+
+        const fontSize = calculateScreenFontSize(currentHymnVerse)
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            fontSize: Number(fontSize),
+            font: settings.defaultFont,
+        }
+        tempSlide.data = hymn
+        tempSlide.contents = generateSlideContent(tempSlide, hymn, currentHymnVerse)
+        tempSlide.name = generateSlideName(tempSlide)
+
+        return tempSlide
+    }, [preSlideCreation, settings])
+
+    const createSongSlide = useCallback((song: Song): Slide => {
+        const tempSlide = preSlideCreation()
+        tempSlide.layout = slideLayoutTypes.bible
+        tempSlide.type = slideTypes.song
+        tempSlide.background =
+            settings.defaultBackground.default?.background ||
+            settings.defaultBackground.hymn?.background
+        tempSlide.backgroundVideoKey =
+            settings.defaultBackground.default?.backgroundVideoKey ||
+            settings.defaultBackground.hymn?.backgroundVideoKey
+        tempSlide.backgroundType =
+            settings.defaultBackground.default?.backgroundType ||
+            settings.defaultBackground.hymn?.backgroundType
+        tempSlide.songId = song._id || song.id
+        tempSlide.title = 'Verse 1'
+
+        const currentSongVerse = song.verses?.[0]?.trim()
+
+        const fontSize = calculateScreenFontSize(currentSongVerse as string)
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            fontSize: Number(fontSize),
+            font: settings.defaultFont,
+        }
+        tempSlide.data = song
+        tempSlide.contents = generateSlideContent(tempSlide, song, currentSongVerse)
+        tempSlide.name = generateSlideName(tempSlide)
+
+        return tempSlide
+    }, [preSlideCreation, settings])
+
+    const createMediaSlide = useCallback(async (
+        file: ExtendedFileT & { isExternal?: boolean },
+        options?: { oneOfManySlides?: boolean }
+    ): Promise<Slide> => {
+        const tempSlide = preSlideCreation()
+        tempSlide.layout = slideLayoutTypes.empty
+
+        const randomImage =
+            'https://images.unsplash.com/photo-1515162305285-0293e4767cc2?q=80&w=1740'
+        tempSlide.type = slideTypes.media
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            backgroundFillType: backgroundFillTypes.crop,
+        }
+
+        // Handle external videos (YouTube/Vimeo)
+        if (file.isExternal) {
+            const externalVideo = {
+                url: file.url,
+                type: file.type,
+                thumbnail: file.thumbnail,
+                name: file.name,
+            }
+            tempSlide.backgroundType = backgroundTypes.video
+            tempSlide.background = randomImage
+            tempSlide.backgroundVideoKey = null
+            tempSlide.data = externalVideo as ExtendedFileT
+            tempSlide.name = file.name || `${file.type} Video`
+
+            await saveMedia({
+                id: tempSlide.id,
+                content: { type: file.type },
+                data: externalVideo,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            })
+        } else {
+            // Handle regular files
+            tempSlide.backgroundType = file.type === 'audio' ? backgroundTypes.image : file.type
+            tempSlide.background = file.type === 'audio' ? randomImage : file.url
+            tempSlide.backgroundVideoKey = file.type?.includes(backgroundTypes.video)
+                ? settings.defaultBackground.default?.backgroundVideoKey
+                : null
+            tempSlide.data = file
+            tempSlide.name = generateSlideName(tempSlide)
+
+            if (file.blob) {
+                const arrayBuffer = await file.blob.arrayBuffer()
+                await saveMedia({
+                    id: tempSlide.id,
+                    content: { size: file.blob.size, type: file.blob.type },
+                    data: arrayBuffer,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                })
+            }
+        }
+
+        return tempSlide
+    }, [preSlideCreation, settings])
+
+    const createMultipleMediaSlides = useCallback(async (files: ExtendedFileT[]): Promise<Slide[]> => {
+        const slides: Slide[] = []
+
+        for (const file of files) {
+            const slide = await createMediaSlide(file, { oneOfManySlides: true })
+            slides.push(slide)
+        }
+
+        return slides
+    }, [createMediaSlide])
+
+    const createCountdownSlide = useCallback((countdown: Countdown): Slide => {
+        const tempSlide = preSlideCreation()
+        tempSlide.layout = slideLayoutTypes.countdown
+        tempSlide.type = slideTypes.countdown
+        tempSlide.background = settings.defaultBackground.hymn?.background
+        tempSlide.backgroundVideoKey = settings.defaultBackground.hymn?.backgroundVideoKey
+        tempSlide.backgroundType = settings.defaultBackground.hymn?.backgroundType
+        tempSlide.data = countdown
+        tempSlide.name = `${countdown.time?.replace('00:', '')}`
+        tempSlide.contents = generateSlideContent(tempSlide, countdown)
+
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            fontSize: 17.5,
+            alignment: 'center',
+            font: settings.defaultFont,
+        }
+
+        return tempSlide
+    }, [preSlideCreation, settings])
+
+    return {
+        preSlideCreation,
+        createTextSlide,
+        createBibleSlide,
+        createHymnSlide,
+        createSongSlide,
+        createMediaSlide,
+        createMultipleMediaSlides,
+        createCountdownSlide,
+        duplicateSlide,
+        generateObjectId,
+    }
+}
