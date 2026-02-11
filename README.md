@@ -1,8 +1,8 @@
-# Cloud of Worship
+# Selah
 
-A modern, real-time worship presentation application built with React, TypeScript, and Convex. Cloud of Worship helps churches manage and display song lyrics, Bible verses, hymns, and media content during services.
+A modern, real-time worship presentation application built with React, TypeScript, and Convex. Selah helps churches manage and display song lyrics, Bible verses, hymns, and media content during services.
 
-![Cloud of Worship](./final-login-page-screenshot.png)
+![Selah](./final-login-page-screenshot.png)
 
 ## Features
 

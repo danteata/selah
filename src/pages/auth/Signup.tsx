@@ -146,7 +146,7 @@ export default function SignupPage() {
                         {step === 'church' && 'Set up your church'}
                     </h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-1">
-                        {step === 'account' && 'Start your journey with Cloud of Worship'}
+                        {step === 'account' && 'Start your journey with Selah'}
                         {step === 'verify' && 'Enter the code we sent to your email'}
                         {step === 'church' && 'Create a new church or join an existing one'}
                     </p>

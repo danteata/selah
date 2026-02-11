@@ -79,7 +79,7 @@ export default function LoginPage() {
                         Welcome back
                     </h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-1">
-                        Sign in to Cloud of Worship
+                        Sign in to Selah
                     </p>
                 </div>
 

@@ -145,7 +145,7 @@ export default function Dashboard() {
                     <div className="flex justify-between items-center h-16">
                         <div className="flex items-center gap-4">
                             <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-                                Cloud of Worship
+                                Selah
                             </h1>
                             {activeSchedule && (
                                 <span className="text-sm text-gray-500 dark:text-gray-400">
