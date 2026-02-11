@@ -1,0 +1,261 @@
+import { useState, useEffect, useRef } from 'react'
+import { X, Clock, Plus, Play, Pause, RotateCcw } from 'lucide-react'
+
+interface AddCountdownModalProps {
+    isOpen: boolean
+    onClose: () => void
+    onAdd: (countdown: CountdownData) => void
+}
+
+export interface CountdownData {
+    id: string
+    hours: number
+    minutes: number
+    seconds: number
+    title: string
+}
+
+export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalProps) {
+    const [hours, setHours] = useState(0)
+    const [minutes, setMinutes] = useState(5)
+    const [seconds, setSeconds] = useState(0)
+    const [title, setTitle] = useState('')
+
+    const presets = [
+        { label: '1 min', h: 0, m: 1, s: 0 },
+        { label: '5 min', h: 0, m: 5, s: 0 },
+        { label: '10 min', h: 0, m: 10, s: 0 },
+        { label: '15 min', h: 0, m: 15, s: 0 },
+        { label: '30 min', h: 0, m: 30, s: 0 },
+        { label: '1 hour', h: 1, m: 0, s: 0 },
+    ]
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault()
+
+        onAdd({
+            id: `countdown_${Date.now()}`,
+            hours,
+            minutes,
+            seconds,
+            title: title.trim() || 'Countdown',
+        })
+
+        // Reset form
+        setHours(0)
+        setMinutes(5)
+        setSeconds(0)
+        setTitle('')
+        onClose()
+    }
+
+    const applyPreset = (preset: { h: number; m: number; s: number }) => {
+        setHours(preset.h)
+        setMinutes(preset.m)
+        setSeconds(preset.s)
+    }
+
+    if (!isOpen) return null
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && onClose()}
+        >
+            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                        <Clock className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                        Add Countdown
+                    </h3>
+                    <button
+                        onClick={onClose}
+                        className="ml-auto p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Form */}
+                <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                    {/* Title */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Title (optional)
+                        </label>
+                        <input
+                            type="text"
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                            placeholder="Service starts in..."
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                    </div>
+
+                    {/* Time Inputs */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Duration
+                        </label>
+                        <div className="flex gap-4 justify-center">
+                            <div className="text-center">
+                                <input
+                                    type="number"
+                                    value={hours}
+                                    onChange={(e) => setHours(Math.max(0, Math.min(23, parseInt(e.target.value) || 0)))}
+                                    min="0"
+                                    max="23"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Hours</p>
+                            </div>
+                            <span className="text-3xl font-bold text-gray-400 self-center pb-5">:</span>
+                            <div className="text-center">
+                                <input
+                                    type="number"
+                                    value={minutes}
+                                    onChange={(e) => setMinutes(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
+                                    min="0"
+                                    max="59"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Minutes</p>
+                            </div>
+                            <span className="text-3xl font-bold text-gray-400 self-center pb-5">:</span>
+                            <div className="text-center">
+                                <input
+                                    type="number"
+                                    value={seconds}
+                                    onChange={(e) => setSeconds(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
+                                    min="0"
+                                    max="59"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Seconds</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Quick Presets */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Quick Presets
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {presets.map((preset) => (
+                                <button
+                                    key={preset.label}
+                                    type="button"
+                                    onClick={() => applyPreset(preset)}
+                                    className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                    {preset.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex justify-end gap-3 pt-2">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                        >
+                            <Plus className="w-4 h-4" />
+                            Add Countdown
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    )
+}
+
+// Countdown Display Component
+interface CountdownDisplayProps {
+    data: CountdownData
+    onComplete?: () => void
+    className?: string
+}
+
+export function CountdownDisplay({ data, onComplete, className = '' }: CountdownDisplayProps) {
+    const [timeLeft, setTimeLeft] = useState(
+        data.hours * 3600 + data.minutes * 60 + data.seconds
+    )
+    const [isPaused, setIsPaused] = useState(false)
+    const intervalRef = useRef<NodeJS.Timeout | null>(null)
+
+    useEffect(() => {
+        if (!isPaused && timeLeft > 0) {
+            intervalRef.current = setInterval(() => {
+                setTimeLeft((prev) => {
+                    if (prev <= 1) {
+                        clearInterval(intervalRef.current!)
+                        onComplete?.()
+                        return 0
+                    }
+                    return prev - 1
+                })
+            }, 1000)
+        }
+
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current)
+            }
+        }
+    }, [isPaused, timeLeft, onComplete])
+
+    const hours = Math.floor(timeLeft / 3600)
+    const minutes = Math.floor((timeLeft % 3600) / 60)
+    const seconds = timeLeft % 60
+
+    const formatNum = (n: number) => n.toString().padStart(2, '0')
+
+    const reset = () => {
+        setTimeLeft(data.hours * 3600 + data.minutes * 60 + data.seconds)
+        setIsPaused(false)
+    }
+
+    return (
+        <div className={`flex flex-col items-center ${className}`}>
+            {data.title && (
+                <p className="text-lg text-gray-600 dark:text-gray-300 mb-2">{data.title}</p>
+            )}
+            <div className="text-6xl font-bold font-mono text-gray-900 dark:text-white">
+                {hours > 0 && <span>{formatNum(hours)}:</span>}
+                <span>{formatNum(minutes)}</span>
+                <span>:</span>
+                <span>{formatNum(seconds)}</span>
+            </div>
+            <div className="flex gap-2 mt-4">
+                <button
+                    onClick={() => setIsPaused(!isPaused)}
+                    className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
+                >
+                    {isPaused ? (
+                        <Play className="w-5 h-5" />
+                    ) : (
+                        <Pause className="w-5 h-5" />
+                    )}
+                </button>
+                <button
+                    onClick={reset}
+                    className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
+                >
+                    <RotateCcw className="w-5 h-5" />
+                </button>
+            </div>
+        </div>
+    )
+}

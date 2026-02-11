@@ -1,0 +1,1 @@
+export { BibleList } from './BibleList'
