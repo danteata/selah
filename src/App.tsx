@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import LiveView from './pages/LiveView'
 import ChurchSetup from './pages/ChurchSetup'
+import Landing from './pages/Landing'
 import LoginPage from './pages/auth/Login'
 import SignupPage from './pages/auth/Signup'
 import TestPage from './pages/TestPage'
@@ -44,6 +45,7 @@ function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/live" element={<LiveView />} />
+              <Route path="/landing" element={<Landing />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/test" element={<TestPage />} />
@@ -55,7 +57,7 @@ function App() {
                       <AuthenticatedApp />
                     </SignedIn>
                     <SignedOut>
-                      <Navigate to="/login" replace />
+                      <Navigate to="/landing" replace />
                     </SignedOut>
                   </>
                 }
