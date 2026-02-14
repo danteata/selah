@@ -16,13 +16,34 @@ export const createChurch = mutation({
             throw new Error("Not authenticated");
         }
 
-        const user = await ctx.db
+        let user = await ctx.db
             .query("users")
             .withIndex("by_email", (q) => q.eq("email", identity.email!))
             .unique();
 
+        // Create user if they don't exist (just-in-time user creation)
         if (!user) {
-            throw new Error("User not found");
+            const now = new Date().toISOString();
+            const userId = await ctx.db.insert("users", {
+                email: identity.email!,
+                fullname: identity.givenName && identity.familyName
+                    ? `${identity.givenName} ${identity.familyName}`
+                    : identity.email!.split('@')[0],
+                avatar: identity.pictureUrl || "",
+                theme: "light",
+                role: "member",
+                churchId: "",
+                clerkId: identity.subject,
+                emailVerified: true,
+                createdAt: now,
+                updatedAt: now,
+            });
+
+            user = await ctx.db.get(userId);
+        }
+
+        if (!user) {
+            throw new Error("Failed to create or retrieve user");
         }
 
         const now = new Date().toISOString();
@@ -32,7 +53,6 @@ export const createChurch = mutation({
             address: args.address || "",
             pastor: args.pastor || user.fullname,
             userIds: [user._id!],
-            users: [user],
             storageUsed: 0,
             subscriptionPlan: "free",
             createdAt: now,
@@ -60,13 +80,34 @@ export const joinChurch = mutation({
             throw new Error("Not authenticated");
         }
 
-        const user = await ctx.db
+        let user = await ctx.db
             .query("users")
             .withIndex("by_email", (q) => q.eq("email", identity.email!))
             .unique();
 
+        // Create user if they don't exist (just-in-time user creation)
         if (!user) {
-            throw new Error("User not found");
+            const now = new Date().toISOString();
+            const userId = await ctx.db.insert("users", {
+                email: identity.email!,
+                fullname: identity.givenName && identity.familyName
+                    ? `${identity.givenName} ${identity.familyName}`
+                    : identity.email!.split('@')[0],
+                avatar: identity.pictureUrl || "",
+                theme: "light",
+                role: "member",
+                churchId: "",
+                clerkId: identity.subject,
+                emailVerified: true,
+                createdAt: now,
+                updatedAt: now,
+            });
+
+            user = await ctx.db.get(userId);
+        }
+
+        if (!user) {
+            throw new Error("Failed to create or retrieve user");
         }
 
         // For now, we don't have invite codes implemented
