@@ -49,12 +49,22 @@ export function generateSlideContent(
     switch (slide.type) {
         case slideTypes.bible: {
             const scripture = data as Scripture
+            const contents: string[] = []
+
+            // Add scripture content
             if (typeof scripture.content === 'string') {
-                return [scripture.content]
+                contents.push(`<p class="scripture-content">${scripture.content}</p>`)
+            } else if (Array.isArray(scripture.content)) {
+                const versesText = scripture.content
+                    .map((verse: { verse: string; scripture: string }) => `<sup>${verse.verse}</sup>${verse.scripture}`)
+                    .join(' ')
+                contents.push(`<p class="scripture-content">${versesText}</p>`)
             }
-            return Array.isArray(scripture.content)
-                ? scripture.content.map((verse: { scripture: string }) => verse.scripture)
-                : []
+
+            // Add reference label with version
+            contents.push(`<p class="scripture-label"><b>${scripture.label}</b> · ${scripture.version}</p>`)
+
+            return contents
         }
         case slideTypes.hymn: {
             const hymn = data as Hymn
@@ -203,7 +213,9 @@ export function useSlideCreation() {
             ...tempSlide.slideStyle,
             fontSize: Number(fontSize),
             font: settings.defaultFont,
+            bibleVersion: scripture.version,
         }
+        tempSlide.data = scripture
         tempSlide.contents = generateSlideContent(tempSlide, scripture)
 
         return tempSlide
