@@ -127,7 +127,7 @@ export default function LiveView() {
                 }}
             >
                 <div
-                    className="text-center max-w-full"
+                    className="text-center max-w-full tiptap-preview"
                     style={{
                         fontSize: `${slide.slideStyle?.fontSize || 6}vw`,
                         fontFamily: slide.slideStyle?.font || 'Inter',
@@ -138,16 +138,15 @@ export default function LiveView() {
                     }}
                 >
                     {slide.contents.map((content, index) => (
-                        <p
+                        <div
                             key={index}
                             className="text-white mb-4 drop-shadow-lg"
                             style={{
                                 color: slide.type === 'countdown' ? 'white' : undefined,
                                 fontWeight: slide.type === 'countdown' ? 'bold' : undefined
                             }}
-                        >
-                            {content}
-                        </p>
+                            dangerouslySetInnerHTML={{ __html: content }}
+                        />
                     ))}
                 </div>
             </div>

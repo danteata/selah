@@ -232,25 +232,16 @@ export function PreviewContent() {
                     {/* Content editor */}
                     <div className="space-y-2">
                         {activeSlide.contents.map((content, index) => (
-                            <textarea
+                            <div
                                 key={index}
-                                value={content}
-                                onChange={(e) => {
-                                    const newContents = [...activeSlide.contents]
-                                    newContents[index] = e.target.value
-                                    const updatedSlide = { ...activeSlide, contents: newContents }
-                                    setActiveSlide(updatedSlide)
-
-                                    // Update in store
-                                    const updatedSlides = activeSlides.map(s =>
-                                        s.id === updatedSlide.id ? updatedSlide : s
-                                    )
-                                    setActiveSlides(updatedSlides)
-                                }}
-                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent dark:bg-gray-800 dark:text-white resize-none"
-                                rows={3}
-                                placeholder="Slide content..."
-                            />
+                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg dark:bg-gray-800 dark:text-white min-h-[80px] cursor-pointer hover:border-primary-500 transition-colors"
+                                onClick={() => globalEmit(appWideActions.newActiveSlide, activeSlide)}
+                            >
+                                <div
+                                    className="tiptap-preview"
+                                    dangerouslySetInnerHTML={{ __html: content || '<p class="text-gray-400">Click to edit...</p>' }}
+                                />
+                            </div>
                         ))}
                     </div>
 

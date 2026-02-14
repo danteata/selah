@@ -161,11 +161,10 @@ export function LiveOutput() {
                                 }}
                             >
                                 {slide.contents[0] && (
-                                    <div className="w-full h-full flex items-center justify-center p-1">
-                                        <span className="text-white text-[6px] text-center line-clamp-2">
-                                            {slide.contents[0].slice(0, 50)}
-                                        </span>
-                                    </div>
+                                    <div
+                                        className="w-full h-full flex items-center justify-center p-1 tiptap-preview text-white text-[6px] text-center line-clamp-2"
+                                        dangerouslySetInnerHTML={{ __html: slide.contents[0].slice(0, 100) }}
+                                    />
                                 )}
                             </div>
 
@@ -235,9 +234,11 @@ export function LiveOutput() {
                     >
                         {liveSlide.contents[0] && (
                             <div className="absolute inset-0 flex items-center justify-center p-6">
-                                <p className="text-white text-center drop-shadow-lg" style={{ fontSize: '1.5vw' }}>
-                                    {liveSlide.contents[0]}
-                                </p>
+                                <div
+                                    className="text-white text-center drop-shadow-lg tiptap-preview"
+                                    style={{ fontSize: '1.5vw' }}
+                                    dangerouslySetInnerHTML={{ __html: liveSlide.contents[0] }}
+                                />
                             </div>
                         )}
 
