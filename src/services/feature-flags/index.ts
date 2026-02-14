@@ -127,7 +127,11 @@ class PosthogFeatureFlagsAdapter implements FeatureFlagAdapter {
     }
 
     getAllFlags(): Record<string, unknown> {
-        return this.posthog?.featureFlags?.getAllFlags() || {}
+        const flags = this.posthog?.featureFlags?.getFlags()
+        if (!flags || Array.isArray(flags)) {
+            return {}
+        }
+        return flags as unknown as Record<string, unknown>
     }
 
     async reload(): Promise<void> {

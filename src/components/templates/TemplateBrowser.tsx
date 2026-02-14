@@ -174,9 +174,9 @@ export function TemplateBrowser({ isOpen, onClose, onSelect }: TemplateBrowserPr
                             >
                                 {cat.color ? (
                                     <span className={`w-3 h-3 rounded-full ${cat.color}`} />
-                                ) : (
+                                ) : cat.icon ? (
                                     <cat.icon className="w-4 h-4" />
-                                )}
+                                ) : null}
                                 {cat.label}
                             </button>
                         ))}

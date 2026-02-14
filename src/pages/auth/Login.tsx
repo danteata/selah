@@ -31,7 +31,7 @@ export default function LoginPage() {
                 password,
             })
 
-            if (result.status === 'complete') {
+            if (result.status === 'complete' && result.createdSessionId) {
                 await setActive({ session: result.createdSessionId })
                 // Create user record in Convex if it doesn't exist
                 // We'll try to extract user info from Clerk or use the provided email

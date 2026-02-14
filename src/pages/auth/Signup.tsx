@@ -72,12 +72,12 @@ export default function SignupPage() {
                 code: verificationCode,
             })
 
-            if (result.status === 'complete') {
+            if (result.status === 'complete' && result.createdSessionId) {
                 await setActive({ session: result.createdSessionId })
                 // Create user record in Convex
                 await upsertUser({
                     clerkId: result.createdSessionId,
-                    fullname,
+                    fullname: fullName,
                     email,
                 })
                 // Continue to church setup
