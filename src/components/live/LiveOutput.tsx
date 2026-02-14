@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Eye, Trash2, Edit, Monitor, Airplay } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useMultiMonitor } from '../../hooks/useMultiMonitor'
-import type { Slide } from '../../types'
+import { generateSlideContent } from '../../hooks/useSlideCreation'
+import type { Slide, Scripture } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
+import { BibleVerseNavigator } from '../bible/BibleVerseNavigator'
 
 export function LiveOutput() {
     const [ctrlOrMetaActive, setCtrlOrMetaActive] = useState(false)
@@ -135,6 +137,29 @@ export function LiveOutput() {
     const handleStopLive = useCallback(async () => {
         await terminatePresentation()
     }, [terminatePresentation])
+
+    // Handle verse selection from BibleVerseNavigator
+    const handleVerseSelect = useCallback((scripture: Scripture) => {
+        if (!liveSlide) return
+
+        // Update the live slide with new scripture content
+        const updatedSlide = {
+            ...liveSlide,
+            data: scripture,
+            contents: [generateSlideContent(liveSlide, scripture)],
+        }
+
+        // Update the slide in activeSlides
+        const setActiveSlides = useAppStore.getState().setActiveSlides
+        const activeSlides = useAppStore.getState().activeSlides
+        const updatedSlides = activeSlides.map(s =>
+            s.id === liveSlide.id ? updatedSlide : s
+        )
+        setActiveSlides(updatedSlides)
+
+        // Broadcast the updated slide
+        window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
+    }, [liveSlide, generateSlideContent])
 
     return (
         <div className="max-w-[400px] bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4 flex flex-col relative">
@@ -293,6 +318,14 @@ export function LiveOutput() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Bible Verse Navigator - shown when live slide is a bible slide */}
+            {liveSlide?.type === 'bible' && (
+                <BibleVerseNavigator
+                    currentSlide={liveSlide}
+                    onVerseSelect={handleVerseSelect}
+                />
             )}
 
             {/* Navigation hints */}

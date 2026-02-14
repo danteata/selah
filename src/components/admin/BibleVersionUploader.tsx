@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useConvex, useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { bibleVersionObjects } from '../../types'
+import { useUserRole } from '../../hooks/useUserRole'
 import type { BibleVerse } from '../../types'
 
 const BIBLE_DATA_URL = 'https://d37gopmfkl2m2z.cloudfront.net/open/bible-versions'
@@ -21,11 +22,29 @@ interface BibleVersionUploaderProps {
 export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
     const convex = useConvex()
     const uploadBibleVersion = useMutation(api.bibleVersions.uploadBibleVersion)
+    const { isSuperadmin, isLoading: roleLoading } = useUserRole()
 
     const [versions, setVersions] = useState<VersionUploadStatus[]>([])
     const [isUploading, setIsUploading] = useState(false)
     const [currentUploading, setCurrentUploading] = useState<string | null>(null)
     const [uploadedBy, setUploadedBy] = useState('admin')
+
+    // Redirect non-superadmins
+    if (!roleLoading && !isSuperadmin) {
+        return (
+            <div className="bg-white rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
+                <div className="text-center py-12">
+                    <div className="text-red-500 text-6xl mb-4">🚫</div>
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                        Access Denied
+                    </h2>
+                    <p className="text-gray-600">
+                        Only superadmins can upload Bible versions to Convex.
+                    </p>
+                </div>
+            </div>
+        )
+    }
 
     // Initialize versions list
     useEffect(() => {
@@ -199,9 +218,9 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                     <div
                         key={version.id}
                         className={`flex items-center justify-between p-3 rounded-lg border ${version.status === 'completed' ? 'bg-green-50 border-green-200' :
-                                version.status === 'error' ? 'bg-red-50 border-red-200' :
-                                    version.status === 'downloading' || version.status === 'uploading' ? 'bg-blue-50 border-blue-200' :
-                                        'bg-gray-50 border-gray-200'
+                            version.status === 'error' ? 'bg-red-50 border-red-200' :
+                                version.status === 'downloading' || version.status === 'uploading' ? 'bg-blue-50 border-blue-200' :
+                                    'bg-gray-50 border-gray-200'
                             }`}
                     >
                         <div className="flex items-center gap-3">
