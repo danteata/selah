@@ -378,7 +378,7 @@ function StorageSettings() {
     const clearCache = () => {
         if (confirm('Are you sure you want to clear local cache? This will not delete your saved slides.')) {
             // Clear specific cache keys while preserving important data
-            const preserveKeys = ['presenta_library_slides', 'app-storage']
+            const preserveKeys = ['selah_library_slides', 'app-storage']
             for (const key in localStorage) {
                 if (!preserveKeys.includes(key)) {
                     localStorage.removeItem(key)

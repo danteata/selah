@@ -86,7 +86,9 @@ export function TipTapEditor({
     // Update content when prop changes externally
     useEffect(() => {
         if (editor && content !== previousContentRef.current) {
-            editor.commands.setContent(content, { emitUpdate: false })
+            // Handle empty content - TipTap needs at least an empty paragraph
+            const contentToSet = content || '<p></p>'
+            editor.commands.setContent(contentToSet, { emitUpdate: false })
             previousContentRef.current = content
         }
     }, [editor, content])
@@ -183,7 +185,9 @@ export function TipTapInlineEditor({
     // Update content when prop changes externally
     useEffect(() => {
         if (editor && content !== previousContentRef.current) {
-            editor.commands.setContent(content, { emitUpdate: false })
+            // Handle empty content - TipTap needs at least an empty paragraph
+            const contentToSet = content || '<p></p>'
+            editor.commands.setContent(contentToSet, { emitUpdate: false })
             previousContentRef.current = content
         }
     }, [editor, content])

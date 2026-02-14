@@ -157,6 +157,8 @@ export function useSlideCreation() {
             settings.defaultBackground.default?.backgroundType ||
             settings.defaultBackground.text?.backgroundType
         tempSlide.id = generateObjectId()
+        // Initialize with one empty content block so the editor shows something
+        tempSlide.contents = ['']
 
         return tempSlide
     }, [preSlideCreation, settings])

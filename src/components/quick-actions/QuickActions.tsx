@@ -34,6 +34,7 @@ export function QuickActions() {
     const openModal = useAppStore((state) => state.openModal)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
+    const activeSchedule = useAppStore((state) => state.activeSchedule)
 
     // Initialize actions with hymns
     useEffect(() => {
@@ -254,13 +255,13 @@ export function QuickActions() {
                 contents: [''],
                 userId: '',
                 churchId: '',
-                scheduleId: '',
+                scheduleId: activeSchedule?._id || '',
             }
             setEditingSlide(newSlide)
             openModal('editor')
             return
         }
-    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlide, bibleChapterAndVerse, setEditingSlide])
+    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlide, bibleChapterAndVerse, setEditingSlide, activeSchedule])
 
     // Handle keyboard navigation
     const handleInputKeydown = useCallback((e: React.KeyboardEvent) => {

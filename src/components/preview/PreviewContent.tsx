@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Trash2, Copy, LayoutGrid } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useSlideCreation } from '../../hooks'
+import { useSlideCreation, useLibrary } from '../../hooks'
 import type { Slide } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
 import { EmptyState } from '../utils/EmptyState'
@@ -25,16 +25,19 @@ export function PreviewContent() {
     const openModal = useAppStore((state) => state.openModal)
 
     const { createTextSlide, duplicateSlide } = useSlideCreation()
+    const { addToLibrary, isInLibrary } = useLibrary()
     const slidesGridRef = useRef<HTMLDivElement>(null)
 
     // Derive slides from store - single source of truth
+    // Show slides that match the active schedule, or slides without a schedule if no active schedule
     const slides = useMemo(() => {
         if (activeSchedule) {
             return activeSlides.filter(
-                (slide) => slide.scheduleId === activeSchedule._id
+                (slide) => slide.scheduleId === activeSchedule._id || slide.scheduleId === ''
             )
         }
-        return []
+        // If no active schedule, show all slides without a scheduleId
+        return activeSlides.filter((slide) => !slide.scheduleId || slide.scheduleId === '')
     }, [activeSlides, activeSchedule])
 
     const handleDeleteSlide = useCallback((slideId: string) => {
@@ -93,6 +96,10 @@ export function PreviewContent() {
         setEditingSlide(slide)
         openModal('editor')
     }, [setEditingSlide, openModal])
+
+    const handleSaveToLibrary = useCallback((slide: Slide) => {
+        addToLibrary(slide)
+    }, [addToLibrary])
 
     return (
         <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4">
@@ -153,6 +160,9 @@ export function PreviewContent() {
                             onClick={() => handleSlideClick(slide)}
                             onDuplicate={() => handleDuplicateSlide(slide)}
                             onDelete={() => handleDeleteSlide(slide.id)}
+                            onEdit={() => handleEditSlide(slide)}
+                            onSaveToLibrary={() => handleSaveToLibrary(slide)}
+                            isSaved={isInLibrary(slide.id)}
                         />
                     ))
                 ) : (

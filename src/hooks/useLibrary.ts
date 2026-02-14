@@ -7,7 +7,7 @@ interface LibrarySlide extends Slide {
     category?: 'scripture' | 'song' | 'hymn' | 'custom' | 'sermon' | 'announcement'
 }
 
-const LIBRARY_STORAGE_KEY = 'presenta_library_slides'
+const LIBRARY_STORAGE_KEY = 'selah_library_slides'
 
 export function useLibrary() {
     const [librarySlides, setLibrarySlides] = useState<LibrarySlide[]>(() => {
