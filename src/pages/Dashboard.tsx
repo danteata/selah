@@ -24,6 +24,11 @@ export default function Dashboard() {
     const redo = useAppStore((state) => state.redo)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
+    // Get modal state and actions from Zustand store
+    const modals = useAppStore((state) => state.modals)
+    const editingSlide = useAppStore((state) => state.editingSlide)
+    const closeModal = useAppStore((state) => state.closeModal)
+
     // Sync live state to other windows (for multi-monitor support)
     useLiveSync()
 
@@ -61,13 +66,8 @@ export default function Dashboard() {
         }
     }, [])
 
-    // Quick action handlers manage modal state
-    const {
-        modals,
-        editingSlide,
-        closeModal,
-        handleSlideEditorSave,
-    } = useQuickActionHandlers()
+    // Quick action handlers - sets up event listeners
+    const { handleSlideEditorSave } = useQuickActionHandlers()
 
     // Global keyboard shortcuts
     useKeyboardShortcuts([

@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Search, X, ChevronLeft, BookOpen } from 'lucide-react'
-import { useScripture } from '../../hooks'
-import { useGlobalEmit } from '../../hooks/useEmitter'
+import { useScripture, useSlideCreation } from '../../hooks'
+import { useAppStore } from '../../store/appStore'
 import type { Scripture, BibleVerse } from '../../types'
-import { appWideActions, bibleBooks } from '../../types'
+import { bibleBooks } from '../../types'
 
 interface BibleListProps {
     initialQuery?: string
@@ -19,7 +19,8 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
     const [loading, setLoading] = useState(false)
 
     const { fetchScripture } = useScripture()
-    const globalEmit = useGlobalEmit()
+    const { createBibleSlide } = useSlideCreation()
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
     // Parse query like "Genesis 1:1-5" or "Gen 1:1"
     const parseQuery = useCallback((q: string) => {
@@ -87,14 +88,13 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
 
     const handleCreateSlide = useCallback(() => {
         if (scripture) {
-            globalEmit(appWideActions.newBible, {
-                bookIndex: selectedBook,
-                chapter: selectedChapter,
-                scripture
-            })
+            const slide = createBibleSlide(scripture)
+            if (slide) {
+                appendActiveSlide(slide)
+            }
             onClose()
         }
-    }, [scripture, selectedBook, selectedChapter, globalEmit, onClose])
+    }, [scripture, createBibleSlide, appendActiveSlide, onClose])
 
     // Generate chapters for selected book
     const chapters = useMemo(() => {

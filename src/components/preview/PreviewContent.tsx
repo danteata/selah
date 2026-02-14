@@ -1,17 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Trash2, Copy, LayoutGrid } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useSlideCreation, useGlobalEmit } from '../../hooks'
-import { globalEmitter } from '../../hooks/useEmitter'
+import { useSlideCreation } from '../../hooks'
 import type { Slide } from '../../types'
-import { appWideActions } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
 import { EmptyState } from '../utils/EmptyState'
 
 export function PreviewContent() {
     const [activeSlide, setActiveSlide] = useState<Slide | undefined>()
-    const [bulkSelectMode, setBulkSelectMode] = useState(false)
-    const [selectedSlides, setSelectedSlides] = useState<string[]>([])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -20,9 +16,15 @@ export function PreviewContent() {
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
+    const bulkSelectMode = useAppStore((state) => state.bulkSelectMode)
+    const selectedSlideIds = useAppStore((state) => state.selectedSlideIds)
+    const toggleBulkSelectMode = useAppStore((state) => state.toggleBulkSelectMode)
+    const toggleSlideSelection = useAppStore((state) => state.toggleSlideSelection)
+    const clearSelectedSlides = useAppStore((state) => state.clearSelectedSlides)
+    const setEditingSlide = useAppStore((state) => state.setEditingSlide)
+    const openModal = useAppStore((state) => state.openModal)
 
-    const { createTextSlide, duplicateSlide, createBibleSlide, createSongSlide, createHymnSlide } = useSlideCreation()
-    const globalEmit = useGlobalEmit()
+    const { createTextSlide, duplicateSlide } = useSlideCreation()
     const slidesGridRef = useRef<HTMLDivElement>(null)
 
     // Derive slides from store - single source of truth
@@ -45,114 +47,16 @@ export function PreviewContent() {
         }
     }, [slides, activeSlide, removeActiveSlide])
 
-    // Listen for events
-    useEffect(() => {
-        // New text slide
-        globalEmitter.on(appWideActions.newSlide, () => {
-            const newSlide = createTextSlide()
+    const handleCreateNewSlide = useCallback(() => {
+        const newSlide = createTextSlide()
+        if (newSlide) {
             setActiveSlide(newSlide)
-        })
-
-        // Duplicate slide - accepts Slide or Slide[]
-        globalEmitter.on(appWideActions.newText, (data) => {
-            let newSlide: Slide | null = null
-            if (data) {
-                const slide = Array.isArray(data) ? data[0] : data as Slide
-                newSlide = duplicateSlide(slide)
-            } else {
-                newSlide = createTextSlide()
-            }
-            if (newSlide) {
-                setActiveSlide(newSlide)
-            }
-        })
-
-        // New bible slide
-        globalEmitter.on(appWideActions.newBible, (data) => {
-            if (data) {
-                const bibleData = data as { scripture?: any; bookIndex?: number; chapter?: number }
-                if (bibleData.scripture) {
-                    // Data contains scripture info from BibleList
-                    const newSlide = createBibleSlide(bibleData.scripture)
-                    setActiveSlide(newSlide)
-                    appendActiveSlide(newSlide)
-                } else {
-                    // It's a slide
-                    const slide = Array.isArray(data) ? data[0] : data as Slide
-                    if (slide.type === 'bible') {
-                        setActiveSlide(slide)
-                        appendActiveSlide(slide)
-                    }
-                }
-            }
-        })
-
-        // New hymn slide
-        globalEmitter.on(appWideActions.newHymn, (data) => {
-            if (data) {
-                const hymnData = data as { verses?: string[]; chorus?: string; title?: string; number?: string }
-                if (hymnData.verses) {
-                    const newSlide = createHymnSlide(hymnData as any)
-                    setActiveSlide(newSlide)
-                    appendActiveSlide(newSlide)
-                } else {
-                    const slide = Array.isArray(data) ? data[0] : data as Slide
-                    if (slide.type === 'hymn') {
-                        setActiveSlide(slide)
-                        appendActiveSlide(slide)
-                    }
-                }
-            }
-        })
-
-        // New song slide
-        globalEmitter.on(appWideActions.newSong, (data) => {
-            if (data) {
-                const songData = data as { verses?: string[]; chorus?: string; title?: string; _id?: string; id?: string }
-                if (songData.verses) {
-                    const newSlide = createSongSlide(songData as any)
-                    setActiveSlide(newSlide)
-                    appendActiveSlide(newSlide)
-                } else {
-                    const slide = Array.isArray(data) ? data[0] : data as Slide
-                    if (slide.type === 'song') {
-                        setActiveSlide(slide)
-                        appendActiveSlide(slide)
-                    }
-                }
-            }
-        })
-
-        // Delete slide
-        globalEmitter.on(appWideActions.deleteSlide, (slide) => {
-            const s = slide as Slide
-            handleDeleteSlide(s.id)
-        })
-
-        // Select slides toggle
-        globalEmitter.on(appWideActions.selectSlides, () => {
-            setBulkSelectMode(prev => !prev)
-            setSelectedSlides([])
-        })
-
-        // Promote to live
-        globalEmitter.on('promote-active-slide-live', () => {
-            if (activeSlide) {
-                setLiveSlide(activeSlide.id)
-            }
-        })
-
-        return () => {
-            globalEmitter.off(appWideActions.newSlide)
-            globalEmitter.off(appWideActions.newText)
-            globalEmitter.off(appWideActions.newBible)
-            globalEmitter.off(appWideActions.newHymn)
-            globalEmitter.off(appWideActions.newSong)
-            globalEmitter.off(appWideActions.deleteSlide)
-            globalEmitter.off(appWideActions.selectSlides)
-            globalEmitter.off('promote-active-slide-live')
+            appendActiveSlide(newSlide)
+            // Open the editor modal to allow editing the new slide
+            setEditingSlide(newSlide)
+            openModal('editor')
         }
-    }, [createTextSlide, duplicateSlide, createBibleSlide, createHymnSlide, createSongSlide, appendActiveSlide, activeSlide, setLiveSlide, handleDeleteSlide])
+    }, [createTextSlide, appendActiveSlide, setEditingSlide, openModal])
 
     const handleDuplicateSlide = useCallback((slide: Slide) => {
         const newSlide = duplicateSlide(slide)
@@ -163,15 +67,11 @@ export function PreviewContent() {
 
     const handleSlideClick = useCallback((slide: Slide) => {
         if (bulkSelectMode) {
-            setSelectedSlides(prev =>
-                prev.includes(slide.id)
-                    ? prev.filter(id => id !== slide.id)
-                    : [...prev, slide.id]
-            )
+            toggleSlideSelection(slide.id)
         } else {
             setActiveSlide(slide)
         }
-    }, [bulkSelectMode])
+    }, [bulkSelectMode, toggleSlideSelection])
 
     const handleGoLive = useCallback(() => {
         if (activeSlide) {
@@ -180,15 +80,19 @@ export function PreviewContent() {
     }, [activeSlide, setLiveSlide])
 
     const handleDeleteSelected = useCallback(() => {
-        selectedSlides.forEach(id => {
+        selectedSlideIds.forEach(id => {
             const slide = slides.find(s => s.id === id)
             if (slide) {
                 removeActiveSlide(slide)
             }
         })
-        setSelectedSlides([])
-        setBulkSelectMode(false)
-    }, [selectedSlides, slides, removeActiveSlide])
+        clearSelectedSlides()
+    }, [selectedSlideIds, slides, removeActiveSlide, clearSelectedSlides])
+
+    const handleEditSlide = useCallback((slide: Slide) => {
+        setEditingSlide(slide)
+        openModal('editor')
+    }, [setEditingSlide, openModal])
 
     return (
         <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4">
@@ -199,7 +103,7 @@ export function PreviewContent() {
                 </h2>
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={() => setBulkSelectMode(!bulkSelectMode)}
+                        onClick={toggleBulkSelectMode}
                         className={`
               flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors
               ${bulkSelectMode
@@ -212,13 +116,13 @@ export function PreviewContent() {
                         {bulkSelectMode ? 'Cancel' : 'Select'}
                     </button>
 
-                    {bulkSelectMode && selectedSlides.length > 0 && (
+                    {bulkSelectMode && selectedSlideIds.length > 0 && (
                         <button
                             onClick={handleDeleteSelected}
                             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 rounded-lg hover:bg-red-200"
                         >
                             <Trash2 className="w-4 h-4" />
-                            Delete ({selectedSlides.length})
+                            Delete ({selectedSlideIds.length})
                         </button>
                     )}
 
@@ -244,7 +148,7 @@ export function PreviewContent() {
                             slide={slide}
                             isActive={activeSlide?.id === slide.id}
                             isLive={liveSlideId === slide.id}
-                            isSelected={selectedSlides.includes(slide.id)}
+                            isSelected={selectedSlideIds.includes(slide.id)}
                             selectable={bulkSelectMode}
                             onClick={() => handleSlideClick(slide)}
                             onDuplicate={() => handleDuplicateSlide(slide)}
@@ -258,7 +162,7 @@ export function PreviewContent() {
                             sub="No slides yet"
                             desc="Create a new slide to get started"
                             actionText="Create new slide"
-                            action={() => globalEmit(appWideActions.newSlide)}
+                            action={handleCreateNewSlide}
                         />
                     </div>
                 )}
@@ -295,7 +199,7 @@ export function PreviewContent() {
                             <div
                                 key={index}
                                 className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg dark:bg-gray-800 dark:text-white min-h-[80px] cursor-pointer hover:border-primary-500 transition-colors"
-                                onClick={() => globalEmit(appWideActions.newActiveSlide, activeSlide)}
+                                onClick={() => handleEditSlide(activeSlide)}
                             >
                                 <div
                                     className="tiptap-preview"

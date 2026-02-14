@@ -1,65 +1,25 @@
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback } from 'react'
 import { useEmitter } from './useEmitter'
 import { useSlideCreation } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { appWideActions, type Slide, type Countdown } from '../types'
 
-interface ModalState {
-    settings: boolean
-    shortcuts: boolean
-    editor: boolean
-    mediaPicker: boolean
-    templateBrowser: boolean
-    alertModal: boolean
-    countdownModal: boolean
-    libraryPanel: boolean
-    scheduleModal: boolean
-}
-
 interface QuickActionHandlersResult {
-    modals: ModalState
-    editingSlide: Slide | null
-    openModal: (modal: keyof ModalState) => void
-    closeModal: (modal: keyof ModalState) => void
-    closeAllModals: () => void
     handleSlideEditorSave: (slide: Slide) => void
 }
 
-const initialModalState: ModalState = {
-    settings: false,
-    shortcuts: false,
-    editor: false,
-    mediaPicker: false,
-    templateBrowser: false,
-    alertModal: false,
-    countdownModal: false,
-    libraryPanel: false,
-    scheduleModal: false,
-}
-
 export function useQuickActionHandlers(): QuickActionHandlersResult {
-    const [modals, setModals] = useState<ModalState>(initialModalState)
-    const [editingSlide, setEditingSlide] = useState<Slide | null>(null)
-
     const { on } = useEmitter()
     const { createTextSlide, createCountdownSlide } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const setActiveAlert = useAppStore((state) => state.setActiveAlert)
 
-    const openModal = useCallback((modal: keyof ModalState) => {
-        setModals((prev) => ({ ...prev, [modal]: true }))
-    }, [])
-
-    const closeModal = useCallback((modal: keyof ModalState) => {
-        setModals((prev) => ({ ...prev, [modal]: false }))
-        if (modal === 'editor') {
-            setEditingSlide(null)
-        }
-    }, [])
-
-    const closeAllModals = useCallback(() => {
-        setModals(initialModalState)
-        setEditingSlide(null)
-    }, [])
+    // Modal actions from Zustand
+    const openModal = useAppStore((state) => state.openModal)
+    const closeModal = useAppStore((state) => state.closeModal)
+    const setEditingSlide = useAppStore((state) => state.setEditingSlide)
+    const setQuickActionsPage = useAppStore((state) => state.setQuickActionsPage)
+    const setDarkMode = useAppStore((state) => state.setDarkMode)
 
     const handleSlideEditorSave = useCallback((slide: Slide) => {
         appendActiveSlide(slide)
@@ -89,10 +49,7 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
 
         // Toggle Dark Mode
         unsubs.push(on(appWideActions.toggleDarkMode, () => {
-            document.documentElement.classList.toggle('dark')
-            // Persist preference
-            const isDark = document.documentElement.classList.contains('dark')
-            localStorage.setItem('theme', isDark ? 'dark' : 'light')
+            setDarkMode(!document.documentElement.classList.contains('dark'))
         }))
 
         // Open Template Browser
@@ -137,18 +94,13 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
 
         // Remove Alert
         unsubs.push(on(appWideActions.removeAlert, () => {
-            useAppStore.getState().setActiveAlert(null)
+            setActiveAlert(null)
         }))
 
         return () => unsubs.forEach((u) => u())
-    }, [on, openModal, createTextSlide])
+    }, [on, createTextSlide, openModal, closeModal, setEditingSlide, setQuickActionsPage, setDarkMode, setActiveAlert])
 
     return {
-        modals,
-        editingSlide,
-        openModal,
-        closeModal,
-        closeAllModals,
         handleSlideEditorSave,
     }
 }

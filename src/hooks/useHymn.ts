@@ -90,5 +90,5 @@ export function useHymn() {
         }
     }, [downloadHymns])
 
-    return { getHymn, getAllHymns, downloadHymns }
+    return { getHymn, getHymnByNumber: getHymn, getAllHymns, downloadHymns }
 }

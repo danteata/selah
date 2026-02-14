@@ -9,9 +9,27 @@ import type {
     AppSettings,
     SlideStyle,
     Advert,
-    BibleVersion
+    BibleVersion,
+    Scripture,
+    Hymn,
+    Song
 } from '../types'
 import { bibleVersionObjects } from '../types'
+
+// UI State types
+export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
+
+export interface ModalState {
+    settings: boolean
+    shortcuts: boolean
+    editor: boolean
+    mediaPicker: boolean
+    templateBrowser: boolean
+    alertModal: boolean
+    countdownModal: boolean
+    libraryPanel: boolean
+    scheduleModal: boolean
+}
 
 export interface AppState {
     // State
@@ -36,6 +54,14 @@ export interface AppState {
     activeSocket: WebSocket | null
     mainDisplayLabel: string
     mainDisplayScreen: Screen | null
+
+    // UI State (formerly event-driven)
+    modals: ModalState
+    quickActionsPage: QuickActionsPage
+    editingSlide: Slide | null
+    isDarkMode: boolean
+    bulkSelectMode: boolean
+    selectedSlideIds: string[]
 
     // Undo/Redo stacks
     pastStates: Array<Partial<AppState>>
@@ -82,6 +108,18 @@ const defaultSettings: AppSettings = {
     alertLimit: 5,
 }
 
+const initialModalState: ModalState = {
+    settings: false,
+    shortcuts: false,
+    editor: false,
+    mediaPicker: false,
+    templateBrowser: false,
+    alertModal: false,
+    countdownModal: false,
+    libraryPanel: false,
+    scheduleModal: false,
+}
+
 const initialState: AppState = {
     activeAdvert: null,
     schedules: [],
@@ -104,6 +142,14 @@ const initialState: AppState = {
     activeSocket: null,
     mainDisplayLabel: '',
     mainDisplayScreen: null,
+    // UI State
+    modals: initialModalState,
+    quickActionsPage: '',
+    editingSlide: null,
+    isDarkMode: false,
+    bulkSelectMode: false,
+    selectedSlideIds: [],
+    // Undo/Redo
     pastStates: [],
     futureStates: [],
 }
@@ -171,6 +217,20 @@ interface AppStore extends AppState {
     undo: () => void
     redo: () => void
     refreshAppActionsStack: () => void
+
+    // UI Actions (formerly event-driven)
+    openModal: (modal: keyof ModalState) => void
+    closeModal: (modal: keyof ModalState) => void
+    closeAllModals: () => void
+    setQuickActionsPage: (page: QuickActionsPage) => void
+    setEditingSlide: (slide: Slide | null) => void
+    toggleDarkMode: () => void
+    setDarkMode: (isDark: boolean) => void
+    toggleBulkSelectMode: () => void
+    setBulkSelectMode: (mode: boolean) => void
+    toggleSlideSelection: (slideId: string) => void
+    setSelectedSlideIds: (ids: string[]) => void
+    clearSelectedSlides: () => void
 }
 
 export const useAppStore = create<AppStore>()(
@@ -627,6 +687,92 @@ export const useAppStore = create<AppStore>()(
 
             refreshAppActionsStack: () => {
                 set({ pastStates: [], futureStates: [] })
+            },
+
+            // UI Actions (formerly event-driven)
+            openModal: (modal) => {
+                set((state) => ({
+                    modals: { ...state.modals, [modal]: true }
+                }))
+            },
+
+            closeModal: (modal) => {
+                set((state) => ({
+                    modals: { ...state.modals, [modal]: false },
+                    editingSlide: modal === 'editor' ? null : state.editingSlide
+                }))
+            },
+
+            closeAllModals: () => {
+                set({
+                    modals: initialModalState,
+                    editingSlide: null
+                })
+            },
+
+            setQuickActionsPage: (page) => {
+                set({ quickActionsPage: page })
+            },
+
+            setEditingSlide: (slide) => {
+                set({ editingSlide: slide })
+            },
+
+            toggleDarkMode: () => {
+                set((state) => {
+                    const newIsDark = !state.isDarkMode
+                    // Persist to localStorage
+                    localStorage.setItem('theme', newIsDark ? 'dark' : 'light')
+                    // Toggle document class
+                    if (newIsDark) {
+                        document.documentElement.classList.add('dark')
+                    } else {
+                        document.documentElement.classList.remove('dark')
+                    }
+                    return { isDarkMode: newIsDark }
+                })
+            },
+
+            setDarkMode: (isDark) => {
+                set((state) => {
+                    localStorage.setItem('theme', isDark ? 'dark' : 'light')
+                    if (isDark) {
+                        document.documentElement.classList.add('dark')
+                    } else {
+                        document.documentElement.classList.remove('dark')
+                    }
+                    return { isDarkMode: isDark }
+                })
+            },
+
+            toggleBulkSelectMode: () => {
+                set((state) => ({
+                    bulkSelectMode: !state.bulkSelectMode,
+                    selectedSlideIds: []
+                }))
+            },
+
+            setBulkSelectMode: (mode) => {
+                set({
+                    bulkSelectMode: mode,
+                    selectedSlideIds: []
+                })
+            },
+
+            toggleSlideSelection: (slideId) => {
+                set((state) => ({
+                    selectedSlideIds: state.selectedSlideIds.includes(slideId)
+                        ? state.selectedSlideIds.filter(id => id !== slideId)
+                        : [...state.selectedSlideIds, slideId]
+                }))
+            },
+
+            setSelectedSlideIds: (ids) => {
+                set({ selectedSlideIds: ids })
+            },
+
+            clearSelectedSlides: () => {
+                set({ selectedSlideIds: [], bulkSelectMode: false })
             },
         }),
         {

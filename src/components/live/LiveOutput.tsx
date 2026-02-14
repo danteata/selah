@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Eye, Trash2, Edit, Monitor, Airplay } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useGlobalEmit } from '../../hooks/useEmitter'
 import { useMultiMonitor } from '../../hooks/useMultiMonitor'
 import type { Slide } from '../../types'
-import { appWideActions } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
 
@@ -19,8 +17,9 @@ export function LiveOutput() {
     const liveOutputSlidesId = useAppStore((state) => state.liveOutputSlidesId)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
-
-    const globalEmit = useGlobalEmit()
+    const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
+    const setEditingSlide = useAppStore((state) => state.setEditingSlide)
+    const openModal = useAppStore((state) => state.openModal)
 
     // Get live output slides
     const liveOutputSlides = useMemo(() => {
@@ -112,12 +111,13 @@ export function LiveOutput() {
     }, [setLiveSlide, activeSlides])
 
     const handleDeleteSlide = useCallback((slide: Slide) => {
-        globalEmit(appWideActions.deleteSlide, slide)
-    }, [globalEmit])
+        removeActiveSlide(slide)
+    }, [removeActiveSlide])
 
     const handleEditSlide = useCallback((slide: Slide) => {
-        globalEmit(appWideActions.newActiveSlide, slide)
-    }, [globalEmit])
+        setEditingSlide(slide)
+        openModal('editor')
+    }, [setEditingSlide, openModal])
 
     // Handle open live with screen picker
     const handleOpenLive = useCallback(async () => {
@@ -298,11 +298,13 @@ export function LiveOutput() {
             {/* Navigation hints */}
             <div className="mt-4 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
                 <div className="flex items-center gap-2">
-                    <span>↑↓ Navigate</span>
-                    <span>Ctrl+1-9 Quick jump</span>
+                    <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">âââ </kbd>
+                    <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">âââ¬</kbd>
+                    Navigate
                 </div>
-                <div>
-                    {currentIndex + 1} / {liveOutputSlides.length}
+                <div className="flex items-center gap-2">
+                    <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">Ctrl+0-9</kbd>
+                    Quick select
                 </div>
             </div>
         </div>

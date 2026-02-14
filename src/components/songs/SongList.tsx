@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide-react'
-import { useSong } from '../../hooks'
-import { useSongs } from '../../hooks/useSongs'
-import { useGlobalEmit } from '../../hooks/useEmitter'
+import { useSong, useSongs, useSlideCreation } from '../../hooks'
+import { useAppStore } from '../../store/appStore'
 import { AddSongModal } from './AddSongModal'
 import type { Song } from '../../types'
-import { appWideActions } from '../../types'
 
 interface SongListProps {
     onClose: () => void
@@ -20,7 +18,8 @@ export function SongList({ onClose }: SongListProps) {
 
     const { songs, loading: songsLoading, searchSongs, deleteSong, parseSongLyrics } = useSongs()
     const { getSong } = useSong()
-    const globalEmit = useGlobalEmit()
+    const { createSongSlide } = useSlideCreation()
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
     // Filter songs
     const filteredSongs = songs.filter((song: Song) =>
@@ -32,11 +31,14 @@ export function SongList({ onClose }: SongListProps) {
         if (selectedSong) {
             const songWithVerses = await getSong(selectedSong)
             if (songWithVerses) {
-                globalEmit(appWideActions.newSong, songWithVerses)
-                onClose()
+                const slide = createSongSlide(songWithVerses as any)
+                if (slide) {
+                    appendActiveSlide(slide)
+                }
             }
+            onClose()
         }
-    }, [selectedSong, getSong, globalEmit, onClose])
+    }, [selectedSong, getSong, createSongSlide, appendActiveSlide, onClose])
 
     const handleDeleteSong = useCallback(async (songId: string) => {
         const success = await deleteSong(songId)

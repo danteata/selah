@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, X, ChevronLeft, Music } from 'lucide-react'
-import { useHymn } from '../../hooks'
-import { useGlobalEmit } from '../../hooks/useEmitter'
+import { useHymn, useSlideCreation } from '../../hooks'
+import { useAppStore } from '../../store/appStore'
 import type { Hymn } from '../../types'
-import { appWideActions } from '../../types'
 
 interface HymnListProps {
     onClose: () => void
@@ -17,7 +16,8 @@ export function HymnList({ onClose }: HymnListProps) {
     const [loading, setLoading] = useState(true)
 
     const { getAllHymns } = useHymn()
-    const globalEmit = useGlobalEmit()
+    const { createHymnSlide } = useSlideCreation()
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
     // Load hymns
     useEffect(() => {
@@ -46,10 +46,13 @@ export function HymnList({ onClose }: HymnListProps) {
 
     const handleCreateSlide = useCallback(() => {
         if (selectedHymn) {
-            globalEmit(appWideActions.newHymn, selectedHymn.number)
+            const slide = createHymnSlide(selectedHymn as any)
+            if (slide) {
+                appendActiveSlide(slide)
+            }
             onClose()
         }
-    }, [selectedHymn, globalEmit, onClose])
+    }, [selectedHymn, createHymnSlide, appendActiveSlide, onClose])
 
     if (loading) {
         return (

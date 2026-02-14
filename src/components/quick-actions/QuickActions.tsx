@@ -1,12 +1,13 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Search, X } from 'lucide-react'
 import fuzzysort from 'fuzzysort'
-import { useEmitter, useHymn, useGlobalEmit } from '../../hooks'
+import { useHymn, useScripture, useSlideCreation } from '../../hooks'
+import { useAppStore, type QuickActionsPage } from '../../store/appStore'
 import {
-    appWideActions,
     slideTypes,
     quickActionsArr,
     bibleBooks,
+    appWideActions,
     type QuickAction,
     type Slide
 } from '../../types'
@@ -18,15 +19,21 @@ import { SongList } from '../songs/SongList'
 
 export function QuickActions() {
     const [searchInput, setSearchInput] = useState('')
-    const [page, setPage] = useState('') // 'bible', 'hymn', 'song', etc.
     const [focusedActionIndex, setFocusedActionIndex] = useState(0)
     const [actions, setActions] = useState<QuickAction[]>([])
 
     const searchInputRef = useRef<HTMLInputElement>(null)
     const actionsContainerRef = useRef<HTMLDivElement>(null)
-    const { getAllHymns } = useHymn()
-    const { on } = useEmitter()
-    const globalEmit = useGlobalEmit()
+    const { getAllHymns, getHymnByNumber } = useHymn()
+    const { fetchScripture } = useScripture()
+    const { createBibleSlide, createHymnSlide } = useSlideCreation()
+
+    // Use Zustand for page state and actions
+    const page = useAppStore((state) => state.quickActionsPage)
+    const setQuickActionsPage = useAppStore((state) => state.setQuickActionsPage)
+    const openModal = useAppStore((state) => state.openModal)
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const setEditingSlide = useAppStore((state) => state.setEditingSlide)
 
     // Initialize actions with hymns
     useEffect(() => {
@@ -37,7 +44,7 @@ export function QuickActions() {
                 icon: 'i-bx-bible',
                 name: book,
                 desc: `Open the book of ${book}`,
-                action: appWideActions.newBible,
+                action: `bible:${index + 1}`, // Custom action format for direct handling
                 meta: `${book} 0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7 8:8 9:9 10:10 -`,
                 searchableOnly: true,
                 bibleBookIndex: `${index + 1}`,
@@ -48,7 +55,7 @@ export function QuickActions() {
                 icon: 'i-bx-church',
                 name: hymn.title,
                 desc: 'verse and chorus included',
-                action: appWideActions.newHymn,
+                action: `hymn:${hymn.number}`, // Custom action format for direct handling
                 meta: `hymn ${hymn.meta}`,
                 searchableOnly: true,
                 hymnIndex: hymn.number,
@@ -60,48 +67,6 @@ export function QuickActions() {
 
         initHymns()
     }, [getAllHymns])
-
-    // Listen for events
-    useEffect(() => {
-        const unsubs: Array<() => void> = []
-
-        unsubs.push(on(appWideActions.newBible, (data) => {
-            if (data === '') setPage('bible')
-        }))
-
-        unsubs.push(on(appWideActions.newSong, (data) => {
-            const d = data as Slide | undefined
-            if (!d || !(d as { fromSaved?: boolean }).fromSaved) setPage('song')
-        }))
-
-        unsubs.push(on(appWideActions.newHymn, (data) => {
-            if (data === 'undefined') setPage('hymn')
-        }))
-
-        unsubs.push(on(appWideActions.newMedia, (data) => {
-            const arr = data as Slide[] | undefined
-            if (!arr || !arr[0] || !(arr[0] as { fromSaved?: boolean }).fromSaved) setPage('media')
-        }))
-
-        unsubs.push(on(appWideActions.newYouTubeVideo, () => setPage('youtube')))
-        unsubs.push(on(appWideActions.newVimeoVideo, () => setPage('vimeo')))
-        unsubs.push(on(appWideActions.newSearchBible, () => setPage('search-bible')))
-        unsubs.push(on(appWideActions.newLibrary, () => setPage('library')))
-        unsubs.push(on(appWideActions.newTemplates, () => setPage('templates')))
-        unsubs.push(on(appWideActions.newAlert, () => setPage('alert')))
-        unsubs.push(on(appWideActions.newCountdown, () => setPage('countdown')))
-
-        unsubs.push(on(appWideActions.quickActionsFocus, () => {
-            if (page !== '') {
-                setTimeout(() => searchInputRef.current?.focus(), 300)
-                setPage('')
-            } else {
-                searchInputRef.current?.focus()
-            }
-        }))
-
-        return () => unsubs.forEach(u => u())
-    }, [on, page])
 
     // Reset focus when page changes
     useEffect(() => {
@@ -174,6 +139,129 @@ export function QuickActions() {
         return mappedResults.slice(0, 10)
     }, [searchInput, actions, bibleChapterAndVerse])
 
+    // Handle action execution
+    const executeAction = useCallback(async (action: QuickAction) => {
+        // Handle navigation actions (set page state)
+        if (action.action === appWideActions.newBible || action.action === appWideActions.newSearchBible) {
+            setQuickActionsPage('bible')
+            return
+        }
+        if (action.action === appWideActions.newHymn) {
+            setQuickActionsPage('hymn')
+            return
+        }
+        if (action.action === appWideActions.newSong || action.action === appWideActions.addSong) {
+            setQuickActionsPage('song')
+            return
+        }
+        if (action.action === appWideActions.newMedia) {
+            openModal('mediaPicker')
+            return
+        }
+        if (action.action === appWideActions.newYouTubeVideo) {
+            // Open media picker for YouTube video - TODO: add YouTube URL input
+            openModal('mediaPicker')
+            return
+        }
+        if (action.action === appWideActions.newVimeoVideo) {
+            // Open media picker for Vimeo video - TODO: add Vimeo URL input
+            openModal('mediaPicker')
+            return
+        }
+        if (action.action === appWideActions.newTemplates) {
+            openModal('templateBrowser')
+            return
+        }
+        if (action.action === appWideActions.newAlert) {
+            openModal('alertModal')
+            return
+        }
+        if (action.action === appWideActions.newCountdown) {
+            openModal('countdownModal')
+            return
+        }
+        if (action.action === appWideActions.newLibrary) {
+            openModal('libraryPanel')
+            return
+        }
+        if (action.action === appWideActions.openSettings) {
+            openModal('settings')
+            return
+        }
+        if (action.action === appWideActions.openScheduleModal) {
+            openModal('scheduleModal')
+            return
+        }
+        if (action.action === appWideActions.openShortcutsModal) {
+            openModal('shortcuts')
+            return
+        }
+        if (action.action === appWideActions.removeAlert) {
+            // Handle remove alert - TODO: implement remove alert action
+            console.log('Remove alert action triggered')
+            return
+        }
+        if (action.action === appWideActions.toggleDarkMode) {
+            // Handle toggle dark mode
+            document.documentElement.classList.toggle('dark')
+            return
+        }
+
+        // Handle direct slide creation actions (bible book or hymn number)
+        if (action.action.startsWith('bible:')) {
+            const bookIndex = action.bibleBookIndex
+            const reference = `${bookIndex}:${bibleChapterAndVerse || '1:1'}`
+            try {
+                const scripture = await fetchScripture(reference)
+                if (scripture) {
+                    const slide = createBibleSlide(scripture)
+                    if (slide) {
+                        appendActiveSlide(slide)
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch scripture:', e)
+            }
+            return
+        }
+
+        if (action.action.startsWith('hymn:')) {
+            const hymnNumber = action.hymnIndex
+            if (!hymnNumber) return
+            try {
+                const hymn = await getHymnByNumber(hymnNumber)
+                if (hymn) {
+                    const slide = createHymnSlide(hymn as any)
+                    if (slide) {
+                        appendActiveSlide(slide)
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch hymn:', e)
+            }
+            return
+        }
+
+        // Handle text slide creation
+        if (action.action === appWideActions.newSlide || action.action === appWideActions.newText) {
+            // Create a new empty text slide and open the editor
+            const newSlide: Slide = {
+                id: `slide_${Date.now()}`,
+                index: 0,
+                name: 'New Slide',
+                type: 'text',
+                layout: 'full-text',
+                contents: [''],
+                userId: '',
+                churchId: '',
+                scheduleId: '',
+            }
+            setEditingSlide(newSlide)
+            openModal('editor')
+            return
+        }
+    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlide, bibleChapterAndVerse, setEditingSlide])
+
     // Handle keyboard navigation
     const handleInputKeydown = useCallback((e: React.KeyboardEvent) => {
         const currentActions = searchInput.length >= 2
@@ -199,16 +287,11 @@ export function QuickActions() {
                 e.preventDefault()
                 const action = currentActions?.[focusedActionIndex]
                 if (action) {
-                    const actionData = action.type === slideTypes.bible
-                        ? `${action.bibleBookIndex}:${bibleChapterAndVerse}`
-                        : action.type === slideTypes.hymn
-                            ? action.hymnIndex
-                            : ''
-                    globalEmit(action.action, actionData)
+                    executeAction(action)
                 }
                 break
         }
-    }, [searchInput, searchedActions, actions, focusedActionIndex, bibleChapterAndVerse, globalEmit])
+    }, [searchInput, searchedActions, actions, focusedActionIndex, executeAction])
 
     // Scroll focused action into view
     useEffect(() => {
@@ -225,6 +308,11 @@ export function QuickActions() {
     // Filter basic actions
     const basicActions = actions?.filter((a: QuickAction) => !a?.searchableOnly)
 
+    // Handle page close
+    const handleClosePage = useCallback(() => {
+        setQuickActionsPage('')
+    }, [setQuickActionsPage])
+
     return (
         <div className="max-w-[330px] relative overflow-visible z-20 bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4">
             {/* Header */}
@@ -234,7 +322,7 @@ export function QuickActions() {
                 </h2>
                 {page && (
                     <button
-                        onClick={() => setPage('')}
+                        onClick={handleClosePage}
                         className="text-sm text-primary-600 hover:text-primary-700"
                     >
                         Back
@@ -279,12 +367,12 @@ export function QuickActions() {
             </div>
 
             {/* Content based on page state */}
-            {page === 'bible' ? (
-                <BibleList onClose={() => setPage('')} />
+            {page === 'bible' || page === 'search-bible' ? (
+                <BibleList onClose={handleClosePage} />
             ) : page === 'hymn' ? (
-                <HymnList onClose={() => setPage('')} />
+                <HymnList onClose={handleClosePage} />
             ) : page === 'song' ? (
-                <SongList onClose={() => setPage('')} />
+                <SongList onClose={handleClosePage} />
             ) : (
                 <>
                     {/* Actions List */}
@@ -302,7 +390,7 @@ export function QuickActions() {
                                     isFocused={index === focusedActionIndex}
                                     onClick={() => {
                                         setFocusedActionIndex(index)
-                                        globalEmit(action.action, '')
+                                        executeAction(action)
                                     }}
                                 />
                             ))
@@ -316,12 +404,7 @@ export function QuickActions() {
                                     isFocused={index === focusedActionIndex}
                                     onClick={() => {
                                         setFocusedActionIndex(index)
-                                        const actionData = action.type === slideTypes.bible
-                                            ? `${action.bibleBookIndex}:${bibleChapterAndVerse}`
-                                            : action.type === slideTypes.hymn
-                                                ? action.hymnIndex
-                                                : ''
-                                        globalEmit(action.action, actionData)
+                                        executeAction(action)
                                     }}
                                 />
                             ))
