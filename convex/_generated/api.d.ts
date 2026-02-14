@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as bibleVersions from "../bibleVersions.js";
 import type * as churches from "../churches.js";
 import type * as schedules from "../schedules.js";
 import type * as slides from "../slides.js";
@@ -24,6 +25,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  bibleVersions: typeof bibleVersions;
   churches: typeof churches;
   schedules: typeof schedules;
   slides: typeof slides;

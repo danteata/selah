@@ -224,4 +224,21 @@ export default defineSchema({
         createdAt: v.string(),
         updatedAt: v.string(),
     }),
+
+    // Bible Versions table - stores complete Bible version data
+    bibleVersions: defineTable({
+        id: v.string(), // KJV, NIV, etc.
+        name: v.string(), // King James Version, New International Version, etc.
+        data: v.array(v.object({
+            book: v.string(),
+            chapter: v.string(),
+            verse: v.string(),
+            scripture: v.string(),
+        })),
+        copyrightContent: v.string(),
+        isPublicDomain: v.boolean(),
+        uploadedAt: v.string(),
+        uploadedBy: v.string(),
+    })
+        .index("by_version_id", ["id"]),
 });

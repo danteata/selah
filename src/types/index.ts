@@ -183,6 +183,7 @@ export interface BibleVersion {
     name: string
     isDownloaded: boolean
     copyrightContent: string
+    isPublicDomain?: boolean
 }
 
 export interface Hymn {
@@ -449,78 +450,91 @@ export const bibleVersionObjects: BibleVersion[] = [
         name: 'King James Version',
         isDownloaded: false,
         copyrightContent: 'Scripture taken from the King James Version. Public Domain',
+        isPublicDomain: true,
     },
     {
         id: 'ASV',
         name: 'American Standard Version',
         isDownloaded: false,
         copyrightContent: 'Scripture taken from the American Standard Version. Public Domain',
+        isPublicDomain: true,
     },
     {
         id: 'YLT',
         name: "Young's Literal Translation",
         isDownloaded: false,
         copyrightContent: "Scripture taken from the Young's Literal Translation. Public Domain",
+        isPublicDomain: true,
     },
     {
         id: 'WEB',
         name: 'World English Bible',
         isDownloaded: false,
         copyrightContent: 'Scripture taken from the World English Bible. Public Domain',
+        isPublicDomain: true,
     },
     {
         id: 'NKJV',
         name: 'New King James Version',
         isDownloaded: false,
         copyrightContent: 'Scripture taken from the New King James Version®. Copyright © 1982 by Thomas Nelson. All rights reserved.',
+        isPublicDomain: false,
     },
     {
         id: 'NIV',
         name: 'New International Version',
         isDownloaded: false,
         copyrightContent: 'Scriptures taken from the Holy Bible, New International Version®, NIV®. Copyright © 1973, 1978, 1984, 2011 by Biblica, Inc.™ All rights reserved worldwide.',
+        isPublicDomain: false,
     },
     {
         id: 'AMP',
         name: 'Amplified Bible',
         isDownloaded: false,
         copyrightContent: 'All Scripture quotations, unless otherwise indicated, are taken from the Amplified Bible, Copyright © 2015 by The Lockman Foundation.',
+        isPublicDomain: false,
     },
     {
         id: 'NLT',
         name: 'New Living Translation',
         isDownloaded: false,
         copyrightContent: 'Scripture quotations marked (NLT) are taken from the Holy Bible, New Living Translation, copyright ©1996, 2004, 2015 by Tyndale House Foundation.',
+        isPublicDomain: false,
     },
     {
         id: 'CEV',
         name: 'Contemporary English Version',
         isDownloaded: false,
         copyrightContent: 'Scripture quotations marked (CEV) are from the Contemporary English Version Copyright © 1991, 1992, 1995 by American Bible Society.',
+        isPublicDomain: false,
     },
     {
         id: 'MSG',
         name: 'The Message',
         isDownloaded: false,
         copyrightContent: 'Scripture taken from THE MESSAGE. Copyright © 1993, 1994, 1995, 1996, 2000, 2001, 2002.',
+        isPublicDomain: false,
     },
     {
         id: 'NASB',
         name: 'New American Standard Bible',
         isDownloaded: false,
         copyrightContent: 'Scripture quotations taken from the (NASB®) New American Standard Bible®, Copyright © 1960, 1971 by The Lockman Foundation',
+        isPublicDomain: false,
     },
     {
         id: 'TPT',
         name: 'The Passion Translation',
         isDownloaded: false,
         copyrightContent: 'Scripture quotations marked TPT are from The Passion Translation®. Copyright © 2017, 2018, 2020 by Passion & Fire Ministries, Inc.',
+        isPublicDomain: false,
     },
     {
         id: 'YBCV',
         name: 'Yoruba YBCV (Bibeli Mimọ)',
         isDownloaded: false,
         copyrightContent: 'Scripture quotations taken from the Yoruba Bible Crowther Version © The Bible Society of Nigeria, 2012',
+        isPublicDomain: false,
     },
 ]
 

@@ -1,50 +1,155 @@
 import { useCallback } from 'react'
 import { useAppStore } from '../store/appStore'
 import { getIndexedDB } from './useIndexedDB'
+import { useConvex } from 'convex/react'
+import { api } from '../../convex/_generated/api'
 import type { BibleVerse, Scripture, Hymn } from '../types'
 
-// Bible data URL from Vue app
+// Bible data URL from Vue app (CDN fallback)
 const BIBLE_DATA_URL = 'https://d37gopmfkl2m2z.cloudfront.net/open/bible-versions'
+
+// Data source tracking
+export type BibleDataSource = 'indexeddb' | 'convex' | 'cdn'
+
+export interface BibleVersionStatus {
+    id: string
+    downloaded: boolean
+    source: BibleDataSource | null
+    availableOnConvex: boolean
+    availableOnCdn: boolean
+}
 
 export function useScripture() {
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
+    const convex = useConvex()
 
-    // Download Bible version data if not cached
-    const downloadBibleVersion = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
+    // Fetch Bible data from CDN (fallback)
+    const fetchFromCdn = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
         try {
-            console.log(`Downloading Bible version: ${version}...`)
+            console.log(`Fetching Bible version ${version} from CDN...`)
             const response = await fetch(`${BIBLE_DATA_URL}/${version.toLowerCase()}.json`)
 
             if (!response.ok) {
-                throw new Error(`Failed to fetch Bible data: ${response.status}`)
+                console.warn(`CDN fetch failed for ${version}: ${response.status}`)
+                return null
             }
 
             const bibleData = await response.json() as BibleVerse[]
-
-            // Cache in IndexedDB
-            const db = getIndexedDB()
-            await db.bibleAndHymns.put({
-                id: version,
-                data: bibleData as unknown as Array<Scripture | Hymn>,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            })
-
-            console.log(`Bible version ${version} downloaded and cached`)
+            console.log(`Successfully fetched ${version} from CDN (${bibleData.length} verses)`)
             return bibleData
         } catch (error) {
-            console.error('Error downloading Bible data:', error)
+            console.error('Error fetching from CDN:', error)
             return null
         }
     }, [])
 
-    // Check if a bible version is downloaded
-    const isVersionDownloaded = useCallback(async (version: string): Promise<boolean> => {
+    // Fetch Bible data from Convex
+    const fetchFromConvex = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
+        try {
+            console.log(`Fetching Bible version ${version} from Convex...`)
+            const result = await convex.query(api.bibleVersions.getBibleVersion, { id: version })
+
+            if (!result) {
+                console.warn(`Version ${version} not found on Convex`)
+                return null
+            }
+
+            console.log(`Successfully fetched ${version} from Convex (${result.data.length} verses)`)
+            return result.data as BibleVerse[]
+        } catch (error) {
+            console.error('Error fetching from Convex:', error)
+            return null
+        }
+    }, [convex])
+
+    // Cache Bible data in IndexedDB
+    const cacheInIndexedDB = useCallback(async (version: string, data: BibleVerse[]): Promise<void> => {
         const db = getIndexedDB()
-        const count = await db.bibleAndHymns.where('id').equals(version).count()
-        return count > 0
+        await db.bibleAndHymns.put({
+            id: version,
+            data: data as unknown as Array<Scripture | Hymn>,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        })
+        console.log(`Cached Bible version ${version} in IndexedDB`)
     }, [])
+
+    // Get Bible data from IndexedDB cache
+    const getFromIndexedDB = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
+        const db = getIndexedDB()
+        const cached = await db.bibleAndHymns.get(version)
+
+        if (cached?.data) {
+            console.log(`Found ${version} in IndexedDB cache`)
+            return cached.data as unknown as BibleVerse[]
+        }
+
+        return null
+    }, [])
+
+    // Download Bible version with fallback chain: IndexedDB → Convex → CDN
+    const downloadBibleVersion = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
+        // 1. Check IndexedDB cache first
+        const cached = await getFromIndexedDB(version)
+        if (cached) {
+            return cached
+        }
+
+        // 2. Try Convex
+        const convexData = await fetchFromConvex(version)
+        if (convexData) {
+            // Cache in IndexedDB for future use
+            await cacheInIndexedDB(version, convexData)
+            return convexData
+        }
+
+        // 3. Fallback to CDN
+        const cdnData = await fetchFromCdn(version)
+        if (cdnData) {
+            // Cache in IndexedDB for future use
+            await cacheInIndexedDB(version, cdnData)
+            return cdnData
+        }
+
+        console.error(`Failed to fetch Bible version ${version} from any source`)
+        return null
+    }, [getFromIndexedDB, fetchFromConvex, fetchFromCdn, cacheInIndexedDB])
+
+    // Check if a bible version is downloaded (in IndexedDB)
+    const isVersionDownloaded = useCallback(async (version: string): Promise<boolean> => {
+        const cached = await getFromIndexedDB(version)
+        return cached !== null
+    }, [getFromIndexedDB])
+
+    // Get detailed status of a Bible version
+    const getVersionStatus = useCallback(async (version: string): Promise<BibleVersionStatus> => {
+        const downloaded = await isVersionDownloaded(version)
+
+        let availableOnConvex = false
+        try {
+            availableOnConvex = await convex.query(api.bibleVersions.hasBibleVersion, { id: version })
+        } catch {
+            // Convex not available
+        }
+
+        // Check CDN availability (just check if the URL responds with OK)
+        let availableOnCdn = false
+        try {
+            const response = await fetch(`${BIBLE_DATA_URL}/${version.toLowerCase()}.json`, { method: 'HEAD' })
+            availableOnCdn = response.ok
+        } catch {
+            // CDN not available
+        }
+
+        return {
+            id: version,
+            downloaded,
+            source: downloaded ? 'indexeddb' : null,
+            availableOnConvex,
+            availableOnCdn,
+        }
+    }, [isVersionDownloaded, convex])
 
     const fetchScripture = useCallback(async (
         label: string = '1:1:1',
@@ -156,5 +261,13 @@ export function useScripture() {
         }
     }, [defaultBibleVersion, setDefaultBibleVersion, isVersionDownloaded, downloadBibleVersion])
 
-    return { fetchScripture, downloadBibleVersion, isVersionDownloaded }
+    return {
+        fetchScripture,
+        downloadBibleVersion,
+        isVersionDownloaded,
+        getVersionStatus,
+        fetchFromConvex,
+        fetchFromCdn,
+        cacheInIndexedDB,
+    }
 }
