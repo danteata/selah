@@ -17,10 +17,11 @@ export function PreviewContent() {
     const activeSlides = useAppStore((state) => state.activeSlides)
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
     const setActiveSlides = useAppStore((state) => state.setActiveSlides)
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
 
-    const { createTextSlide, duplicateSlide } = useSlideCreation()
+    const { createTextSlide, duplicateSlide, createBibleSlide, createSongSlide, createHymnSlide } = useSlideCreation()
     const globalEmit = useGlobalEmit()
     const slidesGridRef = useRef<HTMLDivElement>(null)
 
@@ -66,6 +67,62 @@ export function PreviewContent() {
             }
         })
 
+        // New bible slide
+        globalEmitter.on(appWideActions.newBible, (data) => {
+            if (data) {
+                const bibleData = data as { scripture?: any; bookIndex?: number; chapter?: number }
+                if (bibleData.scripture) {
+                    // Data contains scripture info from BibleList
+                    const newSlide = createBibleSlide(bibleData.scripture)
+                    setActiveSlide(newSlide)
+                    appendActiveSlide(newSlide)
+                } else {
+                    // It's a slide
+                    const slide = Array.isArray(data) ? data[0] : data as Slide
+                    if (slide.type === 'bible') {
+                        setActiveSlide(slide)
+                        appendActiveSlide(slide)
+                    }
+                }
+            }
+        })
+
+        // New hymn slide
+        globalEmitter.on(appWideActions.newHymn, (data) => {
+            if (data) {
+                const hymnData = data as { verses?: string[]; chorus?: string; title?: string; number?: string }
+                if (hymnData.verses) {
+                    const newSlide = createHymnSlide(hymnData as any)
+                    setActiveSlide(newSlide)
+                    appendActiveSlide(newSlide)
+                } else {
+                    const slide = Array.isArray(data) ? data[0] : data as Slide
+                    if (slide.type === 'hymn') {
+                        setActiveSlide(slide)
+                        appendActiveSlide(slide)
+                    }
+                }
+            }
+        })
+
+        // New song slide
+        globalEmitter.on(appWideActions.newSong, (data) => {
+            if (data) {
+                const songData = data as { verses?: string[]; chorus?: string; title?: string; _id?: string; id?: string }
+                if (songData.verses) {
+                    const newSlide = createSongSlide(songData as any)
+                    setActiveSlide(newSlide)
+                    appendActiveSlide(newSlide)
+                } else {
+                    const slide = Array.isArray(data) ? data[0] : data as Slide
+                    if (slide.type === 'song') {
+                        setActiveSlide(slide)
+                        appendActiveSlide(slide)
+                    }
+                }
+            }
+        })
+
         // Delete slide
         globalEmitter.on(appWideActions.deleteSlide, (slide) => {
             const s = slide as Slide
@@ -88,11 +145,14 @@ export function PreviewContent() {
         return () => {
             globalEmitter.off(appWideActions.newSlide)
             globalEmitter.off(appWideActions.newText)
+            globalEmitter.off(appWideActions.newBible)
+            globalEmitter.off(appWideActions.newHymn)
+            globalEmitter.off(appWideActions.newSong)
             globalEmitter.off(appWideActions.deleteSlide)
             globalEmitter.off(appWideActions.selectSlides)
             globalEmitter.off('promote-active-slide-live')
         }
-    }, [createTextSlide, duplicateSlide, activeSlide, setLiveSlide, handleDeleteSlide])
+    }, [createTextSlide, duplicateSlide, createBibleSlide, createHymnSlide, createSongSlide, appendActiveSlide, activeSlide, setLiveSlide, handleDeleteSlide])
 
     const handleDuplicateSlide = useCallback((slide: Slide) => {
         const newSlide = duplicateSlide(slide)
