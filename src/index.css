@@ -59,3 +59,150 @@ body {
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+
+/* TipTap Editor Styles */
+.tiptap {
+    outline: none;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+    color: #adb5bd;
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+}
+
+.tiptap h1 {
+    font-size: 2em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+}
+
+.tiptap h2 {
+    font-size: 1.5em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+}
+
+.tiptap h3 {
+    font-size: 1.25em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+}
+
+.tiptap ul,
+.tiptap ol {
+    padding-left: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+.tiptap ul {
+    list-style-type: disc;
+}
+
+.tiptap ol {
+    list-style-type: decimal;
+}
+
+.tiptap blockquote {
+    border-left: 3px solid #cbd5e1;
+    padding-left: 1em;
+    margin-left: 0;
+    margin-right: 0;
+    font-style: italic;
+    color: #64748b;
+}
+
+.tiptap code {
+    background-color: #f1f5f9;
+    border-radius: 0.25rem;
+    padding: 0.125rem 0.25rem;
+    font-family: monospace;
+    font-size: 0.875em;
+}
+
+.tiptap mark {
+    border-radius: 0.25rem;
+    padding: 0.125rem 0;
+}
+
+.tiptap p {
+    margin-bottom: 0.5em;
+}
+
+.tiptap p:last-child {
+    margin-bottom: 0;
+}
+
+/* Dark mode TipTap styles */
+.dark .tiptap code {
+    background-color: #334155;
+}
+
+.dark .tiptap blockquote {
+    border-left-color: #475569;
+    color: #94a3b8;
+}
+
+/* TipTap Preview Styles (for rendered output) */
+.tiptap-preview h1 {
+    font-size: 2em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+}
+
+.tiptap-preview h2 {
+    font-size: 1.5em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+}
+
+.tiptap-preview h3 {
+    font-size: 1.25em;
+    font-weight: bold;
+    margin-bottom: 0.5em;
+}
+
+.tiptap-preview p {
+    margin-bottom: 0.5em;
+}
+
+.tiptap-preview p:last-child {
+    margin-bottom: 0;
+}
+
+.tiptap-preview ul,
+.tiptap-preview ol {
+    padding-left: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+.tiptap-preview ul {
+    list-style-type: disc;
+}
+
+.tiptap-preview ol {
+    list-style-type: decimal;
+}
+
+.tiptap-preview blockquote {
+    border-left: 3px solid rgba(255, 255, 255, 0.3);
+    padding-left: 1em;
+    margin-left: 0;
+    margin-right: 0;
+    font-style: italic;
+}
+
+.tiptap-preview code {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 0.25rem;
+    padding: 0.125rem 0.25rem;
+    font-family: monospace;
+    font-size: 0.875em;
+}
+
+.tiptap-preview mark {
+    border-radius: 0.25rem;
+    padding: 0.125rem 0;
+}

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Slide, SlideStyle } from '../../types'
+import { TipTapEditor } from './TipTapEditor'
 
 interface SlideEditorProps {
     slide: Slide | null
@@ -195,23 +196,18 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                                         : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                                         }`}
                                 >
-                                    <textarea
-                                        ref={activeContentIndex === index ? textareaRef : null}
-                                        value={content}
-                                        onChange={(e) => updateContent(index, e.target.value)}
+                                    <TipTapEditor
+                                        content={content}
+                                        onChange={(html) => updateContent(index, html)}
                                         onFocus={() => setActiveContentIndex(index)}
                                         placeholder={`Content block ${index + 1}...`}
-                                        rows={4}
-                                        className="w-full p-3 bg-transparent resize-none focus:outline-none text-gray-900 dark:text-white"
-                                        style={{
-                                            fontFamily: editedSlide.slideStyle?.font || settings.defaultFont,
-                                            textAlign: (editedSlide.slideStyle?.alignment as any) || 'center',
-                                        }}
+                                        font={editedSlide.slideStyle?.font || settings.defaultFont}
+                                        alignment={(editedSlide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center'}
                                     />
                                     {editedSlide.contents.length > 1 && (
                                         <button
                                             onClick={() => removeContentBlock(index)}
-                                            className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity z-10"
                                         >
                                             <X className="w-4 h-4" />
                                         </button>
@@ -241,17 +237,18 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                                     textAlign: (editedSlide.slideStyle?.alignment as any) || 'center',
                                 }}
                             >
-                                <div className="text-white">
+                                <div
+                                    className="text-white tiptap-preview"
+                                    style={{
+                                        fontSize: `${(editedSlide.slideStyle?.fontSizePercent || 100) / 100 * 1.5}rem`,
+                                    }}
+                                >
                                     {editedSlide.contents.map((content, index) => (
-                                        <p
+                                        <div
                                             key={index}
                                             className="mb-2 last:mb-0"
-                                            style={{
-                                                fontSize: `${(editedSlide.slideStyle?.fontSizePercent || 100) / 100 * 1.5}rem`,
-                                            }}
-                                        >
-                                            {content || '(Empty)'}
-                                        </p>
+                                            dangerouslySetInnerHTML={{ __html: content || '<p>(Empty)</p>' }}
+                                        />
                                     ))}
                                 </div>
                             </div>

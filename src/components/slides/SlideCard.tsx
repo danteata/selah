@@ -57,9 +57,10 @@ export function SlideCard({
             >
                 {slide.contents[0] && (
                     <div className="absolute inset-0 flex items-center justify-center p-4">
-                        <p className="text-white text-xs text-center line-clamp-3 drop-shadow-lg">
-                            {slide.contents[0]}
-                        </p>
+                        <div
+                            className="text-white text-xs text-center line-clamp-3 drop-shadow-lg tiptap-preview"
+                            dangerouslySetInnerHTML={{ __html: slide.contents[0] }}
+                        />
                     </div>
                 )}
 
