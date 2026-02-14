@@ -205,3 +205,24 @@ export const hasChurch = query({
         return !!user?.churchId;
     },
 });
+
+// Get church by ID (simple query without auth)
+export const getChurchById = query({
+    args: { id: v.string() },
+    handler: async (ctx, args) => {
+        const church = await ctx.db
+            .query("churches")
+            .filter((q) => q.eq(q.field("_id"), args.id))
+            .unique();
+        return church;
+    },
+});
+
+// List all churches (for superadmin)
+export const listChurches = query({
+    args: {},
+    handler: async (ctx) => {
+        const churches = await ctx.db.query("churches").collect();
+        return churches;
+    },
+});

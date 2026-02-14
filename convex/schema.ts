@@ -8,7 +8,11 @@ export default defineSchema({
         clerkId: v.optional(v.string()), // Clerk authentication ID
         fullname: v.string(),
         email: v.string(),
-        role: v.string(),
+        role: v.union(
+            v.literal("superadmin"),
+            v.literal("admin"),
+            v.literal("member")
+        ),
         avatar: v.string(),
         theme: v.string(),
         churchId: v.string(),
@@ -24,7 +28,8 @@ export default defineSchema({
     })
         .index("by_email", ["email"])
         .index("by_church", ["churchId"])
-        .index("by_clerk_id", ["clerkId"]),
+        .index("by_clerk_id", ["clerkId"])
+        .index("by_role", ["role"]),
 
     // Churches table
     churches: defineTable({

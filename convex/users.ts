@@ -2,6 +2,19 @@ import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 
+// Role type
+export type UserRole = "superadmin" | "admin" | "member";
+
+// Check if user has required role or higher
+export function hasRequiredRole(userRole: UserRole, requiredRole: UserRole): boolean {
+    const roleHierarchy: Record<UserRole, number> = {
+        superadmin: 3,
+        admin: 2,
+        member: 1,
+    };
+    return roleHierarchy[userRole] >= roleHierarchy[requiredRole];
+}
+
 // Get current user by clerk ID
 export const getCurrentUser = query({
     args: { clerkId: v.optional(v.string()) },
@@ -40,6 +53,27 @@ export const getUsersByChurch = query({
     },
 });
 
+// Check if any superadmin exists
+export const hasSuperadmin = query({
+    args: {},
+    handler: async (ctx) => {
+        const superadmin = await ctx.db
+            .query("users")
+            .withIndex("by_role", (q) => q.eq("role", "superadmin"))
+            .first();
+        return !!superadmin;
+    },
+});
+
+// Get user count
+export const getUserCount = query({
+    args: {},
+    handler: async (ctx) => {
+        const users = await ctx.db.query("users").collect();
+        return users.length;
+    },
+});
+
 // Create or update user
 export const upsertUser = mutation({
     args: {
@@ -68,12 +102,17 @@ export const upsertUser = mutation({
             });
             return existingUser._id;
         } else {
+            // Check if this is the first user (make them superadmin)
+            const userCount = await ctx.db.query("users").collect();
+            const isFirstUser = userCount.length === 0;
+            const role: UserRole = isFirstUser ? "superadmin" : "member";
+
             // Create new user
             const userId = await ctx.db.insert("users", {
                 clerkId: args.clerkId,
                 fullname: args.fullname,
                 email: args.email,
-                role: "member",
+                role,
                 avatar: args.avatar || "",
                 theme: "light",
                 churchId: args.churchId || "",
@@ -114,6 +153,32 @@ export const updateUserProfile = mutation({
     },
 });
 
+// Update user role (superadmin only)
+export const updateUserRole = mutation({
+    args: {
+        userId: v.id("users"),
+        newRole: v.union(
+            v.literal("superadmin"),
+            v.literal("admin"),
+            v.literal("member")
+        ),
+        requesterId: v.id("users"),
+    },
+    handler: async (ctx, args) => {
+        // Check if requester is superadmin
+        const requester = await ctx.db.get(args.requesterId);
+        if (!requester || requester.role !== "superadmin") {
+            throw new Error("Only superadmins can update user roles");
+        }
+
+        await ctx.db.patch(args.userId, {
+            role: args.newRole,
+            updatedAt: new Date().toISOString(),
+        });
+        return args.userId;
+    },
+});
+
 // Update user church
 export const updateUserChurch = mutation({
     args: {
@@ -129,11 +194,40 @@ export const updateUserChurch = mutation({
     },
 });
 
-// Delete user
+// Delete user (superadmin only)
 export const deleteUser = mutation({
-    args: { userId: v.id("users") },
+    args: {
+        userId: v.id("users"),
+        requesterId: v.id("users"),
+    },
     handler: async (ctx, args) => {
+        // Check if requester is superadmin
+        const requester = await ctx.db.get(args.requesterId);
+        if (!requester || requester.role !== "superadmin") {
+            throw new Error("Only superadmins can delete users");
+        }
+
         await ctx.db.delete(args.userId);
         return args.userId;
+    },
+});
+
+// Check if user can access admin features
+export const canAccessAdmin = query({
+    args: { userId: v.id("users") },
+    handler: async (ctx, args) => {
+        const user = await ctx.db.get(args.userId);
+        if (!user) return false;
+        return user.role === "superadmin" || user.role === "admin";
+    },
+});
+
+// Check if user is superadmin
+export const isSuperadmin = query({
+    args: { userId: v.id("users") },
+    handler: async (ctx, args) => {
+        const user = await ctx.db.get(args.userId);
+        if (!user) return false;
+        return user.role === "superadmin";
     },
 });
