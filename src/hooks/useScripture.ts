@@ -8,6 +8,7 @@ const BIBLE_DATA_URL = 'https://d37gopmfkl2m2z.cloudfront.net/open/bible-version
 
 export function useScripture() {
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
+    const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
 
     // Download Bible version data if not cached
     const downloadBibleVersion = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
@@ -38,11 +39,19 @@ export function useScripture() {
         }
     }, [])
 
+    // Check if a bible version is downloaded
+    const isVersionDownloaded = useCallback(async (version: string): Promise<boolean> => {
+        const db = getIndexedDB()
+        const count = await db.bibleAndHymns.where('id').equals(version).count()
+        return count > 0
+    }, [])
+
     const fetchScripture = useCallback(async (
         label: string = '1:1:1',
         version: string = ''
     ): Promise<Scripture | null> => {
-        version = version || defaultBibleVersion
+        // Use provided version or default
+        const selectedVersion = version || defaultBibleVersion
 
         const db = getIndexedDB()
 
@@ -66,18 +75,25 @@ export function useScripture() {
                 verses.push(Number(verseStr))
             }
 
-            // Fetch bible data from IndexedDB
-            let bibleDataRaw = await db.bibleAndHymns.get(version)
-            let bibleData = bibleDataRaw?.data as unknown as BibleVerse[]
+            // Check if version is downloaded
+            const isDownloaded = await isVersionDownloaded(selectedVersion)
 
-            // If not cached, download it
-            if (!bibleData) {
-                const downloadedData = await downloadBibleVersion(version)
-                if (!downloadedData) {
-                    console.error(`Bible version ${version} not found and could not be downloaded`)
+            if (!isDownloaded) {
+                console.log(`Bible version ${selectedVersion} not downloaded, downloading now...`)
+                const downloaded = await downloadBibleVersion(selectedVersion)
+                if (!downloaded) {
+                    console.error(`Failed to download Bible version ${selectedVersion}`)
                     return null
                 }
-                bibleData = downloadedData
+            }
+
+            // Fetch bible data from IndexedDB
+            const bibleDataRaw = await db.bibleAndHymns.get(selectedVersion)
+            const bibleData = bibleDataRaw?.data as unknown as BibleVerse[]
+
+            if (!bibleData) {
+                console.error(`Bible data not found for version ${selectedVersion}`)
+                return null
             }
 
             // Find start index
@@ -121,10 +137,15 @@ export function useScripture() {
                 ? `${bookName} ${chapter}:${startVerse}`
                 : `${bookName} ${chapter}:${startVerse}-${endVerse}`
 
+            // Update default version to the one just used
+            if (selectedVersion !== defaultBibleVersion) {
+                setDefaultBibleVersion(selectedVersion)
+            }
+
             const scripture: Scripture = {
                 label: labelText,
                 labelShortFormat: `${book}:${chapter}:${startVerse}${startVerse !== endVerse ? `-${endVerse}` : ''}`,
-                version,
+                version: selectedVersion,
                 content: selectedVerses
             }
 
@@ -133,7 +154,7 @@ export function useScripture() {
             console.error('Error fetching scripture:', error)
             return null
         }
-    }, [defaultBibleVersion])
+    }, [defaultBibleVersion, setDefaultBibleVersion, isVersionDownloaded, downloadBibleVersion])
 
-    return { fetchScripture, downloadBibleVersion }
+    return { fetchScripture, downloadBibleVersion, isVersionDownloaded }
 }

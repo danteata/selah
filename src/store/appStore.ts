@@ -463,12 +463,7 @@ export const useAppStore = create<AppStore>()(
             },
 
             setBibleVersions: (bibleVersions) => {
-                set((state) => ({
-                    settings: {
-                        ...state.settings,
-                        bibleVersions
-                    }
-                }))
+                set({ bibleVersions })
             },
 
             setActiveSocket: (socket) => {

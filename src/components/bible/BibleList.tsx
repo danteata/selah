@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Search, X, ChevronLeft, BookOpen } from 'lucide-react'
 import { useScripture, useSlideCreation } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
+import { BibleVersionSelect } from './BibleVersionSelect'
 import type { Scripture, BibleVerse } from '../../types'
 import { bibleBooks } from '../../types'
 
@@ -17,10 +18,19 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
     const [verses, setVerses] = useState<BibleVerse[]>([])
     const [scripture, setScripture] = useState<Scripture | null>(null)
     const [loading, setLoading] = useState(false)
+    const [selectedVersion, setSelectedVersion] = useState<string>('')
 
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
+
+    // Initialize selected version with default
+    useEffect(() => {
+        if (!selectedVersion) {
+            setSelectedVersion(defaultBibleVersion || 'KJV')
+        }
+    }, [defaultBibleVersion, selectedVersion])
 
     // Parse query like "Genesis 1:1-5" or "Gen 1:1"
     const parseQuery = useCallback((q: string) => {
@@ -76,7 +86,7 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
         const label = `${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}${parsed.endVerse !== parsed.startVerse ? `-${parsed.endVerse}` : ''
             }`
 
-        const result = await fetchScripture(label)
+        const result = await fetchScripture(label, selectedVersion)
         if (result) {
             setScripture(result)
             if (Array.isArray(result.content)) {
@@ -84,7 +94,7 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
             }
         }
         setLoading(false)
-    }, [query, parseQuery, fetchScripture])
+    }, [query, parseQuery, fetchScripture, selectedVersion])
 
     const handleCreateSlide = useCallback(() => {
         if (scripture) {
@@ -132,6 +142,10 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
                         />
                     </div>
+                    <BibleVersionSelect
+                        selectedVersion={selectedVersion}
+                        onChange={setSelectedVersion}
+                    />
                     <button
                         onClick={handleSearch}
                         disabled={loading}
@@ -199,7 +213,12 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
             {scripture && (
                 <div className="flex-1 overflow-y-auto p-4">
                     <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                        <h3 className="font-semibold text-lg mb-3">{scripture.label}</h3>
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-semibold text-lg">{scripture.label}</h3>
+                            <span className="text-sm text-primary-600 dark:text-primary-400 font-medium">
+                                {scripture.version}
+                            </span>
+                        </div>
                         <div className="space-y-2">
                             {verses.map((verse, index) => (
                                 <p key={index} className="text-gray-700 dark:text-gray-300">

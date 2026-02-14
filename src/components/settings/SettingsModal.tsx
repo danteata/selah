@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import { BibleVersionSettings } from './BibleVersionSettings'
 
 type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts'
 
@@ -285,35 +286,8 @@ function BibleSettings({
         setFootnotes: any
     }
 }) {
-    const bibleVersions = [
-        { id: 'KJV', name: 'King James Version' },
-        { id: 'NIV', name: 'New International Version' },
-        { id: 'ESV', name: 'English Standard Version' },
-        { id: 'NKJV', name: 'New King James Version' },
-        { id: 'NLT', name: 'New Living Translation' },
-        { id: 'NASB', name: 'New American Standard Bible' },
-    ]
-
     return (
         <div className="space-y-6">
-            {/* Default Version */}
-            <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Default Bible Version
-                </label>
-                <select
-                    value={settings.defaultBibleVersion || 'KJV'}
-                    onChange={(e) => onUpdate.setDefaultBibleVersion(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-                >
-                    {bibleVersions.map((version) => (
-                        <option key={version.id} value={version.id}>
-                            {version.name} ({version.id})
-                        </option>
-                    ))}
-                </select>
-            </div>
-
             {/* Footnotes Toggle */}
             <div className="flex items-center justify-between">
                 <div>
@@ -334,6 +308,11 @@ function BibleSettings({
                             }`}
                     />
                 </button>
+            </div>
+
+            {/* Bible Version Settings */}
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <BibleVersionSettings />
             </div>
         </div>
     )
