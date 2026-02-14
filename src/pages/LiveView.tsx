@@ -1,21 +1,87 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Maximize2, Minimize2, X } from 'lucide-react'
-import { useAppStore } from '../store/appStore'
+import type { Slide } from '../types'
+
+const STORAGE_KEY = 'selah-live-state'
+
+interface LiveState {
+    slides: Slide[]
+    liveSlideId: string | null
+    settings: {
+        liveWindowFullscreen: boolean
+        songAndHymnLabelsVisibility: boolean
+        defaultFont: string
+    }
+}
 
 export default function LiveView() {
     const [searchParams] = useSearchParams()
     const [isFullscreen, setIsFullscreen] = useState(false)
-    const [currentSlide, setCurrentSlide] = useState(searchParams.get('slide') || '')
+    const [currentSlideId, setCurrentSlideId] = useState(searchParams.get('slide') || '')
+    const [liveState, setLiveState] = useState<LiveState | null>(null)
+    const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
 
-    const activeSlides = useAppStore((state) => state.activeSlides)
-    const liveSlideId = useAppStore((state) => state.liveSlideId)
-    const settings = useAppStore((state) => state.settings)
+    // Initialize BroadcastChannel for cross-window communication
+    useEffect(() => {
+        broadcastChannelRef.current = new BroadcastChannel('selah-live-channel')
+
+        broadcastChannelRef.current.onmessage = (event) => {
+            if (event.data?.type === 'state-update') {
+                setLiveState(event.data.state)
+                if (event.data.state.liveSlideId) {
+                    setCurrentSlideId(event.data.state.liveSlideId)
+                }
+            } else if (event.data?.type === 'slide-update') {
+                setCurrentSlideId(event.data.slideId)
+            }
+        }
+
+        // Load initial state from localStorage
+        const storedState = localStorage.getItem(STORAGE_KEY)
+        if (storedState) {
+            try {
+                const parsed = JSON.parse(storedState)
+                setLiveState(parsed)
+                if (!currentSlideId && parsed.liveSlideId) {
+                    setCurrentSlideId(parsed.liveSlideId)
+                }
+            } catch (e) {
+                console.error('Failed to parse stored state:', e)
+            }
+        }
+
+        // Listen for storage events (from other windows)
+        const handleStorageChange = (e: StorageEvent) => {
+            if (e.key === STORAGE_KEY && e.newValue) {
+                try {
+                    const parsed = JSON.parse(e.newValue)
+                    setLiveState(parsed)
+                } catch (err) {
+                    console.error('Failed to parse storage event:', err)
+                }
+            }
+        }
+
+        window.addEventListener('storage', handleStorageChange)
+
+        return () => {
+            broadcastChannelRef.current?.close()
+            window.removeEventListener('storage', handleStorageChange)
+        }
+    }, [currentSlideId])
 
     // Get current live slide
     const slide = useMemo(() => {
-        return activeSlides.find(s => s.id === (currentSlide || liveSlideId))
-    }, [activeSlides, liveSlideId, currentSlide])
+        if (!liveState?.slides) return null
+        return liveState.slides.find(s => s.id === currentSlideId)
+    }, [liveState, currentSlideId])
+
+    const settings = liveState?.settings || {
+        liveWindowFullscreen: false,
+        songAndHymnLabelsVisibility: true,
+        defaultFont: 'Inter',
+    }
 
     // Toggle fullscreen
     const toggleFullscreen = useCallback(() => {
@@ -36,30 +102,6 @@ export default function LiveView() {
 
         document.addEventListener('fullscreenchange', handleFullscreenChange)
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-    }, [])
-
-    // Listen for slide updates from broadcast channel
-    useEffect(() => {
-        const handleBroadcast = (event: MessageEvent) => {
-            if (event.data?.type === 'slide-update') {
-                setCurrentSlide(event.data.slideId)
-            }
-        }
-
-        // Also listen for custom events from same window
-        const handleCustomEvent = (e: CustomEvent) => {
-            if (e.detail?.id) {
-                setCurrentSlide(e.detail.id)
-            }
-        }
-
-        window.addEventListener('message', handleBroadcast)
-        window.addEventListener('broadcast-slide' as never, handleCustomEvent as EventListener)
-
-        return () => {
-            window.removeEventListener('message', handleBroadcast)
-            window.removeEventListener('broadcast-slide' as never, handleCustomEvent as EventListener)
-        }
     }, [])
 
     // Auto-enter fullscreen if setting is enabled

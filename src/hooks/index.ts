@@ -22,3 +22,5 @@ export {
     useNumberShortcuts,
     useCtrlOrMetaActive
 } from './useKeyboardShortcuts'
+export { useMultiMonitor } from './useMultiMonitor'
+export { useLiveSync } from './useLiveSync'

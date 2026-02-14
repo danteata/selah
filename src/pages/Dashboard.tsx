@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Moon, Sun } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { QuickActions, PreviewContent, LiveOutput } from '../components'
-import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers } from '../hooks'
+import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync } from '../hooks'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
 import { SlideEditor } from '../components/editor/SlideEditor'
@@ -23,6 +23,9 @@ export default function Dashboard() {
     const undo = useAppStore((state) => state.undo)
     const redo = useAppStore((state) => state.redo)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+
+    // Sync live state to other windows (for multi-monitor support)
+    useLiveSync()
 
     const [isDark, setIsDark] = useState(() => {
         if (typeof window === 'undefined') return false

@@ -1,13 +1,18 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Eye, Trash2, Edit } from 'lucide-react'
+import { Eye, Trash2, Edit, Monitor, Airplay } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useGlobalEmit } from '../../hooks/useEmitter'
+import { useMultiMonitor } from '../../hooks/useMultiMonitor'
 import type { Slide } from '../../types'
 import { appWideActions } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
+import { ScreenPicker } from './ScreenPicker'
 
 export function LiveOutput() {
     const [ctrlOrMetaActive, setCtrlOrMetaActive] = useState(false)
+    const [showScreenPicker, setShowScreenPicker] = useState(false)
+
+    const { isPresenting, selectedScreenId, detectScreens, openLiveViewOnScreen, terminatePresentation } = useMultiMonitor()
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -114,21 +119,60 @@ export function LiveOutput() {
         globalEmit(appWideActions.newActiveSlide, slide)
     }, [globalEmit])
 
+    // Handle open live with screen picker
+    const handleOpenLive = useCallback(async () => {
+        await detectScreens()
+        setShowScreenPicker(true)
+    }, [detectScreens])
+
+    // Handle screen selection
+    const handleScreenSelect = useCallback(async (screenId: string) => {
+        await openLiveViewOnScreen(screenId, liveSlideId || undefined)
+        setShowScreenPicker(false)
+    }, [openLiveViewOnScreen, liveSlideId])
+
+    // Handle stop presenting
+    const handleStopLive = useCallback(async () => {
+        await terminatePresentation()
+    }, [terminatePresentation])
+
     return (
-        <div className="max-w-[400px] bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4 flex flex-col">
+        <div className="max-w-[400px] bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4 flex flex-col relative">
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
                     Slide Schedule
                 </h2>
-                <button
-                    onClick={() => globalEmit(appWideActions.goLive)}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                    <Eye className="w-4 h-4" />
-                    Open Live
-                </button>
+                <div className="flex items-center gap-2">
+                    {isPresenting ? (
+                        <button
+                            onClick={handleStopLive}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+                        >
+                            <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                            Stop Live
+                        </button>
+                    ) : (
+                        <button
+                            onClick={handleOpenLive}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                        >
+                            <Eye className="w-4 h-4" />
+                            Open Live
+                        </button>
+                    )}
+                </div>
             </div>
+
+            {/* Screen Picker Modal */}
+            {showScreenPicker && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm rounded-lg">
+                    <ScreenPicker
+                        onSelect={handleScreenSelect}
+                        onClose={() => setShowScreenPicker(false)}
+                    />
+                </div>
+            )}
 
             {/* Slides list */}
             <div className="flex-1 overflow-y-auto space-y-2 max-h-[calc(100vh-350px)]">
