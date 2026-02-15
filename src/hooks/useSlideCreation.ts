@@ -32,12 +32,13 @@ export function generateObjectId(): string {
 export function calculateScreenFontSize(content: string): number {
     const length = content?.length || 0
     if (length === 0) return 3.5
-    if (length < 100) return 8
-    if (length < 200) return 6.5
-    if (length < 300) return 5.5
-    if (length < 400) return 4.5
-    if (length < 500) return 4
-    return 3.5
+    if (length < 100) return 6
+    if (length < 200) return 5
+    if (length < 300) return 4
+    if (length < 400) return 3.5
+    if (length < 500) return 3
+    if (length < 700) return 2.5
+    return 2.2
 }
 
 // Generate slide content from data

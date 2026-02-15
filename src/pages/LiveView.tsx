@@ -180,32 +180,33 @@ export default function LiveView() {
 
             {/* Content */}
             <div
-                className="absolute inset-0 flex items-center justify-center p-12"
+                className="absolute inset-0 flex items-center justify-center"
                 style={{
-                    paddingLeft: `${slide.slideStyle?.windowPadding?.left || 24}px`,
-                    paddingRight: `${slide.slideStyle?.windowPadding?.right || 24}px`,
-                    paddingTop: `${slide.slideStyle?.windowPadding?.top || 24}px`,
-                    paddingBottom: `${slide.slideStyle?.windowPadding?.bottom || 24}px`,
+                    paddingLeft: `${slide.slideStyle?.windowPadding?.left || 64}px`,
+                    paddingRight: `${slide.slideStyle?.windowPadding?.right || 64}px`,
+                    paddingTop: `${slide.slideStyle?.windowPadding?.top || 64}px`,
+                    paddingBottom: `${slide.slideStyle?.windowPadding?.bottom || 64}px`,
                 }}
             >
                 <div
                     className="text-center max-w-full tiptap-preview"
                     style={{
-                        fontSize: `${slide.slideStyle?.fontSize || 6}vw`,
+                        fontSize: `${slide.slideStyle?.fontSize || 4.5}vw`,
                         fontFamily: slide.slideStyle?.font || 'Inter',
                         textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
                         textTransform: slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none' || 'none',
-                        lineHeight: slide.slideStyle?.lineSpacing || 'normal',
+                        lineHeight: 1.4,
                         textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
                     }}
                 >
                     {slide.contents.map((content, index) => (
                         <div
                             key={index}
-                            className="text-white mb-4 drop-shadow-lg"
+                            className="text-white drop-shadow-lg"
                             style={{
                                 color: slide.type === 'countdown' ? 'white' : undefined,
-                                fontWeight: slide.type === 'countdown' ? 'bold' : undefined
+                                fontWeight: slide.type === 'countdown' ? 'bold' : undefined,
+                                marginBottom: index < slide.contents.length - 1 ? '0.4em' : 0
                             }}
                             dangerouslySetInnerHTML={{ __html: content }}
                         />
