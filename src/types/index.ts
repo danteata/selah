@@ -318,6 +318,12 @@ export interface AppSettings {
         transcriptionProvider?: 'web-speech' | 'whisper'
         /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
         whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
+        /** Optional server endpoint for chunked transcription */
+        whisperEndpoint?: string
+        /** Optional API key for OpenAI-compatible endpoint */
+        whisperApiKey?: string
+        /** Chunk size in milliseconds for realtime transcription */
+        whisperChunkDurationMs?: number
         /** Auto-display detected verses */
         autoDisplay?: boolean
         /** Auto-lookup detected verses */

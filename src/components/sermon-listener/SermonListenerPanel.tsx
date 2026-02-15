@@ -8,10 +8,8 @@ import { useSermonListener } from '../../hooks/useSermonListener'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
 import { useAppStore } from '../../store/appStore'
-import { useEmitter } from '../../hooks/useEmitter'
-import { IconWrapper } from '../utils/IconWrapper'
 import { Mic, Square, Book, Send, Trash2, Loader2 } from 'lucide-react'
-import type { Scripture, BibleVerse, Slide } from '../../types'
+import type { Scripture, BibleVerse } from '../../types'
 
 interface SermonListenerPanelProps {
     /** Whether to auto-display detected verses */
@@ -33,7 +31,6 @@ export function SermonListenerPanel({
     onVerseDetected,
     compact = false,
 }: SermonListenerPanelProps) {
-    const emitter = useEmitter()
     const isDarkMode = useAppStore((state) => state.isDarkMode)
     const [showTranscript, setShowTranscript] = useState(false)
     const [autoDisplayEnabled, setAutoDisplayEnabled] = useState(autoDisplay)
@@ -49,6 +46,7 @@ export function SermonListenerPanel({
         currentScripture,
         error,
         isLoading,
+        provider,
         start,
         stop,
         reset,
@@ -74,31 +72,12 @@ export function SermonListenerPanel({
         lookupVerse(verse)
     }
 
-    // Handle send to live
-    const handleSendToLive = (verse: DetectedVerse, scripture: Scripture | null) => {
-        if (!scripture) return
-
-        const slide: Slide = {
-            id: `sermon-verse-${Date.now()}`,
-            index: 0,
-            name: scripture.label,
-            type: 'bible',
-            layout: 'default',
-            userId: '',
-            churchId: '',
-            scheduleId: '',
-            contents: Array.isArray(scripture.content)
-                ? scripture.content.map((v: BibleVerse) => v.scripture || '')
-                : [],
-            background: '',
-            backgroundType: 'color',
-        }
-
-        emitter.emit('new-bible', slide)
-    }
-
     // Not supported message
     if (!isSupported) {
+        const unsupportedMessage = provider === 'whisper'
+            ? 'Whisper provider is not configured. Add a transcription endpoint in Sermon Listener settings, or switch to Web Speech API.'
+            : "Your browser doesn't support the Web Speech API. Please try Chrome, Edge, or Safari."
+
         return (
             <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
                 <div className="flex items-center gap-3 text-amber-500">
@@ -106,8 +85,7 @@ export function SermonListenerPanel({
                     <div>
                         <p className="font-medium">Speech Recognition Not Supported</p>
                         <p className="text-sm opacity-75">
-                            Your browser doesn't support the Web Speech API.
-                            Please try Chrome, Edge, or Safari.
+                            {unsupportedMessage}
                         </p>
                     </div>
                 </div>

@@ -1,6 +1,6 @@
 /**
  * Bible Verse Detection Service
- * Parses text to detect Bible verse references in various formats
+ * Parses text to detect Bible verse references in both typed and spoken formats.
  */
 
 export interface DetectedVerse {
@@ -112,6 +112,51 @@ export const BOOK_TO_NUMBER: Record<string, number> = {
     'Jude': 65, 'Revelation': 66,
 }
 
+const NUMBER_WORDS: Record<string, number> = {
+    zero: 0,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+    seventy: 70,
+    eighty: 80,
+    ninety: 90,
+    hundred: 100,
+}
+
+const ORDINAL_WORDS: Record<string, number> = {
+    first: 1,
+    second: 2,
+    third: 3,
+}
+
+interface BookAlias {
+    aliasTokens: string[]
+    book: string
+}
+
+let cachedBookAliases: BookAlias[] | null = null
+
 // Build regex pattern for book names
 function buildBookPattern(): string {
     const bookPatterns: string[] = []
@@ -131,16 +176,13 @@ function buildBookPattern(): string {
 
     // Add all book names and abbreviations
     for (const abbrev of Object.keys(BOOK_MAPPINGS)) {
-        // Escape special regex characters
         const escaped = abbrev.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         bookPatterns.push(escaped)
     }
 
-    // Sort by length (longest first) to match more specific patterns first
     return bookPatterns.sort((a, b) => b.length - a.length).join('|')
 }
 
-// Main regex pattern for detecting Bible verses
 const BOOK_PATTERN = buildBookPattern()
 
 // Pattern for chapter and verse
@@ -152,32 +194,23 @@ const VERSE_PATTERN = new RegExp(
     'gi'
 )
 
-// Alternative patterns for different formats
 const ALTERNATIVE_PATTERNS = [
-    // "chapter 3 verse 16" or "chapter 3 verses 16 to 20"
     /chapter\s+(\d+)[,\s]+(?:verse[s]?\s+)?(\d+)(?:\s+(?:to|through|-|\u2013|\u2014)\s*(\d+))?/gi,
-    // "verse 16 of chapter 3"
     /(?:verse[s]?\s+)?(\d+)\s+of\s+chapter\s+(\d+)/gi,
 ]
 
-/**
- * Normalize book name to standard form
- */
 function normalizeBookName(bookText: string): string | null {
     const normalized = bookText.toLowerCase().trim()
 
-    // Direct mapping
     if (BOOK_MAPPINGS[normalized]) {
         return BOOK_MAPPINGS[normalized]
     }
 
-    // Handle Roman numerals
     const romanToArabic: Record<string, string> = {
         'i': '1', 'ii': '2', 'iii': '3',
         'I': '1', 'II': '2', 'III': '3',
     }
 
-    // Try to match with Roman numeral conversion
     for (const [roman, arabic] of Object.entries(romanToArabic)) {
         if (normalized.startsWith(roman.toLowerCase() + ' ')) {
             const rest = normalized.slice(roman.length + 1)
@@ -191,17 +224,194 @@ function normalizeBookName(bookText: string): string | null {
     return null
 }
 
-/**
- * Detect Bible verse references in text
- */
+function normalizeAlias(alias: string): string[] {
+    return alias
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+}
+
+function getBookAliases(): BookAlias[] {
+    if (cachedBookAliases) return cachedBookAliases
+
+    const aliases: BookAlias[] = []
+    const seen = new Set<string>()
+
+    const addAlias = (alias: string, canonicalBook: string) => {
+        const aliasTokens = normalizeAlias(alias)
+        if (aliasTokens.length === 0) return
+
+        const key = `${aliasTokens.join(' ')}=>${canonicalBook}`
+        if (seen.has(key)) return
+        seen.add(key)
+        aliases.push({ aliasTokens, book: canonicalBook })
+    }
+
+    for (const [alias, canonicalBook] of Object.entries(BOOK_MAPPINGS)) {
+        addAlias(alias, canonicalBook)
+    }
+    for (const canonicalBook of Object.keys(BOOK_TO_NUMBER)) {
+        addAlias(canonicalBook, canonicalBook)
+    }
+
+    cachedBookAliases = aliases.sort((a, b) => b.aliasTokens.length - a.aliasTokens.length)
+    return cachedBookAliases
+}
+
+function parseSpokenNumber(input: string): number | null {
+    const normalized = input
+        .toLowerCase()
+        .replace(/-/g, ' ')
+        .replace(/[^\w\s]/g, ' ')
+        .trim()
+
+    if (!normalized) return null
+    if (/^\d+$/.test(normalized)) {
+        return parseInt(normalized, 10)
+    }
+
+    const tokens = normalized.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) return null
+
+    let value = 0
+    let hasNumberToken = false
+
+    for (const token of tokens) {
+        if (token === 'and') continue
+
+        if (/^\d+$/.test(token)) {
+            value += parseInt(token, 10)
+            hasNumberToken = true
+            continue
+        }
+
+        if (ORDINAL_WORDS[token] !== undefined) {
+            value += ORDINAL_WORDS[token]
+            hasNumberToken = true
+            continue
+        }
+
+        const base = NUMBER_WORDS[token]
+        if (base === undefined) return null
+
+        hasNumberToken = true
+        if (base === 100) {
+            value = value === 0 ? 100 : value * 100
+        } else {
+            value += base
+        }
+    }
+
+    if (!hasNumberToken || value <= 0) return null
+    return value
+}
+
+function parseNumberFromTokens(tokens: string[], startIndex: number, maxTokens: number = 4): { value: number; nextIndex: number } | null {
+    const remaining = tokens.length - startIndex
+    const tokenWindow = Math.min(maxTokens, remaining)
+
+    for (let length = tokenWindow; length >= 1; length -= 1) {
+        const phrase = tokens.slice(startIndex, startIndex + length).join(' ')
+        const value = parseSpokenNumber(phrase)
+        if (value !== null) {
+            return {
+                value,
+                nextIndex: startIndex + length,
+            }
+        }
+    }
+
+    return null
+}
+
+function detectSpokenVerses(text: string): DetectedVerse[] {
+    const normalizedText = text
+        .toLowerCase()
+        .replace(/[.,;!?()[\]{}]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+    if (!normalizedText) return []
+
+    const bookAliases = getBookAliases()
+    const tokens = normalizedText.split(' ')
+    const seen = new Set<string>()
+    const detected: DetectedVerse[] = []
+    let searchFrom = 0
+
+    for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
+        const alias = bookAliases.find((candidate) =>
+            candidate.aliasTokens.every((token, aliasIndex) => tokens[tokenIndex + aliasIndex] === token)
+        )
+        if (!alias) continue
+
+        let pointer = tokenIndex + alias.aliasTokens.length
+
+        if (tokens[pointer] === 'chapter') {
+            pointer += 1
+        }
+
+        const chapter = parseNumberFromTokens(tokens, pointer)
+        if (!chapter) continue
+        pointer = chapter.nextIndex
+
+        if (tokens[pointer] === 'verse' || tokens[pointer] === 'verses') {
+            pointer += 1
+        }
+
+        const verseStart = parseNumberFromTokens(tokens, pointer)
+        if (!verseStart) continue
+        pointer = verseStart.nextIndex
+
+        let verseEnd: number | undefined
+        if (tokens[pointer] === 'to' || tokens[pointer] === 'through' || tokens[pointer] === '-') {
+            const rangeEnd = parseNumberFromTokens(tokens, pointer + 1)
+            if (rangeEnd) {
+                verseEnd = rangeEnd.value
+                pointer = rangeEnd.nextIndex
+            }
+        }
+
+        const reference = verseEnd
+            ? `${alias.book} ${chapter.value}:${verseStart.value}-${verseEnd}`
+            : `${alias.book} ${chapter.value}:${verseStart.value}`
+
+        if (seen.has(reference)) continue
+        seen.add(reference)
+
+        const raw = tokens.slice(tokenIndex, pointer).join(' ')
+        const startIndex = normalizedText.indexOf(raw, searchFrom)
+        const endIndex = startIndex === -1 ? -1 : startIndex + raw.length
+        if (startIndex !== -1) {
+            searchFrom = endIndex
+        }
+
+        detected.push({
+            raw,
+            reference,
+            book: alias.book,
+            chapter: chapter.value,
+            verseStart: verseStart.value,
+            verseEnd,
+            startIndex: startIndex === -1 ? 0 : startIndex,
+            endIndex: endIndex === -1 ? raw.length : endIndex,
+            confidence: 'medium',
+        })
+
+        tokenIndex = Math.max(tokenIndex, pointer - 1)
+    }
+
+    return detected
+}
+
 export function detectVerses(text: string): DetectedVerse[] {
     const detected: DetectedVerse[] = []
     const seen = new Set<string>()
 
-    // Reset regex state
     VERSE_PATTERN.lastIndex = 0
 
-    // Main pattern matching
     let match: RegExpExecArray | null
     while ((match = VERSE_PATTERN.exec(text)) !== null) {
         const [fullMatch, bookText, chapter, verseStart, verseEnd] = match
@@ -213,7 +423,6 @@ export function detectVerses(text: string): DetectedVerse[] {
             ? `${normalizedBook} ${chapter}:${verseStart}-${verseEnd}`
             : `${normalizedBook} ${chapter}:${verseStart}`
 
-        // Avoid duplicates
         if (seen.has(reference)) continue
         seen.add(reference)
 
@@ -230,22 +439,22 @@ export function detectVerses(text: string): DetectedVerse[] {
         })
     }
 
-    // Alternative pattern matching (lower confidence)
     for (const pattern of ALTERNATIVE_PATTERNS) {
         pattern.lastIndex = 0
         while ((match = pattern.exec(text)) !== null) {
-            // These patterns need context to determine the book
-            // For now, we'll skip these as they require more context analysis
-            // This could be enhanced with NLP or context-aware parsing
+            // Reserved for future context-based extraction.
         }
+    }
+
+    for (const spokenVerse of detectSpokenVerses(text)) {
+        if (seen.has(spokenVerse.reference)) continue
+        seen.add(spokenVerse.reference)
+        detected.push(spokenVerse)
     }
 
     return detected
 }
 
-/**
- * Convert detected verse to internal label format (book:chapter:verse)
- */
 export function verseToLabel(verse: DetectedVerse): string {
     const bookNum = BOOK_TO_NUMBER[verse.book]
     if (!bookNum) return ''
@@ -256,18 +465,10 @@ export function verseToLabel(verse: DetectedVerse): string {
     return `${bookNum}:${verse.chapter}:${verse.verseStart}`
 }
 
-/**
- * Check if a string contains potential verse references
- */
 export function hasVerseReference(text: string): boolean {
-    VERSE_PATTERN.lastIndex = 0
-    return VERSE_PATTERN.test(text)
+    return detectVerses(text).length > 0
 }
 
-/**
- * Extract the most likely verse from recent transcription context
- * This helps when a verse reference is split across multiple transcription segments
- */
 export function extractVerseFromContext(
     recentText: string,
     maxLength: number = 200
@@ -276,14 +477,9 @@ export function extractVerseFromContext(
     const verses = detectVerses(lastChars)
 
     if (verses.length === 0) return null
-
-    // Return the last detected verse (most recent)
     return verses[verses.length - 1]
 }
 
-/**
- * Format verse for display
- */
 export function formatVerseForDisplay(verse: DetectedVerse): string {
     if (verse.verseEnd) {
         return `${verse.book} ${verse.chapter}:${verse.verseStart}-${verse.verseEnd}`

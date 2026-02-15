@@ -1,16 +1,16 @@
 /**
  * Sermon Listener Settings Component
- * 
+ *
  * Settings panel for configuring the sermon listener feature,
- * including the ability to switch between Web Speech API and Whisper.cpp
+ * including provider selection and Whisper endpoint options.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { unifiedTranscriptionService } from '../../services/sermon-listener'
 import type { TranscriptionProvider } from '../../services/sermon-listener'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Check, Info, Loader2 } from 'lucide-react'
+import { Info, Loader2 } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
     onClose?: () => void
@@ -30,17 +30,27 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [autoDisplay, setAutoDisplay] = useState(sermonSettings?.autoDisplay ?? false)
     const [autoLookup, setAutoLookup] = useState(sermonSettings?.autoLookup ?? true)
     const [language, setLanguage] = useState(sermonSettings?.language || 'en-US')
+    const [whisperEndpoint, setWhisperEndpoint] = useState(sermonSettings?.whisperEndpoint || '')
+    const [whisperApiKey, setWhisperApiKey] = useState(sermonSettings?.whisperApiKey || '')
+    const [whisperChunkDurationMs, setWhisperChunkDurationMs] = useState(
+        sermonSettings?.whisperChunkDurationMs ?? 5000
+    )
 
     const [isLoading, setIsLoading] = useState(false)
     const [loadingProgress, setLoadingProgress] = useState(0)
+    const [providerError, setProviderError] = useState<string | null>(null)
     const [webSpeechAvailable, setWebSpeechAvailable] = useState(false)
+    const [whisperAvailable, setWhisperAvailable] = useState(false)
 
-    // Check Web Speech API availability
     useEffect(() => {
         unifiedTranscriptionService.isProviderAvailable('web-speech').then(setWebSpeechAvailable)
+        unifiedTranscriptionService.isProviderAvailable('whisper').then(setWhisperAvailable)
     }, [])
 
-    // Save settings
+    const isWhisperConfigured = useMemo(() => {
+        return Boolean(whisperEndpoint.trim() || whisperApiKey.trim() || whisperAvailable)
+    }, [whisperApiKey, whisperAvailable, whisperEndpoint])
+
     const saveSettings = () => {
         setAppSettings({
             ...useAppStore.getState().settings,
@@ -48,6 +58,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 enabled: true,
                 transcriptionProvider: provider,
                 whisperModel,
+                whisperEndpoint: whisperEndpoint.trim() || undefined,
+                whisperApiKey: whisperApiKey.trim() || undefined,
+                whisperChunkDurationMs: whisperChunkDurationMs > 0 ? whisperChunkDurationMs : 5000,
                 autoDisplay,
                 autoLookup,
                 language,
@@ -56,44 +69,51 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         onClose?.()
     }
 
-    // Handle provider change
     const handleProviderChange = async (newProvider: TranscriptionProvider) => {
+        setProviderError(null)
         setProvider(newProvider)
 
-        if (newProvider === 'whisper') {
-            setIsLoading(true)
-            setLoadingProgress(0)
+        if (newProvider !== 'whisper') return
 
-            const success = await unifiedTranscriptionService.setProvider('whisper', {
-                whisperModel,
-                language: language.split('-')[0], // Convert en-US to en
-                onProgress: setLoadingProgress,
-            })
+        if (!isWhisperConfigured) {
+            setProvider('web-speech')
+            setProviderError('Whisper needs a transcription endpoint or API key before it can be used.')
+            return
+        }
 
-            setIsLoading(false)
-            if (!success) {
-                // Revert to web-speech if Whisper fails
-                setProvider('web-speech')
-            }
+        setIsLoading(true)
+        setLoadingProgress(0)
+
+        const success = await unifiedTranscriptionService.setProvider('whisper', {
+            whisperModel,
+            language: language.split('-')[0],
+            whisperEndpoint: whisperEndpoint.trim() || undefined,
+            whisperApiKey: whisperApiKey.trim() || undefined,
+            whisperChunkDurationMs,
+            onProgress: setLoadingProgress,
+        })
+
+        setIsLoading(false)
+        if (!success) {
+            setProvider('web-speech')
+            setProviderError('Failed to initialize Whisper provider. Check endpoint credentials and try again.')
         }
     }
 
-    const modelSizes = {
-        tiny: { size: '~75MB', speed: 'Fastest', accuracy: 'Good' },
-        base: { size: '~142MB', speed: 'Fast', accuracy: 'Better' },
-        small: { size: '~466MB', speed: 'Medium', accuracy: 'Great' },
-        medium: { size: '~1.5GB', speed: 'Slow', accuracy: 'Excellent' },
+    const modelDescriptions = {
+        tiny: 'Fastest (maps to lightweight API model)',
+        base: 'Balanced (recommended)',
+        small: 'Higher quality (if supported by endpoint)',
+        medium: 'Highest quality (if supported by endpoint)',
     }
 
     return (
         <div className={`p-6 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
             <h2 className="text-xl font-bold mb-6">Sermon Listener Settings</h2>
 
-            {/* Transcription Provider */}
             <div className="mb-6">
                 <label className="block text-sm font-medium mb-3">Transcription Provider</label>
                 <div className="space-y-3">
-                    {/* Web Speech API Option */}
                     <button
                         onClick={() => !isLoading && handleProviderChange('web-speech')}
                         disabled={isLoading || !webSpeechAvailable}
@@ -116,15 +136,14 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             )}
                         </div>
                         <div className="mt-2 flex gap-4 text-xs">
-                            <span className="text-green-500">✓ No download required</span>
-                            <span className="text-green-500">✓ Real-time streaming</span>
+                            <span className="text-green-500">✓ No extra backend required</span>
+                            <span className="text-green-500">✓ Lowest latency</span>
                             {!webSpeechAvailable && (
                                 <span className="text-red-500">✗ Not supported in this browser</span>
                             )}
                         </div>
                     </button>
 
-                    {/* Whisper.cpp Option */}
                     <button
                         onClick={() => !isLoading && handleProviderChange('whisper')}
                         disabled={isLoading}
@@ -137,9 +156,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     >
                         <div className="flex items-center justify-between">
                             <div>
-                                <div className="font-medium">Whisper.cpp (Offline)</div>
+                                <div className="font-medium">Whisper-Compatible Endpoint</div>
                                 <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    High-quality offline transcription
+                                    Chunked microphone upload to your transcription API
                                 </div>
                             </div>
                             {isLoading ? (
@@ -149,16 +168,14 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             ) : null}
                         </div>
                         <div className="mt-2 flex gap-4 text-xs">
-                            <span className="text-green-500">✓ Works offline</span>
-                            <span className="text-green-500">✓ Better accuracy</span>
-                            <span className="text-amber-500">⚠ Model download required</span>
+                            <span className="text-green-500">✓ Consistent across browsers</span>
+                            <span className="text-amber-500">⚠ Requires endpoint config</span>
                         </div>
 
-                        {/* Loading progress */}
                         {isLoading && (
                             <div className="mt-3">
                                 <div className="flex justify-between text-xs mb-1">
-                                    <span>Downloading model...</span>
+                                    <span>Initializing provider...</span>
                                     <span>{Math.round(loadingProgress)}%</span>
                                 </div>
                                 <div className={`h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
@@ -173,43 +190,96 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 </div>
             </div>
 
-            {/* Whisper Model Selection */}
-            {provider === 'whisper' && (
-                <div className="mb-6">
-                    <label className="block text-sm font-medium mb-3">Whisper Model Size</label>
-                    <div className="grid grid-cols-2 gap-2">
-                        {(Object.keys(modelSizes) as Array<keyof typeof modelSizes>).map((model) => (
-                            <button
-                                key={model}
-                                onClick={() => setWhisperModel(model)}
-                                disabled={isLoading}
-                                className={`p-3 rounded-lg border text-left transition-all ${whisperModel === model
-                                    ? 'border-blue-500 bg-blue-500/10'
-                                    : isDarkMode
-                                        ? 'border-gray-700 hover:border-gray-600'
-                                        : 'border-gray-200 hover:border-gray-300'
-                                    }`}
-                            >
-                                <div className="font-medium capitalize">{model}</div>
-                                <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    {modelSizes[model].size} • {modelSizes[model].accuracy}
-                                </div>
-                            </button>
-                        ))}
-                    </div>
-                    <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                        <Info className="inline w-4 h-4 mr-1" />
-                        Recommended: "base" for best balance of speed and accuracy
-                    </p>
+            {providerError && (
+                <div className={`mb-6 p-3 rounded-lg ${isDarkMode ? 'bg-red-900/30 text-red-300' : 'bg-red-100 text-red-700'}`}>
+                    <p className="text-sm">{providerError}</p>
                 </div>
             )}
 
-            {/* Language */}
+            {provider === 'whisper' && (
+                <div className="mb-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-2">Whisper Endpoint URL</label>
+                        <input
+                            value={whisperEndpoint}
+                            onChange={(event) => setWhisperEndpoint(event.target.value)}
+                            placeholder="https://your-api.example.com/transcribe"
+                            className={`w-full p-2 rounded-lg border ${isDarkMode
+                                ? 'bg-gray-700 border-gray-600 text-white'
+                                : 'bg-white border-gray-300'
+                                }`}
+                        />
+                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Endpoint should accept multipart audio and return JSON with a `text` field.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-2">API Key (Optional)</label>
+                        <input
+                            value={whisperApiKey}
+                            onChange={(event) => setWhisperApiKey(event.target.value)}
+                            placeholder="Bearer token for endpoint"
+                            className={`w-full p-2 rounded-lg border ${isDarkMode
+                                ? 'bg-gray-700 border-gray-600 text-white'
+                                : 'bg-white border-gray-300'
+                                }`}
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-2">Chunk Duration (ms)</label>
+                        <input
+                            type="number"
+                            min={1000}
+                            step={500}
+                            value={whisperChunkDurationMs}
+                            onChange={(event) => setWhisperChunkDurationMs(Number(event.target.value || 5000))}
+                            className={`w-full p-2 rounded-lg border ${isDarkMode
+                                ? 'bg-gray-700 border-gray-600 text-white'
+                                : 'bg-white border-gray-300'
+                                }`}
+                        />
+                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Lower values reduce delay but increase request volume.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-3">Model Preference</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {(Object.keys(modelDescriptions) as Array<keyof typeof modelDescriptions>).map((model) => (
+                                <button
+                                    key={model}
+                                    onClick={() => setWhisperModel(model)}
+                                    disabled={isLoading}
+                                    className={`p-3 rounded-lg border text-left transition-all ${whisperModel === model
+                                        ? 'border-blue-500 bg-blue-500/10'
+                                        : isDarkMode
+                                            ? 'border-gray-700 hover:border-gray-600'
+                                            : 'border-gray-200 hover:border-gray-300'
+                                        }`}
+                                >
+                                    <div className="font-medium capitalize">{model}</div>
+                                    <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                        {modelDescriptions[model]}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                        <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            <Info className="inline w-4 h-4 mr-1" />
+                            Keep `base` unless your endpoint documents a different best model.
+                        </p>
+                    </div>
+                </div>
+            )}
+
             <div className="mb-6">
                 <label className="block text-sm font-medium mb-2">Language</label>
                 <select
                     value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
+                    onChange={(event) => setLanguage(event.target.value)}
                     className={`w-full p-2 rounded-lg border ${isDarkMode
                         ? 'bg-gray-700 border-gray-600 text-white'
                         : 'bg-white border-gray-300'
@@ -228,7 +298,6 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 </select>
             </div>
 
-            {/* Behavior Settings */}
             <div className="mb-6 space-y-3">
                 <label className="block text-sm font-medium mb-2">Behavior</label>
 
@@ -236,7 +305,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     <input
                         type="checkbox"
                         checked={autoLookup}
-                        onChange={(e) => setAutoLookup(e.target.checked)}
+                        onChange={(event) => setAutoLookup(event.target.checked)}
                         className="w-4 h-4 rounded"
                     />
                     <div>
@@ -251,7 +320,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     <input
                         type="checkbox"
                         checked={autoDisplay}
-                        onChange={(e) => setAutoDisplay(e.target.checked)}
+                        onChange={(event) => setAutoDisplay(event.target.checked)}
                         className="w-4 h-4 rounded"
                     />
                     <div>
@@ -263,7 +332,6 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 </label>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex justify-end gap-3">
                 {onClose && (
                     <button

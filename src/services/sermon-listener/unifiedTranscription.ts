@@ -22,6 +22,9 @@ export interface UnifiedTranscriptionOptions {
     onStatusChange?: (status: TranscriptionStatus) => void
     // Whisper-specific options
     whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
+    whisperEndpoint?: string
+    whisperApiKey?: string
+    whisperChunkDurationMs?: number
     onProgress?: (progress: number) => void
 }
 
@@ -56,8 +59,7 @@ class UnifiedTranscriptionService {
             case 'web-speech':
                 return speechRecognitionService.isSupported()
             case 'whisper':
-                // Whisper is always "available" but needs initialization
-                return true
+                return whisperTranscriptionService.isConfigured()
             default:
                 return false
         }
@@ -88,14 +90,17 @@ class UnifiedTranscriptionService {
         this.currentProvider = provider
         this.options = { ...this.options, ...options }
 
-        // Initialize Whisper if needed
-        if (provider === 'whisper' && !this.whisperInitialized) {
+        // Initialize Whisper provider
+        if (provider === 'whisper') {
             this.isLoading = true
             this.options.onStatusChange?.(this.getStatus())
 
             const initialized = await whisperTranscriptionService.init({
-                modelUrl: this.getWhisperModelUrl(options?.whisperModel || 'base'),
                 language: options?.language || 'en',
+                endpoint: options?.whisperEndpoint,
+                apiKey: options?.whisperApiKey,
+                model: this.getWhisperModelName(options?.whisperModel || 'base'),
+                chunkDurationMs: options?.whisperChunkDurationMs,
                 onProgress: options?.onProgress,
                 onStatus: (status) => console.log('[Whisper]', status),
             })
@@ -111,19 +116,27 @@ class UnifiedTranscriptionService {
             }
         }
 
-        this.isReady = true
+        if (provider === 'web-speech' && !speechRecognitionService.isSupported()) {
+            this.error = 'Web Speech API is not supported in this browser'
+            this.isReady = false
+            this.options.onStatusChange?.(this.getStatus())
+            return false
+        }
+
+        this.isReady = provider === 'web-speech' ? speechRecognitionService.isSupported() : this.whisperInitialized
         this.options.onStatusChange?.(this.getStatus())
         return true
     }
 
     /**
-     * Get Whisper model URL based on model size
+     * Map size aliases to OpenAI-compatible model names
      */
-    private getWhisperModelUrl(model: 'tiny' | 'base' | 'small' | 'medium'): string {
-        const modelName = model === 'tiny' ? 'tiny.en' :
-            model === 'base' ? 'base.en' :
-                model === 'small' ? 'small.en' : 'medium.en'
-        return `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${modelName}.bin`
+    private getWhisperModelName(model: 'tiny' | 'base' | 'small' | 'medium'): string {
+        // Keep existing setting options stable while mapping them to widely-supported API model names.
+        if (model === 'tiny') return 'whisper-1'
+        if (model === 'small') return 'whisper-1'
+        if (model === 'medium') return 'whisper-1'
+        return 'whisper-1'
     }
 
     /**
@@ -182,10 +195,10 @@ class UnifiedTranscriptionService {
             onResult: (transcript, isFinal, confidence) => {
                 this.options.onResult?.(transcript, isFinal, confidence)
             },
-            onError: (error, _message) => {
-                this.error = error
+            onError: (error, message) => {
+                this.error = message || error
                 this.isListening = false
-                this.options.onError?.(error)
+                this.options.onError?.(error, message)
                 this.options.onStatusChange?.(this.getStatus())
             },
         })
@@ -201,21 +214,41 @@ class UnifiedTranscriptionService {
         if (!this.whisperInitialized) {
             const initialized = await whisperTranscriptionService.init({
                 language: this.options.language || 'en',
+                endpoint: this.options.whisperEndpoint,
+                apiKey: this.options.whisperApiKey,
+                model: this.getWhisperModelName(this.options.whisperModel || 'base'),
+                chunkDurationMs: this.options.whisperChunkDurationMs,
                 onProgress: this.options.onProgress,
             })
             if (!initialized) {
-                this.error = 'Whisper not initialized'
+                this.error = 'Whisper transcription is not configured. Set a transcription endpoint first.'
                 return false
             }
             this.whisperInitialized = true
         }
 
-        // For Whisper, we need to set up audio recording
-        // This is a simplified version - full implementation would use MediaRecorder
+        const started = await whisperTranscriptionService.startRealtimeTranscription(
+            (result) => {
+                this.options.onResult?.(result.text, true, undefined)
+            },
+            (error) => {
+                this.error = error
+                this.isListening = false
+                this.options.onError?.(error)
+                this.options.onStatusChange?.(this.getStatus())
+            },
+            this.options.whisperChunkDurationMs
+        )
+
+        if (!started) {
+            this.error = 'Failed to start Whisper transcription stream'
+            this.options.onStatusChange?.(this.getStatus())
+            return false
+        }
+
         this.isListening = true
         this.options.onStart?.()
         this.options.onStatusChange?.(this.getStatus())
-
         return true
     }
 
@@ -228,7 +261,7 @@ class UnifiedTranscriptionService {
         if (this.currentProvider === 'web-speech') {
             speechRecognitionService.stop()
         } else {
-            // Whisper cleanup if needed
+            await whisperTranscriptionService.stopRealtimeTranscription()
         }
 
         this.isListening = false

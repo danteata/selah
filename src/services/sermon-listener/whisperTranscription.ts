@@ -1,24 +1,22 @@
 /**
- * Whisper.cpp WASM Integration
- * 
- * This service provides an alternative to Web Speech API using whisper.cpp
- * compiled to WebAssembly for offline, high-quality transcription.
- * 
- * Setup:
- * 1. Build whisper.cpp with WASM support or use pre-built binaries
- * 2. Host the model files (ggml-base.en.bin recommended for English)
- * 3. Configure the model URL below
- * 
- * @see https://github.com/ggml-org/whisper.cpp/tree/master/examples/whisper.wasm
+ * Whisper-style Transcription Service
+ *
+ * This service provides chunked audio transcription using MediaRecorder
+ * and an OpenAI-compatible transcription endpoint.
+ *
+ * Runtime options:
+ * 1. Set `VITE_TRANSCRIPTION_ENDPOINT` to your backend endpoint (recommended)
+ * 2. Or provide `VITE_OPENAI_API_KEY` to call OpenAI directly (not recommended for production clients)
  */
 
-// Model configuration
-const WHISPER_MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin'
-const WHISPER_MODEL_SIZE = 142_000_000 // ~142MB for base.en model
+const DEFAULT_OPENAI_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions'
 
 export interface WhisperConfig {
-    modelUrl?: string
+    endpoint?: string
+    apiKey?: string
+    model?: string
     language?: string
+    chunkDurationMs?: number
     onProgress?: (progress: number) => void
     onStatus?: (status: string) => void
 }
@@ -33,280 +31,285 @@ export interface WhisperTranscriptionResult {
     language?: string
 }
 
-// Type definitions for whisper.cpp WASM module
-interface WhisperWasmModule {
-    init: (modelPath: string) => Promise<boolean>
-    transcribe: (audioData: Float32Array, options: TranscribeOptions) => Promise<WhisperTranscriptionResult>
-    free: () => void
-}
-
-interface TranscribeOptions {
+interface TranscriptionApiResponse {
+    text?: string
+    segments?: Array<{ start: number; end: number; text: string }>
     language?: string
-    translate?: boolean
-    maxLen?: number
-    tokenTimestamps?: boolean
 }
 
-/**
- * Whisper.cpp WASM Service
- * 
- * This is a skeleton implementation. To fully integrate:
- * 
- * 1. Build whisper.cpp WASM:
- *    ```bash
- *    git clone https://github.com/ggml-org/whisper.cpp
- *    cd whisper.cpp
- *    make whisper.wasm  # or use emscripten build
- *    ```
- * 
- * 2. Host the WASM files and model:
- *    - whisper.wasm
- *    - ggml-base.en.bin (or other model)
- * 
- * 3. Use a library like whisper-wasm or build your own wrapper
- */
+type ResultCallback = (result: WhisperTranscriptionResult) => void
+type ErrorCallback = (error: string) => void
+
 class WhisperTranscriptionService {
-    private module: WhisperWasmModule | null = null
+    private config: WhisperConfig = {}
     private isInitialized = false
     private isInitializing = false
     private modelLoaded = false
-    private config: WhisperConfig = {}
+    private mediaRecorder: MediaRecorder | null = null
+    private mediaStream: MediaStream | null = null
+    private processingQueue: Promise<void> = Promise.resolve()
+    private isStreaming = false
 
-    /**
-     * Initialize the Whisper service
-     * Downloads the model if not cached
-     */
     async init(config: WhisperConfig = {}): Promise<boolean> {
-        if (this.isInitialized) return true
         if (this.isInitializing) {
-            // Wait for existing initialization
             while (this.isInitializing) {
-                await new Promise(r => setTimeout(r, 100))
+                await new Promise((resolve) => setTimeout(resolve, 50))
             }
             return this.isInitialized
         }
 
         this.isInitializing = true
-        this.config = config
+        this.config = {
+            model: 'whisper-1',
+            language: 'en',
+            chunkDurationMs: 5000,
+            ...this.config,
+            ...config,
+        }
 
         try {
-            this.config.onStatus?.('Loading Whisper model...')
-
-            // Option A: Use a pre-built WASM wrapper library
-            // Example using a hypothetical whisper-wasm package:
-            /*
-            const { initWhisper } = await import('whisper-wasm')
-            
-            // Download model with progress
-            const modelUrl = config.modelUrl || WHISPER_MODEL_URL
-            const modelResponse = await fetch(modelUrl)
-            const reader = modelResponse.body?.getReader()
-            const contentLength = parseInt(modelResponse.headers.get('content-length') || '0')
-            
-            let downloaded = 0
-            const chunks: Uint8Array[] = []
-            
-            while (reader) {
-                const { done, value } = await reader.read()
-                if (done) break
-                chunks.push(value)
-                downloaded += value.length
-                config.onProgress?.(downloaded / contentLength * 100)
+            this.config.onStatus?.('Preparing transcription service...')
+            if (!this.hasTranscriptionTransport()) {
+                this.config.onStatus?.(
+                    'Transcription endpoint is not configured. Set VITE_TRANSCRIPTION_ENDPOINT or provide API credentials.'
+                )
+                this.isInitialized = false
+                this.modelLoaded = false
+                return false
             }
-            
-            // Initialize WASM module with model
-            this.module = await initWhisper({
-                modelData: concatenateChunks(chunks),
-                language: config.language || 'en'
-            })
-            */
-
-            // Option B: Use the official whisper.cpp WASM build
-            // Host whisper.wasm and use the Module interface
-            /*
-            const whisperModule = await import('/path/to/whisper.wasm')
-            await whisperModule.default({
-                locateFile: (file: string) => `/wasm/${file}`
-            })
-            this.module = whisperModule
-            */
-
-            // For now, we'll use a placeholder that shows the integration pattern
-            console.log('Whisper.cpp WASM integration ready for configuration')
-            console.log('Model URL:', config.modelUrl || WHISPER_MODEL_URL)
-            console.log('Model size:', WHISPER_MODEL_SIZE / 1_000_000, 'MB')
 
             this.isInitialized = true
             this.modelLoaded = true
-            this.config.onStatus?.('Whisper ready')
-
+            this.config.onProgress?.(100)
+            this.config.onStatus?.('Transcription service ready')
             return true
         } catch (error) {
-            console.error('Failed to initialize Whisper:', error)
-            this.config.onStatus?.('Failed to load Whisper model')
+            console.error('Failed to initialize transcription service:', error)
+            this.config.onStatus?.('Failed to initialize transcription service')
+            this.isInitialized = false
+            this.modelLoaded = false
             return false
         } finally {
             this.isInitializing = false
         }
     }
 
-    /**
-     * Check if Whisper is available
-     */
     isAvailable(): boolean {
         return this.isInitialized && this.modelLoaded
     }
 
-    /**
-     * Transcribe audio from a MediaRecorder
-     * 
-     * @param audioBlob - Audio blob from MediaRecorder
-     * @returns Transcription result
-     */
+    isConfigured(): boolean {
+        return this.hasTranscriptionTransport()
+    }
+
     async transcribeAudio(audioBlob: Blob): Promise<WhisperTranscriptionResult | null> {
         if (!this.isAvailable()) {
-            console.warn('Whisper not initialized')
+            console.warn('Transcription service not initialized')
             return null
         }
 
         try {
-            // Convert blob to AudioBuffer
-            const audioContext = new AudioContext({ sampleRate: 16000 })
-            const arrayBuffer = await audioBlob.arrayBuffer()
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
-
-            // Get mono channel data (Whisper expects 16kHz mono)
-            const channelData = audioBuffer.getChannelData(0)
-
-            // Transcribe using WASM module
-            if (this.module) {
-                const result = await this.module.transcribe(channelData, {
-                    language: this.config.language || 'en',
-                    maxLen: 0,
-                    tokenTimestamps: true,
-                })
-                return result
+            const response = await this.requestTranscription(audioBlob)
+            return {
+                text: (response.text || '').trim(),
+                segments: response.segments,
+                language: response.language || this.config.language,
             }
-
-            return null
         } catch (error) {
             console.error('Transcription failed:', error)
             return null
         }
     }
 
-    /**
-     * Transcribe from a continuous audio stream
-     * This is useful for real-time transcription
-     */
-    async transcribeStream(
-        audioContext: AudioContext,
-        stream: MediaStream,
-        onResult: (result: WhisperTranscriptionResult) => void,
-        chunkDurationMs: number = 5000
-    ): Promise<() => void> {
+    async startRealtimeTranscription(
+        onResult: ResultCallback,
+        onError: ErrorCallback,
+        chunkDurationMs?: number
+    ): Promise<boolean> {
         if (!this.isAvailable()) {
-            throw new Error('Whisper not initialized')
+            onError('Transcription service is not initialized')
+            return false
         }
 
-        const source = audioContext.createMediaStreamSource(stream)
-        const processor = audioContext.createScriptProcessor(4096, 1, 1)
+        if (!navigator.mediaDevices?.getUserMedia) {
+            onError('MediaDevices API is not available in this browser')
+            return false
+        }
 
-        let audioChunks: Float32Array[] = []
-        let totalSamples = 0
-        const samplesPerChunk = audioContext.sampleRate * (chunkDurationMs / 1000)
+        if (this.isStreaming) {
+            onError('Transcription stream already started')
+            return false
+        }
 
-        processor.onaudioprocess = async (event) => {
-            const inputData = event.inputBuffer.getChannelData(0)
-            audioChunks.push(new Float32Array(inputData))
-            totalSamples += inputData.length
+        try {
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    noiseSuppression: true,
+                    echoCancellation: true,
+                    autoGainControl: true,
+                },
+            })
+        } catch {
+            onError('Microphone permission is required for transcription')
+            return false
+        }
 
-            // Process when we have enough audio
-            if (totalSamples >= samplesPerChunk) {
-                // Combine chunks
-                const combined = new Float32Array(totalSamples)
-                let offset = 0
-                for (const chunk of audioChunks) {
-                    combined.set(chunk, offset)
-                    offset += chunk.length
-                }
+        try {
+            const mimeType = this.getSupportedMimeType()
+            this.mediaRecorder = mimeType
+                ? new MediaRecorder(this.mediaStream, { mimeType })
+                : new MediaRecorder(this.mediaStream)
+        } catch (error) {
+            console.error('Failed to create MediaRecorder:', error)
+            onError('Unable to capture microphone audio in this browser')
+            this.cleanupMedia()
+            return false
+        }
 
-                // Transcribe
-                if (this.module) {
-                    try {
-                        const result = await this.module.transcribe(combined, {
-                            language: this.config.language || 'en',
-                        })
-                        onResult(result)
-                    } catch (error) {
-                        console.error('Stream transcription error:', error)
-                    }
-                }
+        this.isStreaming = true
+        this.config.onStatus?.('Realtime transcription started')
 
-                // Reset for next chunk
-                audioChunks = []
-                totalSamples = 0
+        this.mediaRecorder.ondataavailable = (event) => {
+            if (!event.data || event.data.size === 0) return
+
+            // Process chunks in-order to keep transcript stable.
+            this.processingQueue = this.processingQueue
+                .then(async () => {
+                    const result = await this.transcribeAudio(event.data)
+                    if (!result?.text) return
+                    onResult(result)
+                })
+                .catch((error) => {
+                    console.error('Realtime transcription chunk failed:', error)
+                    onError('Failed to transcribe one of the audio chunks')
+                })
+        }
+
+        this.mediaRecorder.onerror = () => {
+            onError('Audio recorder encountered an error')
+        }
+
+        this.mediaRecorder.onstop = () => {
+            this.isStreaming = false
+            this.config.onStatus?.('Realtime transcription stopped')
+            this.cleanupMedia()
+        }
+
+        this.mediaRecorder.start(chunkDurationMs || this.config.chunkDurationMs || 5000)
+        return true
+    }
+
+    async stopRealtimeTranscription(): Promise<void> {
+        if (!this.isStreaming) return
+
+        try {
+            if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                this.mediaRecorder.stop()
+            }
+            await this.processingQueue
+        } catch (error) {
+            console.error('Failed to stop transcription stream:', error)
+        } finally {
+            this.isStreaming = false
+            this.cleanupMedia()
+        }
+    }
+
+    free(): void {
+        this.cleanupMedia()
+        this.isInitialized = false
+        this.modelLoaded = false
+        this.isStreaming = false
+        this.processingQueue = Promise.resolve()
+    }
+
+    private hasTranscriptionTransport(): boolean {
+        const endpoint = this.getEndpoint()
+        const apiKey = this.getApiKey()
+        return Boolean(endpoint || apiKey)
+    }
+
+    private getEndpoint(): string | null {
+        const endpointFromEnv = import.meta.env.VITE_TRANSCRIPTION_ENDPOINT as string | undefined
+        return this.config.endpoint || endpointFromEnv || null
+    }
+
+    private getApiKey(): string | null {
+        const apiKeyFromEnv = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
+        return this.config.apiKey || apiKeyFromEnv || null
+    }
+
+    private async requestTranscription(audioBlob: Blob): Promise<TranscriptionApiResponse> {
+        const endpoint = this.getEndpoint()
+        const apiKey = this.getApiKey()
+
+        const requestUrl = endpoint || DEFAULT_OPENAI_ENDPOINT
+        const model = this.config.model || 'whisper-1'
+        const language = this.config.language || 'en'
+
+        const audioFile = new File([audioBlob], `sermon-chunk-${Date.now()}.webm`, {
+            type: audioBlob.type || 'audio/webm',
+        })
+
+        const formData = new FormData()
+        formData.append('file', audioFile)
+        formData.append('model', model)
+        formData.append('language', language)
+        formData.append('response_format', 'json')
+
+        const headers = new Headers()
+        if (apiKey) {
+            headers.set('Authorization', `Bearer ${apiKey}`)
+        }
+
+        const response = await fetch(requestUrl, {
+            method: 'POST',
+            headers,
+            body: formData,
+        })
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '')
+            throw new Error(`Transcription request failed (${response.status}): ${errorText}`)
+        }
+
+        const responseBody = await response.json() as TranscriptionApiResponse
+        return responseBody
+    }
+
+    private getSupportedMimeType(): string | null {
+        const mimeTypes = [
+            'audio/webm;codecs=opus',
+            'audio/ogg;codecs=opus',
+            'audio/mp4',
+        ]
+
+        for (const mimeType of mimeTypes) {
+            if (MediaRecorder.isTypeSupported(mimeType)) {
+                return mimeType
             }
         }
 
-        source.connect(processor)
-        processor.connect(audioContext.destination)
-
-        // Return cleanup function
-        return () => {
-            processor.disconnect()
-            source.disconnect()
-        }
+        return null
     }
 
-    /**
-     * Free resources
-     */
-    free(): void {
-        if (this.module) {
-            this.module.free()
-            this.module = null
+    private cleanupMedia(): void {
+        if (this.mediaRecorder) {
+            this.mediaRecorder.ondataavailable = null
+            this.mediaRecorder.onerror = null
+            this.mediaRecorder.onstop = null
         }
-        this.isInitialized = false
-        this.modelLoaded = false
+
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach((track) => track.stop())
+        }
+
+        this.mediaRecorder = null
+        this.mediaStream = null
     }
 }
 
-// Export singleton
 export const whisperTranscriptionService = new WhisperTranscriptionService()
-
-/**
- * Alternative: Use a community WASM wrapper
- * 
- * Libraries to consider:
- * 
- * 1. whisper-web (Hugging Face)
- *    https://github.com/huggingface/transformers.js
- *    - Uses ONNX runtime
- *    - Easy integration
- *    - Good documentation
- * 
- * 2. whisper.cpp WASM (Official)
- *    https://github.com/ggml-org/whisper.cpp/tree/master/examples/whisper.wasm
- *    - Direct from whisper.cpp
- *    - Most up-to-date
- *    - Requires manual WASM setup
- * 
- * 3. transformers.js
- *    npm install @xenova/transformers
- *    
- *    Example:
- *    ```typescript
- *    import { pipeline } from '@xenova/transformers'
- *    
- *    const transcriber = await pipeline(
- *        'automatic-speech-recognition',
- *        'Xenova/whisper-base.en'
- *    )
- *    
- *    const result = await transcriber(audioUrl)
- *    console.log(result.text)
- *    ```
- */
 
 export default whisperTranscriptionService

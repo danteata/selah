@@ -84,6 +84,14 @@ export interface SpeechRecognitionOptions {
     onSpeechStart?: () => void
     /** Callback when speech ends */
     onSpeechEnd?: () => void
+    /** Automatically restart on recoverable errors/end events */
+    autoRestart?: boolean
+    /** Maximum auto-restart attempts before stopping */
+    maxRestartAttempts?: number
+    /** Delay before auto-restart in milliseconds */
+    restartDelayMs?: number
+    /** Request microphone access before starting recognition */
+    preflightMicPermission?: boolean
 }
 
 export interface SpeechRecognitionStatus {
@@ -101,11 +109,14 @@ export interface SpeechRecognitionStatus {
 export class SpeechRecognitionService {
     private recognition: SpeechRecognitionInterface | null = null
     private isListening = false
+    private shouldBeListening = false
     private currentTranscript = ''
     private interimTranscript = ''
     private error: string | null = null
     private options: SpeechRecognitionOptions = {}
     private fullTranscript: string[] = []
+    private restartAttempts = 0
+    private restartTimer: number | null = null
 
     constructor() {
         this.initialize()
@@ -146,21 +157,23 @@ export class SpeechRecognitionService {
         this.recognition.onstart = () => {
             this.isListening = true
             this.error = null
+            this.restartAttempts = 0
             this.options.onStart?.()
         }
 
         this.recognition.onend = () => {
             this.isListening = false
-            // Save final transcript
-            if (this.currentTranscript) {
-                this.fullTranscript.push(this.currentTranscript)
-            }
             this.options.onEnd?.()
+
+            if (this.shouldBeListening) {
+                this.scheduleRestart('Recognition ended unexpectedly')
+            }
         }
 
         this.recognition.onresult = (event: SpeechRecognitionEvent) => {
             let interimTranscript = ''
             let finalTranscript = ''
+            let confidence = 0
 
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const result = event.results[i]
@@ -168,6 +181,7 @@ export class SpeechRecognitionService {
 
                 if (result.isFinal) {
                     finalTranscript += transcript
+                    confidence = result[0].confidence
                 } else {
                     interimTranscript += transcript
                 }
@@ -176,19 +190,26 @@ export class SpeechRecognitionService {
             if (finalTranscript) {
                 this.currentTranscript = finalTranscript
                 this.fullTranscript.push(finalTranscript)
-                this.options.onResult?.(finalTranscript, true, event.results[event.resultIndex][0].confidence)
+                this.options.onResult?.(finalTranscript, true, confidence)
             }
 
-            if (interimTranscript) {
-                this.interimTranscript = interimTranscript
+            const hadInterim = this.interimTranscript.length > 0
+            this.interimTranscript = interimTranscript
+            if (interimTranscript || hadInterim) {
                 this.options.onResult?.(interimTranscript, false, 0)
             }
         }
 
         this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-            this.error = event.error
+            const message = this.getErrorMessage(event.error, event.message)
+            this.error = message
             this.isListening = false
-            this.options.onError?.(event.error, event.message)
+            this.options.onError?.(event.error, message)
+
+            if (!this.shouldBeListening) return
+            if (!this.isRecoverableError(event.error)) return
+
+            this.scheduleRestart(`Speech recognition error: ${event.error}`)
         }
 
         this.recognition.onspeechstart = () => {
@@ -242,20 +263,34 @@ export class SpeechRecognitionService {
         }
 
         // Set defaults
-        if (!this.recognition.lang) {
-            this.recognition.lang = 'en-US'
-        }
-        if (this.recognition.continuous === undefined) {
-            this.recognition.continuous = true
-        }
-        if (this.recognition.interimResults === undefined) {
-            this.recognition.interimResults = true
-        }
+        this.recognition.lang = this.options.lang || 'en-US'
+        this.recognition.continuous = this.options.continuous ?? true
+        this.recognition.interimResults = this.options.interimResults ?? true
+        this.recognition.maxAlternatives = this.options.maxAlternatives ?? 1
 
         // Reset state
         this.currentTranscript = ''
         this.interimTranscript = ''
         this.error = null
+        this.shouldBeListening = true
+        this.restartAttempts = 0
+        this.clearRestartTimer()
+
+        // Warm up mic permission to avoid browser-specific audio-capture/network failures
+        if (this.options.preflightMicPermission !== false) {
+            const permissionGranted = await this.ensureMicrophonePermission()
+            if (!permissionGranted) {
+                this.error = 'Microphone access is required. Please allow microphone permissions and try again.'
+                this.shouldBeListening = false
+                return false
+            }
+        }
+
+        if (!this.isSecureContextForSpeech()) {
+            this.error = 'Speech recognition requires a secure context (HTTPS or localhost).'
+            this.shouldBeListening = false
+            return false
+        }
 
         try {
             this.recognition.start()
@@ -263,6 +298,7 @@ export class SpeechRecognitionService {
         } catch (err) {
             console.error('Failed to start speech recognition:', err)
             this.error = err instanceof Error ? err.message : 'Failed to start'
+            this.shouldBeListening = false
             return false
         }
     }
@@ -271,6 +307,8 @@ export class SpeechRecognitionService {
      * Stop speech recognition
      */
     stop(): void {
+        this.shouldBeListening = false
+        this.clearRestartTimer()
         if (!this.recognition || !this.isListening) return
 
         try {
@@ -284,6 +322,8 @@ export class SpeechRecognitionService {
      * Abort speech recognition immediately
      */
     abort(): void {
+        this.shouldBeListening = false
+        this.clearRestartTimer()
         if (!this.recognition) return
 
         try {
@@ -344,6 +384,82 @@ export class SpeechRecognitionService {
      */
     getError(): string | null {
         return this.error
+    }
+
+    private clearRestartTimer(): void {
+        if (this.restartTimer !== null) {
+            window.clearTimeout(this.restartTimer)
+            this.restartTimer = null
+        }
+    }
+
+    private scheduleRestart(reason: string): void {
+        if (!this.recognition) return
+        if (this.restartTimer !== null) return
+        if (this.options.autoRestart === false) return
+
+        const maxAttempts = this.options.maxRestartAttempts ?? 5
+        if (this.restartAttempts >= maxAttempts) {
+            this.shouldBeListening = false
+            this.error = 'Speech recognition stopped after repeated connection errors. Please retry.'
+            this.options.onError?.('max-restarts-exceeded', this.error)
+            return
+        }
+
+        const delayMs = this.options.restartDelayMs ?? 750
+        this.restartAttempts += 1
+        this.restartTimer = window.setTimeout(() => {
+            this.restartTimer = null
+            if (!this.shouldBeListening || this.isListening) return
+
+            try {
+                this.recognition?.start()
+            } catch (err) {
+                console.warn('Failed to auto-restart speech recognition:', reason, err)
+                this.scheduleRestart('Auto-restart failed')
+            }
+        }, delayMs)
+    }
+
+    private isRecoverableError(error: string): boolean {
+        return error === 'network' || error === 'no-speech'
+    }
+
+    private async ensureMicrophonePermission(): Promise<boolean> {
+        if (!navigator.mediaDevices?.getUserMedia) return false
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+            stream.getTracks().forEach((track) => track.stop())
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private isSecureContextForSpeech(): boolean {
+        if (window.isSecureContext) return true
+
+        const hostname = window.location.hostname
+        return hostname === 'localhost' || hostname === '127.0.0.1'
+    }
+
+    private getErrorMessage(error: string, fallback?: string): string {
+        switch (error) {
+            case 'network':
+                return 'Speech service network issue. Check internet and keep this tab active.'
+            case 'no-speech':
+                return 'No speech detected. Please speak closer to the microphone.'
+            case 'audio-capture':
+                return 'Microphone was not found or is already in use by another app.'
+            case 'not-allowed':
+            case 'service-not-allowed':
+                return 'Microphone permission denied. Enable microphone access in browser settings.'
+            case 'language-not-supported':
+                return 'Selected recognition language is not supported by this browser.'
+            default:
+                return fallback || error || 'Speech recognition failed'
+        }
     }
 }
 

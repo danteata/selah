@@ -189,7 +189,7 @@ import { FeatureGatedSermonListener } from '@/components/sermon-listener'
 
 ## Settings & Configuration
 
-The Sermon Listener can be configured through app settings, allowing users to toggle between Web Speech API and Whisper.cpp.
+The Sermon Listener can be configured through app settings, allowing users to toggle between Web Speech API and a Whisper-compatible transcription endpoint.
 
 ### Settings Interface
 
@@ -201,6 +201,12 @@ interface SermonListenerSettings {
   transcriptionProvider?: 'web-speech' | 'whisper'
   /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
   whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
+  /** Optional endpoint for server-side transcription */
+  whisperEndpoint?: string
+  /** Optional API key for endpoint auth */
+  whisperApiKey?: string
+  /** Chunk size for realtime uploads */
+  whisperChunkDurationMs?: number
   /** Auto-display detected verses */
   autoDisplay?: boolean
   /** Auto-lookup detected verses */
@@ -232,7 +238,7 @@ function MyComponent() {
     modelLoadingProgress,
     start,
     stop,
-    setProvider,  // Switch between 'web-speech' and 'whisper'
+      setProvider,  // Switch between 'web-speech' and 'whisper'
   } = useSermonListener({
     provider: 'whisper',  // Override settings
     autoLookup: true,
@@ -242,7 +248,7 @@ function MyComponent() {
   const handleSwitchToWhisper = async () => {
     const success = await setProvider('whisper')
     if (success) {
-      console.log('Switched to Whisper.cpp')
+      console.log('Switched to Whisper provider')
     }
   }
 
@@ -259,6 +265,24 @@ function MyComponent() {
   )
 }
 ```
+
+## Environment Variables
+
+```bash
+# Optional: endpoint for whisper-compatible transcription API
+VITE_TRANSCRIPTION_ENDPOINT=https://your-api.example.com/transcribe
+
+# Optional: API key if calling an authenticated endpoint directly
+VITE_OPENAI_API_KEY=your_api_key_here
+```
+
+## Troubleshooting `network` Errors
+
+1. Ensure app is served on HTTPS (or localhost).
+2. Keep microphone permission enabled for the current site.
+3. Keep the tab active while listening.
+4. Use Web Speech API as primary provider for lowest latency.
+5. If you need deterministic cross-browser behavior, configure the Whisper endpoint provider.
 
 ## Browser Support
 

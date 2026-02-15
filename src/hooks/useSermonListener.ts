@@ -13,6 +13,7 @@ import { unifiedTranscriptionService } from '../services/sermon-listener'
 import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
 import {
     detectVerses,
+    extractVerseFromContext,
     verseToLabel,
 } from '../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../services/sermon-listener/verseDetection'
@@ -88,12 +89,11 @@ export type UseSermonListenerReturn = SermonListenerState & SermonListenerAction
  */
 export function useSermonListener(options: SermonListenerOptions = {}): UseSermonListenerReturn {
     const {
-        language = 'en-US',
-        autoLookup = true,
-        autoDisplay = false,
-        minConfidence = 'high',
+        language: languageOverride,
+        autoLookup: autoLookupOverride,
+        autoDisplay: autoDisplayOverride,
+        minConfidence: minConfidenceOverride,
         provider: providerOverride,
-        onVerseDetected,
         onTranscriptUpdate,
         onError,
     } = options
@@ -102,6 +102,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const { fetchScripture } = useScripture()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
+
+    const language = languageOverride || sermonSettings?.language || 'en-US'
+    const autoLookup = autoLookupOverride ?? sermonSettings?.autoLookup ?? true
+    const autoDisplay = autoDisplayOverride ?? sermonSettings?.autoDisplay ?? false
+    const minConfidence = minConfidenceOverride ?? 'high'
 
     // Determine provider from settings or override
     const getInitialProvider = (): TranscriptionProvider => {
@@ -129,11 +134,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Track processed verses to avoid duplicates
     const processedVersesRef = useRef<Set<string>>(new Set())
+    const transcriptBufferRef = useRef('')
 
     // Check support on mount
     useEffect(() => {
         const checkSupport = async () => {
             const available = await unifiedTranscriptionService.isProviderAvailable(provider)
+            if (!available && provider === 'whisper') {
+                const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
+                if (webSpeechAvailable) {
+                    setProvider('web-speech')
+                    setIsSupported(true)
+                    setError('Whisper is not configured. Falling back to Web Speech API.')
+                    return
+                }
+            }
             setIsSupported(available)
         }
         checkSupport()
@@ -194,17 +209,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     /**
      * Process transcript for verse detection
      */
-    const processTranscript = useCallback((text: string, _isFinal: boolean) => {
+    const processTranscript = useCallback((text: string) => {
         if (!text) return
 
-        // Detect verses in the transcript
         const verses = detectVerses(text)
+        const contextVerse = extractVerseFromContext(text, 300)
+        const candidateVerses = contextVerse
+            ? [...verses, contextVerse]
+            : verses
 
         // Filter by confidence and check for new verses
         const confidenceOrder = { high: 3, medium: 2, low: 1 }
         const minConfidenceLevel = confidenceOrder[minConfidence]
 
-        for (const verse of verses) {
+        for (const verse of candidateVerses) {
             const verseConfidence = confidenceOrder[verse.confidence]
             if (verseConfidence < minConfidenceLevel) continue
 
@@ -270,6 +288,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         const success = await unifiedTranscriptionService.setProvider(newProvider, {
             language: language.split('-')[0],
             whisperModel: sermonSettings?.whisperModel || 'base',
+            whisperEndpoint: sermonSettings?.whisperEndpoint,
+            whisperApiKey: sermonSettings?.whisperApiKey,
+            whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
             onProgress: setModelLoadingProgress,
         })
 
@@ -283,7 +304,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
 
         return success
-    }, [isListening, language, sermonSettings?.whisperModel])
+    }, [
+        isListening,
+        language,
+        sermonSettings?.whisperApiKey,
+        sermonSettings?.whisperChunkDurationMs,
+        sermonSettings?.whisperEndpoint,
+        sermonSettings?.whisperModel,
+    ])
 
     /**
      * Start listening
@@ -307,6 +335,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             language,
             continuous: true,
             interimResults: true,
+            whisperModel: sermonSettings?.whisperModel || 'base',
+            whisperEndpoint: sermonSettings?.whisperEndpoint,
+            whisperApiKey: sermonSettings?.whisperApiKey,
+            whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
             onStart: () => {
                 setIsListening(true)
                 setError(null)
@@ -316,17 +348,25 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             },
             onResult: (text, isFinal) => {
                 if (isFinal) {
-                    setTranscript(prev => prev + ' ' + text)
-                    processTranscript(text, true)
+                    setInterimTranscript('')
+                    setTranscript((prev) => {
+                        const combinedTranscript = `${prev} ${text}`.trim()
+                        transcriptBufferRef.current = combinedTranscript
+                        processTranscript(combinedTranscript)
+                        return combinedTranscript
+                    })
                 } else {
                     setInterimTranscript(text)
+                    const rollingContext = `${transcriptBufferRef.current} ${text}`.trim()
+                    processTranscript(rollingContext)
                 }
                 onTranscriptUpdate?.(text, !isFinal)
             },
-            onError: (err) => {
-                setError(err)
+            onError: (err, message) => {
+                const resolvedError = message || err
+                setError(resolvedError)
                 setIsListening(false)
-                onError?.(err)
+                onError?.(resolvedError)
             },
             onStatusChange: (status: TranscriptionStatus) => {
                 setIsListening(status.isListening)
@@ -334,7 +374,19 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         })
 
         return success
-    }, [isSupported, isListening, provider, language, processTranscript, onTranscriptUpdate, onError])
+    }, [
+        isSupported,
+        isListening,
+        language,
+        onError,
+        onTranscriptUpdate,
+        processTranscript,
+        provider,
+        sermonSettings?.whisperApiKey,
+        sermonSettings?.whisperChunkDurationMs,
+        sermonSettings?.whisperEndpoint,
+        sermonSettings?.whisperModel,
+    ])
 
     /**
      * Stop listening
@@ -356,6 +408,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setCurrentScripture(null)
         setError(null)
         processedVersesRef.current.clear()
+        transcriptBufferRef.current = ''
         unifiedTranscriptionService.clearTranscript()
     }, [])
 
