@@ -6,7 +6,6 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useEmitter } from './useEmitter'
 import { useScripture } from './useScripture'
 import { useAppStore } from '../store/appStore'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
@@ -18,6 +17,16 @@ import {
 } from '../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../services/sermon-listener/verseDetection'
 import type { Slide, Scripture, BibleVerse } from '../types'
+
+const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
+
+export interface SavedSermonTranscript {
+    id: string
+    title: string
+    transcript: string
+    provider: TranscriptionProvider
+    createdAt: string
+}
 
 export interface SermonListenerOptions {
     /** Language for speech recognition */
@@ -63,6 +72,8 @@ export interface SermonListenerState {
     isModelLoading: boolean
     /** Model loading progress (0-100) */
     modelLoadingProgress: number
+    /** Saved transcripts */
+    savedTranscripts: SavedSermonTranscript[]
 }
 
 export interface SermonListenerActions {
@@ -80,9 +91,35 @@ export interface SermonListenerActions {
     removeVerse: (verse: DetectedVerse) => void
     /** Switch transcription provider */
     setProvider: (provider: TranscriptionProvider) => Promise<boolean>
+    /** Save the current transcript */
+    saveCurrentTranscript: (title?: string) => SavedSermonTranscript | null
+    /** Delete a saved transcript */
+    deleteSavedTranscript: (id: string) => void
+    /** Clear all saved transcripts */
+    clearSavedTranscripts: () => void
+    /** Export current transcript as a file */
+    exportCurrentTranscript: () => boolean
 }
 
 export type UseSermonListenerReturn = SermonListenerState & SermonListenerActions
+
+// Helper functions for localStorage persistence
+function readSavedTranscripts(): SavedSermonTranscript[] {
+    if (typeof window === 'undefined') return []
+    try {
+        const raw = localStorage.getItem(SERMON_TRANSCRIPT_STORAGE_KEY)
+        if (!raw) return []
+        const parsed = JSON.parse(raw) as SavedSermonTranscript[]
+        return Array.isArray(parsed) ? parsed : []
+    } catch {
+        return []
+    }
+}
+
+function writeSavedTranscripts(items: SavedSermonTranscript[]): void {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(SERMON_TRANSCRIPT_STORAGE_KEY, JSON.stringify(items))
+}
 
 /**
  * Hook for listening to sermons and detecting Bible verse references
@@ -98,10 +135,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         onError,
     } = options
 
-    const emitter = useEmitter()
     const { fetchScripture } = useScripture()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
+    const activeSchedule = useAppStore((state) => state.activeSchedule)
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const setLiveSlide = useAppStore((state) => state.setLiveSlide)
 
     const language = languageOverride || sermonSettings?.language || 'en-US'
     const autoLookup = autoLookupOverride ?? sermonSettings?.autoLookup ?? true
@@ -127,6 +166,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [provider, setProvider] = useState<TranscriptionProvider>(getInitialProvider)
     const [isModelLoading, setIsModelLoading] = useState(false)
     const [modelLoadingProgress, setModelLoadingProgress] = useState(0)
+    const [savedTranscripts, setSavedTranscripts] = useState<SavedSermonTranscript[]>(() => readSavedTranscripts())
 
     // Refs for callback stability
     const optionsRef = useRef(options)
@@ -195,7 +235,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             layout: 'default',
             userId: '',
             churchId: '',
-            scheduleId: '',
+            scheduleId: activeSchedule?._id || '',
             contents: Array.isArray(currentScripture.content)
                 ? currentScripture.content.map((v: BibleVerse) => v.scripture || '')
                 : [],
@@ -203,9 +243,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             backgroundType: 'color',
         }
 
-        // Emit event to display on live view
-        emitter.emit('new-bible', slide)
-    }, [currentScripture, emitter])
+        // Add slide to active slides and set as live
+        appendActiveSlide(slide)
+        setLiveSlide(slide.id)
+    }, [currentScripture, activeSchedule, appendActiveSlide, setLiveSlide])
 
     /**
      * Process transcript for verse detection
@@ -259,21 +300,23 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             layout: 'default',
                             userId: '',
                             churchId: '',
-                            scheduleId: '',
+                            scheduleId: activeSchedule?._id || '',
                             contents: Array.isArray(scripture.content)
                                 ? scripture.content.map((v: BibleVerse) => v.scripture || '')
                                 : [],
                             background: '',
                             backgroundType: 'color',
                         }
-                        emitter.emit('new-bible', slide)
+                        // Add slide to active slides and set as live
+                        appendActiveSlide(slide)
+                        setLiveSlide(slide.id)
                     }
                 })
             } else {
                 optionsRef.current.onVerseDetected?.(verse, null)
             }
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, emitter])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, activeSchedule, appendActiveSlide, setLiveSlide])
 
     /**
      * Set transcription provider
@@ -429,6 +472,71 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         processedVersesRef.current.delete(verse.reference)
     }, [])
 
+    /**
+     * Save the current transcript
+     */
+    const saveCurrentTranscript = useCallback((title?: string): SavedSermonTranscript | null => {
+        if (!transcript.trim()) return null
+
+        const saved: SavedSermonTranscript = {
+            id: `transcript-${Date.now()}`,
+            title: title || `Sermon Transcript ${new Date().toLocaleDateString()}`,
+            transcript,
+            provider,
+            createdAt: new Date().toISOString(),
+        }
+
+        setSavedTranscripts(prev => {
+            const updated = [...prev, saved]
+            writeSavedTranscripts(updated)
+            return updated
+        })
+
+        return saved
+    }, [transcript, provider])
+
+    /**
+     * Delete a saved transcript
+     */
+    const deleteSavedTranscript = useCallback((id: string) => {
+        setSavedTranscripts(prev => {
+            const updated = prev.filter(t => t.id !== id)
+            writeSavedTranscripts(updated)
+            return updated
+        })
+    }, [])
+
+    /**
+     * Clear all saved transcripts
+     */
+    const clearSavedTranscripts = useCallback(() => {
+        setSavedTranscripts([])
+        writeSavedTranscripts([])
+    }, [])
+
+    /**
+     * Export current transcript as a file
+     */
+    const exportCurrentTranscript = useCallback((): boolean => {
+        if (!transcript.trim()) return false
+
+        try {
+            const blob = new Blob([transcript], { type: 'text/plain' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `sermon-transcript-${new Date().toISOString().split('T')[0]}.txt`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
+            return true
+        } catch (err) {
+            console.error('Failed to export transcript:', err)
+            return false
+        }
+    }, [transcript])
+
     // Cleanup on unmount
     useEffect(() => {
         return () => {
@@ -452,6 +560,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         provider,
         isModelLoading,
         modelLoadingProgress,
+        savedTranscripts,
         // Actions
         start,
         stop,
@@ -460,6 +569,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         displayCurrentVerse,
         removeVerse,
         setProvider: setTranscriptionProvider,
+        saveCurrentTranscript,
+        deleteSavedTranscript,
+        clearSavedTranscripts,
+        exportCurrentTranscript,
     }
 }
 
