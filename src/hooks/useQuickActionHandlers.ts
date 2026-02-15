@@ -12,6 +12,8 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
     const { on } = useEmitter()
     const { createTextSlide, createCountdownSlide } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
+    const activeSlides = useAppStore((state) => state.activeSlides)
     const setActiveAlert = useAppStore((state) => state.setActiveAlert)
 
     // Modal actions from Zustand
@@ -22,9 +24,14 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
     const setDarkMode = useAppStore((state) => state.setDarkMode)
 
     const handleSlideEditorSave = useCallback((slide: Slide) => {
-        appendActiveSlide(slide)
+        const exists = activeSlides.find((s) => s.id === slide.id)
+        if (exists) {
+            updateActiveSlide(slide)
+        } else {
+            appendActiveSlide(slide)
+        }
         closeModal('editor')
-    }, [appendActiveSlide, closeModal])
+    }, [activeSlides, appendActiveSlide, updateActiveSlide, closeModal])
 
     // Listen to quick action events
     useEffect(() => {

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import type { Slide } from '../types'
+import { useFileUrl } from '../hooks/useTemplates'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -77,6 +78,13 @@ export default function LiveView() {
         return liveState.slides.find(s => s.id === currentSlideId)
     }, [liveState, currentSlideId])
 
+    // Get file URL if slide has a backgroundStorageId
+    const fileUrl = useFileUrl(slide?.backgroundStorageId || null)
+
+    // Determine the background to use
+    const backgroundUrl = fileUrl || slide?.background
+    const isVideoBackground = slide?.backgroundType === 'video' && backgroundUrl
+
     const settings = liveState?.settings || {
         liveWindowFullscreen: false,
         songAndHymnLabelsVisibility: true,
@@ -146,11 +154,23 @@ export default function LiveView() {
             onDoubleClick={toggleFullscreen}
         >
             {/* Background */}
-            {slide.background ? (
+            {isVideoBackground && backgroundUrl ? (
+                <video
+                    src={backgroundUrl}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    style={{
+                        filter: `blur(${slide.slideStyle?.blur || 0}px) brightness(${slide.slideStyle?.brightness || 50}%)`
+                    }}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                />
+            ) : backgroundUrl ? (
                 <div
                     className="absolute inset-0 bg-cover bg-center"
                     style={{
-                        backgroundImage: `url(${slide.background})`,
+                        backgroundImage: `url(${backgroundUrl})`,
                         filter: `blur(${slide.slideStyle?.blur || 0}px) brightness(${slide.slideStyle?.brightness || 50}%)`
                     }}
                 />

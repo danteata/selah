@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, BookOpen, ArrowLeft, ArrowRight, RefreshCw } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, BookOpen, ArrowLeft, ArrowRight, RefreshCw, LayoutTemplate, X } from 'lucide-react'
 import { useScripture, useSlideCreation } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
+import { useTemplates } from '../../hooks/useTemplates'
 import type { Scripture, BibleVerse } from '../../types'
+import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 
 // Book abbreviations map for smart parsing
@@ -74,6 +76,7 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
     const [currentStartVerse, setCurrentStartVerse] = useState<number | null>(null)
     const [currentEndVerse, setCurrentEndVerse] = useState<number | null>(null)
     const [neighboringVerses, setNeighboringVerses] = useState<{ prev: BibleVerse[]; next: BibleVerse[] }>({ prev: [], next: [] })
+    const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
 
     const inputRef = useRef<HTMLInputElement>(null)
 
@@ -81,6 +84,7 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
     const { createBibleSlide } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
+    const { templates } = useTemplates()
 
     // Initialize selected version with default
     useEffect(() => {
@@ -272,10 +276,10 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
         }
     }, [query, fetchScriptureWithVersion])
 
-    // Create slide
-    const handleCreateSlide = useCallback(() => {
+    // Create slide with optional template
+    const handleCreateSlide = useCallback((template?: TemplateItem | null) => {
         if (scripture) {
-            const slide = createBibleSlide(scripture)
+            const slide = createBibleSlide(scripture, { template })
             if (slide) {
                 appendActiveSlide(slide)
             }
@@ -474,13 +478,55 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
                             >
                                 New Search
                             </button>
-                            <button
-                                onClick={handleCreateSlide}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                            >
-                                Create Slide
-                            </button>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => handleCreateSlide(selectedTemplate)}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                >
+                                    Create Slide
+                                </button>
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setSelectedTemplate(null)}
+                                        className={`p-2 rounded-lg border ${selectedTemplate
+                                                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-600'
+                                                : 'border-gray-300 dark:border-gray-600 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                            }`}
+                                        title={selectedTemplate ? `Using: ${selectedTemplate.name}` : 'Use template'}
+                                    >
+                                        <LayoutTemplate className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
+
+                        {/* Template Selector */}
+                        {templates && templates.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                <label className="text-xs text-gray-500 dark:text-gray-400 mb-2 block">
+                                    Quick select template:
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                    {templates.slice(0, 5).map(template => (
+                                        <button
+                                            key={template._id}
+                                            onClick={() => setSelectedTemplate(selectedTemplate?._id === template._id ? null : template)}
+                                            className={`px-3 py-1 text-xs rounded-full transition-colors ${selectedTemplate?._id === template._id
+                                                    ? 'bg-primary-500 text-white'
+                                                    : 'bg-gray-100 dark:bg-gray-700 hover:bg-primary-100 dark:hover:bg-primary-900/30 text-gray-700 dark:text-gray-300'
+                                                }`}
+                                        >
+                                            {template.name}
+                                        </button>
+                                    ))}
+                                    {templates.length > 5 && (
+                                        <span className="px-3 py-1 text-xs text-gray-400 dark:text-gray-500">
+                                            +{templates.length - 5} more
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

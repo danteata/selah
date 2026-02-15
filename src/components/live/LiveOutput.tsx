@@ -3,6 +3,7 @@ import { Eye, Trash2, Edit, Monitor, Airplay } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useMultiMonitor } from '../../hooks/useMultiMonitor'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
+import { useFileUrl } from '../../hooks/useTemplates'
 import type { Slide, Scripture } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
@@ -39,6 +40,13 @@ export function LiveOutput() {
     const liveSlide = useMemo(() => {
         return activeSlides.find(slide => slide.id === liveSlideId)
     }, [activeSlides, liveSlideId])
+
+    // Get file URL for live slide if it has a backgroundStorageId
+    const liveSlideFileUrl = useFileUrl(liveSlide?.backgroundStorageId || null)
+
+    // Determine the background URL for live slide
+    const liveSlideBackground = liveSlideFileUrl || liveSlide?.background
+    const isLiveSlideVideo = liveSlide?.backgroundType === 'video' && liveSlideBackground
 
     // Get next and previous slides
     const currentIndex = useMemo(() => {
@@ -295,12 +303,23 @@ export function LiveOutput() {
                     <div
                         className="aspect-video rounded-lg overflow-hidden relative"
                         style={{
-                            backgroundImage: liveSlide.background ? `url(${liveSlide.background})` : undefined,
+                            backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
                             backgroundSize: 'cover',
                             backgroundPosition: 'center',
-                            backgroundColor: !liveSlide.background ? '#1f2937' : undefined,
+                            backgroundColor: !liveSlideBackground ? '#1f2937' : undefined,
                         }}
                     >
+                        {/* Video background */}
+                        {isLiveSlideVideo && (
+                            <video
+                                src={liveSlideBackground}
+                                className="absolute inset-0 w-full h-full object-cover"
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
+                            />
+                        )}
                         {liveSlide.contents[0] && (
                             <div className="absolute inset-0 flex items-center justify-center p-6">
                                 <div

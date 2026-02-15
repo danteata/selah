@@ -1,6 +1,7 @@
 import { Trash2, Copy, Bookmark, Pencil } from 'lucide-react'
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
+import { useFileUrl } from '../../hooks/useTemplates'
 
 interface SlideCardProps {
     slide: Slide
@@ -29,6 +30,15 @@ export function SlideCard({
     onSaveToLibrary,
     isSaved = false,
 }: SlideCardProps) {
+    // Get file URL if slide has a backgroundStorageId
+    const fileUrl = useFileUrl(slide.backgroundStorageId || null)
+
+    // Determine the background to use
+    const backgroundUrl = fileUrl || slide.background
+
+    // Check if this is a video background
+    const isVideoBackground = slide.backgroundType === 'video' && backgroundUrl
+
     return (
         <div
             onClick={onClick}
@@ -63,12 +73,23 @@ export function SlideCard({
             <div
                 className="aspect-video relative overflow-hidden"
                 style={{
-                    backgroundImage: slide.background ? `url(${slide.background})` : undefined,
+                    backgroundImage: !isVideoBackground && backgroundUrl ? `url(${backgroundUrl})` : undefined,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
-                    backgroundColor: !slide.background ? '#1f2937' : undefined,
+                    backgroundColor: !backgroundUrl ? '#1f2937' : undefined,
                 }}
             >
+                {/* Video background */}
+                {isVideoBackground && (
+                    <video
+                        src={backgroundUrl}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                    />
+                )}
                 {slide.contents[0] && slide.contents[0] !== '<p></p>' && slide.contents[0] !== '' && (
                     <div className="absolute inset-0 flex items-center justify-center p-4">
                         <div

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Moon, Sun, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { QuickActions, PreviewContent, LiveOutput } from '../components'
-import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync } from '../hooks'
+import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates, useFileUrl } from '../hooks'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
 import { SlideEditor } from '../components/editor/SlideEditor'
@@ -14,7 +14,9 @@ import { AddCountdownModal, type CountdownData } from '../components/countdown/A
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
 import { SermonListenerPanel } from '../components/sermon-listener'
+import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import type { Slide } from '../types'
+import type { TemplateItem } from '../hooks/useTemplates'
 
 export default function Dashboard() {
     const { user: clerkUser } = useClerk()
@@ -40,6 +42,13 @@ export default function Dashboard() {
 
     // Sermon listener panel state
     const [showSermonListener, setShowSermonListener] = useState(false)
+
+    // Save as template modal state
+    const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false)
+    const [slideToSaveAsTemplate, setSlideToSaveAsTemplate] = useState<Slide | null>(null)
+
+    // Templates hook for creating custom templates
+    const { createTemplate } = useTemplates()
 
     const toggleTheme = () => {
         const newIsDark = !isDark
@@ -100,22 +109,68 @@ export default function Dashboard() {
     }
 
     // Handle template selection
-    const handleTemplateSelect = (template: { id: string; name: string; background: string }) => {
+    const handleTemplateSelect = async (template: TemplateItem) => {
+        // Parse the slideId - it could be a JSON string or an object
+        let templateSlide: Partial<Slide> | null = null
+        if (typeof template.slideId === 'string') {
+            try {
+                templateSlide = JSON.parse(template.slideId)
+            } catch {
+                // If parsing fails, templateSlide remains null
+            }
+        } else if (typeof template.slideId === 'object' && template.slideId !== null) {
+            templateSlide = template.slideId as Partial<Slide>
+        }
+
+        // If template has a backgroundStorageId, we need to get the URL
+        // For now, we'll use the background from the slide data or thumbnail
+        // The video URL will be fetched when the slide is displayed
         const slide: Slide = {
             id: `slide_${Date.now()}`,
             index: 0,
             name: template.name,
-            type: 'text',
-            layout: 'full-text',
-            contents: ['Your content here'],
+            type: templateSlide?.type || 'text',
+            layout: templateSlide?.layout || 'full-text',
+            contents: templateSlide?.contents || ['Your content here'],
             userId: '',
             churchId: '',
             scheduleId: activeSchedule?._id || '',
-            background: template.background,
-            backgroundType: 'gradient',
+            background: templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            backgroundType: templateSlide?.backgroundType || 'gradient',
+            backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId,
         }
         appendActiveSlide(slide)
         closeModal('templateBrowser')
+    }
+
+    // Handle creating custom template from current slide
+    const handleCreateCustomTemplate = () => {
+        // Get the currently selected slide from the store
+        const state = useAppStore.getState()
+        const currentSlideId = state.liveSlideId
+        const currentSlide = state.activeSlides.find(s => s.id === currentSlideId)
+        if (currentSlide) {
+            setSlideToSaveAsTemplate(currentSlide)
+            setShowSaveAsTemplate(true)
+            return true
+        }
+        return false
+    }
+
+    // Handle saving a slide as a template
+    const handleSaveAsTemplate = async (name: string, category: string, description?: string) => {
+        if (!slideToSaveAsTemplate) return
+
+        await createTemplate({
+            name,
+            category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
+            description,
+            slideId: slideToSaveAsTemplate,
+            thumbnail: slideToSaveAsTemplate.background,
+        })
+
+        setShowSaveAsTemplate(false)
+        setSlideToSaveAsTemplate(null)
     }
 
     // Handle countdown creation - convert CountdownData to Countdown slide
@@ -268,8 +323,20 @@ export default function Dashboard() {
                     isOpen={modals.templateBrowser}
                     onClose={() => closeModal('templateBrowser')}
                     onSelect={handleTemplateSelect}
+                    onCreateCustom={handleCreateCustomTemplate}
                 />
             )}
+
+            {/* Save As Template Modal */}
+            <SaveAsTemplateModal
+                isOpen={showSaveAsTemplate}
+                slide={slideToSaveAsTemplate}
+                onClose={() => {
+                    setShowSaveAsTemplate(false)
+                    setSlideToSaveAsTemplate(null)
+                }}
+                onSave={handleSaveAsTemplate}
+            />
 
             {/* AddAlertModal handles its own alerts via store internally */}
             {modals.alertModal && (

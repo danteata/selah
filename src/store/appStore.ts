@@ -15,6 +15,7 @@ import type {
     Song
 } from '../types'
 import { bibleVersionObjects } from '../types'
+import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
 
 // UI State types
 export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
@@ -73,21 +74,9 @@ const defaultSettings: AppSettings = {
     defaultBibleVersion: 'KJV',
     defaultFont: 'Inter',
     defaultBackground: {
-        hymn: {
-            backgroundType: 'image',
-            background: 'https://images.unsplash.com/photo-1506056820413-f8fa4de15de6?q=80&w=1740',
-            backgroundVideoKey: null
-        },
-        bible: {
-            backgroundType: 'image',
-            background: 'https://images.unsplash.com/photo-1504052434569-70ad5836ab65?q=80&w=1740',
-            backgroundVideoKey: null
-        },
-        text: {
-            backgroundType: 'image',
-            background: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=1740',
-            backgroundVideoKey: null
-        },
+        hymn: DEFAULT_BACKGROUNDS.hymn,
+        bible: DEFAULT_BACKGROUNDS.bible,
+        text: DEFAULT_BACKGROUNDS.text,
     },
     slideStyles: {
         blur: 0.5,
@@ -173,6 +162,7 @@ interface AppStore extends AppState {
     setActiveSchedule: (schedule: Schedule | null) => void
     appendActiveSlide: (slide: Slide, position?: number) => void
     appendActiveSlides: (slides: Slide[]) => void
+    updateActiveSlide: (slide: Slide) => void
     removeActiveSlide: (slide: Slide) => void
     replaceScheduleActiveSlides: (slides: Slide[]) => void
     setActiveSlides: (slides: Slide[]) => void
@@ -208,6 +198,7 @@ interface AppStore extends AppState {
     setActiveAdvert: (advert: Advert | null) => void
     setDefaultSlideBackgrounds: () => void
     setDefaultSlideBackground: (type: string, background: string, backgroundVideoKey?: string | null) => void
+    setDefaultTemplate: (slideType: 'scripture' | 'hymn' | 'song' | 'text', templateId: string | null) => void
     signOut: () => void
     // Schedule CRUD
     createSchedule: (name: string) => void
@@ -313,6 +304,19 @@ export const useAppStore = create<AppStore>()(
                     return {
                         activeSlides: ensureUniqueIds(tempSlides),
                         liveOutputSlidesId: Array.from(new Set(tempSlides.map((slide) => slide.id))),
+                        futureStates: []
+                    }
+                })
+            },
+
+            updateActiveSlide: (slide) => {
+                set((state) => {
+                    const updatedSlides = state.activeSlides.map((s) =>
+                        s.id === slide.id ? slide : s
+                    )
+                    return {
+                        pastStates: [...state.pastStates, { activeSlides: state.activeSlides }],
+                        activeSlides: updatedSlides,
                         futureStates: []
                     }
                 })
@@ -591,6 +595,18 @@ export const useAppStore = create<AppStore>()(
                                 background,
                                 backgroundVideoKey
                             }
+                        }
+                    }
+                }))
+            },
+
+            setDefaultTemplate: (slideType, templateId) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        defaultTemplates: {
+                            ...state.settings.defaultTemplates,
+                            [slideType]: templateId
                         }
                     }
                 }))

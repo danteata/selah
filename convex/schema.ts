@@ -205,7 +205,9 @@ export default defineSchema({
             createdAt: v.optional(v.string()),
             updatedAt: v.optional(v.string()),
         })),
-        createdBy: v.string(),
+        createdBy: v.optional(v.string()), // Optional - system templates don't have a creator
+        favoritedBy: v.optional(v.array(v.string())), // Array of user IDs who favorited this template
+        backgroundStorageId: v.optional(v.string()), // Storage ID for video/image files
         category: v.union(
             v.literal("announcement"),
             v.literal("worship"),

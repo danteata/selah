@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import { useTemplates } from '../../hooks/useTemplates'
 import { BibleVersionSettings } from './BibleVersionSettings'
 import { SermonListenerSettings } from '../sermon-listener'
 
@@ -242,6 +243,9 @@ function DisplaySettings({
 // Background Settings Tab
 function BackgroundSettings() {
     const setDefaultSlideBackground = useAppStore((state) => state.setDefaultSlideBackground)
+    const setDefaultTemplate = useAppStore((state) => state.setDefaultTemplate)
+    const settings = useAppStore((state) => state.settings)
+    const { templates } = useTemplates()
 
     const backgroundTypes = [
         { id: 'scripture', label: 'Scripture', color: 'from-blue-600 to-indigo-700' },
@@ -250,29 +254,130 @@ function BackgroundSettings() {
         { id: 'custom', label: 'Custom', color: 'from-gray-600 to-gray-800' },
     ]
 
+    // Get template name by ID
+    const getTemplateName = (templateId: string | null | undefined) => {
+        if (!templateId) return null
+        return templates?.find(t => t._id === templateId)?.name || null
+    }
+
     return (
         <div className="space-y-6">
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-                Set default backgrounds for different slide types.
-            </p>
+            {/* Default Templates Section */}
+            <div className="space-y-4">
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                    Default Templates
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Choose a template to use automatically when creating new slides.
+                </p>
 
-            <div className="grid grid-cols-2 gap-4">
-                {backgroundTypes.map((type) => (
-                    <div
-                        key={type.id}
-                        className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
-                    >
-                        <div className={`h-24 bg-gradient-to-br ${type.color}`} />
-                        <div className="p-3 bg-white dark:bg-gray-800">
-                            <h4 className="text-sm font-medium text-gray-900 dark:text-white">
-                                {type.label}
-                            </h4>
-                            <button className="mt-2 text-xs text-primary-600 hover:text-primary-700">
-                                Change Background
-                            </button>
+                <div className="space-y-3">
+                    {/* Scripture Template Selector */}
+                    <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Scripture Template
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {settings.defaultTemplates?.scripture
+                                    ? `Using: ${getTemplateName(settings.defaultTemplates.scripture)}`
+                                    : 'Using default background'}
+                            </p>
                         </div>
+                        <select
+                            value={settings.defaultTemplates?.scripture || ''}
+                            onChange={(e) => setDefaultTemplate('scripture', e.target.value || null)}
+                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        >
+                            <option value="">Use Default Background</option>
+                            {templates?.map(template => (
+                                <option key={template._id} value={template._id}>
+                                    {template.name}
+                                </option>
+                            ))}
+                        </select>
                     </div>
-                ))}
+
+                    {/* Hymn Template Selector */}
+                    <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Hymn Template
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {settings.defaultTemplates?.hymn
+                                    ? `Using: ${getTemplateName(settings.defaultTemplates.hymn)}`
+                                    : 'Using default background'}
+                            </p>
+                        </div>
+                        <select
+                            value={settings.defaultTemplates?.hymn || ''}
+                            onChange={(e) => setDefaultTemplate('hymn', e.target.value || null)}
+                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        >
+                            <option value="">Use Default Background</option>
+                            {templates?.map(template => (
+                                <option key={template._id} value={template._id}>
+                                    {template.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Song Template Selector */}
+                    <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                Song Template
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {settings.defaultTemplates?.song
+                                    ? `Using: ${getTemplateName(settings.defaultTemplates.song)}`
+                                    : 'Using default background'}
+                            </p>
+                        </div>
+                        <select
+                            value={settings.defaultTemplates?.song || ''}
+                            onChange={(e) => setDefaultTemplate('song', e.target.value || null)}
+                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        >
+                            <option value="">Use Default Background</option>
+                            {templates?.map(template => (
+                                <option key={template._id} value={template._id}>
+                                    {template.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
+                    Default Backgrounds
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    Set default backgrounds for different slide types.
+                </p>
+
+                <div className="grid grid-cols-2 gap-4">
+                    {backgroundTypes.map((type) => (
+                        <div
+                            key={type.id}
+                            className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
+                        >
+                            <div className={`h-24 bg-gradient-to-br ${type.color}`} />
+                            <div className="p-3 bg-white dark:bg-gray-800">
+                                <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                                    {type.label}
+                                </h4>
+                                <button className="mt-2 text-xs text-primary-600 hover:text-primary-700">
+                                    Change Background
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     )

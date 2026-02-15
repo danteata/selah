@@ -16,6 +16,8 @@ import {
     backgroundFillTypes
 } from '../types'
 import { saveMedia } from './useIndexedDB'
+import type { TemplateItem } from './useTemplates'
+import { useTemplates } from './useTemplates'
 
 // Generate a unique ObjectID-style ID
 export function generateObjectId(): string {
@@ -122,6 +124,7 @@ export function useSlideCreation() {
     const settings = useAppStore((state) => state.settings)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const { templates } = useTemplates()
 
     const preSlideCreation = useCallback((): Slide => {
         const tempSlide: Slide = {
@@ -185,20 +188,59 @@ export function useSlideCreation() {
 
     const createBibleSlide = useCallback((
         scripture: Scripture,
-        options?: { fromWholeBibleSearch?: boolean }
+        options?: { fromWholeBibleSearch?: boolean, template?: TemplateItem | null }
     ): Slide => {
         const tempSlide = preSlideCreation()
         tempSlide.layout = slideLayoutTypes.bible
         tempSlide.type = slideTypes.bible
-        tempSlide.background =
-            settings.defaultBackground.default?.background ||
-            settings.defaultBackground.bible?.background
-        tempSlide.backgroundVideoKey =
-            settings.defaultBackground.default?.backgroundVideoKey ||
-            settings.defaultBackground.bible?.backgroundVideoKey
-        tempSlide.backgroundType =
-            settings.defaultBackground.default?.backgroundType ||
-            settings.defaultBackground.bible?.backgroundType
+
+        // Apply template if provided directly, or use default template from settings
+        let templateToUse: TemplateItem | null = null
+
+        if (options?.template) {
+            // Explicitly provided template (not null/undefined)
+            templateToUse = options.template
+        } else if (settings.defaultTemplates?.scripture && templates) {
+            // Look up the full template from the templates list using the stored ID
+            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.scripture) || null
+        }
+
+        if (templateToUse) {
+            let templateSlide: Partial<Slide> | null = null
+
+            if (typeof templateToUse.slideId === 'string') {
+                try {
+                    templateSlide = JSON.parse(templateToUse.slideId)
+                } catch {
+                    // If parsing fails, templateSlide remains null
+                }
+            } else if (typeof templateToUse.slideId === 'object' && templateToUse.slideId !== null) {
+                templateSlide = templateToUse.slideId as Partial<Slide>
+            }
+
+            // Apply template properties
+            if (templateSlide) {
+                tempSlide.background = templateSlide.background || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                tempSlide.backgroundType = templateSlide.backgroundType || 'gradient'
+                tempSlide.backgroundStorageId = templateSlide.backgroundStorageId || null
+                tempSlide.backgroundVideoKey = templateSlide.backgroundVideoKey || null
+                if (templateSlide.slideStyle) {
+                    tempSlide.slideStyle = { ...tempSlide.slideStyle, ...templateSlide.slideStyle }
+                }
+            }
+        } else {
+            // Use default background
+            tempSlide.background =
+                settings.defaultBackground.default?.background ||
+                settings.defaultBackground.bible?.background
+            tempSlide.backgroundVideoKey =
+                settings.defaultBackground.default?.backgroundVideoKey ||
+                settings.defaultBackground.bible?.backgroundVideoKey
+            tempSlide.backgroundType =
+                settings.defaultBackground.default?.backgroundType ||
+                settings.defaultBackground.bible?.backgroundType
+        }
+
         tempSlide.title = scripture?.label
         tempSlide.name = generateSlideName(tempSlide)
 
@@ -219,7 +261,7 @@ export function useSlideCreation() {
         tempSlide.contents = generateSlideContent(tempSlide, scripture)
 
         return tempSlide
-    }, [preSlideCreation, settings])
+    }, [preSlideCreation, settings, templates])
 
     const createHymnSlide = useCallback((hymn: Hymn): Slide => {
         const tempSlide = preSlideCreation()

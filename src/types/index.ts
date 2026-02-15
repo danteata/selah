@@ -95,6 +95,7 @@ export interface Slide {
     backgroundType?: string
     background?: string
     backgroundVideoKey?: string | null
+    backgroundStorageId?: string | null
     title?: string
     songId?: string
     hasChorus?: boolean
@@ -310,6 +311,13 @@ export interface AppSettings {
     motionlessSlides?: boolean
     transitionInterval?: number
     alertLimit?: number
+    // Default template IDs for slide types
+    defaultTemplates?: {
+        scripture?: string | null
+        hymn?: string | null
+        song?: string | null
+        text?: string | null
+    }
     // Sermon Listener Settings
     sermonListener?: {
         /** Enable sermon listener feature */
