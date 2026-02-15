@@ -146,7 +146,7 @@ export function LiveOutput() {
         const updatedSlide = {
             ...liveSlide,
             data: scripture,
-            contents: [generateSlideContent(liveSlide, scripture)],
+            contents: generateSlideContent(liveSlide, scripture),
         }
 
         // Update the slide in activeSlides
