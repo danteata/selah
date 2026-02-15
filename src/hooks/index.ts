@@ -24,3 +24,5 @@ export {
 } from './useKeyboardShortcuts'
 export { useMultiMonitor } from './useMultiMonitor'
 export { useLiveSync } from './useLiveSync'
+export { useSermonListener } from './useSermonListener'
+export type { UseSermonListenerReturn, SermonListenerOptions, SermonListenerState, SermonListenerActions } from './useSermonListener'

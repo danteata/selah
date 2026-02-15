@@ -310,6 +310,21 @@ export interface AppSettings {
     motionlessSlides?: boolean
     transitionInterval?: number
     alertLimit?: number
+    // Sermon Listener Settings
+    sermonListener?: {
+        /** Enable sermon listener feature */
+        enabled?: boolean
+        /** Transcription provider: 'web-speech' | 'whisper' */
+        transcriptionProvider?: 'web-speech' | 'whisper'
+        /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
+        whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
+        /** Auto-display detected verses */
+        autoDisplay?: boolean
+        /** Auto-lookup detected verses */
+        autoLookup?: boolean
+        /** Language for speech recognition */
+        language?: string
+    }
 }
 
 // ==================== App State Types ====================

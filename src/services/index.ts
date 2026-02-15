@@ -49,6 +49,19 @@ export {
     type Plan,
 } from './payments'
 
+// Sermon Listener (Speech Recognition & Verse Detection)
+export {
+    speechRecognitionService,
+    SpeechRecognitionService,
+    detectVerses,
+    verseToLabel,
+    hasVerseReference,
+    extractVerseFromContext,
+    formatVerseForDisplay,
+    BOOK_TO_NUMBER,
+    type DetectedVerse,
+} from './sermon-listener'
+
 /**
  * Initialize all services
  * Call this once at app startup

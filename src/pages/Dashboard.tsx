@@ -1,6 +1,6 @@
 import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
-import { Moon, Sun } from 'lucide-react'
+import { Moon, Sun, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { QuickActions, PreviewContent, LiveOutput } from '../components'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync } from '../hooks'
@@ -13,6 +13,7 @@ import { AddAlertModal } from '../components/alerts/AddAlertModal'
 import { AddCountdownModal, type CountdownData } from '../components/countdown/AddCountdownModal'
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
+import { SermonListenerPanel } from '../components/sermon-listener'
 import type { Slide } from '../types'
 
 export default function Dashboard() {
@@ -36,6 +37,9 @@ export default function Dashboard() {
         if (typeof window === 'undefined') return false
         return document.documentElement.classList.contains('dark')
     })
+
+    // Sermon listener panel state
+    const [showSermonListener, setShowSermonListener] = useState(false)
 
     const toggleTheme = () => {
         const newIsDark = !isDark
@@ -158,6 +162,18 @@ export default function Dashboard() {
                         </div>
 
                         <div className="flex items-center gap-4">
+                            {/* Sermon Listener Toggle */}
+                            <button
+                                onClick={() => setShowSermonListener(!showSermonListener)}
+                                className={`p-2 rounded-lg transition-colors ${showSermonListener
+                                    ? 'bg-blue-500 text-white'
+                                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                    }`}
+                                title="Sermon Listener"
+                            >
+                                <Mic className="w-5 h-5" />
+                            </button>
+
                             {/* Theme Toggle */}
                             <button
                                 onClick={toggleTheme}
@@ -186,6 +202,17 @@ export default function Dashboard() {
 
             {/* Main Content */}
             <main className="max-w-[1800px] mx-auto p-4 sm:p-6 lg:p-8">
+                {/* Sermon Listener Panel */}
+                {showSermonListener && (
+                    <div className="mb-4">
+                        <SermonListenerPanel
+                            autoLookup={true}
+                            autoDisplay={false}
+                            compact={false}
+                        />
+                    </div>
+                )}
+
                 <div className="flex gap-6 h-[calc(100vh-8rem)]">
                     {/* Quick Actions */}
                     <div className="flex-shrink-0">

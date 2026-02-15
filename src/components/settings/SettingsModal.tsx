@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { BibleVersionSettings } from './BibleVersionSettings'
+import { SermonListenerSettings } from '../sermon-listener'
 
-type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts'
+type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -53,6 +54,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         { id: 'display' as const, label: 'Display', icon: Monitor },
         { id: 'background' as const, label: 'Background', icon: Palette },
         { id: 'bible' as const, label: 'Bible', icon: Book },
+        { id: 'sermon-listener' as const, label: 'Sermon Listener', icon: Mic },
         { id: 'profile' as const, label: 'Profile', icon: User },
         { id: 'storage' as const, label: 'Storage', icon: HardDrive },
         { id: 'shortcuts' as const, label: 'Shortcuts', icon: Keyboard },
@@ -121,6 +123,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 onUpdate={{ setDefaultBibleVersion, setFootnotes }}
                             />
                         )}
+                        {activeTab === 'sermon-listener' && <SermonListenerSettings />}
                         {activeTab === 'profile' && <ProfileSettings />}
                         {activeTab === 'storage' && <StorageSettings />}
                         {activeTab === 'shortcuts' && <ShortcutsSettings />}
