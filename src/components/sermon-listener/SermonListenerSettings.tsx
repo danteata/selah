@@ -1,20 +1,24 @@
 /**
  * Sermon Listener Settings Component
  *
- * Settings panel for configuring the sermon listener feature,
- * including provider selection and Whisper endpoint options.
+ * Configure live transcription providers:
+ * - Web Speech API
+ * - Whisper API endpoint
+ * - Whisper.cpp local endpoint (offline)
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { unifiedTranscriptionService } from '../../services/sermon-listener'
 import type { TranscriptionProvider } from '../../services/sermon-listener'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Info, Loader2 } from 'lucide-react'
+import { Info } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
     onClose?: () => void
 }
+
+const DEFAULT_WHISPER_CPP_ENDPOINT = 'http://127.0.0.1:8080/inference'
 
 export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps = {}) {
     const isDarkMode = useAppStore((state) => state.isDarkMode)
@@ -30,10 +34,18 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [autoDisplay, setAutoDisplay] = useState(sermonSettings?.autoDisplay ?? false)
     const [autoLookup, setAutoLookup] = useState(sermonSettings?.autoLookup ?? true)
     const [language, setLanguage] = useState(sermonSettings?.language || 'en-US')
+
     const [whisperEndpoint, setWhisperEndpoint] = useState(sermonSettings?.whisperEndpoint || '')
     const [whisperApiKey, setWhisperApiKey] = useState(sermonSettings?.whisperApiKey || '')
     const [whisperChunkDurationMs, setWhisperChunkDurationMs] = useState(
         sermonSettings?.whisperChunkDurationMs ?? 5000
+    )
+
+    const [whisperCppEndpoint, setWhisperCppEndpoint] = useState(
+        sermonSettings?.whisperCppEndpoint || DEFAULT_WHISPER_CPP_ENDPOINT
+    )
+    const [whisperCppChunkDurationMs, setWhisperCppChunkDurationMs] = useState(
+        sermonSettings?.whisperCppChunkDurationMs ?? 5000
     )
 
     const [isLoading, setIsLoading] = useState(false)
@@ -41,15 +53,21 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [providerError, setProviderError] = useState<string | null>(null)
     const [webSpeechAvailable, setWebSpeechAvailable] = useState(false)
     const [whisperAvailable, setWhisperAvailable] = useState(false)
+    const [whisperCppAvailable, setWhisperCppAvailable] = useState(false)
 
     useEffect(() => {
         unifiedTranscriptionService.isProviderAvailable('web-speech').then(setWebSpeechAvailable)
         unifiedTranscriptionService.isProviderAvailable('whisper').then(setWhisperAvailable)
+        unifiedTranscriptionService.isProviderAvailable('whisper-cpp').then(setWhisperCppAvailable)
     }, [])
 
     const isWhisperConfigured = useMemo(() => {
         return Boolean(whisperEndpoint.trim() || whisperApiKey.trim() || whisperAvailable)
     }, [whisperApiKey, whisperAvailable, whisperEndpoint])
+
+    const isWhisperCppConfigured = useMemo(() => {
+        return Boolean(whisperCppEndpoint.trim() || whisperCppAvailable)
+    }, [whisperCppAvailable, whisperCppEndpoint])
 
     const saveSettings = () => {
         setAppSettings({
@@ -61,6 +79,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 whisperEndpoint: whisperEndpoint.trim() || undefined,
                 whisperApiKey: whisperApiKey.trim() || undefined,
                 whisperChunkDurationMs: whisperChunkDurationMs > 0 ? whisperChunkDurationMs : 5000,
+                whisperCppEndpoint: whisperCppEndpoint.trim() || DEFAULT_WHISPER_CPP_ENDPOINT,
+                whisperCppChunkDurationMs: whisperCppChunkDurationMs > 0 ? whisperCppChunkDurationMs : 5000,
                 autoDisplay,
                 autoLookup,
                 language,
@@ -73,38 +93,48 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         setProviderError(null)
         setProvider(newProvider)
 
-        if (newProvider !== 'whisper') return
+        if (newProvider === 'web-speech') {
+            return
+        }
 
-        if (!isWhisperConfigured) {
+        if (newProvider === 'whisper' && !isWhisperConfigured) {
             setProvider('web-speech')
-            setProviderError('Whisper needs a transcription endpoint or API key before it can be used.')
+            setProviderError('Whisper API needs an endpoint or API key before it can be used.')
+            return
+        }
+
+        if (newProvider === 'whisper-cpp' && !isWhisperCppConfigured) {
+            setProvider('web-speech')
+            setProviderError('Whisper.cpp needs a local endpoint URL before it can be used.')
             return
         }
 
         setIsLoading(true)
         setLoadingProgress(0)
 
-        const success = await unifiedTranscriptionService.setProvider('whisper', {
+        const success = await unifiedTranscriptionService.setProvider(newProvider, {
             whisperModel,
             language: language.split('-')[0],
             whisperEndpoint: whisperEndpoint.trim() || undefined,
             whisperApiKey: whisperApiKey.trim() || undefined,
             whisperChunkDurationMs,
+            whisperCppEndpoint: whisperCppEndpoint.trim() || DEFAULT_WHISPER_CPP_ENDPOINT,
+            whisperCppChunkDurationMs,
             onProgress: setLoadingProgress,
         })
 
         setIsLoading(false)
         if (!success) {
             setProvider('web-speech')
-            setProviderError('Failed to initialize Whisper provider. Check endpoint credentials and try again.')
+            setProviderError(`Failed to initialize ${newProvider} provider. Check settings and try again.`)
         }
     }
 
     const modelDescriptions = {
         tiny: 'Fastest (maps to lightweight API model)',
         base: 'Balanced (recommended)',
-        small: 'Higher quality (if supported by endpoint)',
-        medium: 'Highest quality (if supported by endpoint)',
+        small: 'Higher quality (if endpoint supports it)',
+        medium: 'Highest quality (if endpoint supports it)',
     }
 
     return (
@@ -128,18 +158,11 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             <div>
                                 <div className="font-medium">Web Speech API</div>
                                 <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    Built-in browser speech recognition
+                                    Browser-native streaming transcription
                                 </div>
                             </div>
                             {provider === 'web-speech' && (
                                 <IconWrapper name="i-bx-check" className="text-blue-500" />
-                            )}
-                        </div>
-                        <div className="mt-2 flex gap-4 text-xs">
-                            <span className="text-green-500">✓ No extra backend required</span>
-                            <span className="text-green-500">✓ Lowest latency</span>
-                            {!webSpeechAvailable && (
-                                <span className="text-red-500">✗ Not supported in this browser</span>
                             )}
                         </div>
                     </button>
@@ -156,38 +179,55 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     >
                         <div className="flex items-center justify-between">
                             <div>
-                                <div className="font-medium">Whisper-Compatible Endpoint</div>
+                                <div className="font-medium">Whisper API Endpoint</div>
                                 <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    Chunked microphone upload to your transcription API
+                                    Chunked upload to remote transcription API
                                 </div>
                             </div>
-                            {isLoading ? (
-                                <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-                            ) : provider === 'whisper' ? (
+                            {provider === 'whisper' && (
                                 <IconWrapper name="i-bx-check" className="text-blue-500" />
-                            ) : null}
+                            )}
                         </div>
-                        <div className="mt-2 flex gap-4 text-xs">
-                            <span className="text-green-500">✓ Consistent across browsers</span>
-                            <span className="text-amber-500">⚠ Requires endpoint config</span>
-                        </div>
+                    </button>
 
-                        {isLoading && (
-                            <div className="mt-3">
-                                <div className="flex justify-between text-xs mb-1">
-                                    <span>Initializing provider...</span>
-                                    <span>{Math.round(loadingProgress)}%</span>
-                                </div>
-                                <div className={`h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
-                                    <div
-                                        className="h-full bg-blue-500 rounded-full transition-all"
-                                        style={{ width: `${loadingProgress}%` }}
-                                    />
+                    <button
+                        onClick={() => !isLoading && handleProviderChange('whisper-cpp')}
+                        disabled={isLoading}
+                        className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'whisper-cpp'
+                            ? 'border-blue-500 bg-blue-500/10'
+                            : isDarkMode
+                                ? 'border-gray-700 hover:border-gray-600'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                    >
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="font-medium">Whisper.cpp Local (Offline)</div>
+                                <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    Sends audio chunks to local whisper.cpp server
                                 </div>
                             </div>
-                        )}
+                            {provider === 'whisper-cpp' && (
+                                <IconWrapper name="i-bx-check" className="text-blue-500" />
+                            )}
+                        </div>
                     </button>
                 </div>
+
+                {isLoading && (
+                    <div className="mt-3">
+                        <div className="flex justify-between text-xs mb-1">
+                            <span>Initializing provider...</span>
+                            <span>{Math.round(loadingProgress)}%</span>
+                        </div>
+                        <div className={`h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                            <div
+                                className="h-full bg-blue-500 rounded-full transition-all"
+                                style={{ width: `${loadingProgress}%` }}
+                            />
+                        </div>
+                    </div>
+                )}
             </div>
 
             {providerError && (
@@ -199,7 +239,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             {provider === 'whisper' && (
                 <div className="mb-6 space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-2">Whisper Endpoint URL</label>
+                        <label className="block text-sm font-medium mb-2">Whisper API Endpoint URL</label>
                         <input
                             value={whisperEndpoint}
                             onChange={(event) => setWhisperEndpoint(event.target.value)}
@@ -209,9 +249,6 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                                 : 'bg-white border-gray-300'
                                 }`}
                         />
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Endpoint should accept multipart audio and return JSON with a `text` field.
-                        </p>
                     </div>
 
                     <div>
@@ -240,9 +277,6 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                                 : 'bg-white border-gray-300'
                                 }`}
                         />
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Lower values reduce delay but increase request volume.
-                        </p>
                     </div>
 
                     <div>
@@ -269,7 +303,45 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         </div>
                         <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                             <Info className="inline w-4 h-4 mr-1" />
-                            Keep `base` unless your endpoint documents a different best model.
+                            Keep `base` unless your API endpoint recommends another model.
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {provider === 'whisper-cpp' && (
+                <div className="mb-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-2">Whisper.cpp Endpoint URL</label>
+                        <input
+                            value={whisperCppEndpoint}
+                            onChange={(event) => setWhisperCppEndpoint(event.target.value)}
+                            placeholder={DEFAULT_WHISPER_CPP_ENDPOINT}
+                            className={`w-full p-2 rounded-lg border ${isDarkMode
+                                ? 'bg-gray-700 border-gray-600 text-white'
+                                : 'bg-white border-gray-300'
+                                }`}
+                        />
+                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Run whisper.cpp server locally and point this to its `/inference` endpoint.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-2">Chunk Duration (ms)</label>
+                        <input
+                            type="number"
+                            min={1000}
+                            step={500}
+                            value={whisperCppChunkDurationMs}
+                            onChange={(event) => setWhisperCppChunkDurationMs(Number(event.target.value || 5000))}
+                            className={`w-full p-2 rounded-lg border ${isDarkMode
+                                ? 'bg-gray-700 border-gray-600 text-white'
+                                : 'bg-white border-gray-300'
+                                }`}
+                        />
+                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Lower values reduce delay but increase CPU/network calls to local server.
                         </p>
                     </div>
                 </div>

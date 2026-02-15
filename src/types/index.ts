@@ -314,8 +314,8 @@ export interface AppSettings {
     sermonListener?: {
         /** Enable sermon listener feature */
         enabled?: boolean
-        /** Transcription provider: 'web-speech' | 'whisper' */
-        transcriptionProvider?: 'web-speech' | 'whisper'
+        /** Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' */
+        transcriptionProvider?: 'web-speech' | 'whisper' | 'whisper-cpp'
         /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
         whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
         /** Optional server endpoint for chunked transcription */
@@ -324,6 +324,10 @@ export interface AppSettings {
         whisperApiKey?: string
         /** Chunk size in milliseconds for realtime transcription */
         whisperChunkDurationMs?: number
+        /** Local whisper.cpp server endpoint */
+        whisperCppEndpoint?: string
+        /** Chunk size for whisper.cpp local transcription */
+        whisperCppChunkDurationMs?: number
         /** Auto-display detected verses */
         autoDisplay?: boolean
         /** Auto-lookup detected verses */

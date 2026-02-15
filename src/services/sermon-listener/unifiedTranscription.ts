@@ -7,8 +7,9 @@
 
 import { speechRecognitionService } from './speechRecognition'
 import { whisperTranscriptionService } from './whisperTranscription'
+import { whisperCppTranscriptionService } from './whisperCppTranscription'
 
-export type TranscriptionProvider = 'web-speech' | 'whisper'
+export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp'
 
 export interface UnifiedTranscriptionOptions {
     provider?: TranscriptionProvider
@@ -25,6 +26,8 @@ export interface UnifiedTranscriptionOptions {
     whisperEndpoint?: string
     whisperApiKey?: string
     whisperChunkDurationMs?: number
+    whisperCppEndpoint?: string
+    whisperCppChunkDurationMs?: number
     onProgress?: (progress: number) => void
 }
 
@@ -50,6 +53,7 @@ class UnifiedTranscriptionService {
     private error: string | null = null
     private options: UnifiedTranscriptionOptions = {}
     private whisperInitialized = false
+    private whisperCppInitialized = false
 
     /**
      * Check if a provider is available
@@ -60,6 +64,8 @@ class UnifiedTranscriptionService {
                 return speechRecognitionService.isSupported()
             case 'whisper':
                 return whisperTranscriptionService.isConfigured()
+            case 'whisper-cpp':
+                return whisperCppTranscriptionService.isConfigured()
             default:
                 return false
         }
@@ -75,7 +81,11 @@ class UnifiedTranscriptionService {
             isReady: this.isReady,
             isLoading: this.isLoading,
             error: this.error,
-            modelLoaded: this.currentProvider === 'whisper' ? this.whisperInitialized : undefined,
+            modelLoaded: this.currentProvider === 'whisper'
+                ? this.whisperInitialized
+                : this.currentProvider === 'whisper-cpp'
+                    ? this.whisperCppInitialized
+                    : undefined,
         }
     }
 
@@ -116,6 +126,29 @@ class UnifiedTranscriptionService {
             }
         }
 
+        if (provider === 'whisper-cpp') {
+            this.isLoading = true
+            this.options.onStatusChange?.(this.getStatus())
+
+            const initialized = await whisperCppTranscriptionService.init({
+                language: options?.language || 'en',
+                endpoint: options?.whisperCppEndpoint,
+                chunkDurationMs: options?.whisperCppChunkDurationMs,
+                onProgress: options?.onProgress,
+                onStatus: (status) => console.log('[Whisper.cpp]', status),
+            })
+
+            this.whisperCppInitialized = initialized
+            this.isLoading = false
+            this.isReady = initialized
+
+            if (!initialized) {
+                this.error = 'Failed to initialize Whisper.cpp'
+                this.options.onStatusChange?.(this.getStatus())
+                return false
+            }
+        }
+
         if (provider === 'web-speech' && !speechRecognitionService.isSupported()) {
             this.error = 'Web Speech API is not supported in this browser'
             this.isReady = false
@@ -123,7 +156,11 @@ class UnifiedTranscriptionService {
             return false
         }
 
-        this.isReady = provider === 'web-speech' ? speechRecognitionService.isSupported() : this.whisperInitialized
+        this.isReady = provider === 'web-speech'
+            ? speechRecognitionService.isSupported()
+            : provider === 'whisper'
+                ? this.whisperInitialized
+                : this.whisperCppInitialized
         this.options.onStatusChange?.(this.getStatus())
         return true
     }
@@ -164,9 +201,11 @@ class UnifiedTranscriptionService {
         try {
             if (this.currentProvider === 'web-speech') {
                 return await this.startWebSpeech()
-            } else {
+            }
+            if (this.currentProvider === 'whisper') {
                 return await this.startWhisper()
             }
+            return await this.startWhisperCpp()
         } catch (err) {
             this.error = err instanceof Error ? err.message : 'Failed to start transcription'
             this.options.onStatusChange?.(this.getStatus())
@@ -253,6 +292,49 @@ class UnifiedTranscriptionService {
     }
 
     /**
+     * Start whisper.cpp local transcription
+     */
+    private async startWhisperCpp(): Promise<boolean> {
+        if (!this.whisperCppInitialized) {
+            const initialized = await whisperCppTranscriptionService.init({
+                language: this.options.language || 'en',
+                endpoint: this.options.whisperCppEndpoint,
+                chunkDurationMs: this.options.whisperCppChunkDurationMs,
+                onProgress: this.options.onProgress,
+            })
+            if (!initialized) {
+                this.error = 'Whisper.cpp provider is not configured correctly.'
+                return false
+            }
+            this.whisperCppInitialized = true
+        }
+
+        const started = await whisperCppTranscriptionService.startRealtimeTranscription(
+            (result) => {
+                this.options.onResult?.(result.text, true, undefined)
+            },
+            (error) => {
+                this.error = error
+                this.isListening = false
+                this.options.onError?.(error)
+                this.options.onStatusChange?.(this.getStatus())
+            },
+            this.options.whisperCppChunkDurationMs
+        )
+
+        if (!started) {
+            this.error = 'Failed to start Whisper.cpp transcription stream'
+            this.options.onStatusChange?.(this.getStatus())
+            return false
+        }
+
+        this.isListening = true
+        this.options.onStart?.()
+        this.options.onStatusChange?.(this.getStatus())
+        return true
+    }
+
+    /**
      * Stop transcription
      */
     async stop(): Promise<void> {
@@ -260,8 +342,10 @@ class UnifiedTranscriptionService {
 
         if (this.currentProvider === 'web-speech') {
             speechRecognitionService.stop()
-        } else {
+        } else if (this.currentProvider === 'whisper') {
             await whisperTranscriptionService.stopRealtimeTranscription()
+        } else {
+            await whisperCppTranscriptionService.stopRealtimeTranscription()
         }
 
         this.isListening = false

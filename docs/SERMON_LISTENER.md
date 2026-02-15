@@ -189,7 +189,10 @@ import { FeatureGatedSermonListener } from '@/components/sermon-listener'
 
 ## Settings & Configuration
 
-The Sermon Listener can be configured through app settings, allowing users to toggle between Web Speech API and a Whisper-compatible transcription endpoint.
+The Sermon Listener can be configured through app settings, allowing users to switch between:
+- Web Speech API
+- Whisper API endpoint
+- Whisper.cpp local endpoint (offline)
 
 ### Settings Interface
 
@@ -197,8 +200,8 @@ The Sermon Listener can be configured through app settings, allowing users to to
 interface SermonListenerSettings {
   /** Enable sermon listener feature */
   enabled?: boolean
-  /** Transcription provider: 'web-speech' | 'whisper' */
-  transcriptionProvider?: 'web-speech' | 'whisper'
+  /** Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' */
+  transcriptionProvider?: 'web-speech' | 'whisper' | 'whisper-cpp'
   /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
   whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
   /** Optional endpoint for server-side transcription */
@@ -207,6 +210,10 @@ interface SermonListenerSettings {
   whisperApiKey?: string
   /** Chunk size for realtime uploads */
   whisperChunkDurationMs?: number
+  /** Local whisper.cpp endpoint (default: http://127.0.0.1:8080/inference) */
+  whisperCppEndpoint?: string
+  /** Chunk size for whisper.cpp uploads */
+  whisperCppChunkDurationMs?: number
   /** Auto-display detected verses */
   autoDisplay?: boolean
   /** Auto-lookup detected verses */
@@ -274,15 +281,40 @@ VITE_TRANSCRIPTION_ENDPOINT=https://your-api.example.com/transcribe
 
 # Optional: API key if calling an authenticated endpoint directly
 VITE_OPENAI_API_KEY=your_api_key_here
+
+# Optional: local whisper.cpp server endpoint
+VITE_WHISPER_CPP_ENDPOINT=http://127.0.0.1:8080/inference
 ```
+
+## Running Whisper.cpp Locally (Offline Mode)
+
+1. Clone and build whisper.cpp:
+```bash
+git clone https://github.com/ggml-org/whisper.cpp
+cd whisper.cpp
+make
+```
+
+2. Download a model (example):
+```bash
+./models/download-ggml-model.sh base.en
+```
+
+3. Start the local server (common binary name is `whisper-server`):
+```bash
+./build/bin/whisper-server -m ./models/ggml-base.en.bin --host 127.0.0.1 --port 8080
+```
+
+4. In Selah settings, select `Whisper.cpp Local (Offline)` and set endpoint:
+`http://127.0.0.1:8080/inference`
 
 ## Troubleshooting `network` Errors
 
 1. Ensure app is served on HTTPS (or localhost).
 2. Keep microphone permission enabled for the current site.
 3. Keep the tab active while listening.
-4. Use Web Speech API as primary provider for lowest latency.
-5. If you need deterministic cross-browser behavior, configure the Whisper endpoint provider.
+4. If browser speech keeps returning `network`, switch to `whisper-cpp` offline provider.
+5. For whisper.cpp provider, start a local server from the whisper.cpp repo and set the endpoint.
 
 ## Browser Support
 

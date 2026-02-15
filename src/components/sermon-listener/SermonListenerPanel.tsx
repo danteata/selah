@@ -75,8 +75,10 @@ export function SermonListenerPanel({
     // Not supported message
     if (!isSupported) {
         const unsupportedMessage = provider === 'whisper'
-            ? 'Whisper provider is not configured. Add a transcription endpoint in Sermon Listener settings, or switch to Web Speech API.'
-            : "Your browser doesn't support the Web Speech API. Please try Chrome, Edge, or Safari."
+            ? 'Whisper API provider is not configured. Add a transcription endpoint in settings, or switch to Web Speech API.'
+            : provider === 'whisper-cpp'
+                ? 'Whisper.cpp provider is not configured. Set a local whisper.cpp endpoint in settings, or switch to Web Speech API.'
+                : "Your browser doesn't support the Web Speech API. Please try Chrome, Edge, or Safari."
 
         return (
             <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>

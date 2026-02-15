@@ -140,12 +140,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     useEffect(() => {
         const checkSupport = async () => {
             const available = await unifiedTranscriptionService.isProviderAvailable(provider)
-            if (!available && provider === 'whisper') {
+            if (!available && (provider === 'whisper' || provider === 'whisper-cpp')) {
                 const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
                 if (webSpeechAvailable) {
                     setProvider('web-speech')
                     setIsSupported(true)
-                    setError('Whisper is not configured. Falling back to Web Speech API.')
+                    const sourceProvider = provider === 'whisper-cpp' ? 'Whisper.cpp' : 'Whisper'
+                    setError(`${sourceProvider} is not configured. Falling back to Web Speech API.`)
                     return
                 }
             }
@@ -291,6 +292,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             whisperEndpoint: sermonSettings?.whisperEndpoint,
             whisperApiKey: sermonSettings?.whisperApiKey,
             whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
+            whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
+            whisperCppChunkDurationMs: sermonSettings?.whisperCppChunkDurationMs,
             onProgress: setModelLoadingProgress,
         })
 
@@ -309,6 +312,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         language,
         sermonSettings?.whisperApiKey,
         sermonSettings?.whisperChunkDurationMs,
+        sermonSettings?.whisperCppChunkDurationMs,
+        sermonSettings?.whisperCppEndpoint,
         sermonSettings?.whisperEndpoint,
         sermonSettings?.whisperModel,
     ])
@@ -339,6 +344,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             whisperEndpoint: sermonSettings?.whisperEndpoint,
             whisperApiKey: sermonSettings?.whisperApiKey,
             whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
+            whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
+            whisperCppChunkDurationMs: sermonSettings?.whisperCppChunkDurationMs,
             onStart: () => {
                 setIsListening(true)
                 setError(null)
@@ -384,6 +391,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         provider,
         sermonSettings?.whisperApiKey,
         sermonSettings?.whisperChunkDurationMs,
+        sermonSettings?.whisperCppChunkDurationMs,
+        sermonSettings?.whisperCppEndpoint,
         sermonSettings?.whisperEndpoint,
         sermonSettings?.whisperModel,
     ])

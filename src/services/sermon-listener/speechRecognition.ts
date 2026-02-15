@@ -117,6 +117,7 @@ export class SpeechRecognitionService {
     private fullTranscript: string[] = []
     private restartAttempts = 0
     private restartTimer: number | null = null
+    private consecutiveRecoverableErrors = 0
 
     constructor() {
         this.initialize()
@@ -158,6 +159,7 @@ export class SpeechRecognitionService {
             this.isListening = true
             this.error = null
             this.restartAttempts = 0
+            this.consecutiveRecoverableErrors = 0
             this.options.onStart?.()
         }
 
@@ -202,14 +204,29 @@ export class SpeechRecognitionService {
 
         this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
             const message = this.getErrorMessage(event.error, event.message)
-            this.error = message
+            const recoverable = this.isRecoverableError(event.error)
+
+            if (!recoverable) {
+                this.error = message
+            }
             this.isListening = false
-            this.options.onError?.(event.error, message)
+            if (!this.shouldBeListening) {
+                this.options.onError?.(event.error, message)
+                return
+            }
 
-            if (!this.shouldBeListening) return
-            if (!this.isRecoverableError(event.error)) return
+            if (!recoverable) {
+                this.options.onError?.(event.error, message)
+                return
+            }
 
-            this.scheduleRestart(`Speech recognition error: ${event.error}`)
+            this.consecutiveRecoverableErrors += 1
+            const scheduled = this.scheduleRestart(`Speech recognition error: ${event.error}`)
+            if (!scheduled) {
+                const finalMessage = 'Speech recognition could not recover from network interruptions. Switch to Whisper.cpp offline mode or retry.'
+                this.error = finalMessage
+                this.options.onError?.(event.error, finalMessage)
+            }
         }
 
         this.recognition.onspeechstart = () => {
@@ -274,6 +291,7 @@ export class SpeechRecognitionService {
         this.error = null
         this.shouldBeListening = true
         this.restartAttempts = 0
+        this.consecutiveRecoverableErrors = 0
         this.clearRestartTimer()
 
         // Warm up mic permission to avoid browser-specific audio-capture/network failures
@@ -393,20 +411,21 @@ export class SpeechRecognitionService {
         }
     }
 
-    private scheduleRestart(reason: string): void {
-        if (!this.recognition) return
-        if (this.restartTimer !== null) return
-        if (this.options.autoRestart === false) return
+    private scheduleRestart(reason: string): boolean {
+        if (!this.recognition) return false
+        if (this.restartTimer !== null) return true
+        if (this.options.autoRestart === false) return false
 
-        const maxAttempts = this.options.maxRestartAttempts ?? 5
+        const maxAttempts = this.options.maxRestartAttempts ?? 20
         if (this.restartAttempts >= maxAttempts) {
             this.shouldBeListening = false
             this.error = 'Speech recognition stopped after repeated connection errors. Please retry.'
-            this.options.onError?.('max-restarts-exceeded', this.error)
-            return
+            return false
         }
 
-        const delayMs = this.options.restartDelayMs ?? 750
+        const baseDelayMs = this.options.restartDelayMs ?? 600
+        const exponentialFactor = Math.min(this.consecutiveRecoverableErrors, 6)
+        const delayMs = Math.min(baseDelayMs * (2 ** exponentialFactor), 4500)
         this.restartAttempts += 1
         this.restartTimer = window.setTimeout(() => {
             this.restartTimer = null
@@ -419,6 +438,7 @@ export class SpeechRecognitionService {
                 this.scheduleRestart('Auto-restart failed')
             }
         }, delayMs)
+        return true
     }
 
     private isRecoverableError(error: string): boolean {
