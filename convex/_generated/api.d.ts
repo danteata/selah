@@ -16,6 +16,7 @@ import type * as slides from "../slides.js";
 import type * as songs from "../songs.js";
 import type * as templates from "../templates.js";
 import type * as users from "../users.js";
+import type * as verseEmbeddings from "../verseEmbeddings.js";
 
 import type {
   ApiFromModules,
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   songs: typeof songs;
   templates: typeof templates;
   users: typeof users;
+  verseEmbeddings: typeof verseEmbeddings;
 }>;
 
 /**

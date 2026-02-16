@@ -248,4 +248,35 @@ export default defineSchema({
         uploadedBy: v.string(),
     })
         .index("by_version_id", ["id"]),
+
+    // Verse Embeddings table - for semantic Bible verse search
+    // Used by AI sermon listener to detect paraphrased verses
+    verseEmbeddings: defineTable({
+        // Standardized reference (e.g., "John 3:16")
+        reference: v.string(),
+        // Book name (e.g., "John")
+        book: v.string(),
+        // Book number (1-66, for quick lookups)
+        bookNumber: v.number(),
+        // Chapter number
+        chapter: v.number(),
+        // Verse number
+        verse: v.number(),
+        // Verse text (for display and context)
+        text: v.string(),
+        // Bible version this embedding was generated from
+        version: v.string(),
+        // Embedding vector (384 dimensions for all-MiniLM-L6-v2)
+        embedding: v.array(v.float64()),
+    })
+        // Vector index for semantic similarity search
+        .vectorIndex("by_embedding", {
+            vectorField: "embedding",
+            dimensions: 384,
+            filterFields: ["book", "version"]
+        })
+        // Standard indexes for lookups
+        .index("by_reference", ["reference"])
+        .index("by_book_chapter", ["book", "chapter"])
+        .index("by_version", ["version"]),
 });

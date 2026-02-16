@@ -3,6 +3,7 @@
  * Combines speech recognition with Bible verse detection for real-time sermon listening
  * 
  * Supports both Web Speech API and Whisper.cpp transcription providers
+ * Includes semantic verse detection using local embeddings (Transformers.js)
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
@@ -14,8 +15,10 @@ import {
     detectVerses,
     extractVerseFromContext,
     verseToLabel,
-} from '../services/sermon-listener/verseDetection'
-import type { DetectedVerse } from '../services/sermon-listener/verseDetection'
+    getSemanticDetector,
+    resetSemanticDetector,
+} from '../services/sermon-listener'
+import type { DetectedVerse, SemanticVerseMatch } from '../services/sermon-listener'
 import type { Slide, Scripture, BibleVerse } from '../types'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
@@ -39,6 +42,8 @@ export interface SermonListenerOptions {
     minConfidence?: 'high' | 'medium' | 'low'
     /** Transcription provider override */
     provider?: TranscriptionProvider
+    /** Enable semantic verse detection (paraphrases) */
+    enableSemanticDetection?: boolean
     /** Callback when a verse is detected */
     onVerseDetected?: (verse: DetectedVerse, scripture: Scripture | null) => void
     /** Callback when transcription updates */
@@ -74,6 +79,12 @@ export interface SermonListenerState {
     modelLoadingProgress: number
     /** Saved transcripts */
     savedTranscripts: SavedSermonTranscript[]
+    /** Whether semantic detection is enabled */
+    semanticDetectionEnabled: boolean
+    /** Whether semantic detector is ready */
+    semanticDetectorReady: boolean
+    /** Whether semantic search is in progress */
+    isSemanticSearching: boolean
 }
 
 export interface SermonListenerActions {
@@ -146,6 +157,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const autoLookup = autoLookupOverride ?? sermonSettings?.autoLookup ?? true
     const autoDisplay = autoDisplayOverride ?? sermonSettings?.autoDisplay ?? false
     const minConfidence = minConfidenceOverride ?? 'high'
+    const enableSemanticDetection = options.enableSemanticDetection ?? true
 
     // Determine provider from settings or override
     const getInitialProvider = (): TranscriptionProvider => {
@@ -168,6 +180,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [modelLoadingProgress, setModelLoadingProgress] = useState(0)
     const [savedTranscripts, setSavedTranscripts] = useState<SavedSermonTranscript[]>(() => readSavedTranscripts())
 
+    // Semantic detection state
+    const [semanticDetectorReady, setSemanticDetectorReady] = useState(false)
+    const [isSemanticSearching, setIsSemanticSearching] = useState(false)
+
     // Refs for callback stability
     const optionsRef = useRef(options)
     optionsRef.current = options
@@ -175,6 +191,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Track processed verses to avoid duplicates
     const processedVersesRef = useRef<Set<string>>(new Set())
     const transcriptBufferRef = useRef('')
+
+    // Semantic detector ref
+    const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
     // Check support on mount
     useEffect(() => {
@@ -194,6 +213,46 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
         checkSupport()
     }, [provider])
+
+    // Initialize semantic detector
+    useEffect(() => {
+        if (!enableSemanticDetection) return
+
+        const initDetector = async () => {
+            try {
+                const convexUrl = import.meta.env.VITE_CONVEX_URL
+                if (!convexUrl) {
+                    console.warn('[SemanticDetector] No Convex URL found, semantic detection disabled')
+                    return
+                }
+
+                const detector = getSemanticDetector({
+                    enabled: true,
+                    version: defaultBibleVersion,
+                })
+
+                const result = await detector.initialize(convexUrl)
+
+                if (result.ready) {
+                    semanticDetectorRef.current = detector
+                    setSemanticDetectorReady(true)
+                    console.log('[SemanticDetector] Initialized successfully')
+                } else {
+                    console.warn('[SemanticDetector] Initialization failed:', result.error)
+                }
+            } catch (error) {
+                console.error('[SemanticDetector] Initialization error:', error)
+            }
+        }
+
+        initDetector()
+
+        return () => {
+            resetSemanticDetector()
+            semanticDetectorRef.current = null
+            setSemanticDetectorReady(false)
+        }
+    }, [enableSemanticDetection, defaultBibleVersion])
 
     /**
      * Look up a verse and get its content
@@ -254,6 +313,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const processTranscript = useCallback((text: string) => {
         if (!text) return
 
+        // Regex-based verse detection
         const verses = detectVerses(text)
         const contextVerse = extractVerseFromContext(text, 300)
         const candidateVerses = contextVerse
@@ -316,7 +376,56 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 optionsRef.current.onVerseDetected?.(verse, null)
             }
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, activeSchedule, appendActiveSlide, setLiveSlide])
+
+        // Semantic verse detection (for paraphrases)
+        if (semanticDetectorReady && semanticDetectorRef.current && text.length >= 50) {
+            setIsSemanticSearching(true)
+            // Use addText which handles throttling internally
+            semanticDetectorRef.current.addText(text).then((semanticMatches) => {
+                if (!semanticMatches) return // Throttled or buffer too short
+
+                for (const match of semanticMatches) {
+                    // Check if already processed
+                    if (processedVersesRef.current.has(match.reference)) continue
+
+                    // Mark as processed
+                    processedVersesRef.current.add(match.reference)
+
+                    // Convert to DetectedVerse format
+                    const detectedVerse: DetectedVerse = {
+                        raw: match.reference,
+                        reference: match.reference,
+                        book: match.book,
+                        chapter: match.chapter,
+                        verseStart: match.verse,
+                        confidence: match.score >= 0.85 ? 'high' : match.score >= 0.75 ? 'medium' : 'low',
+                        startIndex: 0,
+                        endIndex: text.length,
+                    }
+
+                    // Add to detected verses
+                    setDetectedVerses(prev => {
+                        if (prev.some(v => v.reference === match.reference)) return prev
+                        return [...prev, detectedVerse]
+                    })
+
+                    // Set as current verse
+                    setCurrentVerse(detectedVerse)
+
+                    // Auto-lookup if enabled
+                    if (autoLookup) {
+                        lookupVerse(detectedVerse).then(scripture => {
+                            optionsRef.current.onVerseDetected?.(detectedVerse, scripture)
+                        })
+                    }
+                }
+            }).catch((error: Error) => {
+                console.error('[SemanticDetector] Search error:', error)
+            }).finally(() => {
+                setIsSemanticSearching(false)
+            })
+        }
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, activeSchedule, appendActiveSlide, setLiveSlide, semanticDetectorReady])
 
     /**
      * Set transcription provider
@@ -561,6 +670,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         isModelLoading,
         modelLoadingProgress,
         savedTranscripts,
+        semanticDetectionEnabled: enableSemanticDetection,
+        semanticDetectorReady,
+        isSemanticSearching,
         // Actions
         start,
         stop,
