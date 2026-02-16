@@ -1,6 +1,6 @@
 import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
-import { Moon, Sun, Mic } from 'lucide-react'
+import { Moon, Sun, Mic, Shield, Database, Book, X } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { DashboardLayout } from '../components'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates, useFileUrl } from '../hooks'
@@ -13,6 +13,9 @@ import { AddAlertModal } from '../components/alerts/AddAlertModal'
 import { AddCountdownModal, type CountdownData } from '../components/countdown/AddCountdownModal'
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
+import { ChurchContext } from '../components/layout/ChurchContext'
+import { BibleVersionUploader, VerseEmbeddingSeeder } from '../components/admin'
+import { useUserRole } from '../hooks/useUserRole'
 
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import type { Slide } from '../types'
@@ -46,6 +49,13 @@ export default function Dashboard() {
     // Save as template modal state
     const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false)
     const [slideToSaveAsTemplate, setSlideToSaveAsTemplate] = useState<Slide | null>(null)
+
+    // Admin panel state
+    const [showAdminPanel, setShowAdminPanel] = useState(false)
+    const [adminTab, setAdminTab] = useState<'bible' | 'embeddings'>('bible')
+
+    // Get user role for admin access
+    const { isSuperadmin, canAccessAdmin } = useUserRole()
 
     // Templates hook for creating custom templates
     const { createTemplate } = useTemplates()
@@ -217,6 +227,23 @@ export default function Dashboard() {
                         </div>
 
                         <div className="flex items-center gap-4">
+                            {/* Church Context Switcher (for superadmin) */}
+                            <ChurchContext />
+
+                            {/* Admin Panel Toggle (for superadmin/admin) */}
+                            {canAccessAdmin && (
+                                <button
+                                    onClick={() => setShowAdminPanel(!showAdminPanel)}
+                                    className={`p-2 rounded-lg transition-colors ${showAdminPanel
+                                        ? 'bg-purple-500 text-white'
+                                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                        }`}
+                                    title="Admin Panel"
+                                >
+                                    <Shield className="w-5 h-5" />
+                                </button>
+                            )}
+
                             {/* Sermon Listener Toggle */}
                             <button
                                 onClick={() => setShowSermonListener(!showSermonListener)}
@@ -345,6 +372,69 @@ export default function Dashboard() {
                     isOpen={modals.scheduleModal}
                     onClose={() => closeModal('scheduleModal')}
                 />
+            )}
+
+            {/* Admin Panel Modal */}
+            {showAdminPanel && (
+                <div className="fixed inset-0 z-50 overflow-y-auto">
+                    <div className="flex min-h-full items-center justify-center p-4">
+                        <div
+                            className="fixed inset-0 bg-black/50 transition-opacity"
+                            onClick={() => setShowAdminPanel(false)}
+                        />
+                        <div className="relative bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] overflow-hidden">
+                            {/* Header */}
+                            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                <div className="flex items-center gap-3">
+                                    <Shield className="w-5 h-5 text-purple-500" />
+                                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                        Admin Panel
+                                    </h2>
+                                </div>
+                                <button
+                                    onClick={() => setShowAdminPanel(false)}
+                                    className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            {/* Tabs */}
+                            <div className="flex border-b border-gray-200 dark:border-gray-700">
+                                <button
+                                    onClick={() => setAdminTab('bible')}
+                                    className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'bible'
+                                        ? 'border-purple-500 text-purple-600 dark:text-purple-400'
+                                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                                        }`}
+                                >
+                                    <Book className="w-4 h-4" />
+                                    Bible Versions
+                                </button>
+                                <button
+                                    onClick={() => setAdminTab('embeddings')}
+                                    className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'embeddings'
+                                        ? 'border-purple-500 text-purple-600 dark:text-purple-400'
+                                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                                        }`}
+                                >
+                                    <Database className="w-4 h-4" />
+                                    Verse Embeddings
+                                </button>
+                            </div>
+
+                            {/* Content */}
+                            <div className="p-6 overflow-y-auto max-h-[calc(80vh-140px)]">
+                                {adminTab === 'bible' && (
+                                    <BibleVersionUploader onClose={() => setShowAdminPanel(false)} />
+                                )}
+                                {adminTab === 'embeddings' && (
+                                    <VerseEmbeddingSeeder onClose={() => setShowAdminPanel(false)} />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     )
