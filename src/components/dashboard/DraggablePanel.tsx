@@ -41,37 +41,37 @@ export function DraggablePanel({
     const [isFullscreen, setIsFullscreen] = useState(false)
     const panelRef = useRef<HTMLDivElement>(null)
 
-    // Accent color mappings for visual distinction
-    const accentColors: Record<string, { bg: string; border: string; text: string; glow: string }> = {
+    // Accent color mappings
+    const accentColors: Record<string, { bg: string; border: string; text: string; headerAccent: string }> = {
         blue: {
             bg: 'bg-blue-500/10',
-            border: 'border-blue-500/30',
-            text: 'text-blue-400',
-            glow: 'shadow-blue-500/20',
+            border: 'border-blue-400/40',
+            text: 'text-blue-500',
+            headerAccent: 'from-blue-500/8 to-transparent',
         },
         purple: {
             bg: 'bg-purple-500/10',
-            border: 'border-purple-500/30',
-            text: 'text-purple-400',
-            glow: 'shadow-purple-500/20',
+            border: 'border-purple-400/40',
+            text: 'text-purple-500',
+            headerAccent: 'from-purple-500/8 to-transparent',
         },
         emerald: {
             bg: 'bg-emerald-500/10',
-            border: 'border-emerald-500/30',
-            text: 'text-emerald-400',
-            glow: 'shadow-emerald-500/20',
+            border: 'border-emerald-400/40',
+            text: 'text-emerald-500',
+            headerAccent: 'from-emerald-500/8 to-transparent',
         },
         amber: {
             bg: 'bg-amber-500/10',
-            border: 'border-amber-500/30',
-            text: 'text-amber-400',
-            glow: 'shadow-amber-500/20',
+            border: 'border-amber-400/40',
+            text: 'text-amber-500',
+            headerAccent: 'from-amber-500/8 to-transparent',
         },
         rose: {
             bg: 'bg-rose-500/10',
-            border: 'border-rose-500/30',
-            text: 'text-rose-400',
-            glow: 'shadow-rose-500/20',
+            border: 'border-rose-400/40',
+            text: 'text-rose-500',
+            headerAccent: 'from-rose-500/8 to-transparent',
         },
     }
 
@@ -95,238 +95,214 @@ export function DraggablePanel({
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
     }, [])
 
+    // Close the dropdown when clicking outside
+    useEffect(() => {
+        if (!showMenu) return
+        const handleClickOutside = (e: MouseEvent) => {
+            if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+                setShowMenu(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [showMenu])
+
     return (
         <div
             ref={panelRef}
             className={`
-        h-full flex flex-col
-        bg-white/80 dark:bg-gray-900/80
-        backdrop-blur-xl
-        rounded-2xl
-        border border-gray-200/50 dark:border-gray-700/50
-        shadow-lg shadow-gray-200/20 dark:shadow-black/30
-        transition-all duration-300 ease-out
-        hover:shadow-xl hover:shadow-gray-200/30 dark:hover:shadow-black/40
-        ${isHovered ? `${colors.border}` : ''}
-        ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}
-        ${className}
-      `}
+                draggable-panel
+                ${isCollapsed ? 'draggable-panel--collapsed' : ''}
+                h-full flex flex-col
+                bg-white dark:bg-gray-900/95
+                rounded-xl
+                border border-gray-200/60 dark:border-gray-700/60
+                shadow-sm
+                transition-shadow duration-200 ease-out
+                ${isHovered ? `shadow-md ${colors.border}` : ''}
+                ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}
+                ${className}
+                overflow-hidden
+            `}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
         >
-            {/* Panel Header */}
+            {/* Panel Header — always visible, acts as drag handle */}
             <div
                 className={`
-          flex items-center justify-between
-          px-4 py-3
-          bg-gradient-to-r from-gray-50/80 to-transparent
-          dark:from-gray-800/50 dark:to-transparent
-          border-b border-gray-100 dark:border-gray-800
-          rounded-t-2xl
-          cursor-move
-          select-none
-          transition-colors duration-200
-          ${isHovered ? `${colors.bg}` : ''}
-        `}
+                    flex items-center justify-between
+                    px-3 py-2
+                    bg-gradient-to-r ${isHovered ? colors.headerAccent : 'from-gray-50/60 to-transparent dark:from-gray-800/40 dark:to-transparent'}
+                    ${!isCollapsed ? 'border-b border-gray-100 dark:border-gray-800/60' : ''}
+                    cursor-move
+                    select-none
+                    transition-all duration-200
+                    flex-shrink-0
+                `}
             >
                 {/* Left: Drag Handle + Icon + Title */}
-                <div className="flex items-center gap-3">
-                    {/* Drag Handle */}
-                    <div
-                        className={`
-              flex items-center justify-center
-              w-6 h-6
-              text-gray-400 dark:text-gray-500
-              hover:text-gray-600 dark:hover:text-gray-300
-              transition-colors duration-200
-              cursor-grab active:cursor-grabbing
-            `}
-                    >
-                        <GripVertical className="w-4 h-4" />
+                <div className="flex items-center gap-2 min-w-0">
+                    <div className="text-gray-300 dark:text-gray-600 hover:text-gray-400 dark:hover:text-gray-400 transition-colors cursor-grab active:cursor-grabbing flex-shrink-0">
+                        <GripVertical className="w-3.5 h-3.5" />
                     </div>
 
-                    {/* Icon */}
-                    <div className={`${colors.text}`}>
+                    <div className={`${colors.text} flex-shrink-0`}>
                         {icon}
                     </div>
 
-                    {/* Title */}
-                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 tracking-wide">
+                    <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-300 truncate">
                         {title}
                     </h3>
                 </div>
 
                 {/* Right: Actions */}
-                <div className="flex items-center gap-1">
-                    {/* Collapse Button */}
+                <div className="flex items-center gap-0.5 flex-shrink-0">
+                    {/* Collapse/Expand Button */}
                     {onCollapse && (
                         <button
-                            onClick={onCollapse}
-                            className={`
-                p-1.5 rounded-lg
-                text-gray-400 dark:text-gray-500
-                hover:text-gray-600 dark:hover:text-gray-300
-                hover:bg-gray-100 dark:hover:bg-gray-800
-                transition-all duration-200
-              `}
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                onCollapse()
+                            }}
+                            className="
+                                p-1 rounded-md
+                                text-gray-400 dark:text-gray-500
+                                hover:text-gray-600 dark:hover:text-gray-300
+                                hover:bg-gray-100/80 dark:hover:bg-gray-800/80
+                                transition-all duration-150
+                            "
                             title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
                         >
                             {isCollapsed ? (
-                                <ChevronDown className="w-4 h-4" />
+                                <ChevronDown className="w-3.5 h-3.5" />
                             ) : (
-                                <ChevronUp className="w-4 h-4" />
+                                <ChevronUp className="w-3.5 h-3.5" />
                             )}
                         </button>
                     )}
 
-                    {/* Fullscreen Button */}
-                    <button
-                        onClick={handleFullscreen}
-                        className={`
-              p-1.5 rounded-lg
-              text-gray-400 dark:text-gray-500
-              hover:text-gray-600 dark:hover:text-gray-300
-              hover:bg-gray-100 dark:hover:bg-gray-800
-              transition-all duration-200
-            `}
-                        title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                    >
-                        {isFullscreen ? (
-                            <Minimize2 className="w-4 h-4" />
-                        ) : (
-                            <Maximize2 className="w-4 h-4" />
-                        )}
-                    </button>
+                    {/* Only show these controls when expanded */}
+                    {!isCollapsed && (
+                        <>
+                            {/* Fullscreen Button */}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleFullscreen()
+                                }}
+                                className="
+                                    p-1 rounded-md
+                                    text-gray-400 dark:text-gray-500
+                                    hover:text-gray-600 dark:hover:text-gray-300
+                                    hover:bg-gray-100/80 dark:hover:bg-gray-800/80
+                                    transition-all duration-150
+                                "
+                                title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                            >
+                                {isFullscreen ? (
+                                    <Minimize2 className="w-3.5 h-3.5" />
+                                ) : (
+                                    <Maximize2 className="w-3.5 h-3.5" />
+                                )}
+                            </button>
 
-                    {/* More Options */}
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowMenu(!showMenu)}
-                            className={`
-                p-1.5 rounded-lg
-                text-gray-400 dark:text-gray-500
-                hover:text-gray-600 dark:hover:text-gray-300
-                hover:bg-gray-100 dark:hover:bg-gray-800
-                transition-all duration-200
-              `}
-                        >
-                            <MoreHorizontal className="w-4 h-4" />
-                        </button>
-
-                        {/* Dropdown Menu */}
-                        <AnimatePresence>
-                            {showMenu && (
-                                <motion.div
-                                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                    transition={{ duration: 0.15 }}
-                                    className="absolute right-0 top-full mt-1 z-50"
+                            {/* More Options */}
+                            <div className="relative">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        setShowMenu(!showMenu)
+                                    }}
+                                    className="
+                                        p-1 rounded-md
+                                        text-gray-400 dark:text-gray-500
+                                        hover:text-gray-600 dark:hover:text-gray-300
+                                        hover:bg-gray-100/80 dark:hover:bg-gray-800/80
+                                        transition-all duration-150
+                                    "
                                 >
-                                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 py-1 min-w-[140px]">
-                                        <button
-                                            onClick={() => {
-                                                onCollapse?.()
-                                                setShowMenu(false)
-                                            }}
-                                            className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-                                        >
-                                            {isCollapsed ? (
-                                                <ChevronDown className="w-4 h-4" />
-                                            ) : (
-                                                <ChevronUp className="w-4 h-4" />
-                                            )}
-                                            {isCollapsed ? 'Expand' : 'Collapse'}
-                                        </button>
-                                        {isClosable && onClose && (
-                                            <button
-                                                onClick={() => {
-                                                    onClose()
-                                                    setShowMenu(false)
-                                                }}
-                                                className="w-full px-3 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
-                                            >
-                                                <X className="w-4 h-4" />
-                                                Close Panel
-                                            </button>
-                                        )}
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
+                                    <MoreHorizontal className="w-3.5 h-3.5" />
+                                </button>
 
-                    {/* Close Button */}
+                                {/* Dropdown Menu */}
+                                <AnimatePresence>
+                                    {showMenu && (
+                                        <motion.div
+                                            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                                            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                                            transition={{ duration: 0.12 }}
+                                            className="absolute right-0 top-full mt-1 z-50"
+                                        >
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[130px]">
+                                                <button
+                                                    onClick={() => {
+                                                        onCollapse?.()
+                                                        setShowMenu(false)
+                                                    }}
+                                                    className="w-full px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                                                >
+                                                    <ChevronUp className="w-3.5 h-3.5" />
+                                                    Collapse
+                                                </button>
+                                                {isClosable && onClose && (
+                                                    <button
+                                                        onClick={() => {
+                                                            onClose()
+                                                            setShowMenu(false)
+                                                        }}
+                                                        className="w-full px-3 py-1.5 text-left text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                        Close Panel
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </>
+                    )}
+
+                    {/* Close Button — visible when closable, even when collapsed */}
                     {isClosable && onClose && (
                         <button
-                            onClick={onClose}
-                            className={`
-                p-1.5 rounded-lg
-                text-gray-400 dark:text-gray-500
-                hover:text-red-500 dark:hover:text-red-400
-                hover:bg-red-50 dark:hover:bg-red-900/20
-                transition-all duration-200
-              `}
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                onClose()
+                            }}
+                            className="
+                                p-1 rounded-md
+                                text-gray-400 dark:text-gray-500
+                                hover:text-red-500 dark:hover:text-red-400
+                                hover:bg-red-50 dark:hover:bg-red-900/20
+                                transition-all duration-150
+                            "
                             title="Close panel"
                         >
-                            <X className="w-4 h-4" />
+                            <X className="w-3.5 h-3.5" />
                         </button>
                     )}
                 </div>
             </div>
 
-            {/* Panel Content */}
+            {/* Panel Content — only rendered when expanded */}
             <AnimatePresence initial={false}>
                 {!isCollapsed && (
                     <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2, ease: 'easeInOut' }}
-                        className="flex-1 overflow-hidden"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15, ease: 'easeOut' }}
+                        className="flex-1 min-h-0 overflow-y-auto"
                     >
-                        <div className="h-full overflow-auto p-4">
+                        <div className="p-3">
                             {children}
                         </div>
                     </motion.div>
                 )}
             </AnimatePresence>
-
-            {/* Collapsed State Indicator */}
-            {isCollapsed && (
-                <div className="flex-1 flex items-center justify-center py-8">
-                    <button
-                        onClick={onCollapse}
-                        className={`
-              flex items-center gap-2 px-4 py-2
-              text-sm text-gray-500 dark:text-gray-400
-              bg-gray-100 dark:bg-gray-800
-              rounded-lg
-              hover:bg-gray-200 dark:hover:bg-gray-700
-              transition-colors duration-200
-            `}
-                    >
-                        <ChevronDown className="w-4 h-4" />
-                        Expand {title}
-                    </button>
-                </div>
-            )}
-
-            {/* Hover Glow Effect */}
-            {isHovered && !isCollapsed && (
-                <div
-                    className={`
-            absolute inset-0 -z-10
-            rounded-2xl
-            opacity-0 pointer-events-none
-            transition-opacity duration-300
-            ${isHovered ? 'opacity-100' : ''}
-          `}
-                    style={{
-                        boxShadow: `0 0 40px rgba(var(--accent-rgb, 59, 130, 246), 0.1)`,
-                    }}
-                />
-            )}
         </div>
     )
 }

@@ -47,33 +47,37 @@ export function ActionCard({ action, dataActionIndex, isFocused, onClick }: Acti
             data-action-index={dataActionIndex}
             onClick={onClick}
             className={`
-        w-full flex items-start gap-3 p-3 rounded-lg text-left transition-all
-        ${isFocused
-                    ? 'bg-primary-50 dark:bg-primary-900 ring-2 ring-primary-500'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left
+                transition-all duration-150 group
+                ${isFocused
+                    ? 'bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-400/40'
+                    : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
                 }
-      `}
+            `}
         >
             <div className={`
-        flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center
-        ${action.tier === 'teams'
-                    ? 'bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-300'
-                    : 'bg-primary-100 text-primary-600 dark:bg-primary-900 dark:text-primary-300'
+                flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center
+                transition-colors duration-150
+                ${action.tier === 'teams'
+                    ? 'bg-purple-100/80 text-purple-500 dark:bg-purple-900/30 dark:text-purple-400'
+                    : 'bg-blue-100/80 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400'
                 }
-      `}>
-                <Icon className="w-5 h-5" />
+            `}>
+                <Icon className="w-3.5 h-3.5" />
             </div>
 
             <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-gray-900 dark:text-white truncate">
-                    {action.name}
+                <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
+                        {action.name}
+                    </span>
                     {action.tier === 'teams' && (
-                        <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 rounded-full">
-                            Teams
+                        <span className="text-[9px] px-1.5 py-0.5 bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400 rounded-full font-semibold uppercase tracking-wider flex-shrink-0">
+                            Pro
                         </span>
                     )}
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                </div>
+                <p className="text-xs text-gray-400 dark:text-gray-500 truncate leading-tight">
                     {action.desc}
                 </p>
             </div>

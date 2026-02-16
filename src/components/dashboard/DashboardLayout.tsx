@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Zap, LayoutGrid, Monitor, Mic, Library } from 'lucide-react'
 import { DraggablePanel } from './DraggablePanel'
 import { QuickActions } from '../quick-actions/QuickActions'
@@ -13,11 +13,13 @@ import {
 } from '../../types/dashboard'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
+import './dashboard.css'
 
-// Use require to get around type issues with react-grid-layout
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { Responsive, WidthProvider } = require('react-grid-layout')
+import { Responsive, WidthProvider } from 'react-grid-layout/legacy'
 const ResponsiveGridLayout = WidthProvider(Responsive)
+
+// Height of a collapsed panel in grid units (header only ≈ 2 rows × 40px = 80px)
+const COLLAPSED_HEIGHT = 2
 
 interface DashboardLayoutProps {
     showSermonListener?: boolean
@@ -51,7 +53,6 @@ export function DashboardLayout({
     const [collapsedPanels, setCollapsedPanels] = useState<Set<PanelId>>(new Set())
     const [hiddenPanels, setHiddenPanels] = useState<Set<PanelId>>(new Set())
     const [layouts, setLayouts] = useState<{ [key: string]: LayoutItem[] }>(() => {
-        // Load from localStorage if available
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
             try {
@@ -62,6 +63,9 @@ export function DashboardLayout({
         }
         return DEFAULT_LAYOUTS
     })
+
+    // Store original heights so we can restore them on expand
+    const originalHeightsRef = useRef<Record<string, number>>({})
 
     // Save layouts to localStorage
     useEffect(() => {
@@ -88,11 +92,46 @@ export function DashboardLayout({
     const handleCollapse = useCallback((panelId: PanelId) => {
         setCollapsedPanels(prev => {
             const next = new Set(prev)
-            if (next.has(panelId)) {
+            const isCurrentlyCollapsed = next.has(panelId)
+
+            if (isCurrentlyCollapsed) {
+                // Expanding — restore original height
                 next.delete(panelId)
+                const origH = originalHeightsRef.current[panelId]
+                if (origH) {
+                    setLayouts(prevLayouts => {
+                        const updated: { [key: string]: LayoutItem[] } = {}
+                        Object.entries(prevLayouts).forEach(([bp, items]) => {
+                            updated[bp] = items.map(item =>
+                                item.i === panelId
+                                    ? { ...item, h: origH, minH: DEFAULT_PANEL_CONFIGS.find(p => p.id === panelId)?.minH }
+                                    : item
+                            )
+                        })
+                        return updated
+                    })
+                }
             } else {
+                // Collapsing — save current height then shrink
                 next.add(panelId)
+                setLayouts(prevLayouts => {
+                    const updated: { [key: string]: LayoutItem[] } = {}
+                    Object.entries(prevLayouts).forEach(([bp, items]) => {
+                        updated[bp] = items.map(item => {
+                            if (item.i === panelId) {
+                                // Save the original height before collapsing
+                                if (!originalHeightsRef.current[panelId]) {
+                                    originalHeightsRef.current[panelId] = item.h
+                                }
+                                return { ...item, h: COLLAPSED_HEIGHT, minH: COLLAPSED_HEIGHT }
+                            }
+                            return item
+                        })
+                    })
+                    return updated
+                })
             }
+
             return next
         })
     }, [])
@@ -164,13 +203,13 @@ export function DashboardLayout({
                 breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
                 cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
                 rowHeight={40}
-                containerPadding={[16, 16]}
-                margin={[16, 16]}
-                onLayoutChange={(layout: unknown, allLayouts: Record<string, unknown[]>) => {
-                    // Convert to our type
+                containerPadding={[12, 12]}
+                margin={[12, 12]}
+                onLayoutChange={(layout: any, allLayouts: any) => {
                     const converted: { [key: string]: LayoutItem[] } = {}
                     Object.entries(allLayouts).forEach(([key, items]) => {
-                        converted[key] = (items as LayoutItem[]).map(item => ({
+                        const layoutItems = items as any[]
+                        converted[key] = layoutItems.map(item => ({
                             i: item.i,
                             x: item.x,
                             y: item.y,
@@ -191,7 +230,7 @@ export function DashboardLayout({
                 compactType="vertical"
                 preventCollision={false}
                 useCSSTransforms={true}
-                droppingItem={{ i: 'new', w: 4, h: 4 }}
+                droppingItem={{ i: 'new', x: 0, y: 0, w: 4, h: 4 }}
             >
                 {visiblePanels.map((panel) => (
                     <div
@@ -216,8 +255,8 @@ export function DashboardLayout({
 
             {/* Panel Toggle Bar - Fixed at bottom */}
             <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
-                <div className="flex items-center gap-2 px-4 py-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                    <span className="text-xs text-gray-500 dark:text-gray-400 mr-2">Panels:</span>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                    <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 mr-1.5 uppercase tracking-wider">Panels</span>
                     {DEFAULT_PANEL_CONFIGS.map((panel) => {
                         const isHidden = hiddenPanels.has(panel.id)
                         const Icon = iconMap[panel.icon]
@@ -232,17 +271,17 @@ export function DashboardLayout({
                                     }
                                 }}
                                 className={`
-                  flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                  transition-all duration-200
-                  ${isHidden
+                                    flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium
+                                    transition-all duration-200
+                                    ${isHidden
                                         ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
-                                        : `${accentColorMap[panel.id] === 'blue' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : ''}
-                       ${accentColorMap[panel.id] === 'purple' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' : ''}
-                       ${accentColorMap[panel.id] === 'emerald' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : ''}
-                       ${accentColorMap[panel.id] === 'amber' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' : ''}
-                       ${accentColorMap[panel.id] === 'rose' ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' : ''}`
+                                        : `${accentColorMap[panel.id] === 'blue' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : ''}
+                                           ${accentColorMap[panel.id] === 'purple' ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400' : ''}
+                                           ${accentColorMap[panel.id] === 'emerald' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' : ''}
+                                           ${accentColorMap[panel.id] === 'amber' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400' : ''}
+                                           ${accentColorMap[panel.id] === 'rose' ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400' : ''}`
                                     }
-                `}
+                                `}
                                 title={isHidden ? `Show ${panel.title}` : `Hide ${panel.title}`}
                             >
                                 {Icon}

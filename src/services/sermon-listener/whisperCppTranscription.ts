@@ -59,6 +59,21 @@ class WhisperCppTranscriptionService {
 
         try {
             this.config.onStatus?.('Preparing whisper.cpp local provider...')
+
+            // Verify the whisper.cpp server is actually running
+            const endpoint = this.getEndpoint()
+            this.config.onStatus?.(`Checking connection to ${endpoint}...`)
+
+            const isServerRunning = await this.checkServerHealth(endpoint)
+
+            if (!isServerRunning) {
+                console.error('whisper.cpp server is not reachable at', endpoint)
+                this.config.onStatus?.(`whisper.cpp server not reachable at ${endpoint}. Please ensure the server is running.`)
+                this.isInitialized = false
+                this.modelLoaded = false
+                return false
+            }
+
             this.isInitialized = true
             this.modelLoaded = true
             this.config.onProgress?.(100)
@@ -72,6 +87,50 @@ class WhisperCppTranscriptionService {
             return false
         } finally {
             this.isInitializing = false
+        }
+    }
+
+    /**
+     * Check if the whisper.cpp server is running and reachable
+     */
+    private async checkServerHealth(endpoint: string): Promise<boolean> {
+        try {
+            // Try to reach the server with a HEAD request or GET to the base URL
+            // whisper.cpp server responds to GET on / with basic info
+            const baseUrl = endpoint.replace(/\/inference$/, '')
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+            try {
+                const response = await fetch(baseUrl, {
+                    method: 'GET',
+                    signal: controller.signal,
+                })
+                clearTimeout(timeoutId)
+                return response.ok || response.status === 404 // 404 means server is running but no root handler
+            } catch {
+                clearTimeout(timeoutId)
+                // Try the full endpoint with a minimal request
+                const controller2 = new AbortController()
+                const timeoutId2 = setTimeout(() => controller2.abort(), 5000)
+
+                try {
+                    // Some whisper.cpp builds only respond to POST /inference
+                    await fetch(endpoint, {
+                        method: 'POST',
+                        body: new FormData(),
+                        signal: controller2.signal,
+                    })
+                    clearTimeout(timeoutId2)
+                    return true
+                } catch {
+                    clearTimeout(timeoutId2)
+                    return false
+                }
+            }
+        } catch (error) {
+            console.error('Health check failed:', error)
+            return false
         }
     }
 

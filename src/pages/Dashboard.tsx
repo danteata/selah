@@ -2,7 +2,7 @@ import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
 import { Moon, Sun, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
-import { QuickActions, PreviewContent, LiveOutput } from '../components'
+import { DashboardLayout } from '../components'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates, useFileUrl } from '../hooks'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
@@ -13,7 +13,7 @@ import { AddAlertModal } from '../components/alerts/AddAlertModal'
 import { AddCountdownModal, type CountdownData } from '../components/countdown/AddCountdownModal'
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
-import { SermonListenerPanel } from '../components/sermon-listener'
+
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import type { Slide } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
@@ -256,34 +256,11 @@ export default function Dashboard() {
             </header>
 
             {/* Main Content */}
-            <main className="max-w-[1800px] mx-auto p-4 sm:p-6 lg:p-8">
-                {/* Sermon Listener Panel */}
-                {showSermonListener && (
-                    <div className="mb-4">
-                        <SermonListenerPanel
-                            autoLookup={true}
-                            autoDisplay={false}
-                            compact={false}
-                        />
-                    </div>
-                )}
-
-                <div className="flex gap-6 h-[calc(100vh-8rem)]">
-                    {/* Quick Actions */}
-                    <div className="flex-shrink-0">
-                        <QuickActions />
-                    </div>
-
-                    {/* Preview Content */}
-                    <div className="flex-1 min-w-0">
-                        <PreviewContent />
-                    </div>
-
-                    {/* Live Output */}
-                    <div className="flex-shrink-0">
-                        <LiveOutput />
-                    </div>
-                </div>
+            <main className="h-[calc(100vh-4rem)]">
+                <DashboardLayout
+                    showSermonListener={showSermonListener}
+                    onSermonListenerToggle={() => setShowSermonListener(!showSermonListener)}
+                />
             </main>
 
             {/* Modals */}

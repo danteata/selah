@@ -17,6 +17,26 @@ import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
 import { SongList } from '../songs/SongList'
 
+// Group actions into categories for better visual organisation
+const PRIMARY_ACTIONS: Set<string> = new Set([
+    appWideActions.newBible,
+    appWideActions.newSearchBible,
+    appWideActions.newHymn,
+    appWideActions.addSong,
+    appWideActions.newLibrary,
+    appWideActions.newSong,
+])
+
+const CREATE_ACTIONS: Set<string> = new Set([
+    appWideActions.newSlide,
+    appWideActions.newMedia,
+    appWideActions.newTemplates,
+    appWideActions.newAlert,
+    appWideActions.newCountdown,
+    appWideActions.newYouTubeVideo,
+    appWideActions.newVimeoVideo,
+])
+
 export function QuickActions() {
     const [searchInput, setSearchInput] = useState('')
     const [focusedActionIndex, setFocusedActionIndex] = useState(0)
@@ -45,7 +65,7 @@ export function QuickActions() {
                 icon: 'i-bx-bible',
                 name: book,
                 desc: `Open the book of ${book}`,
-                action: `bible:${index + 1}`, // Custom action format for direct handling
+                action: `bible:${index + 1}`,
                 meta: `${book} 0:0 1:1 2:2 3:3 4:4 5:5 6:6 7:7 8:8 9:9 10:10 -`,
                 searchableOnly: true,
                 bibleBookIndex: `${index + 1}`,
@@ -56,7 +76,7 @@ export function QuickActions() {
                 icon: 'i-bx-church',
                 name: hymn.title,
                 desc: 'verse and chorus included',
-                action: `hymn:${hymn.number}`, // Custom action format for direct handling
+                action: `hymn:${hymn.number}`,
                 meta: `hymn ${hymn.meta}`,
                 searchableOnly: true,
                 hymnIndex: hymn.number,
@@ -105,7 +125,6 @@ export function QuickActions() {
             ?.replace('/', '')
             ?.match(/\b\d{2}\b/g)
 
-        // Don't search if input includes two digit number
         if (twoDigitNumbers) return []
 
         const colonIndex = searchInput.indexOf(':')
@@ -121,14 +140,12 @@ export function QuickActions() {
 
         let mappedResults = results.map(result => result.obj as QuickAction)
 
-        // Sort by showing searchableOnly actions last
         mappedResults = mappedResults.sort((a: QuickAction, b: QuickAction) => {
             if (a.searchableOnly && !b.searchableOnly) return 1
             if (!a.searchableOnly && b.searchableOnly) return -1
             return 0
         })
 
-        // If bible chapter and verse found, show Bible types first
         if (bibleChapterAndVerse) {
             mappedResults = mappedResults.sort((a: QuickAction, b: QuickAction) => {
                 if (a.type === 'bible' && b.type !== 'bible') return -1
@@ -142,7 +159,6 @@ export function QuickActions() {
 
     // Handle action execution
     const executeAction = useCallback(async (action: QuickAction) => {
-        // Handle navigation actions (set page state)
         if (action.action === appWideActions.newBible || action.action === appWideActions.newSearchBible) {
             setQuickActionsPage('bible')
             return
@@ -160,12 +176,10 @@ export function QuickActions() {
             return
         }
         if (action.action === appWideActions.newYouTubeVideo) {
-            // Open media picker for YouTube video - TODO: add YouTube URL input
             openModal('mediaPicker')
             return
         }
         if (action.action === appWideActions.newVimeoVideo) {
-            // Open media picker for Vimeo video - TODO: add Vimeo URL input
             openModal('mediaPicker')
             return
         }
@@ -198,17 +212,14 @@ export function QuickActions() {
             return
         }
         if (action.action === appWideActions.removeAlert) {
-            // Handle remove alert - TODO: implement remove alert action
             console.log('Remove alert action triggered')
             return
         }
         if (action.action === appWideActions.toggleDarkMode) {
-            // Handle toggle dark mode
             document.documentElement.classList.toggle('dark')
             return
         }
 
-        // Handle direct slide creation actions (bible book or hymn number)
         if (action.action.startsWith('bible:')) {
             const bookIndex = action.bibleBookIndex
             const reference = `${bookIndex}:${bibleChapterAndVerse || '1:1'}`
@@ -243,9 +254,7 @@ export function QuickActions() {
             return
         }
 
-        // Handle text slide creation
         if (action.action === appWideActions.newSlide || action.action === appWideActions.newText) {
-            // Create a new empty text slide and open the editor
             const newSlide: Slide = {
                 id: `slide_${Date.now()}`,
                 index: 0,
@@ -306,35 +315,29 @@ export function QuickActions() {
         }
     }, [focusedActionIndex])
 
-    // Filter basic actions
+    // Categorised basic actions
     const basicActions = actions?.filter((a: QuickAction) => !a?.searchableOnly)
+    const primaryActions = basicActions.filter(a => PRIMARY_ACTIONS.has(a.action))
+    const createActions = basicActions.filter(a => CREATE_ACTIONS.has(a.action))
+    const otherActions = basicActions.filter(a => !PRIMARY_ACTIONS.has(a.action) && !CREATE_ACTIONS.has(a.action))
 
     // Handle page close
     const handleClosePage = useCallback(() => {
         setQuickActionsPage('')
     }, [setQuickActionsPage])
 
-    return (
-        <div className="max-w-[330px] relative overflow-visible z-20 bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {searchInput.length < 2 ? 'Quick Actions' : 'Search Results'}
-                </h2>
-                {page && (
-                    <button
-                        onClick={handleClosePage}
-                        className="text-sm text-primary-600 hover:text-primary-700"
-                    >
-                        Back
-                    </button>
-                )}
-            </div>
+    // Build flat action list for keyboard navigation index tracking
+    const allVisibleActions = useMemo(() => {
+        if (searchInput.length >= 2) return searchedActions
+        return [...primaryActions, ...createActions, ...otherActions]
+    }, [searchInput, searchedActions, primaryActions, createActions, otherActions])
 
+    return (
+        <div className="relative">
             {/* Search Input */}
-            <div className="mb-4">
+            <div className="mb-3">
                 <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <input
                         ref={searchInputRef}
                         type="text"
@@ -342,22 +345,22 @@ export function QuickActions() {
                         onChange={(e) => setSearchInput(e.target.value)}
                         onKeyDown={handleInputKeydown}
                         placeholder="Search actions, scripture, hymns..."
-                        className="w-full pl-10 pr-10 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
+                        className="w-full pl-8 pr-8 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 dark:bg-gray-800/50 dark:text-white transition-colors placeholder:text-gray-400"
                     />
                     {searchInput && (
                         <button
                             onClick={() => setSearchInput('')}
-                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            className="absolute right-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                         >
-                            <X className="w-4 h-4" />
+                            <X className="w-3.5 h-3.5" />
                         </button>
                     )}
                 </div>
 
                 {/* Search hints */}
                 {searchInput.trim().length > 0 && (
-                    <div className="flex items-center gap-2 mt-2 text-sm text-gray-600 dark:text-gray-400">
-                        <span>Search anything:</span>
+                    <div className="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        <span>Search:</span>
                         <div className="flex gap-1">
                             {[slideTypes.bible, slideTypes.hymn, slideTypes.song].map(type => (
                                 <SlideChip key={type} slideType={type} />
@@ -367,6 +370,16 @@ export function QuickActions() {
                 )}
             </div>
 
+            {/* Sub-page navigation */}
+            {page && (
+                <button
+                    onClick={handleClosePage}
+                    className="mb-2 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                >
+                    ← Back to actions
+                </button>
+            )}
+
             {/* Content based on page state */}
             {page === 'bible' || page === 'search-bible' ? (
                 <BibleList onClose={handleClosePage} />
@@ -375,29 +388,11 @@ export function QuickActions() {
             ) : page === 'song' ? (
                 <SongList onClose={handleClosePage} />
             ) : (
-                <>
-                    {/* Actions List */}
-                    <div
-                        ref={actionsContainerRef}
-                        className="overflow-y-auto max-h-[calc(100vh-250px)] space-y-1"
-                    >
-                        {searchInput.length < 2 ? (
-                            // Basic actions
-                            basicActions.map((action, index) => (
-                                <ActionCard
-                                    key={action.name}
-                                    action={action}
-                                    dataActionIndex={index}
-                                    isFocused={index === focusedActionIndex}
-                                    onClick={() => {
-                                        setFocusedActionIndex(index)
-                                        executeAction(action)
-                                    }}
-                                />
-                            ))
-                        ) : (
-                            // Search results
-                            searchedActions.map((action: QuickAction, index: number) => (
+                <div ref={actionsContainerRef}>
+                    {searchInput.length >= 2 ? (
+                        /* Search results — flat list */
+                        <div className="space-y-0.5">
+                            {searchedActions.map((action: QuickAction, index: number) => (
                                 <ActionCard
                                     key={action.name}
                                     action={{ ...action, bibleChapterAndVerse }}
@@ -408,17 +403,95 @@ export function QuickActions() {
                                         executeAction(action)
                                     }}
                                 />
-                            ))
-                        )}
-                    </div>
+                            ))}
+                        </div>
+                    ) : (
+                        /* Default view — grouped actions */
+                        <>
+                            {/* Primary actions */}
+                            {primaryActions.length > 0 && (
+                                <div className="mb-3">
+                                    <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 px-1">
+                                        Content
+                                    </div>
+                                    <div className="space-y-0.5">
+                                        {primaryActions.map((action, index) => (
+                                            <ActionCard
+                                                key={action.name}
+                                                action={action}
+                                                dataActionIndex={index}
+                                                isFocused={index === focusedActionIndex}
+                                                onClick={() => {
+                                                    setFocusedActionIndex(index)
+                                                    executeAction(action)
+                                                }}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Create actions */}
+                            {createActions.length > 0 && (
+                                <div className="mb-3">
+                                    <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 px-1">
+                                        Create
+                                    </div>
+                                    <div className="space-y-0.5">
+                                        {createActions.map((action, index) => {
+                                            const globalIndex = primaryActions.length + index
+                                            return (
+                                                <ActionCard
+                                                    key={action.name}
+                                                    action={action}
+                                                    dataActionIndex={globalIndex}
+                                                    isFocused={globalIndex === focusedActionIndex}
+                                                    onClick={() => {
+                                                        setFocusedActionIndex(globalIndex)
+                                                        executeAction(action)
+                                                    }}
+                                                />
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Other actions (settings, schedule, etc.) */}
+                            {otherActions.length > 0 && (
+                                <div>
+                                    <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1 px-1">
+                                        More
+                                    </div>
+                                    <div className="space-y-0.5">
+                                        {otherActions.map((action, index) => {
+                                            const globalIndex = primaryActions.length + createActions.length + index
+                                            return (
+                                                <ActionCard
+                                                    key={action.name}
+                                                    action={action}
+                                                    dataActionIndex={globalIndex}
+                                                    isFocused={globalIndex === focusedActionIndex}
+                                                    onClick={() => {
+                                                        setFocusedActionIndex(globalIndex)
+                                                        executeAction(action)
+                                                    }}
+                                                />
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
 
                     {/* Empty state for search */}
                     {searchInput.length >= 2 && searchedActions.length === 0 && (
-                        <div className="text-center py-8 text-gray-500">
-                            <p>No actions found</p>
+                        <div className="text-center py-6 text-sm text-gray-400">
+                            No actions found
                         </div>
                     )}
-                </>
+                </div>
             )}
         </div>
     )
