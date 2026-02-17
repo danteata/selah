@@ -24,11 +24,11 @@ import {
 } from './localEmbeddings';
 
 // Configuration
-const SEMANTIC_DETECTION_THRESHOLD = 0.75; // Minimum similarity score
+const SEMANTIC_DETECTION_THRESHOLD = 0.55; // Minimum similarity score (lowered for better detection)
 const SEMANTIC_DETECTION_LIMIT = 5; // Max results per search
 const MIN_TEXT_LENGTH = 50; // Minimum characters before attempting detection
 const MAX_TEXT_LENGTH = 500; // Maximum characters to embed (truncated)
-const THROTTLE_MS = 30000; // Throttle semantic searches to 30 seconds
+const THROTTLE_MS = 5000; // Throttle semantic searches to 5 seconds (lowered for testing)
 
 export interface SemanticVerseMatch {
     reference: string;
@@ -256,14 +256,19 @@ export class SemanticVerseDetector {
      * Search using local similarity calculation.
      */
     private async searchLocally(embedding: number[]): Promise<SemanticVerseMatch[]> {
+        console.log('[SemanticDetector] Searching locally with version:', this.config.version);
         const cached = await getCachedVerseEmbeddings(this.config.version);
 
         if (cached.length === 0) {
-            console.warn('[SemanticDetector] No cached embeddings for local search');
+            console.warn('[SemanticDetector] No cached embeddings for local search, version:', this.config.version);
             return [];
         }
 
+        console.log('[SemanticDetector] Found', cached.length, 'cached embeddings for version:', this.config.version);
+
         const matches = findSimilarLocally(embedding, cached, this.config.threshold, this.config.limit);
+
+        console.log('[SemanticDetector] Semantic matches found:', matches.length, 'Top match:', matches[0]);
 
         return matches.map((m) => ({
             reference: m.reference,

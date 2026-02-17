@@ -6,6 +6,7 @@ export {
     extractVerseFromContext,
     formatVerseForDisplay,
     BOOK_TO_NUMBER,
+    NUMBER_TO_BOOK,
 } from './verseDetection'
 export type { DetectedVerse } from './verseDetection'
 export { whisperTranscriptionService } from './whisperTranscription'

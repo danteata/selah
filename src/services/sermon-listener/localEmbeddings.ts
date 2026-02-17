@@ -226,6 +226,13 @@ export function findSimilarLocally(
         score: cosineSimilarity(queryEmbedding, v.embedding),
     }));
 
+    // Sort by score descending
+    scores.sort((a, b) => b.score - a.score);
+
+    // Log top scores for debugging
+    const topScores = scores.slice(0, 3);
+    console.log('[findSimilarLocally] Top scores:', topScores.map(s => ({ reference: s.reference, score: s.score.toFixed(3) })));
+
     return scores
         .filter((s) => s.score >= threshold)
         .sort((a, b) => b.score - a.score)

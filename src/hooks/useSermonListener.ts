@@ -18,9 +18,10 @@ import {
     verseToLabel,
     getSemanticDetector,
     resetSemanticDetector,
+    NUMBER_TO_BOOK,
 } from '../services/sermon-listener'
 import type { DetectedVerse, SemanticVerseMatch } from '../services/sermon-listener'
-import type { Slide, Scripture } from '../types'
+import type { Slide, Scripture, BibleVersion } from '../types'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
 
@@ -150,6 +151,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
+    const bibleVersions = useAppStore((state) => state.bibleVersions)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
@@ -228,9 +230,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     return
                 }
 
+                // Get the actual version ID from the bible versions list
+                // The defaultBibleVersion might be the name (e.g., 'KJV') but we need the ID
+                const versions = bibleVersions as BibleVersion[]
+                const versionEntry = versions?.find(
+                    (v) => v.name === defaultBibleVersion || v.id === defaultBibleVersion
+                )
+                const versionId = versionEntry?.id || defaultBibleVersion
+
+                console.log('[SemanticDetector] Bible versions in store:', versions?.map(v => v.id + '/' + v.name))
+                console.log('[SemanticDetector] Using version:', versionId, '(default:', defaultBibleVersion, ')')
+
                 const detector = getSemanticDetector({
                     enabled: true,
-                    version: defaultBibleVersion,
+                    version: versionId,
                 })
 
                 const result = await detector.initialize(convexUrl)
@@ -254,7 +267,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             semanticDetectorRef.current = null
             setSemanticDetectorReady(false)
         }
-    }, [enableSemanticDetection, defaultBibleVersion])
+    }, [enableSemanticDetection, defaultBibleVersion, bibleVersions])
 
     /**
      * Look up a verse and get its content
@@ -368,11 +381,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // Mark as processed
                     processedVersesRef.current.add(match.reference)
 
+                    // Convert book number to book name if needed
+                    let bookName = match.book
+                    const bookNum = parseInt(match.book, 10)
+                    if (!isNaN(bookNum) && bookNum >= 1 && bookNum <= 66) {
+                        bookName = NUMBER_TO_BOOK[bookNum] || match.book
+                    }
+
+                    // Build proper reference with book name
+                    const properReference = `${bookName} ${match.chapter}:${match.verse}`
+
                     // Convert to DetectedVerse format
                     const detectedVerse: DetectedVerse = {
                         raw: match.reference,
-                        reference: match.reference,
-                        book: match.book,
+                        reference: properReference,
+                        book: bookName,
                         chapter: match.chapter,
                         verseStart: match.verse,
                         confidence: match.score >= 0.85 ? 'high' : match.score >= 0.75 ? 'medium' : 'low',
