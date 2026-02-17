@@ -13,6 +13,8 @@ export { whisperTranscriptionService } from './whisperTranscription'
 export type { WhisperConfig, WhisperTranscriptionResult } from './whisperTranscription'
 export { whisperCppTranscriptionService } from './whisperCppTranscription'
 export type { WhisperCppConfig, WhisperCppTranscriptionResult } from './whisperCppTranscription'
+export { elevenLabsTranscriptionService } from './elevenLabsTranscription'
+export type { ElevenLabsConfig, ElevenLabsTranscriptionResult } from './elevenLabsTranscription'
 export { unifiedTranscriptionService } from './unifiedTranscription'
 export type { TranscriptionProvider, UnifiedTranscriptionOptions, TranscriptionStatus } from './unifiedTranscription'
 

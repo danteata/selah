@@ -326,8 +326,8 @@ export interface AppSettings {
     sermonListener?: {
         /** Enable sermon listener feature */
         enabled?: boolean
-        /** Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' */
-        transcriptionProvider?: 'web-speech' | 'whisper' | 'whisper-cpp'
+        /** Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' | 'elevenlabs' */
+        transcriptionProvider?: 'web-speech' | 'whisper' | 'whisper-cpp' | 'elevenlabs'
         /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
         whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
         /** Optional server endpoint for chunked transcription */
@@ -340,6 +340,12 @@ export interface AppSettings {
         whisperCppEndpoint?: string
         /** Chunk size for whisper.cpp local transcription */
         whisperCppChunkDurationMs?: number
+        /** ElevenLabs API key */
+        elevenLabsApiKey?: string
+        /** ElevenLabs model ID */
+        elevenLabsModelId?: string
+        /** Chunk size for ElevenLabs transcription */
+        elevenLabsChunkDurationMs?: number
         /** Auto-display detected verses */
         autoDisplay?: boolean
         /** Auto-lookup detected verses */

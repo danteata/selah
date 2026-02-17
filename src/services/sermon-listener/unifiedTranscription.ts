@@ -2,14 +2,15 @@
  * Unified Transcription Service
  * 
  * Provides a unified interface for speech transcription that can switch between
- * Web Speech API and Whisper.cpp based on user settings.
+ * Web Speech API, Whisper.cpp, and ElevenLabs based on user settings.
  */
 
 import { speechRecognitionService } from './speechRecognition'
 import { whisperTranscriptionService } from './whisperTranscription'
 import { whisperCppTranscriptionService } from './whisperCppTranscription'
+import { elevenLabsTranscriptionService } from './elevenLabsTranscription'
 
-export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp'
+export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | 'elevenlabs'
 
 export interface UnifiedTranscriptionOptions {
     provider?: TranscriptionProvider
@@ -28,6 +29,10 @@ export interface UnifiedTranscriptionOptions {
     whisperChunkDurationMs?: number
     whisperCppEndpoint?: string
     whisperCppChunkDurationMs?: number
+    // ElevenLabs-specific options
+    elevenLabsApiKey?: string
+    elevenLabsModelId?: string
+    elevenLabsChunkDurationMs?: number
     onProgress?: (progress: number) => void
 }
 
@@ -43,7 +48,7 @@ export interface TranscriptionStatus {
 /**
  * Unified Transcription Service
  * 
- * Switches between Web Speech API and Whisper.cpp based on settings
+ * Switches between Web Speech API, Whisper.cpp, and ElevenLabs based on settings
  */
 class UnifiedTranscriptionService {
     private currentProvider: TranscriptionProvider = 'web-speech'
@@ -54,6 +59,7 @@ class UnifiedTranscriptionService {
     private options: UnifiedTranscriptionOptions = {}
     private whisperInitialized = false
     private whisperCppInitialized = false
+    private elevenLabsInitialized = false
 
     /**
      * Check if a provider is available
@@ -66,6 +72,8 @@ class UnifiedTranscriptionService {
                 return whisperTranscriptionService.isConfigured()
             case 'whisper-cpp':
                 return whisperCppTranscriptionService.isConfigured()
+            case 'elevenlabs':
+                return elevenLabsTranscriptionService.isConfigured()
             default:
                 return false
         }
@@ -85,7 +93,9 @@ class UnifiedTranscriptionService {
                 ? this.whisperInitialized
                 : this.currentProvider === 'whisper-cpp'
                     ? this.whisperCppInitialized
-                    : undefined,
+                    : this.currentProvider === 'elevenlabs'
+                        ? this.elevenLabsInitialized
+                        : undefined,
         }
     }
 
@@ -149,6 +159,30 @@ class UnifiedTranscriptionService {
             }
         }
 
+        if (provider === 'elevenlabs') {
+            this.isLoading = true
+            this.options.onStatusChange?.(this.getStatus())
+
+            const initialized = await elevenLabsTranscriptionService.init({
+                language: options?.language || 'en',
+                apiKey: options?.elevenLabsApiKey,
+                modelId: options?.elevenLabsModelId,
+                chunkDurationMs: options?.elevenLabsChunkDurationMs,
+                onProgress: options?.onProgress,
+                onStatus: (status) => console.log('[ElevenLabs]', status),
+            })
+
+            this.elevenLabsInitialized = initialized
+            this.isLoading = false
+            this.isReady = initialized
+
+            if (!initialized) {
+                this.error = 'Failed to initialize ElevenLabs'
+                this.options.onStatusChange?.(this.getStatus())
+                return false
+            }
+        }
+
         if (provider === 'web-speech' && !speechRecognitionService.isSupported()) {
             this.error = 'Web Speech API is not supported in this browser'
             this.isReady = false
@@ -160,7 +194,9 @@ class UnifiedTranscriptionService {
             ? speechRecognitionService.isSupported()
             : provider === 'whisper'
                 ? this.whisperInitialized
-                : this.whisperCppInitialized
+                : provider === 'whisper-cpp'
+                    ? this.whisperCppInitialized
+                    : this.elevenLabsInitialized
         this.options.onStatusChange?.(this.getStatus())
         return true
     }
@@ -205,7 +241,10 @@ class UnifiedTranscriptionService {
             if (this.currentProvider === 'whisper') {
                 return await this.startWhisper()
             }
-            return await this.startWhisperCpp()
+            if (this.currentProvider === 'whisper-cpp') {
+                return await this.startWhisperCpp()
+            }
+            return await this.startElevenLabs()
         } catch (err) {
             this.error = err instanceof Error ? err.message : 'Failed to start transcription'
             this.options.onStatusChange?.(this.getStatus())
@@ -335,6 +374,50 @@ class UnifiedTranscriptionService {
     }
 
     /**
+     * Start ElevenLabs transcription
+     */
+    private async startElevenLabs(): Promise<boolean> {
+        if (!this.elevenLabsInitialized) {
+            const initialized = await elevenLabsTranscriptionService.init({
+                language: this.options.language || 'en',
+                apiKey: this.options.elevenLabsApiKey,
+                modelId: this.options.elevenLabsModelId,
+                chunkDurationMs: this.options.elevenLabsChunkDurationMs,
+                onProgress: this.options.onProgress,
+            })
+            if (!initialized) {
+                this.error = 'ElevenLabs provider is not configured correctly. Set ELEVENLABS_API_KEY.'
+                return false
+            }
+            this.elevenLabsInitialized = true
+        }
+
+        const started = await elevenLabsTranscriptionService.startRealtimeTranscription(
+            (result) => {
+                this.options.onResult?.(result.text, true, undefined)
+            },
+            (error) => {
+                this.error = error
+                this.isListening = false
+                this.options.onError?.(error)
+                this.options.onStatusChange?.(this.getStatus())
+            },
+            this.options.elevenLabsChunkDurationMs
+        )
+
+        if (!started) {
+            this.error = 'Failed to start ElevenLabs transcription stream'
+            this.options.onStatusChange?.(this.getStatus())
+            return false
+        }
+
+        this.isListening = true
+        this.options.onStart?.()
+        this.options.onStatusChange?.(this.getStatus())
+        return true
+    }
+
+    /**
      * Stop transcription
      */
     async stop(): Promise<void> {
@@ -344,8 +427,10 @@ class UnifiedTranscriptionService {
             speechRecognitionService.stop()
         } else if (this.currentProvider === 'whisper') {
             await whisperTranscriptionService.stopRealtimeTranscription()
-        } else {
+        } else if (this.currentProvider === 'whisper-cpp') {
             await whisperCppTranscriptionService.stopRealtimeTranscription()
+        } else if (this.currentProvider === 'elevenlabs') {
+            await elevenLabsTranscriptionService.stopRealtimeTranscription()
         }
 
         this.isListening = false

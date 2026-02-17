@@ -446,6 +446,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
             whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
             whisperCppChunkDurationMs: sermonSettings?.whisperCppChunkDurationMs,
+            elevenLabsApiKey: sermonSettings?.elevenLabsApiKey,
+            elevenLabsModelId: sermonSettings?.elevenLabsModelId,
+            elevenLabsChunkDurationMs: sermonSettings?.elevenLabsChunkDurationMs,
             onProgress: setModelLoadingProgress,
         })
 
@@ -468,6 +471,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         sermonSettings?.whisperCppEndpoint,
         sermonSettings?.whisperEndpoint,
         sermonSettings?.whisperModel,
+        sermonSettings?.elevenLabsApiKey,
+        sermonSettings?.elevenLabsModelId,
+        sermonSettings?.elevenLabsChunkDurationMs,
     ])
 
     /**
@@ -498,6 +504,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
             whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
             whisperCppChunkDurationMs: sermonSettings?.whisperCppChunkDurationMs,
+            elevenLabsApiKey: sermonSettings?.elevenLabsApiKey,
+            elevenLabsModelId: sermonSettings?.elevenLabsModelId,
+            elevenLabsChunkDurationMs: sermonSettings?.elevenLabsChunkDurationMs,
             onStart: () => {
                 setIsListening(true)
                 setError(null)
@@ -549,6 +558,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         sermonSettings?.whisperCppEndpoint,
         sermonSettings?.whisperEndpoint,
         sermonSettings?.whisperModel,
+        sermonSettings?.elevenLabsApiKey,
+        sermonSettings?.elevenLabsModelId,
+        sermonSettings?.elevenLabsChunkDurationMs,
     ])
 
     /**
