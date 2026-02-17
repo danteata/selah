@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useScripture } from './useScripture'
+import { useSlideCreation } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
 import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
@@ -19,7 +20,7 @@ import {
     resetSemanticDetector,
 } from '../services/sermon-listener'
 import type { DetectedVerse, SemanticVerseMatch } from '../services/sermon-listener'
-import type { Slide, Scripture, BibleVerse } from '../types'
+import type { Slide, Scripture } from '../types'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
 
@@ -147,6 +148,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     } = options
 
     const { fetchScripture } = useScripture()
+    const { createBibleSlide } = useSlideCreation()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
@@ -285,27 +287,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const displayCurrentVerse = useCallback(() => {
         if (!currentScripture) return
 
-        // Create a slide from the scripture
-        const slide: Slide = {
-            id: `sermon-verse-${Date.now()}`,
-            index: 0,
-            name: currentScripture.label,
-            type: 'bible',
-            layout: 'default',
-            userId: '',
-            churchId: '',
-            scheduleId: activeSchedule?._id || '',
-            contents: Array.isArray(currentScripture.content)
-                ? currentScripture.content.map((v: BibleVerse) => v.scripture || '')
-                : [],
-            background: '',
-            backgroundType: 'color',
-        }
+        // Create a slide from the scripture using the proper function
+        // This applies the default bible verse template and includes the verse reference
+        const slide = createBibleSlide(currentScripture)
 
         // Add slide to active slides and set as live
         appendActiveSlide(slide)
         setLiveSlide(slide.id)
-    }, [currentScripture, activeSchedule, appendActiveSlide, setLiveSlide])
+    }, [currentScripture, createBibleSlide, appendActiveSlide, setLiveSlide])
 
     /**
      * Process transcript for verse detection
@@ -352,21 +341,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
                     // Auto-display if enabled
                     if (autoDisplay && scripture) {
-                        const slide: Slide = {
-                            id: `sermon-verse-${Date.now()}`,
-                            index: 0,
-                            name: scripture.label,
-                            type: 'bible',
-                            layout: 'default',
-                            userId: '',
-                            churchId: '',
-                            scheduleId: activeSchedule?._id || '',
-                            contents: Array.isArray(scripture.content)
-                                ? scripture.content.map((v: BibleVerse) => v.scripture || '')
-                                : [],
-                            background: '',
-                            backgroundType: 'color',
-                        }
+                        // Create a slide using the proper function to apply template
+                        const slide = createBibleSlide(scripture)
+
                         // Add slide to active slides and set as live
                         appendActiveSlide(slide)
                         setLiveSlide(slide.id)
@@ -425,7 +402,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setIsSemanticSearching(false)
             })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, activeSchedule, appendActiveSlide, setLiveSlide, semanticDetectorReady])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, activeSchedule, appendActiveSlide, setLiveSlide, semanticDetectorReady])
 
     /**
      * Set transcription provider
