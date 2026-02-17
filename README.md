@@ -131,6 +131,37 @@ presenta-react/
 | `lint` | Run ESLint checks |
 | `test` | Run tests once |
 | `test:watch` | Run tests in watch mode |
+| `whisper:start` | Setup and start local whisper.cpp server |
+
+## Sermon Listener & Transcription
+
+Selah supports real-time sermon transcription with automated scripture detection. You can choose from several transcription providers:
+
+### 1. Web Speech API (Default)
+Browser-native transcription. Requires no additional setup but depends on browser support (best in Chrome).
+
+### 2. Whisper.cpp (Offline/High Quality)
+For the best experience and fully offline operation, you can use a local [whisper.cpp](https://github.com/ggerganov/whisper.cpp) server. **Docker is the recommended setup method.**
+
+**Setup Instructions:**
+1. Ensure you have [Docker](https://www.docker.com/) installed and running.
+2. Run the helper script to build and start the server:
+   ```bash
+   bun run whisper:start
+   # or
+   npm run whisper:start
+   ```
+   *This will build a Docker image using the configuration in `deploy/whisper-cpp/` and start a container on port 8080.*
+
+3. If you don't have Docker, the script will attempt a manual build (requires `cmake` and `git`).
+
+4. In Selah, go to **Settings > Sermon Listener Settings**.
+5. Select **Whisper.cpp Local (Offline)** as your provider.
+6. Ensure the endpoint is set to `http://127.0.0.1:8080/inference`.
+7. Click **Save Settings**.
+
+### 3. Whisper API (Remote)
+Upload chunks to a remote OpenAI-compatible Whisper endpoint. Requires a valid endpoint URL and optional API key.
 
 ## Usage Guide
 

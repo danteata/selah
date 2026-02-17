@@ -347,8 +347,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
 
                     <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
                         <p className={`text-sm ${isDarkMode ? 'text-amber-300' : 'text-amber-800'}`}>
-                            <strong>Setup required:</strong> The whisper.cpp server must be running before starting transcription.
-                            Run it with: <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>./server -m models/ggml-base.en.bin --port 8080</code>
+                            <strong>Setup required (Docker recommended):</strong> The whisper.cpp server must be running.
+                            Run it with: <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>bun run whisper:start</code> or <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>npm run whisper:start</code>
                         </p>
                     </div>
                 </div>

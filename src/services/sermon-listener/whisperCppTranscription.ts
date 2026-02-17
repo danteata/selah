@@ -78,8 +78,9 @@ class WhisperCppTranscriptionService {
             const isServerRunning = await this.checkServerHealth(endpoint)
 
             if (!isServerRunning) {
-                console.error('whisper.cpp server is not reachable at', endpoint)
-                this.config.onStatus?.(`whisper.cpp server not reachable at ${endpoint}. Please ensure the server is running.`)
+                const errorMsg = `whisper.cpp server not reachable at ${endpoint}. Please ensure the server is running (try 'npm run whisper:start').`
+                console.error(errorMsg)
+                this.config.onStatus?.(errorMsg)
                 this.isInitialized = false
                 this.modelLoaded = false
                 return false
