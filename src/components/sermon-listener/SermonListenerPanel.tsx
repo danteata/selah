@@ -32,7 +32,6 @@ export function SermonListenerPanel({
     compact = false,
 }: SermonListenerPanelProps) {
     const isDarkMode = useAppStore((state) => state.isDarkMode)
-    const [showTranscript, setShowTranscript] = useState(false)
     const [autoDisplayEnabled, setAutoDisplayEnabled] = useState(autoDisplay)
     const transcriptRef = useRef<HTMLDivElement>(null)
 
@@ -66,6 +65,11 @@ export function SermonListenerPanel({
             transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
         }
     }, [transcript, interimTranscript])
+
+    // Debug: log transcript changes
+    useEffect(() => {
+        console.log('[SermonListenerPanel] Transcript updated:', transcript?.substring(0, 100))
+    }, [transcript])
 
     // Handle verse click - display on live
     const handleVerseClick = (verse: DetectedVerse) => {
@@ -138,8 +142,8 @@ export function SermonListenerPanel({
                     <button
                         onClick={isListening ? stop : start}
                         className={`px-4 py-2 rounded-lg font-medium transition-colors ${isListening
-                                ? 'bg-red-500 hover:bg-red-600 text-white'
-                                : 'bg-blue-500 hover:bg-blue-600 text-white'
+                            ? 'bg-red-500 hover:bg-red-600 text-white'
+                            : 'bg-blue-500 hover:bg-blue-600 text-white'
                             }`}
                     >
                         {isListening ? 'Stop' : 'Start'}
@@ -199,10 +203,10 @@ export function SermonListenerPanel({
                             <div
                                 key={`${verse.reference}-${idx}`}
                                 className={`group flex items-center gap-1 px-3 py-1.5 rounded-full text-sm cursor-pointer transition-colors ${currentVerse?.reference === verse.reference
-                                        ? 'bg-blue-500 text-white'
-                                        : isDarkMode
-                                            ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                                            : 'bg-white hover:bg-gray-200 text-gray-700'
+                                    ? 'bg-blue-500 text-white'
+                                    : isDarkMode
+                                        ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                                        : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
                                     }`}
                                 onClick={() => handleVerseClick(verse)}
                             >
@@ -217,8 +221,8 @@ export function SermonListenerPanel({
                                         removeVerse(verse)
                                     }}
                                     className={`ml-1 opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
-                                            ? 'text-white/70 hover:text-white'
-                                            : 'text-gray-400 hover:text-red-500'
+                                        ? 'text-white/70 hover:text-white'
+                                        : 'text-gray-400 hover:text-red-500'
                                         }`}
                                 >
                                     <Trash2 className="w-4 h-4" />
@@ -229,37 +233,40 @@ export function SermonListenerPanel({
                 </div>
             )}
 
-            {/* Transcript toggle */}
-            {!compact && (
-                <div className="flex justify-center">
-                    <button
-                        onClick={() => setShowTranscript(!showTranscript)}
-                        className={`text-sm ${isDarkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
-                    >
-                        {showTranscript ? 'Hide' : 'Show'} Transcript
-                    </button>
-                </div>
-            )}
-
-            {/* Transcript display */}
-            {!compact && showTranscript && (
-                <div
-                    ref={transcriptRef}
-                    className={`p-4 rounded-lg max-h-48 overflow-y-auto ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}
-                >
-                    <p className={`text-sm whitespace-pre-wrap ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                        {transcript}
-                        {interimTranscript && (
-                            <span className={`${isDarkMode ? 'text-gray-500 italic' : 'text-gray-400 italic'}`}>
-                                {interimTranscript}
-                            </span>
+            {/* Transcript section - always show when listening or has content */}
+            {(isListening || transcript || interimTranscript) && (
+                <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                        <h4 className={`font-semibold ${compact ? 'text-sm' : 'text-base'}`}>
+                            Transcript
+                        </h4>
+                        {transcript && (
+                            <button
+                                onClick={reset}
+                                className={`text-xs ${isDarkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+                            >
+                                Clear
+                            </button>
                         )}
-                    </p>
-                    {!transcript && !interimTranscript && (
-                        <p className={`text-sm italic ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                            No transcription yet. Start listening to see the sermon transcript.
+                    </div>
+                    <div
+                        ref={transcriptRef}
+                        className={`p-3 rounded-lg max-h-48 overflow-y-auto ${isDarkMode ? 'bg-gray-900' : 'bg-white'}`}
+                    >
+                        <p className={`text-sm whitespace-pre-wrap ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            {transcript}
+                            {interimTranscript && (
+                                <span className={`${isDarkMode ? 'text-gray-500 italic' : 'text-gray-400 italic'}`}>
+                                    {interimTranscript}
+                                </span>
+                            )}
                         </p>
-                    )}
+                        {!transcript && !interimTranscript && isListening && (
+                            <p className={`text-sm italic ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                                Listening... Speak to see transcription.
+                            </p>
+                        )}
+                    </div>
                 </div>
             )}
 

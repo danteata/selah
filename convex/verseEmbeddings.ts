@@ -310,10 +310,10 @@ export const seedEmbeddingsFromVersion = action({
     handler: async (ctx, args): Promise<{ success: boolean; count: number; error?: string }> => {
         const batchSize = args.batchSize ?? 100;
 
-        // Get Bible version data
-        const bibleVersion = await ctx.runQuery(api.bibleVersions.getBibleVersion, { id: args.versionId });
-        if (!bibleVersion) {
-            return { success: false, count: 0, error: `Bible version "${args.versionId}" not found` };
+        // Get Bible version file URL
+        const fileInfo = await ctx.runQuery(api.bibleVersions.getBibleFileUrl, { versionId: args.versionId });
+        if (!fileInfo || !fileInfo.url) {
+            return { success: false, count: 0, error: `Bible version "${args.versionId}" not found or has no file` };
         }
 
         // Get OpenAI API key from environment
@@ -326,13 +326,20 @@ export const seedEmbeddingsFromVersion = action({
             };
         }
 
+        // Fetch the Bible data from file storage
+        const response = await fetch(fileInfo.url);
+        if (!response.ok) {
+            return { success: false, count: 0, error: `Failed to fetch Bible file: ${response.status}` };
+        }
+
+        const verses = await response.json() as Array<{ book: string; chapter: string; verse: string; scripture: string }>;
+
         let count = 0;
-        const verses = bibleVersion.data;
 
         // Process in batches
         for (let i = 0; i < verses.length; i += batchSize) {
             const batch = verses.slice(i, i + batchSize);
-            const texts = batch.map((v: { scripture: string }) => v.scripture);
+            const texts = batch.map((v) => v.scripture);
 
             // Generate embeddings via OpenAI
             // Using text-embedding-3-small for cost efficiency

@@ -13,6 +13,7 @@ interface VersionUploadStatus {
     status: 'pending' | 'downloading' | 'uploading' | 'completed' | 'error'
     error?: string
     verseCount?: number
+    fileSize?: number
 }
 
 interface BibleVersionUploaderProps {
@@ -21,7 +22,8 @@ interface BibleVersionUploaderProps {
 
 export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
     const convex = useConvex()
-    const uploadBibleVersion = useMutation(api.bibleVersions.uploadBibleVersion)
+    const generateUploadUrl = useMutation(api.bibleVersions.generateUploadUrl)
+    const saveBibleVersion = useMutation(api.bibleVersions.saveBibleVersion)
     const { isSuperadmin, isLoading: roleLoading } = useUserRole()
 
     const [versions, setVersions] = useState<VersionUploadStatus[]>([])
@@ -68,20 +70,23 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
     }, [convex])
 
     // Download Bible data from CDN
-    const downloadFromCdn = useCallback(async (versionId: string): Promise<BibleVerse[] | null> => {
+    const downloadFromCdn = useCallback(async (versionId: string): Promise<{ data: BibleVerse[], blob: Blob } | null> => {
         try {
             const response = await fetch(`${BIBLE_DATA_URL}/${versionId.toLowerCase()}.json`)
             if (!response.ok) {
                 throw new Error(`Failed to fetch: ${response.status}`)
             }
-            return await response.json() as BibleVerse[]
+            const data = await response.json() as BibleVerse[]
+            // Also create a blob for file upload
+            const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
+            return { data, blob }
         } catch (error) {
             console.error(`Error downloading ${versionId}:`, error)
             return null
         }
     }, [])
 
-    // Upload a single version to Convex
+    // Upload a single version to Convex using file storage
     const uploadVersion = useCallback(async (versionId: string) => {
         const versionInfo = bibleVersionObjects.find(v => v.id === versionId)
         if (!versionInfo) return
@@ -92,8 +97,8 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
         ))
 
         // Download from CDN
-        const data = await downloadFromCdn(versionId)
-        if (!data) {
+        const result = await downloadFromCdn(versionId)
+        if (!result) {
             setVersions(prev => prev.map(v =>
                 v.id === versionId ? { ...v, status: 'error' as const, error: 'Failed to download from CDN' } : v
             ))
@@ -101,24 +106,47 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
             return
         }
 
+        const { data, blob } = result
+
         setVersions(prev => prev.map(v =>
-            v.id === versionId ? { ...v, status: 'uploading' as const, verseCount: data.length } : v
+            v.id === versionId ? {
+                ...v,
+                status: 'uploading' as const,
+                verseCount: data.length,
+                fileSize: blob.size,
+            } : v
         ))
 
-        // Upload to Convex
         try {
-            await uploadBibleVersion({
+            // Step 1: Get upload URL from Convex
+            const uploadUrl = await generateUploadUrl()
+
+            // Step 2: Upload the file to Convex storage
+            const uploadResponse = await fetch(uploadUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: blob,
+            })
+
+            if (!uploadResponse.ok) {
+                throw new Error(`Upload failed: ${uploadResponse.status}`)
+            }
+
+            // Get the storage ID from the response
+            const { storageId } = await uploadResponse.json()
+
+            // Step 3: Save metadata to database
+            await saveBibleVersion({
                 id: versionId,
                 name: versionInfo.name,
-                data: data.map(v => ({
-                    book: v.book,
-                    chapter: v.chapter,
-                    verse: v.verse,
-                    scripture: v.scripture,
-                })),
+                verseCount: data.length,
                 copyrightContent: versionInfo.copyrightContent || '',
                 isPublicDomain: versionInfo.isPublicDomain || false,
                 uploadedBy,
+                fileId: storageId,
+                fileSize: blob.size,
             })
 
             setVersions(prev => prev.map(v =>
@@ -132,7 +160,7 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
         }
 
         setCurrentUploading(null)
-    }, [downloadFromCdn, uploadBibleVersion, uploadedBy])
+    }, [downloadFromCdn, generateUploadUrl, saveBibleVersion, uploadedBy])
 
     // Upload all pending versions
     const uploadAllPending = useCallback(async () => {
@@ -151,11 +179,18 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
     const completedCount = versions.filter(v => v.status === 'completed').length
     const errorCount = versions.filter(v => v.status === 'error').length
 
+    // Format file size
+    const formatFileSize = (bytes: number) => {
+        if (bytes < 1024) return `${bytes} B`
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+    }
+
     return (
         <div className="bg-white rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-semibold text-gray-900">
-                    Bible Version Admin - Upload to Convex
+                    Bible Version Admin - Upload to Convex Storage
                 </h2>
                 {onClose && (
                     <button
@@ -252,6 +287,7 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                                 <div className="text-sm text-gray-500">
                                     {version.id}
                                     {version.verseCount && ` • ${version.verseCount.toLocaleString()} verses`}
+                                    {version.fileSize && ` • ${formatFileSize(version.fileSize)}`}
                                 </div>
                                 {version.error && (
                                     <div className="text-sm text-red-600">{version.error}</div>
@@ -293,10 +329,13 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                 <h3 className="font-medium text-blue-900 mb-2">How it works:</h3>
                 <ol className="text-sm text-blue-700 list-decimal list-inside space-y-1">
                     <li>Bible data is downloaded from the CDN</li>
-                    <li>Data is uploaded to your Convex database</li>
-                    <li>Once uploaded, the app will use Convex as primary source</li>
-                    <li>CDN remains as fallback if Convex is unavailable</li>
+                    <li>Data is uploaded to Convex File Storage (single file per version)</li>
+                    <li>Metadata is stored in the database for quick lookups</li>
+                    <li>App caches Bible data locally in IndexedDB for offline use</li>
                 </ol>
+                <p className="text-xs text-blue-600 mt-2">
+                    💡 This hybrid approach minimizes costs: 1 file upload per version vs thousands of database writes
+                </p>
             </div>
         </div>
     )

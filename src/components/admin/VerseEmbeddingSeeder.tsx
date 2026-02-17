@@ -24,6 +24,8 @@ interface SeedingStatus {
     progress: number
     total: number
     error?: string
+    hasLocalCache?: boolean
+    hasConvexSync?: boolean
 }
 
 interface VerseEmbeddingSeederProps {
@@ -39,6 +41,7 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
     const [isModelLoading, setIsModelLoading] = useState(false)
     const [modelLoaded, setModelLoaded] = useState(false)
     const [activeSeeding, setActiveSeeding] = useState<string | null>(null)
+    const [uploadToConvex, setUploadToConvex] = useState(false) // Opt-in for remote upload
 
     // Get available Bible versions
     const bibleVersions = useQuery(api.bibleVersions.listBibleVersions)
@@ -69,18 +72,36 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
         if (!bibleVersions) return
 
         const initializeStatuses = async () => {
-            // Check each version for embeddings
+            // Check each version for embeddings (local cache first, then Convex)
             const initialStatuses: SeedingStatus[] = await Promise.all(
                 bibleVersions.map(async (version) => {
-                    const stats = await convex.query(api.verseEmbeddings.getEmbeddingStats, {
-                        version: version.id,
-                    })
+                    // Check local cache first
+                    const hasLocalCache = await hasCachedEmbeddings(version.id)
+
+                    // Check Convex sync status
+                    let hasConvexSync = false
+                    try {
+                        const stats = await convex.query(api.verseEmbeddings.getEmbeddingStats, {
+                            version: version.id,
+                        })
+                        hasConvexSync = stats.hasEmbeddings
+                    } catch {
+                        // Convex check failed, assume no sync
+                    }
+
+                    // Determine status
+                    const status: SeedingStatus['status'] = hasLocalCache || hasConvexSync
+                        ? 'completed'
+                        : 'pending'
+
                     return {
                         versionId: version.id,
                         versionName: version.name,
-                        status: stats.hasEmbeddings ? 'completed' : 'pending',
+                        status,
                         progress: 0,
                         total: version.verseCount,
+                        hasLocalCache,
+                        hasConvexSync,
                     }
                 })
             )
@@ -126,13 +147,21 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
                 )
             )
 
-            // Get Bible data
-            const bibleData = await convex.query(api.bibleVersions.getBibleVersion, { id: versionId })
-            if (!bibleData?.data) {
-                throw new Error('Bible version data not found')
+            // Get Bible data from file storage
+            const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
+            if (!fileInfo?.url) {
+                throw new Error('Bible version file not found')
             }
 
-            const verses = bibleData.data
+            // Fetch the Bible JSON file
+            const response = await fetch(fileInfo.url)
+            if (!response.ok) {
+                throw new Error(`Failed to fetch Bible file: ${response.status}`)
+            }
+            const verses = await response.json() as Array<{ book: string; chapter: string; verse: string; scripture: string }>
+            if (!verses || verses.length === 0) {
+                throw new Error('Bible version data is empty')
+            }
             const BATCH_SIZE = 50 // Process 50 verses at a time
             const allEmbeddings: Array<{
                 reference: string
@@ -144,7 +173,7 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
                 embedding: number[]
             }> = []
 
-            // Book name to number mapping
+            // Book name to number mapping (needed for local cache)
             const BOOK_TO_NUMBER: Record<string, number> = {
                 'Genesis': 1, 'Exodus': 2, 'Leviticus': 3, 'Numbers': 4, 'Deuteronomy': 5,
                 'Joshua': 6, 'Judges': 7, 'Ruth': 8, '1 Samuel': 9, '2 Samuel': 10,
@@ -170,7 +199,7 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
                 const texts = batch.map((v) => v.scripture)
                 const embeddings = await embedBatch(texts)
 
-                // Add to all embeddings
+                // Add to all embeddings (include bookNumber for local cache)
                 for (let j = 0; j < batch.length; j++) {
                     const verse = batch[j]
                     const bookNumber = BOOK_TO_NUMBER[verse.book] ?? 0
@@ -199,37 +228,50 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
                 await new Promise((resolve) => setTimeout(resolve, 10))
             }
 
-            // Update status to uploading
-            setStatuses((prev) =>
-                prev.map((s) =>
-                    s.versionId === versionId
-                        ? { ...s, status: 'uploading', progress: verses.length }
-                        : s
-                )
-            )
-
-            // Upload to Convex in chunks
-            const CHUNK_SIZE = 100 // Upload 100 embeddings at a time
-            for (let i = 0; i < allEmbeddings.length; i += CHUNK_SIZE) {
-                const chunk = allEmbeddings.slice(i, i + CHUNK_SIZE)
-                await seedEmbeddingsFromClient({
-                    versionId,
-                    embeddings: chunk,
-                })
-            }
-
-            // Also cache locally for offline use
+            // Cache locally first (this is the primary storage for local-first approach)
             await cacheVerseEmbeddings(allEmbeddings.map((e) => ({
                 ...e,
                 version: versionId,
                 cachedAt: Date.now(),
             })))
 
-            // Update status to completed
+            // Upload to Convex only if opted in (for cross-device sync)
+            if (uploadToConvex) {
+                // Update status to uploading
+                setStatuses((prev) =>
+                    prev.map((s) =>
+                        s.versionId === versionId
+                            ? { ...s, status: 'uploading', progress: verses.length }
+                            : s
+                    )
+                )
+
+                try {
+                    const CHUNK_SIZE = 100 // Upload 100 embeddings at a time
+                    for (let i = 0; i < allEmbeddings.length; i += CHUNK_SIZE) {
+                        const chunk = allEmbeddings.slice(i, i + CHUNK_SIZE)
+                        await seedEmbeddingsFromClient({
+                            versionId,
+                            embeddings: chunk,
+                        })
+                    }
+                } catch (uploadError) {
+                    // Log but don't fail - local cache is sufficient
+                    console.warn(`Convex upload failed for ${versionId}, but local cache is available:`, uploadError)
+                }
+            }
+
+            // Update status to completed with sync flags
             setStatuses((prev) =>
                 prev.map((s) =>
                     s.versionId === versionId
-                        ? { ...s, status: 'completed', progress: verses.length }
+                        ? {
+                            ...s,
+                            status: 'completed',
+                            progress: verses.length,
+                            hasLocalCache: true,
+                            hasConvexSync: uploadToConvex,
+                        }
                         : s
                 )
             )
@@ -245,7 +287,7 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
         } finally {
             setActiveSeeding(null)
         }
-    }, [bibleVersions, convex, loadModel, seedEmbeddingsFromClient])
+    }, [bibleVersions, convex, loadModel, seedEmbeddingsFromClient, uploadToConvex])
 
     // Seed all pending versions
     const seedAllPending = useCallback(async () => {
@@ -319,7 +361,22 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
             </div>
 
             {/* Actions */}
-            <div className="mb-6 flex gap-3">
+            <div className="mb-6 space-y-3">
+                {/* Upload option */}
+                <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
+                    <input
+                        type="checkbox"
+                        id="uploadToConvex"
+                        checked={uploadToConvex}
+                        onChange={(e) => setUploadToConvex(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="uploadToConvex" className="text-sm text-gray-700">
+                        <span className="font-medium">Also upload to Convex</span>
+                        <span className="text-gray-500"> (optional, for cross-device sync)</span>
+                    </label>
+                </div>
+
                 <button
                     onClick={seedAllPending}
                     disabled={!modelLoaded || activeSeeding !== null}
@@ -346,7 +403,20 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
                                 </p>
                             </div>
                             <div className="flex items-center gap-2">
-                                <StatusBadge status={status.status} />
+                                {/* Show local/convex status badges */}
+                                {status.hasLocalCache && (
+                                    <span className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-700">
+                                        💾 Local
+                                    </span>
+                                )}
+                                {status.hasConvexSync && (
+                                    <span className="px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700">
+                                        ☁️ Synced
+                                    </span>
+                                )}
+                                {!status.hasLocalCache && !status.hasConvexSync && status.status === 'pending' && (
+                                    <StatusBadge status={status.status} />
+                                )}
                                 {status.status === 'pending' && (
                                     <button
                                         onClick={() => seedVersion(status.versionId)}

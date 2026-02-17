@@ -506,11 +506,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setIsListening(false)
             },
             onResult: (text, isFinal) => {
+                console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal })
                 if (isFinal) {
                     setInterimTranscript('')
                     setTranscript((prev) => {
                         const combinedTranscript = `${prev} ${text}`.trim()
                         transcriptBufferRef.current = combinedTranscript
+                        console.log('[useSermonListener] Updated transcript:', combinedTranscript.substring(0, 100))
                         processTranscript(combinedTranscript)
                         return combinedTranscript
                     })

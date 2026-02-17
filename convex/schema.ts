@@ -232,18 +232,15 @@ export default defineSchema({
         updatedAt: v.string(),
     }),
 
-    // Bible Versions table - stores complete Bible version data
+    // Bible Versions table - metadata only (actual Bible text stored in Convex file storage)
     bibleVersions: defineTable({
         id: v.string(), // KJV, NIV, etc.
         name: v.string(), // King James Version, New International Version, etc.
-        data: v.array(v.object({
-            book: v.string(),
-            chapter: v.string(),
-            verse: v.string(),
-            scripture: v.string(),
-        })),
+        verseCount: v.number(), // Number of verses (for quick reference)
         copyrightContent: v.string(),
         isPublicDomain: v.boolean(),
+        fileId: v.optional(v.id("_storage")), // Reference to file in Convex storage
+        fileSize: v.optional(v.number()), // File size in bytes for progress tracking
         uploadedAt: v.string(),
         uploadedBy: v.string(),
     })
