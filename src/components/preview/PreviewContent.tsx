@@ -163,6 +163,7 @@ export function PreviewContent() {
                             onEdit={() => handleEditSlide(slide)}
                             onSaveToLibrary={() => handleSaveToLibrary(slide)}
                             isSaved={isInLibrary(slide.id)}
+                            onGoLive={() => setLiveSlide(slide.id)}
                         />
                     ))
                 ) : (

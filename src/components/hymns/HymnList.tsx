@@ -16,7 +16,7 @@ export function HymnList({ onClose }: HymnListProps) {
     const [loading, setLoading] = useState(true)
 
     const { getAllHymns } = useHymn()
-    const { createHymnSlide } = useSlideCreation()
+    const { createHymnSlides } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
     // Load hymns
@@ -44,15 +44,15 @@ export function HymnList({ onClose }: HymnListProps) {
         setFilteredHymns(filtered)
     }, [query, hymns])
 
-    const handleCreateSlide = useCallback(() => {
+    const handleCreateSlides = useCallback(() => {
         if (selectedHymn) {
-            const slide = createHymnSlide(selectedHymn as any)
-            if (slide) {
+            const slides = createHymnSlides(selectedHymn as any)
+            slides.forEach(slide => {
                 appendActiveSlide(slide)
-            }
+            })
             onClose()
         }
-    }, [selectedHymn, createHymnSlide, appendActiveSlide, onClose])
+    }, [selectedHymn, createHymnSlides, appendActiveSlide, onClose])
 
     if (loading) {
         return (
@@ -176,10 +176,10 @@ export function HymnList({ onClose }: HymnListProps) {
                             Back
                         </button>
                         <button
-                            onClick={handleCreateSlide}
+                            onClick={handleCreateSlides}
                             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                         >
-                            Create Slide
+                            Create Slides ({selectedHymn.verses.length + (selectedHymn.chorus && selectedHymn.chorus !== 'false' ? 1 : 0)} verses)
                         </button>
                     </div>
                 </div>

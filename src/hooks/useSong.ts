@@ -38,60 +38,30 @@ export function useSong() {
                 return null
             }
 
-            // Divide lyrics into verses
+            // Divide lyrics into verses by splitting on blank lines
             const verses: string[] = []
-            let tempVerse = ''
-            let lineCount = 0
 
             // Clean up lyrics
-            const lyricLines = songData.lyrics
-                ?.replaceAll('\n \n', '\n\n')
-                ?.split('\n') || []
+            let cleanedLyrics = songData.lyrics || ''
+            cleanedLyrics = cleanedLyrics
+                .replaceAll("â", "'")
+                .replaceAll('solo: ', '')
+                .replaceAll(' ??? ', '')
+                .replaceAll(' ?? ', '')
+                .replaceAll('[force-verse-break]', '')
 
-            for (let i = 0; i < lyricLines.length; i++) {
-                let line = lyricLines[i]
+            // Split by one or more blank lines (handles both single and double blank lines)
+            // A blank line is a line that is empty or contains only whitespace
+            const verseBlocks = cleanedLyrics.split(/\n\s*\n/)
 
-                // Clean up line
-                line = line
-                    .replaceAll("â", "'")
-                    .replaceAll('solo: ', '')
-                    ?.replaceAll(' ??? ', '')
-                    ?.replaceAll(' ?? ', '')
-                    ?.replaceAll('[force-verse-break]', '')
-
-                // If line is empty, push current verse and reset
-                if (line.trim() === '') {
-                    if (tempVerse.trim()) {
-                        verses.push(tempVerse.trim())
-                    }
-                    lineCount = 0
-                    tempVerse = ''
-                    continue
-                }
-
-                tempVerse += `${line}\n`
-                lineCount += 1
-
-                // Check for double newline
-                if (tempVerse.includes('\n\n')) {
-                    verses.push(tempVerse.replace('\n\n', '').trim())
-                    lineCount = 0
-                    tempVerse = ''
-                    continue
-                }
-
-                // Check line count limit
-                if (lineCount === linesToUse) {
-                    verses.push(tempVerse.trim())
-                    lineCount = 0
-                    tempVerse = ''
-                }
-
-                // Last line
-                if ((lyricLines.length - i) === 1 && tempVerse.trim()) {
-                    verses.push(tempVerse.trim())
+            for (const block of verseBlocks) {
+                const trimmedBlock = block.trim()
+                if (trimmedBlock) {
+                    verses.push(trimmedBlock)
                 }
             }
+
+            console.log('Parsed verses:', verses.length, verses)
 
             return {
                 ...songData,

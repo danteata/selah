@@ -18,7 +18,7 @@ export function SongList({ onClose }: SongListProps) {
 
     const { songs, loading: songsLoading, searchSongs, deleteSong, parseSongLyrics } = useSongs()
     const { getSong } = useSong()
-    const { createSongSlide } = useSlideCreation()
+    const { createSongSlides } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
     // Filter songs
@@ -27,18 +27,25 @@ export function SongList({ onClose }: SongListProps) {
         song.artist.toLowerCase().includes(query.toLowerCase())
     )
 
-    const handleCreateSlide = useCallback(async () => {
+    const handleCreateSlides = useCallback(async () => {
         if (selectedSong) {
+            console.log('Selected song:', selectedSong)
+            console.log('Selected song lyrics:', selectedSong.lyrics)
+
             const songWithVerses = await getSong(selectedSong)
+            console.log('Song with verses after getSong:', songWithVerses)
+            console.log('Verses parsed:', songWithVerses?.verses)
+
             if (songWithVerses) {
-                const slide = createSongSlide(songWithVerses as any)
-                if (slide) {
+                const slides = createSongSlides(songWithVerses as any)
+                console.log('Created slides count:', slides.length)
+                slides.forEach(slide => {
                     appendActiveSlide(slide)
-                }
+                })
             }
             onClose()
         }
-    }, [selectedSong, getSong, createSongSlide, appendActiveSlide, onClose])
+    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, onClose])
 
     const handleDeleteSong = useCallback(async (songId: string) => {
         const success = await deleteSong(songId)
@@ -219,10 +226,10 @@ export function SongList({ onClose }: SongListProps) {
                                 Back
                             </button>
                             <button
-                                onClick={handleCreateSlide}
+                                onClick={handleCreateSlides}
                                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                             >
-                                Create Slide
+                                Create Slides
                             </button>
                         </div>
                     </div>

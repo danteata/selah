@@ -1,4 +1,4 @@
-import { Trash2, Copy, Bookmark, Pencil } from 'lucide-react'
+import { Trash2, Copy, Bookmark, Pencil, Radio, Play } from 'lucide-react'
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
 import { useFileUrl } from '../../hooks/useTemplates'
@@ -15,6 +15,7 @@ interface SlideCardProps {
     onEdit?: () => void
     onSaveToLibrary?: () => void
     isSaved?: boolean
+    onGoLive?: () => void
 }
 
 export function SlideCard({
@@ -29,6 +30,7 @@ export function SlideCard({
     onEdit,
     onSaveToLibrary,
     isSaved = false,
+    onGoLive,
 }: SlideCardProps) {
     // Get file URL if slide has a backgroundStorageId
     const fileUrl = useFileUrl(slide.backgroundStorageId || null)
@@ -98,6 +100,17 @@ export function SlideCard({
                         />
                     </div>
                 )}
+
+                {/* Quick Go Live button - appears on hover */}
+                {onGoLive && !isLive && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onGoLive(); }}
+                        className="absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100"
+                        title="Send to Live"
+                    >
+                        <Radio className="w-4 h-4" />
+                    </button>
+                )}
             </div>
 
             {/* Slide info and actions */}
@@ -121,6 +134,12 @@ export function SlideCard({
                 <div className="mt-2 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <SlideChip slideType={slide.type} />
+                        {/* Show verse indicator for song/hymn slides */}
+                        {slide.verseLabel && slide.totalVerses && (
+                            <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
+                                {slide.verseLabel} {slide.totalVerses > 1 && `(${slide.verseIndex! + 1}/${slide.totalVerses})`}
+                            </span>
+                        )}
                         <span className="text-xs text-gray-500 dark:text-gray-400">
                             #{slide.index + 1}
                         </span>

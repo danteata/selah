@@ -104,6 +104,10 @@ export interface Slide {
     saved?: boolean
     createdAt?: string
     updatedAt?: string
+    // Verse tracking for songs/hymns
+    verseIndex?: number
+    totalVerses?: number
+    verseLabel?: string
 }
 
 export interface Template {

@@ -28,7 +28,7 @@ const SEMANTIC_DETECTION_THRESHOLD = 0.55; // Minimum similarity score (lowered 
 const SEMANTIC_DETECTION_LIMIT = 5; // Max results per search
 const MIN_TEXT_LENGTH = 50; // Minimum characters before attempting detection
 const MAX_TEXT_LENGTH = 500; // Maximum characters to embed (truncated)
-const THROTTLE_MS = 5000; // Throttle semantic searches to 5 seconds (lowered for testing)
+const THROTTLE_MS = 3000; // Throttle semantic searches to 5 seconds (lowered for testing)
 
 export interface SemanticVerseMatch {
     reference: string;

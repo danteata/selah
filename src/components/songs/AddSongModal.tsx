@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Music, Plus, Lightbulb, Globe } from 'lucide-react'
+import { X, Music, Plus, Lightbulb, Globe, Eye, EyeOff } from 'lucide-react'
 import { useSongs } from '../../hooks/useSongs'
 import type { Song } from '../../types'
 
@@ -16,8 +16,12 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
     const [lyrics, setLyrics] = useState('')
     const [isPublic, setIsPublic] = useState(true)
     const [error, setError] = useState('')
+    const [showPreview, setShowPreview] = useState(false)
 
     const { createSong, updateSong, loading, parseSongLyrics } = useSongs()
+
+    // Parse verses for preview
+    const parsedVerses = lyrics.trim() ? lyrics.split(/\n\s*\n/).filter(v => v.trim()) : []
 
     // Populate form when editing an existing song or when modal opens
     useEffect(() => {
@@ -164,9 +168,19 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
 
                         {/* Lyrics */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Lyrics <span className="text-red-500">*</span>
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    Lyrics <span className="text-red-500">*</span>
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPreview(!showPreview)}
+                                    className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                                >
+                                    {showPreview ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                    {showPreview ? 'Hide Preview' : 'Preview Verses'}
+                                </button>
+                            </div>
                             <textarea
                                 value={lyrics}
                                 onChange={(e) => setLyrics(e.target.value)}
@@ -175,6 +189,34 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
                                 required
                                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none font-mono text-sm leading-relaxed"
                             />
+
+                            {/* Verse Preview */}
+                            {showPreview && parsedVerses.length > 0 && (
+                                <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                                        Preview: {parsedVerses.length} verse{parsedVerses.length !== 1 ? 's' : ''} detected
+                                    </div>
+                                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                                        {parsedVerses.map((verse, index) => (
+                                            <div key={index} className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
+                                                <div className="text-xs font-medium text-primary-600 dark:text-primary-400 mb-1">
+                                                    Verse {index + 1}
+                                                </div>
+                                                <p className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-line">
+                                                    {verse}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Verse count indicator */}
+                            {lyrics.trim() && !showPreview && (
+                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    {parsedVerses.length} verse{parsedVerses.length !== 1 ? 's' : ''} will be created
+                                </div>
+                            )}
                         </div>
 
                         {/* Public Toggle - Only for new songs */}

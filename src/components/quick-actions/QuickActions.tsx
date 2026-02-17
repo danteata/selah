@@ -46,7 +46,7 @@ export function QuickActions() {
     const actionsContainerRef = useRef<HTMLDivElement>(null)
     const { getAllHymns, getHymnByNumber } = useHymn()
     const { fetchScripture } = useScripture()
-    const { createBibleSlide, createHymnSlide } = useSlideCreation()
+    const { createBibleSlide, createHymnSlides } = useSlideCreation()
 
     // Use Zustand for page state and actions
     const page = useAppStore((state) => state.quickActionsPage)
@@ -243,10 +243,10 @@ export function QuickActions() {
             try {
                 const hymn = await getHymnByNumber(hymnNumber)
                 if (hymn) {
-                    const slide = createHymnSlide(hymn as any)
-                    if (slide) {
+                    const slides = createHymnSlides(hymn as any)
+                    slides.forEach(slide => {
                         appendActiveSlide(slide)
-                    }
+                    })
                 }
             } catch (e) {
                 console.error('Failed to fetch hymn:', e)
@@ -270,7 +270,7 @@ export function QuickActions() {
             openModal('editor')
             return
         }
-    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlide, bibleChapterAndVerse, setEditingSlide, activeSchedule])
+    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule])
 
     // Handle keyboard navigation
     const handleInputKeydown = useCallback((e: React.KeyboardEvent) => {

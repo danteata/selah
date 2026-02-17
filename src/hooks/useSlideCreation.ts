@@ -264,7 +264,7 @@ export function useSlideCreation() {
         return tempSlide
     }, [preSlideCreation, settings, templates])
 
-    const createHymnSlide = useCallback((hymn: Hymn): Slide => {
+    const createHymnSlide = useCallback((hymn: Hymn, verseIndex?: number): Slide => {
         const tempSlide = preSlideCreation()
         tempSlide.layout = slideLayoutTypes.bible
         tempSlide.type = slideTypes.hymn
@@ -279,24 +279,63 @@ export function useSlideCreation() {
             settings.defaultBackground.hymn?.backgroundType
         tempSlide.songId = hymn.number
         tempSlide.hasChorus = hymn.chorus === 'false' ? false : !!hymn.chorus
-        tempSlide.title = 'Verse 1'
 
-        const currentHymnVerse = hymn.verses?.[0]?.trim()
+        // Calculate total verses (including chorus if present)
+        const totalVerses = hymn.verses?.length || 0
+        const hasChorus = hymn.chorus && hymn.chorus !== 'false'
+        const actualVerseIndex = verseIndex ?? 0
 
-        const fontSize = calculateScreenFontSize(currentHymnVerse)
+        // Determine verse label
+        let verseLabel = `Verse ${actualVerseIndex + 1}`
+        if (hasChorus && actualVerseIndex === totalVerses) {
+            verseLabel = 'Chorus'
+        }
+
+        tempSlide.title = verseLabel
+        tempSlide.verseIndex = actualVerseIndex
+        tempSlide.totalVerses = totalVerses + (hasChorus ? 1 : 0)
+        tempSlide.verseLabel = verseLabel
+
+        // Get the content for this verse
+        let currentVerse: string
+        if (hasChorus && actualVerseIndex === totalVerses) {
+            currentVerse = hymn.chorus
+        } else {
+            currentVerse = hymn.verses?.[actualVerseIndex]?.trim() || ''
+        }
+
+        const fontSize = calculateScreenFontSize(currentVerse)
         tempSlide.slideStyle = {
             ...tempSlide.slideStyle,
             fontSize: Number(fontSize),
             font: settings.defaultFont,
         }
         tempSlide.data = hymn
-        tempSlide.contents = generateSlideContent(tempSlide, hymn, currentHymnVerse)
-        tempSlide.name = generateSlideName(tempSlide)
+        tempSlide.contents = generateSlideContent(tempSlide, hymn, currentVerse)
+        tempSlide.name = `${hymn.title} - ${verseLabel}`
 
         return tempSlide
     }, [preSlideCreation, settings])
 
-    const createSongSlide = useCallback((song: Song): Slide => {
+    const createHymnSlides = useCallback((hymn: Hymn): Slide[] => {
+        const slides: Slide[] = []
+        const totalVerses = hymn.verses?.length || 0
+        const hasChorus = hymn.chorus && hymn.chorus !== 'false'
+
+        // Create a slide for each verse
+        for (let i = 0; i < totalVerses; i++) {
+            slides.push(createHymnSlide(hymn, i))
+        }
+
+        // Add chorus slide if hymn has chorus
+        if (hasChorus) {
+            slides.push(createHymnSlide(hymn, totalVerses))
+        }
+
+        return slides
+    }, [createHymnSlide])
+
+    const createSongSlide = useCallback((song: Song, verseIndex?: number): Slide => {
         const tempSlide = preSlideCreation()
         tempSlide.layout = slideLayoutTypes.bible
         tempSlide.type = slideTypes.song
@@ -310,22 +349,60 @@ export function useSlideCreation() {
             settings.defaultBackground.default?.backgroundType ||
             settings.defaultBackground.hymn?.backgroundType
         tempSlide.songId = song._id || song.id
-        tempSlide.title = 'Verse 1'
 
-        const currentSongVerse = song.verses?.[0]?.trim()
+        // Calculate total verses
+        const totalVerses = song.verses?.length || 0
+        const actualVerseIndex = verseIndex ?? 0
 
-        const fontSize = calculateScreenFontSize(currentSongVerse as string)
+        // Determine verse label
+        const verseLabel = `Verse ${actualVerseIndex + 1}`
+
+        tempSlide.title = verseLabel
+        tempSlide.verseIndex = actualVerseIndex
+        tempSlide.totalVerses = totalVerses
+        tempSlide.verseLabel = verseLabel
+
+        // Get the content for this verse
+        const currentVerse = song.verses?.[actualVerseIndex]?.trim() || ''
+
+        const fontSize = calculateScreenFontSize(currentVerse)
         tempSlide.slideStyle = {
             ...tempSlide.slideStyle,
             fontSize: Number(fontSize),
             font: settings.defaultFont,
         }
         tempSlide.data = song
-        tempSlide.contents = generateSlideContent(tempSlide, song, currentSongVerse)
-        tempSlide.name = generateSlideName(tempSlide)
+        tempSlide.contents = generateSlideContent(tempSlide, song, currentVerse)
+        tempSlide.name = `${song.title} - ${verseLabel}`
 
         return tempSlide
     }, [preSlideCreation, settings])
+
+    const createSongSlides = useCallback((song: Song): Slide[] => {
+        console.log('createSongSlides called with song:', song)
+        console.log('Song verses:', song.verses)
+        console.log('Verses count:', song.verses?.length)
+
+        const slides: Slide[] = []
+        const totalVerses = song.verses?.length || 0
+
+        if (totalVerses === 0) {
+            console.warn('No verses found in song! Creating single slide with full lyrics.')
+            // If no verses parsed, create one slide with all lyrics
+            const slide = createSongSlide(song, 0)
+            slide.contents = [song.lyrics || '']
+            slide.name = song.title || 'Song'
+            slides.push(slide)
+        } else {
+            // Create a slide for each verse
+            for (let i = 0; i < totalVerses; i++) {
+                slides.push(createSongSlide(song, i))
+            }
+        }
+
+        console.log('Created slides:', slides.length)
+        return slides
+    }, [createSongSlide])
 
     const createMediaSlide = useCallback(async (
         file: ExtendedFileT & { isExternal?: boolean },
@@ -425,7 +502,9 @@ export function useSlideCreation() {
         createTextSlide,
         createBibleSlide,
         createHymnSlide,
+        createHymnSlides,
         createSongSlide,
+        createSongSlides,
         createMediaSlide,
         createMultipleMediaSlides,
         createCountdownSlide,

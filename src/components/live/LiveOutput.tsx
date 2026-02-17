@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Eye, Trash2, Edit, Monitor, Airplay } from 'lucide-react'
+import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useMultiMonitor } from '../../hooks/useMultiMonitor'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
@@ -32,8 +32,14 @@ export function LiveOutput() {
             .map(id => activeSlides.find(slide => slide.id === id))
             .filter((slide): slide is Slide => slide !== undefined)
 
-        // Filter by active schedule
-        return slides.filter(slide => slide.scheduleId === activeSchedule?._id)
+        // Filter by active schedule (show slides with matching scheduleId or no scheduleId)
+        if (activeSchedule) {
+            return slides.filter(slide =>
+                slide.scheduleId === activeSchedule._id || !slide.scheduleId || slide.scheduleId === ''
+            )
+        }
+        // If no active schedule, show all slides without a scheduleId
+        return slides.filter(slide => !slide.scheduleId || slide.scheduleId === '')
     }, [liveOutputSlidesId, activeSlides, activeSchedule])
 
     // Get live slide
@@ -347,16 +353,50 @@ export function LiveOutput() {
                 />
             )}
 
-            {/* Navigation hints */}
-            <div className="mt-4 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                <div className="flex items-center gap-2">
-                    <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">âââ </kbd>
-                    <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">âââ¬</kbd>
-                    Navigate
+            {/* Navigation controls */}
+            <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <div className="flex items-center justify-between">
+                    {/* Previous/Next buttons */}
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => prevSlide && handleSetLiveSlide(prevSlide.id)}
+                            disabled={!prevSlide}
+                            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <ChevronUp className="w-4 h-4" />
+                            Prev
+                        </button>
+                        <button
+                            onClick={() => nextSlide && handleSetLiveSlide(nextSlide.id)}
+                            disabled={!nextSlide}
+                            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Next
+                            <ChevronDown className="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    {/* Slide position indicator */}
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {liveOutputSlides.length > 0 ? (
+                            <span>{currentIndex + 1} / {liveOutputSlides.length}</span>
+                        ) : (
+                            <span>No slides</span>
+                        )}
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <kbd className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">Ctrl+0-9</kbd>
-                    Quick select
+
+                {/* Keyboard shortcut hints */}
+                <div className="mt-2 flex items-center justify-center gap-4 text-xs text-gray-400 dark:text-gray-500">
+                    <span className="flex items-center gap-1">
+                        <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px]">↑</kbd>
+                        <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px]">↓</kbd>
+                        Navigate
+                    </span>
+                    <span className="flex items-center gap-1">
+                        <kbd className="px-1 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-[10px]">Ctrl+1-9</kbd>
+                        Jump to slide
+                    </span>
                 </div>
             </div>
         </div>

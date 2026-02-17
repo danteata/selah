@@ -209,18 +209,27 @@ class WhisperCppTranscriptionService {
         // Use AudioContext to capture raw PCM data instead of MediaRecorder
         // MediaRecorder produces webm/opus which decodeAudioData can't decode
         try {
-            // Create AudioContext - let it use the native sample rate
-            this.audioContext = new AudioContext()
+            // Create AudioContext at 16kHz to match whisper.cpp's expected sample rate
+            // This eliminates the need for resampling and improves audio quality
+            const targetSampleRate = 16000
+            try {
+                this.audioContext = new AudioContext({ sampleRate: targetSampleRate })
+            } catch {
+                // Fallback to default sample rate if 16kHz is not supported
+                console.warn('[Whisper.cpp] 16kHz AudioContext not supported, using native sample rate')
+                this.audioContext = new AudioContext()
+            }
             const nativeSampleRate = this.audioContext.sampleRate
+            const needsResampling = nativeSampleRate !== targetSampleRate
 
-            console.log('[Whisper.cpp] AudioContext native sample rate:', nativeSampleRate)
+            console.log('[Whisper.cpp] AudioContext sample rate:', nativeSampleRate, needsResampling ? '(will resample to 16kHz)' : '(optimal - no resampling needed)')
 
             const source = this.audioContext.createMediaStreamSource(this.mediaStream)
 
             // Buffer to accumulate audio samples
             this.audioBuffer = []
             const chunkDuration = chunkDurationMs || this.config.chunkDurationMs || 5000
-            // Calculate samples based on NATIVE sample rate, then resample to 16kHz later
+            // Calculate samples based on the AudioContext's actual sample rate
             const samplesPerChunk = nativeSampleRate * (chunkDuration / 1000)
 
             // Use ScriptProcessorNode to capture raw PCM data
@@ -255,11 +264,10 @@ class WhisperCppTranscriptionService {
                         .then(async () => {
                             // Check audio level
                             const maxAmp = this.getMaxAmplitude(combined)
-                            console.log('[Whisper.cpp] Audio level:', maxAmp.toFixed(4), '| Native samples:', combined.length, '| Sample rate:', nativeSampleRate)
+                            console.log('[Whisper.cpp] Audio level:', maxAmp.toFixed(4), '| Samples:', combined.length, '| Sample rate:', nativeSampleRate, needsResampling ? '(resampling...)' : '(no resampling)')
 
-                            // Resample from native sample rate to 16kHz for whisper.cpp
-                            const targetSampleRate = 16000
-                            const resampled = nativeSampleRate !== targetSampleRate
+                            // Resample only if needed (when AudioContext couldn't be set to 16kHz)
+                            const resampled = needsResampling
                                 ? this.resample(combined, nativeSampleRate, targetSampleRate)
                                 : combined
 
