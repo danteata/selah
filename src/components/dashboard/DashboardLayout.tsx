@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Zap, LayoutGrid, Monitor, Mic, Library } from 'lucide-react'
 import { DraggablePanel } from './DraggablePanel'
-import { QuickActions } from '../quick-actions/QuickActions'
+import { QuickActionsSidebar } from '../quick-actions/QuickActionsSidebar'
 import { PreviewContent } from '../preview/PreviewContent'
 import { LiveOutput } from '../live/LiveOutput'
 import { SermonListenerPanel } from '../sermon-listener'
@@ -37,10 +37,10 @@ const iconMap: Record<string, React.ReactNode> = {
     Library: <Library className="w-4 h-4" />,
 }
 
-// Accent color mapping for each panel
+// Accent color mapping for each panel - refined palette
 const accentColorMap: Record<PanelId, string> = {
-    quickActions: 'blue',
-    previewContent: 'purple',
+    quickActions: 'teal',
+    previewContent: 'indigo',
     liveOutput: 'emerald',
     sermonListener: 'amber',
     library: 'rose',
@@ -51,7 +51,7 @@ export function DashboardLayout({
     onSermonListenerToggle
 }: DashboardLayoutProps) {
     const [collapsedPanels, setCollapsedPanels] = useState<Set<PanelId>>(new Set())
-    const [hiddenPanels, setHiddenPanels] = useState<Set<PanelId>>(new Set())
+    const [hiddenPanels, setHiddenPanels] = useState<Set<PanelId>>(new Set(['quickActions'])) // QuickActions hidden by default
     const [layouts, setLayouts] = useState<{ [key: string]: LayoutItem[] }>(() => {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
@@ -217,7 +217,7 @@ export function DashboardLayout({
     const renderPanelContent = (panelId: PanelId) => {
         switch (panelId) {
             case 'quickActions':
-                return <QuickActions />
+                return <QuickActionsSidebar compact={true} />
             case 'previewContent':
                 return <PreviewContent />
             case 'liveOutput':
@@ -297,8 +297,8 @@ export function DashboardLayout({
 
             {/* Panel Toggle Bar - Fixed at bottom, responsive */}
             <div className="fixed bottom-2 sm:bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-1rem)] max-w-lg sm:max-w-none sm:w-auto">
-                <div className="flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-1.5 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-x-auto">
-                    <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 mr-1 uppercase tracking-wider hidden sm:inline">Panels</span>
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-1.5 bg-[var(--bg-secondary)]/95 backdrop-blur-xl rounded-xl shadow-lg border border-[var(--border-default)] overflow-x-auto">
+                    <span className="text-[10px] font-medium text-[var(--text-muted)] mr-1 uppercase tracking-wider hidden sm:inline">Panels</span>
                     {DEFAULT_PANEL_CONFIGS.map((panel) => {
                         const isHidden = hiddenPanels.has(panel.id)
                         const Icon = iconMap[panel.icon]
@@ -316,12 +316,12 @@ export function DashboardLayout({
                                     flex items-center justify-center gap-1 px-2 sm:px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] font-medium
                                     transition-all duration-200 whitespace-nowrap
                                     ${isHidden
-                                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
-                                        : `${accentColorMap[panel.id] === 'blue' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : ''}
-                                           ${accentColorMap[panel.id] === 'purple' ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400' : ''}
-                                           ${accentColorMap[panel.id] === 'emerald' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' : ''}
-                                           ${accentColorMap[panel.id] === 'amber' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400' : ''}
-                                           ${accentColorMap[panel.id] === 'rose' ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400' : ''}`
+                                        ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                                        : `${accentColorMap[panel.id] === 'teal' ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]' : ''}
+                                           ${accentColorMap[panel.id] === 'indigo' ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)]' : ''}
+                                           ${accentColorMap[panel.id] === 'emerald' ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)]' : ''}
+                                           ${accentColorMap[panel.id] === 'amber' ? 'bg-[var(--accent-amber)]/10 text-[var(--accent-amber)]' : ''}
+                                           ${accentColorMap[panel.id] === 'rose' ? 'bg-[var(--accent-rose)]/10 text-[var(--accent-rose)]' : ''}`
                                     }
                                 `}
                                 title={isHidden ? `Show ${panel.title}` : `Hide ${panel.title}`}

@@ -19,8 +19,8 @@
 
 /* Prevent react-grid-layout placeholder from looking jarring */
 .dashboard-layout .react-grid-placeholder {
-    background-color: rgba(99, 102, 241, 0.12) !important;
-    border: 2px dashed rgba(99, 102, 241, 0.3) !important;
+    background-color: rgba(13, 148, 136, 0.08) !important;
+    border: 2px dashed rgba(13, 148, 136, 0.25) !important;
     border-radius: 0.75rem !important;
     opacity: 1 !important;
 }

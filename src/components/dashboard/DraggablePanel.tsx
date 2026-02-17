@@ -34,48 +34,59 @@ export function DraggablePanel({
     onClose,
     onCollapse,
     className = '',
-    accentColor = 'blue',
+    accentColor = 'teal',
 }: DraggablePanelProps) {
     const [isHovered, setIsHovered] = useState(false)
     const [showMenu, setShowMenu] = useState(false)
     const [isFullscreen, setIsFullscreen] = useState(false)
     const panelRef = useRef<HTMLDivElement>(null)
 
-    // Accent color mappings
-    const accentColors: Record<string, { bg: string; border: string; text: string; headerAccent: string }> = {
-        blue: {
-            bg: 'bg-blue-500/10',
-            border: 'border-blue-400/40',
-            text: 'text-blue-500',
-            headerAccent: 'from-blue-500/8 to-transparent',
-        },
-        purple: {
-            bg: 'bg-purple-500/10',
-            border: 'border-purple-400/40',
-            text: 'text-purple-500',
-            headerAccent: 'from-purple-500/8 to-transparent',
-        },
-        emerald: {
-            bg: 'bg-emerald-500/10',
-            border: 'border-emerald-400/40',
-            text: 'text-emerald-500',
-            headerAccent: 'from-emerald-500/8 to-transparent',
+    // Refined accent color mappings - subtle, not garish
+    const accentColors: Record<string, {
+        indicator: string;
+        hoverBg: string;
+        text: string;
+        ring: string;
+        glow: string;
+    }> = {
+        teal: {
+            indicator: 'bg-[var(--accent-teal)]',
+            hoverBg: 'hover:bg-[var(--accent-teal)]/5',
+            text: 'text-[var(--accent-teal)]',
+            ring: 'ring-[var(--accent-teal)]/20',
+            glow: 'shadow-[var(--accent-teal)]/10',
         },
         amber: {
-            bg: 'bg-amber-500/10',
-            border: 'border-amber-400/40',
-            text: 'text-amber-500',
-            headerAccent: 'from-amber-500/8 to-transparent',
+            indicator: 'bg-[var(--accent-amber)]',
+            hoverBg: 'hover:bg-[var(--accent-amber)]/5',
+            text: 'text-[var(--accent-amber)]',
+            ring: 'ring-[var(--accent-amber)]/20',
+            glow: 'shadow-[var(--accent-amber)]/10',
         },
         rose: {
-            bg: 'bg-rose-500/10',
-            border: 'border-rose-400/40',
-            text: 'text-rose-500',
-            headerAccent: 'from-rose-500/8 to-transparent',
+            indicator: 'bg-[var(--accent-rose)]',
+            hoverBg: 'hover:bg-[var(--accent-rose)]/5',
+            text: 'text-[var(--accent-rose)]',
+            ring: 'ring-[var(--accent-rose)]/20',
+            glow: 'shadow-[var(--accent-rose)]/10',
+        },
+        indigo: {
+            indicator: 'bg-[var(--accent-indigo)]',
+            hoverBg: 'hover:bg-[var(--accent-indigo)]/5',
+            text: 'text-[var(--accent-indigo)]',
+            ring: 'ring-[var(--accent-indigo)]/20',
+            glow: 'shadow-[var(--accent-indigo)]/10',
+        },
+        emerald: {
+            indicator: 'bg-[var(--accent-emerald)]',
+            hoverBg: 'hover:bg-[var(--accent-emerald)]/5',
+            text: 'text-[var(--accent-emerald)]',
+            ring: 'ring-[var(--accent-emerald)]/20',
+            glow: 'shadow-[var(--accent-emerald)]/10',
         },
     }
 
-    const colors = accentColors[accentColor] || accentColors.blue
+    const colors = accentColors[accentColor] || accentColors.teal
 
     const handleFullscreen = useCallback(() => {
         if (!document.fullscreenElement) {
@@ -114,12 +125,12 @@ export function DraggablePanel({
                 draggable-panel
                 ${isCollapsed ? 'draggable-panel--collapsed' : ''}
                 h-full flex flex-col
-                bg-white dark:bg-gray-900/95
+                bg-[var(--bg-secondary)]
                 rounded-xl
-                border border-gray-200/60 dark:border-gray-700/60
+                border border-[var(--border-default)]
                 shadow-sm
-                transition-shadow duration-200 ease-out
-                ${isHovered ? `shadow-md ${colors.border}` : ''}
+                transition-all duration-200 ease-out
+                ${isHovered ? `shadow-md ring-1 ${colors.ring}` : ''}
                 ${isFullscreen ? 'fixed inset-0 z-50 rounded-none' : ''}
                 ${className}
                 overflow-hidden
@@ -131,18 +142,22 @@ export function DraggablePanel({
             <div
                 className={`
                     flex items-center justify-between
-                    px-3 py-2
-                    bg-gradient-to-r ${isHovered ? colors.headerAccent : 'from-gray-50/60 to-transparent dark:from-gray-800/40 dark:to-transparent'}
-                    ${!isCollapsed ? 'border-b border-gray-100 dark:border-gray-800/60' : ''}
+                    px-3 py-2.5
+                    bg-[var(--bg-tertiary)]/50
+                    ${!isCollapsed ? 'border-b border-[var(--border-subtle)]' : ''}
                     cursor-move
                     select-none
                     transition-all duration-200
                     flex-shrink-0
+                    group
                 `}
             >
                 {/* Left: Drag Handle + Icon + Title */}
-                <div className="flex items-center gap-2 min-w-0">
-                    <div className="text-gray-300 dark:text-gray-600 hover:text-gray-400 dark:hover:text-gray-400 transition-colors cursor-grab active:cursor-grabbing flex-shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                    {/* Accent indicator */}
+                    <div className={`w-1 h-4 rounded-full ${colors.indicator} opacity-80`} />
+
+                    <div className="text-[var(--text-muted)] group-hover:text-[var(--text-tertiary)] transition-colors cursor-grab active:cursor-grabbing flex-shrink-0">
                         <GripVertical className="w-3.5 h-3.5" />
                     </div>
 
@@ -150,7 +165,7 @@ export function DraggablePanel({
                         {icon}
                     </div>
 
-                    <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-300 truncate">
+                    <h3 className="text-xs font-medium text-[var(--text-secondary)] truncate tracking-wide">
                         {title}
                     </h3>
                 </div>
@@ -165,10 +180,10 @@ export function DraggablePanel({
                                 onCollapse()
                             }}
                             className="
-                                p-1 rounded-md
-                                text-gray-400 dark:text-gray-500
-                                hover:text-gray-600 dark:hover:text-gray-300
-                                hover:bg-gray-100/80 dark:hover:bg-gray-800/80
+                                p-1.5 rounded-md
+                                text-[var(--text-muted)]
+                                hover:text-[var(--text-secondary)]
+                                hover:bg-[var(--bg-tertiary)]
                                 transition-all duration-150
                             "
                             title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
@@ -191,10 +206,10 @@ export function DraggablePanel({
                                     handleFullscreen()
                                 }}
                                 className="
-                                    p-1 rounded-md
-                                    text-gray-400 dark:text-gray-500
-                                    hover:text-gray-600 dark:hover:text-gray-300
-                                    hover:bg-gray-100/80 dark:hover:bg-gray-800/80
+                                    p-1.5 rounded-md
+                                    text-[var(--text-muted)]
+                                    hover:text-[var(--text-secondary)]
+                                    hover:bg-[var(--bg-tertiary)]
                                     transition-all duration-150
                                 "
                                 title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
@@ -214,10 +229,10 @@ export function DraggablePanel({
                                         setShowMenu(!showMenu)
                                     }}
                                     className="
-                                        p-1 rounded-md
-                                        text-gray-400 dark:text-gray-500
-                                        hover:text-gray-600 dark:hover:text-gray-300
-                                        hover:bg-gray-100/80 dark:hover:bg-gray-800/80
+                                        p-1.5 rounded-md
+                                        text-[var(--text-muted)]
+                                        hover:text-[var(--text-secondary)]
+                                        hover:bg-[var(--bg-tertiary)]
                                         transition-all duration-150
                                     "
                                 >
@@ -234,13 +249,13 @@ export function DraggablePanel({
                                             transition={{ duration: 0.12 }}
                                             className="absolute right-0 top-full mt-1 z-50"
                                         >
-                                            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[130px]">
+                                            <div className="bg-[var(--bg-elevated)] rounded-lg shadow-lg border border-[var(--border-default)] py-1 min-w-[130px]">
                                                 <button
                                                     onClick={() => {
                                                         onCollapse?.()
                                                         setShowMenu(false)
                                                     }}
-                                                    className="w-full px-3 py-1.5 text-left text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                                                    className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] flex items-center gap-2"
                                                 >
                                                     <ChevronUp className="w-3.5 h-3.5" />
                                                     Collapse
@@ -251,7 +266,7 @@ export function DraggablePanel({
                                                             onClose()
                                                             setShowMenu(false)
                                                         }}
-                                                        className="w-full px-3 py-1.5 text-left text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
+                                                        className="w-full px-3 py-1.5 text-left text-xs text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/5 flex items-center gap-2"
                                                     >
                                                         <X className="w-3.5 h-3.5" />
                                                         Close Panel
@@ -273,10 +288,10 @@ export function DraggablePanel({
                                 onClose()
                             }}
                             className="
-                                p-1 rounded-md
-                                text-gray-400 dark:text-gray-500
-                                hover:text-red-500 dark:hover:text-red-400
-                                hover:bg-red-50 dark:hover:bg-red-900/20
+                                p-1.5 rounded-md
+                                text-[var(--text-muted)]
+                                hover:text-[var(--accent-rose)]
+                                hover:bg-[var(--accent-rose)]/5
                                 transition-all duration-150
                             "
                             title="Close panel"

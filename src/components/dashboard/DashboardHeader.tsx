@@ -54,32 +54,33 @@ export function DashboardHeader({
     return (
         <header
             className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
-                ? 'bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl shadow-lg shadow-black/5 dark:shadow-black/20'
-                : 'bg-white dark:bg-gray-900'
-                } border-b border-gray-200 dark:border-gray-800`}
+                    ? 'bg-[var(--bg-secondary)]/90 backdrop-blur-xl shadow-lg shadow-black/5 dark:shadow-black/20 border-b border-[var(--border-subtle)]'
+                    : 'bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)]'
+                }`}
         >
             <div className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex justify-between items-center h-16">
                     {/* Logo and Schedule */}
                     <div className="flex items-center gap-4">
-                        {/* Logo with gradient */}
+                        {/* Logo - refined, no gradients */}
                         <motion.div
-                            className="flex items-center gap-2"
+                            className="flex items-center gap-3"
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.5 }}
                         >
                             <div className="relative">
-                                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-lg blur-sm opacity-50" />
-                                <h1 className="relative text-xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent">
+                                {/* Subtle accent mark */}
+                                <div className="absolute -left-1 -top-1 w-2 h-2 rounded-full bg-[var(--accent-teal)]" />
+                                <h1 className="text-xl font-semibold text-[var(--text-primary)] tracking-tight" style={{ fontFamily: "'Crimson Pro', Georgia, serif" }}>
                                     Selah
                                 </h1>
                             </div>
                             {/* Status indicator */}
                             <div className="flex items-center gap-1.5">
                                 <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--accent-teal)] opacity-60" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--accent-teal)]" />
                                 </span>
                             </div>
                         </motion.div>
@@ -90,10 +91,10 @@ export function DashboardHeader({
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: 0.2 }}
-                                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/30 dark:to-purple-900/30 border border-blue-200 dark:border-blue-800"
+                                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-tertiary)] border border-[var(--border-default)]"
                             >
-                                <Calendar className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
-                                <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                                <Calendar className="w-3.5 h-3.5 text-[var(--accent-teal)]" />
+                                <span className="text-sm font-medium text-[var(--text-secondary)]">
                                     {activeSchedule.name}
                                 </span>
                             </motion.div>
@@ -101,7 +102,7 @@ export function DashboardHeader({
                     </div>
 
                     {/* Right Side Actions */}
-                    <div className="flex items-center gap-2 sm:gap-4">
+                    <div className="flex items-center gap-2 sm:gap-3">
                         {/* Church Context Switcher (for superadmin) */}
                         <ChurchContext />
 
@@ -109,13 +110,13 @@ export function DashboardHeader({
                         {canAccessAdmin && onToggleAdminPanel && (
                             <motion.button
                                 onClick={onToggleAdminPanel}
-                                className={`relative p-2.5 rounded-xl transition-all duration-300 ${showAdminPanel
-                                    ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg shadow-purple-500/25'
-                                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                className={`relative p-2.5 rounded-lg transition-all duration-200 ${showAdminPanel
+                                        ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)] ring-1 ring-[var(--accent-indigo)]/20'
+                                        : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                                     }`}
                                 title="Admin Panel"
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
                             >
                                 <Shield className="w-5 h-5" />
                             </motion.button>
@@ -124,18 +125,18 @@ export function DashboardHeader({
                         {/* Sermon Listener Toggle */}
                         <motion.button
                             onClick={onToggleSermonListener}
-                            className={`relative p-2.5 rounded-xl transition-all duration-300 ${showSermonListener
-                                ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white shadow-lg shadow-blue-500/25'
-                                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+                            className={`relative p-2.5 rounded-lg transition-all duration-200 ${showSermonListener
+                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] ring-1 ring-[var(--accent-teal)]/20'
+                                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                                 }`}
                             title="Sermon Listener"
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
                         >
                             <Mic className="w-5 h-5" />
                             {showSermonListener && (
                                 <motion.div
-                                    className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-white dark:border-gray-900"
+                                    className="absolute -top-1 -right-1 w-3 h-3 bg-[var(--accent-teal)] rounded-full border-2 border-[var(--bg-secondary)]"
                                     initial={{ scale: 0 }}
                                     animate={{ scale: 1 }}
                                     transition={{ type: 'spring', stiffness: 500, damping: 15 }}
@@ -146,10 +147,10 @@ export function DashboardHeader({
                         {/* Theme Toggle */}
                         <motion.button
                             onClick={onToggleTheme}
-                            className="relative p-2.5 rounded-xl text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors overflow-hidden"
+                            className="relative p-2.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-all duration-200 overflow-hidden"
                             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
                         >
                             <AnimatePresence mode="wait">
                                 {isDark ? (
@@ -160,7 +161,7 @@ export function DashboardHeader({
                                         exit={{ y: 20, opacity: 0, rotate: 90 }}
                                         transition={{ duration: 0.2 }}
                                     >
-                                        <Sun className="w-5 h-5 text-amber-500" />
+                                        <Sun className="w-5 h-5 text-[var(--accent-amber)]" />
                                     </motion.div>
                                 ) : (
                                     <motion.div
@@ -170,7 +171,7 @@ export function DashboardHeader({
                                         exit={{ y: 20, opacity: 0, rotate: -90 }}
                                         transition={{ duration: 0.2 }}
                                     >
-                                        <Moon className="w-5 h-5 text-indigo-500" />
+                                        <Moon className="w-5 h-5 text-[var(--accent-indigo)]" />
                                     </motion.div>
                                 )}
                             </AnimatePresence>
@@ -183,17 +184,17 @@ export function DashboardHeader({
                                     e.stopPropagation()
                                     setShowUserMenu(!showUserMenu)
                                 }}
-                                className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                             >
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
+                                <div className="w-8 h-8 rounded-full bg-[var(--bg-tertiary)] border border-[var(--border-default)] flex items-center justify-center text-[var(--text-secondary)] text-sm font-medium">
                                     {user.name.charAt(0).toUpperCase()}
                                 </div>
-                                <span className="hidden sm:block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                <span className="hidden sm:block text-sm font-medium text-[var(--text-primary)]">
                                     {user.name}
                                 </span>
-                                <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
+                                <ChevronDown className={`w-4 h-4 text-[var(--text-muted)] transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
                             </motion.button>
 
                             {/* Dropdown Menu */}
@@ -204,33 +205,33 @@ export function DashboardHeader({
                                         animate={{ opacity: 1, y: 0, scale: 1 }}
                                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                                         transition={{ duration: 0.15 }}
-                                        className="absolute right-0 mt-2 w-56 rounded-xl bg-white dark:bg-gray-800 shadow-xl shadow-black/10 dark:shadow-black/30 border border-gray-200 dark:border-gray-700 overflow-hidden"
+                                        className="absolute right-0 mt-2 w-56 rounded-xl bg-[var(--bg-elevated)] shadow-xl border border-[var(--border-default)] overflow-hidden"
                                         onClick={(e) => e.stopPropagation()}
                                     >
                                         <div className="p-2">
-                                            <div className="px-3 py-2 text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                                            <div className="px-3 py-2 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
                                                 Account
                                             </div>
 
                                             <button
-                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                                             >
-                                                <User className="w-4 h-4" />
+                                                <User className="w-4 h-4 text-[var(--text-tertiary)]" />
                                                 <span className="text-sm">Profile</span>
                                             </button>
 
                                             <button
-                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                                             >
-                                                <Settings className="w-4 h-4" />
+                                                <Settings className="w-4 h-4 text-[var(--text-tertiary)]" />
                                                 <span className="text-sm">Settings</span>
                                             </button>
 
-                                            <div className="my-2 border-t border-gray-200 dark:border-gray-700" />
+                                            <div className="my-2 border-t border-[var(--border-subtle)]" />
 
                                             <button
                                                 onClick={user.onSignOut}
-                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/5 transition-colors"
                                             >
                                                 <LogOut className="w-4 h-4" />
                                                 <span className="text-sm">Sign Out</span>

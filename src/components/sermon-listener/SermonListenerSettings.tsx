@@ -22,7 +22,6 @@ interface SermonListenerSettingsProps {
 const DEFAULT_WHISPER_CPP_ENDPOINT = 'http://127.0.0.1:8080/inference'
 
 export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps = {}) {
-    const isDarkMode = useAppStore((state) => state.isDarkMode)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
     const setAppSettings = useAppStore((state) => state.setAppSettings)
 
@@ -164,26 +163,24 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     }
 
     return (
-        <div className={`p-6 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h2 className="text-xl font-bold mb-6">Sermon Listener Settings</h2>
+        <div className="p-6 rounded-lg bg-white dark:bg-gray-800">
+            <h2 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">Sermon Listener Settings</h2>
 
             <div className="mb-6">
-                <label className="block text-sm font-medium mb-3">Transcription Provider</label>
+                <label className="block text-sm font-medium mb-3 text-gray-700 dark:text-gray-300">Transcription Provider</label>
                 <div className="space-y-3">
                     <button
                         onClick={() => !isLoading && handleProviderChange('web-speech')}
                         disabled={isLoading || !webSpeechAvailable}
                         className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'web-speech'
-                            ? 'border-blue-500 bg-blue-500/10'
-                            : isDarkMode
-                                ? 'border-gray-700 hover:border-gray-600'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-blue-500 bg-blue-500/10 dark:bg-blue-500/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                             } ${!webSpeechAvailable ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         <div className="flex items-center justify-between">
                             <div>
-                                <div className="font-medium">Web Speech API</div>
-                                <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                <div className="font-medium text-gray-900 dark:text-white">Web Speech API</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
                                     Browser-native streaming transcription
                                 </div>
                             </div>
@@ -197,16 +194,14 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         onClick={() => !isLoading && handleProviderChange('whisper')}
                         disabled={isLoading}
                         className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'whisper'
-                            ? 'border-blue-500 bg-blue-500/10'
-                            : isDarkMode
-                                ? 'border-gray-700 hover:border-gray-600'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-blue-500 bg-blue-500/10 dark:bg-blue-500/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                             }`}
                     >
                         <div className="flex items-center justify-between">
                             <div>
-                                <div className="font-medium">Whisper API Endpoint</div>
-                                <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                <div className="font-medium text-gray-900 dark:text-white">Whisper API Endpoint</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
                                     Chunked upload to remote transcription API
                                 </div>
                             </div>
@@ -220,16 +215,14 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         onClick={() => !isLoading && handleProviderChange('whisper-cpp')}
                         disabled={isLoading}
                         className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'whisper-cpp'
-                            ? 'border-blue-500 bg-blue-500/10'
-                            : isDarkMode
-                                ? 'border-gray-700 hover:border-gray-600'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-blue-500 bg-blue-500/10 dark:bg-blue-500/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                             }`}
                     >
                         <div className="flex items-center justify-between">
                             <div>
-                                <div className="font-medium">Whisper.cpp Local (Offline)</div>
-                                <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                <div className="font-medium text-gray-900 dark:text-white">Whisper.cpp Local (Offline)</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
                                     Sends audio chunks to local whisper.cpp server
                                 </div>
                             </div>
@@ -243,22 +236,20 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         onClick={() => !isLoading && handleProviderChange('elevenlabs')}
                         disabled={isLoading}
                         className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'elevenlabs'
-                            ? 'border-purple-500 bg-purple-500/10'
-                            : isDarkMode
-                                ? 'border-gray-700 hover:border-gray-600'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-purple-500 bg-purple-500/10 dark:bg-purple-500/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                             }`}
                     >
                         <div className="flex items-center justify-between">
                             <div>
-                                <div className="font-medium">ElevenLabs Speech-to-Text</div>
-                                <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                <div className="font-medium text-gray-900 dark:text-white">ElevenLabs Speech-to-Text</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
                                     High-quality cloud transcription with word-level timestamps
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
                                 {!isElevenLabsConfigured && (
-                                    <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                                    <span className="text-xs text-gray-400 dark:text-gray-500">
                                         API key required
                                     </span>
                                 )}
@@ -272,11 +263,11 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
 
                 {isLoading && (
                     <div className="mt-3">
-                        <div className="flex justify-between text-xs mb-1">
+                        <div className="flex justify-between text-xs mb-1 text-gray-600 dark:text-gray-400">
                             <span>Initializing provider...</span>
                             <span>{Math.round(loadingProgress)}%</span>
                         </div>
-                        <div className={`h-2 rounded-full ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                        <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-700">
                             <div
                                 className="h-full bg-blue-500 rounded-full transition-all"
                                 style={{ width: `${loadingProgress}%` }}
@@ -287,7 +278,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             </div>
 
             {providerError && (
-                <div className={`mb-6 p-3 rounded-lg ${isDarkMode ? 'bg-red-900/30 text-red-300' : 'bg-red-100 text-red-700'}`}>
+                <div className="mb-6 p-3 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
                     <p className="text-sm">{providerError}</p>
                 </div>
             )}
@@ -295,48 +286,39 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             {provider === 'whisper' && (
                 <div className="mb-6 space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-2">Whisper API Endpoint URL</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Whisper API Endpoint URL</label>
                         <input
                             value={whisperEndpoint}
                             onChange={(event) => setWhisperEndpoint(event.target.value)}
                             placeholder="https://your-api.example.com/transcribe"
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-2">API Key (Optional)</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">API Key (Optional)</label>
                         <input
                             value={whisperApiKey}
                             onChange={(event) => setWhisperApiKey(event.target.value)}
                             placeholder="Bearer token for endpoint"
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-2">Chunk Duration (ms)</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Chunk Duration (ms)</label>
                         <input
                             type="number"
                             min={1000}
                             step={500}
                             value={whisperChunkDurationMs}
                             onChange={(event) => setWhisperChunkDurationMs(Number(event.target.value || 5000))}
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-3">Model Preference</label>
+                        <label className="block text-sm font-medium mb-3 text-gray-700 dark:text-gray-300">Model Preference</label>
                         <div className="grid grid-cols-2 gap-2">
                             {(Object.keys(modelDescriptions) as Array<keyof typeof modelDescriptions>).map((model) => (
                                 <button
@@ -344,20 +326,18 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                                     onClick={() => setWhisperModel(model)}
                                     disabled={isLoading}
                                     className={`p-3 rounded-lg border text-left transition-all ${whisperModel === model
-                                        ? 'border-blue-500 bg-blue-500/10'
-                                        : isDarkMode
-                                            ? 'border-gray-700 hover:border-gray-600'
-                                            : 'border-gray-200 hover:border-gray-300'
+                                        ? 'border-blue-500 bg-blue-500/10 dark:bg-blue-500/20'
+                                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                                         }`}
                                 >
-                                    <div className="font-medium capitalize">{model}</div>
-                                    <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    <div className="font-medium capitalize text-gray-900 dark:text-white">{model}</div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400">
                                         {modelDescriptions[model]}
                                     </div>
                                 </button>
                             ))}
                         </div>
-                        <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                             <Info className="inline w-4 h-4 mr-1" />
                             Keep `base` unless your API endpoint recommends another model.
                         </p>
@@ -368,43 +348,37 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             {provider === 'whisper-cpp' && (
                 <div className="mb-6 space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-2">Whisper.cpp Endpoint URL</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Whisper.cpp Endpoint URL</label>
                         <input
                             value={whisperCppEndpoint}
                             onChange={(event) => setWhisperCppEndpoint(event.target.value)}
                             placeholder={DEFAULT_WHISPER_CPP_ENDPOINT}
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             Run whisper.cpp server locally and point this to its `/inference` endpoint.
                         </p>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-2">Chunk Duration (ms)</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Chunk Duration (ms)</label>
                         <input
                             type="number"
                             min={1000}
                             step={500}
                             value={whisperCppChunkDurationMs}
                             onChange={(event) => setWhisperCppChunkDurationMs(Number(event.target.value || 5000))}
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             Lower values reduce delay but increase CPU/network calls to local server.
                         </p>
                     </div>
 
-                    <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
-                        <p className={`text-sm ${isDarkMode ? 'text-amber-300' : 'text-amber-800'}`}>
+                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700">
+                        <p className="text-sm text-amber-800 dark:text-amber-300">
                             <strong>Setup required (Docker recommended):</strong> The whisper.cpp server must be running.
-                            Run it with: <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>bun run whisper:start</code> or <code className={`px-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}>npm run whisper:start</code>
+                            Run it with: <code className="px-1 rounded bg-gray-200 dark:bg-gray-800">bun run whisper:start</code> or <code className="px-1 rounded bg-gray-200 dark:bg-gray-800">npm run whisper:start</code>
                         </p>
                     </div>
                 </div>
@@ -413,55 +387,46 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             {provider === 'elevenlabs' && (
                 <div className="mb-6 space-y-4">
                     <div>
-                        <label className="block text-sm font-medium mb-2">ElevenLabs API Key</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">ElevenLabs API Key</label>
                         <input
                             type="password"
                             value={elevenLabsApiKey}
                             onChange={(event) => setElevenLabsApiKey(event.target.value)}
                             placeholder="sk_..."
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             Or set VITE_ELEVENLABS_API_KEY environment variable
                         </p>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-2">Model ID</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Model ID</label>
                         <input
                             value={elevenLabsModelId}
                             onChange={(event) => setElevenLabsModelId(event.target.value)}
                             placeholder="scribe_v1"
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium mb-2">Chunk Duration (ms)</label>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Chunk Duration (ms)</label>
                         <input
                             type="number"
                             min={2000}
                             step={500}
                             value={elevenLabsChunkDurationMs}
                             onChange={(event) => setElevenLabsChunkDurationMs(Number(event.target.value || 5000))}
-                            className={`w-full p-2 rounded-lg border ${isDarkMode
-                                ? 'bg-gray-700 border-gray-600 text-white'
-                                : 'bg-white border-gray-300'
-                                }`}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
-                        <p className={`mt-1 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                             Lower values reduce delay but increase API calls.
                         </p>
                     </div>
 
-                    <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-purple-900/30 border border-purple-700' : 'bg-purple-50 border border-purple-200'}`}>
-                        <p className={`text-sm ${isDarkMode ? 'text-purple-300' : 'text-purple-800'}`}>
+                    <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700">
+                        <p className="text-sm text-purple-800 dark:text-purple-300">
                             <strong>ElevenLabs Speech-to-Text:</strong> High-quality cloud transcription with word-level timestamps.
                             Get your API key from <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer" className="underline">elevenlabs.io</a>.
                         </p>
@@ -470,14 +435,11 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             )}
 
             <div className="mb-6">
-                <label className="block text-sm font-medium mb-2">Language</label>
+                <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Language</label>
                 <select
                     value={language}
                     onChange={(event) => setLanguage(event.target.value)}
-                    className={`w-full p-2 rounded-lg border ${isDarkMode
-                        ? 'bg-gray-700 border-gray-600 text-white'
-                        : 'bg-white border-gray-300'
-                        }`}
+                    className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                 >
                     <option value="en-US">English (US)</option>
                     <option value="en-GB">English (UK)</option>
@@ -493,7 +455,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             </div>
 
             <div className="mb-6 space-y-3">
-                <label className="block text-sm font-medium mb-2">Behavior</label>
+                <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Behavior</label>
 
                 <label className="flex items-center gap-3 cursor-pointer">
                     <input
@@ -503,8 +465,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         className="w-4 h-4 rounded"
                     />
                     <div>
-                        <div className="font-medium">Auto-lookup verses</div>
-                        <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <div className="font-medium text-gray-900 dark:text-white">Auto-lookup verses</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
                             Automatically fetch scripture content when a verse is detected
                         </div>
                     </div>
@@ -518,8 +480,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         className="w-4 h-4 rounded"
                     />
                     <div>
-                        <div className="font-medium">Auto-display on live view</div>
-                        <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <div className="font-medium text-gray-900 dark:text-white">Auto-display on live view</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
                             Automatically show detected verses on the live output
                         </div>
                     </div>
@@ -530,10 +492,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 {onClose && (
                     <button
                         onClick={onClose}
-                        className={`px-4 py-2 rounded-lg ${isDarkMode
-                            ? 'bg-gray-700 hover:bg-gray-600'
-                            : 'bg-gray-200 hover:bg-gray-300'
-                            }`}
+                        className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
                     >
                         Cancel
                     </button>

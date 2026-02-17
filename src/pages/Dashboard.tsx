@@ -208,13 +208,19 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 overflow-hidden">
-            {/* Animated Background Blobs */}
+        <div className="min-h-screen bg-[var(--bg-primary)] overflow-hidden">
+            {/* Subtle Background Elements - refined, not garish */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-400/20 dark:bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
-                <div className="absolute top-1/2 -left-40 w-96 h-96 bg-purple-400/20 dark:bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-                <div className="absolute -bottom-40 right-1/3 w-72 h-72 bg-emerald-400/20 dark:bg-emerald-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
+                {/* Primary accent glow - teal */}
+                <div className="absolute -top-40 -right-40 w-96 h-96 bg-[var(--accent-teal)]/8 dark:bg-[var(--accent-teal)]/5 rounded-full blur-3xl animate-pulse-soft" />
+                {/* Secondary accent glow - amber */}
+                <div className="absolute top-1/3 -left-40 w-80 h-80 bg-[var(--accent-amber)]/6 dark:bg-[var(--accent-amber)]/4 rounded-full blur-3xl animate-pulse-soft" style={{ animationDelay: '2s' }} />
+                {/* Tertiary accent glow - rose */}
+                <div className="absolute -bottom-40 right-1/4 w-72 h-72 bg-[var(--accent-rose)]/5 dark:bg-[var(--accent-rose)]/3 rounded-full blur-3xl animate-pulse-soft" style={{ animationDelay: '4s' }} />
             </div>
+
+            {/* Grain texture overlay */}
+            <div className="grain-overlay" />
 
             {/* Header */}
             <DashboardHeader
@@ -329,33 +335,33 @@ export default function Dashboard() {
                 <div className="fixed inset-0 z-50 overflow-y-auto">
                     <div className="flex min-h-full items-center justify-center p-4">
                         <div
-                            className="fixed inset-0 bg-black/50 transition-opacity"
+                            className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
                             onClick={() => setShowAdminPanel(false)}
                         />
-                        <div className="relative bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] overflow-hidden">
+                        <div className="relative bg-[var(--bg-secondary)] rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] overflow-hidden border border-[var(--border-default)]">
                             {/* Header */}
-                            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
                                 <div className="flex items-center gap-3">
-                                    <Shield className="w-5 h-5 text-purple-500" />
-                                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                    <Shield className="w-5 h-5 text-[var(--accent-indigo)]" />
+                                    <h2 className="text-lg font-semibold text-[var(--text-primary)]" style={{ fontFamily: "'Crimson Pro', Georgia, serif" }}>
                                         Admin Panel
                                     </h2>
                                 </div>
                                 <button
                                     onClick={() => setShowAdminPanel(false)}
-                                    className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                    className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
                                 >
                                     <X className="w-5 h-5" />
                                 </button>
                             </div>
 
                             {/* Tabs */}
-                            <div className="flex border-b border-gray-200 dark:border-gray-700">
+                            <div className="flex border-b border-[var(--border-subtle)]">
                                 <button
                                     onClick={() => setAdminTab('bible')}
                                     className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'bible'
-                                        ? 'border-purple-500 text-purple-600 dark:text-purple-400'
-                                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                                        ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                                        : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
                                         }`}
                                 >
                                     <Book className="w-4 h-4" />
@@ -364,8 +370,8 @@ export default function Dashboard() {
                                 <button
                                     onClick={() => setAdminTab('embeddings')}
                                     className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'embeddings'
-                                        ? 'border-purple-500 text-purple-600 dark:text-purple-400'
-                                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                                        ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                                        : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
                                         }`}
                                 >
                                     <Database className="w-4 h-4" />
