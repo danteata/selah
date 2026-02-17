@@ -80,6 +80,26 @@ export function DashboardLayout({
                 next.delete('sermonListener')
                 return next
             })
+            // Restore default layout when showing
+            const panelConfig = DEFAULT_PANEL_CONFIGS.find(p => p.id === 'sermonListener')
+            if (panelConfig) {
+                setLayouts(prevLayouts => {
+                    const updated: { [key: string]: LayoutItem[] } = {}
+                    Object.entries(prevLayouts).forEach(([bp, items]) => {
+                        const existingItem = items.find(item => item.i === 'sermonListener')
+                        if (existingItem) {
+                            updated[bp] = items.map(item =>
+                                item.i === 'sermonListener'
+                                    ? { ...item, w: panelConfig.defaultLayout.w, h: panelConfig.defaultLayout.h, minW: panelConfig.minW, minH: panelConfig.minH }
+                                    : item
+                            )
+                        } else {
+                            updated[bp] = [...items, panelConfig.defaultLayout]
+                        }
+                    })
+                    return updated
+                })
+            }
         } else {
             setHiddenPanels(prev => new Set(prev).add('sermonListener'))
         }
@@ -147,7 +167,29 @@ export function DashboardLayout({
         setHiddenPanels(prev => {
             const next = new Set(prev)
             if (next.has(panelId)) {
+                // Showing the panel - restore default layout
                 next.delete(panelId)
+                const panelConfig = DEFAULT_PANEL_CONFIGS.find(p => p.id === panelId)
+                if (panelConfig) {
+                    setLayouts(prevLayouts => {
+                        const updated: { [key: string]: LayoutItem[] } = {}
+                        Object.entries(prevLayouts).forEach(([bp, items]) => {
+                            const existingItem = items.find(item => item.i === panelId)
+                            if (existingItem) {
+                                // Update existing item to default dimensions
+                                updated[bp] = items.map(item =>
+                                    item.i === panelId
+                                        ? { ...item, w: panelConfig.defaultLayout.w, h: panelConfig.defaultLayout.h, minW: panelConfig.minW, minH: panelConfig.minH }
+                                        : item
+                                )
+                            } else {
+                                // Add the panel with default layout
+                                updated[bp] = [...items, panelConfig.defaultLayout]
+                            }
+                        })
+                        return updated
+                    })
+                }
             } else {
                 next.add(panelId)
             }

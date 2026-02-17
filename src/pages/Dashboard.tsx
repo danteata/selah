@@ -1,9 +1,8 @@
 import { useUser, useClerk } from '@clerk/clerk-react'
-import { useEffect, useState } from 'react'
-import { Moon, Sun, Mic, Shield, Database, Book, X } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import { Shield, Database, Book, X } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
-import { DashboardLayout } from '../components'
-import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates, useFileUrl } from '../hooks'
+import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates } from '../hooks'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
 import { SlideEditor } from '../components/editor/SlideEditor'
@@ -13,10 +12,9 @@ import { AddAlertModal } from '../components/alerts/AddAlertModal'
 import { AddCountdownModal, type CountdownData } from '../components/countdown/AddCountdownModal'
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
-import { ChurchContext } from '../components/layout/ChurchContext'
+import { DashboardLayout, DashboardHeader } from '../components/dashboard'
 import { BibleVersionUploader, VerseEmbeddingSeeder } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
-
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import type { Slide } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
@@ -60,7 +58,7 @@ export default function Dashboard() {
     // Templates hook for creating custom templates
     const { createTemplate } = useTemplates()
 
-    const toggleTheme = () => {
+    const toggleTheme = useCallback(() => {
         const newIsDark = !isDark
         setIsDark(newIsDark)
         if (newIsDark) {
@@ -70,7 +68,7 @@ export default function Dashboard() {
             document.documentElement.classList.remove('dark')
             localStorage.setItem('theme', 'light')
         }
-    }
+    }, [isDark])
 
     // Initialize global emitter
     useEffect(() => {
@@ -210,80 +208,32 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 overflow-hidden">
+            {/* Animated Background Blobs */}
+            <div className="fixed inset-0 overflow-hidden pointer-events-none">
+                <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-400/20 dark:bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
+                <div className="absolute top-1/2 -left-40 w-96 h-96 bg-purple-400/20 dark:bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+                <div className="absolute -bottom-40 right-1/3 w-72 h-72 bg-emerald-400/20 dark:bg-emerald-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
+            </div>
+
             {/* Header */}
-            <header className="bg-white dark:bg-gray-900 shadow-sm border-b border-gray-200 dark:border-gray-800">
-                <div className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between items-center h-16">
-                        <div className="flex items-center gap-4">
-                            <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-                                Selah
-                            </h1>
-                            {activeSchedule && (
-                                <span className="text-sm text-gray-500 dark:text-gray-400">
-                                    {activeSchedule.name}
-                                </span>
-                            )}
-                        </div>
+            <DashboardHeader
+                isDark={isDark}
+                onToggleTheme={toggleTheme}
+                activeSchedule={activeSchedule}
+                showSermonListener={showSermonListener}
+                onToggleSermonListener={() => setShowSermonListener(!showSermonListener)}
+                showAdminPanel={showAdminPanel}
+                onToggleAdminPanel={() => setShowAdminPanel(!showAdminPanel)}
+                canAccessAdmin={canAccessAdmin}
+                user={{
+                    name: clerkUser?.firstName || clerkUser?.username || 'User',
+                    onSignOut: () => signOut()
+                }}
+            />
 
-                        <div className="flex items-center gap-4">
-                            {/* Church Context Switcher (for superadmin) */}
-                            <ChurchContext />
-
-                            {/* Admin Panel Toggle (for superadmin/admin) */}
-                            {canAccessAdmin && (
-                                <button
-                                    onClick={() => setShowAdminPanel(!showAdminPanel)}
-                                    className={`p-2 rounded-lg transition-colors ${showAdminPanel
-                                        ? 'bg-purple-500 text-white'
-                                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                        }`}
-                                    title="Admin Panel"
-                                >
-                                    <Shield className="w-5 h-5" />
-                                </button>
-                            )}
-
-                            {/* Sermon Listener Toggle */}
-                            <button
-                                onClick={() => setShowSermonListener(!showSermonListener)}
-                                className={`p-2 rounded-lg transition-colors ${showSermonListener
-                                    ? 'bg-blue-500 text-white'
-                                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                    }`}
-                                title="Sermon Listener"
-                            >
-                                <Mic className="w-5 h-5" />
-                            </button>
-
-                            {/* Theme Toggle */}
-                            <button
-                                onClick={toggleTheme}
-                                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                                title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-                            >
-                                {isDark ? (
-                                    <Sun className="w-5 h-5" />
-                                ) : (
-                                    <Moon className="w-5 h-5" />
-                                )}
-                            </button>
-                            <span className="text-sm text-gray-600 dark:text-gray-400">
-                                {clerkUser?.firstName || clerkUser?.username || 'User'}
-                            </span>
-                            <button
-                                onClick={() => signOut()}
-                                className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                            >
-                                Sign Out
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            {/* Main Content */}
-            <main className="h-[calc(100vh-4rem)]">
+            {/* Main Content with Draggable Layout */}
+            <main className="pt-16 h-screen">
                 <DashboardLayout
                     showSermonListener={showSermonListener}
                     onSermonListenerToggle={() => setShowSermonListener(!showSermonListener)}
