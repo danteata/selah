@@ -295,10 +295,10 @@ export function DashboardLayout({
                 ))}
             </ResponsiveGridLayout>
 
-            {/* Panel Toggle Bar - Fixed at bottom */}
-            <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                    <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 mr-1.5 uppercase tracking-wider">Panels</span>
+            {/* Panel Toggle Bar - Fixed at bottom, responsive */}
+            <div className="fixed bottom-2 sm:bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-1rem)] max-w-lg sm:max-w-none sm:w-auto">
+                <div className="flex items-center justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-1.5 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-xl shadow-lg border border-gray-200/50 dark:border-gray-700/50 overflow-x-auto">
+                    <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 mr-1 uppercase tracking-wider hidden sm:inline">Panels</span>
                     {DEFAULT_PANEL_CONFIGS.map((panel) => {
                         const isHidden = hiddenPanels.has(panel.id)
                         const Icon = iconMap[panel.icon]
@@ -313,8 +313,8 @@ export function DashboardLayout({
                                     }
                                 }}
                                 className={`
-                                    flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium
-                                    transition-all duration-200
+                                    flex items-center justify-center gap-1 px-2 sm:px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] font-medium
+                                    transition-all duration-200 whitespace-nowrap
                                     ${isHidden
                                         ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
                                         : `${accentColorMap[panel.id] === 'blue' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : ''}

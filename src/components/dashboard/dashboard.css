@@ -38,3 +38,160 @@
 .dashboard-layout .react-grid-item:hover .react-resizable-handle:hover {
     opacity: 1;
 }
+
+/* ============================================
+   RESPONSIVE STYLES
+   ============================================ */
+
+/* Medium screens (tablets) - reduce padding and margins */
+@media (max-width: 996px) {
+    .dashboard-layout .react-grid-layout {
+        margin: -8px;
+    }
+
+    .dashboard-layout .react-grid-item {
+        transition: height 0.2s ease-out, transform 0.15s ease-out;
+    }
+}
+
+/* Small screens (large phones / small tablets) */
+@media (max-width: 768px) {
+    .dashboard-layout {
+        padding-bottom: 60px;
+        /* Space for panel toggle bar */
+    }
+
+    .dashboard-layout .react-grid-layout {
+        margin: -6px;
+    }
+
+    /* Reduce container padding */
+    .dashboard-layout .react-grid-item {
+        transition: height 0.15s ease-out;
+    }
+
+    /* Smaller panel headers */
+    .draggable-panel .panel-header {
+        padding: 0.5rem 0.75rem;
+    }
+
+    /* Reduce content padding */
+    .draggable-panel .panel-content {
+        padding: 0.75rem;
+    }
+
+    /* Hide resize handles on small screens */
+    .dashboard-layout .react-resizable-handle {
+        display: none !important;
+    }
+}
+
+/* Extra small screens (phones) */
+@media (max-width: 480px) {
+    .dashboard-layout {
+        padding-bottom: 70px;
+        /* More space for panel toggle bar */
+    }
+
+    .dashboard-layout .react-grid-layout {
+        margin: -4px;
+    }
+
+    /* Compact panel headers */
+    .draggable-panel {
+        border-radius: 0.75rem;
+    }
+
+    .draggable-panel .panel-header {
+        padding: 0.375rem 0.5rem;
+    }
+
+    /* Reduce content padding further */
+    .draggable-panel .panel-content {
+        padding: 0.5rem;
+    }
+
+    /* Smaller icons and text in headers */
+    .draggable-panel h3 {
+        font-size: 0.7rem;
+    }
+
+    /* Disable dragging on very small screens for better touch experience */
+    .dashboard-layout .react-grid-item {
+        cursor: default !important;
+    }
+
+    .dashboard-layout .cursor-move {
+        cursor: default !important;
+    }
+}
+
+/* Tiny screens (small phones) */
+@media (max-width: 360px) {
+    .dashboard-layout .react-grid-layout {
+        margin: -2px;
+    }
+
+    /* Even more compact headers */
+    .draggable-panel .panel-header {
+        padding: 0.25rem 0.375rem;
+    }
+
+    .draggable-panel .panel-content {
+        padding: 0.375rem;
+    }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+
+    /* Larger touch targets */
+    .draggable-panel button {
+        min-width: 32px;
+        min-height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Hide resize handles on touch devices */
+    .dashboard-layout .react-resizable-handle {
+        display: none !important;
+    }
+
+    /* Better touch scrolling in panels */
+    .draggable-panel .panel-content {
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+    }
+}
+
+/* Landscape mode on phones */
+@media (max-height: 500px) and (orientation: landscape) {
+    .dashboard-layout {
+        padding-bottom: 50px;
+    }
+
+    .draggable-panel .panel-header {
+        padding: 0.25rem 0.5rem;
+    }
+
+    .draggable-panel .panel-content {
+        padding: 0.375rem;
+    }
+}
+
+/* High DPI screens - sharper borders */
+@media (-webkit-min-device-pixel-ratio: 2),
+(min-resolution: 192dpi) {
+    .draggable-panel {
+        border-width: 0.5px;
+    }
+}
+
+/* Print styles */
+@media print {
+    .dashboard-layout {
+        display: none !important;
+    }
+}
