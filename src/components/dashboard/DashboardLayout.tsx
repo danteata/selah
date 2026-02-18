@@ -51,7 +51,7 @@ export function DashboardLayout({
     onSermonListenerToggle
 }: DashboardLayoutProps) {
     const [collapsedPanels, setCollapsedPanels] = useState<Set<PanelId>>(new Set())
-    const [hiddenPanels, setHiddenPanels] = useState<Set<PanelId>>(new Set(['quickActions'])) // QuickActions hidden by default
+    const [hiddenPanels, setHiddenPanels] = useState<Set<PanelId>>(new Set()) // All panels visible by default
     const [layouts, setLayouts] = useState<{ [key: string]: LayoutItem[] }>(() => {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {

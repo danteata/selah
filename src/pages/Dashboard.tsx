@@ -41,8 +41,8 @@ export default function Dashboard() {
         return document.documentElement.classList.contains('dark')
     })
 
-    // Sermon listener panel state
-    const [showSermonListener, setShowSermonListener] = useState(false)
+    // Sermon listener panel state - enabled by default
+    const [showSermonListener, setShowSermonListener] = useState(true)
 
     // Save as template modal state
     const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false)
