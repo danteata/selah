@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap } from 'lucide-react'
+import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap, Sparkles } from 'lucide-react'
 import fuzzysort from 'fuzzysort'
-import { useHymn, useScripture, useSlideCreation } from '../../hooks'
-import { useAppStore, type QuickActionsPage } from '../../store/appStore'
+import { useHymn, useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
+import { useAppStore } from '../../store/appStore'
 import {
     slideTypes,
     quickActionsArr,
@@ -43,13 +43,8 @@ const SIDEBAR_ACTIONS = [
     { id: 'alert', icon: <AlertCircle className="w-4 h-4" />, label: 'Alert', action: appWideActions.newAlert },
 ]
 
-interface QuickActionsSidebarProps {
-    compact?: boolean
-}
-
-export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProps) {
+export function QuickActionsSidebar() {
     const [searchInput, setSearchInput] = useState('')
-    const [isExpanded, setIsExpanded] = useState(false)
     const [actions, setActions] = useState<QuickAction[]>([])
     const [focusedIndex, setFocusedIndex] = useState(0)
 
@@ -57,6 +52,21 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
     const { getAllHymns, getHymnByNumber } = useHymn()
     const { fetchScripture } = useScripture()
     const { createBibleSlide, createHymnSlides } = useSlideCreation()
+
+    // Semantic verse search hook
+    const {
+        results: semanticResults,
+        isSearching: isSemanticSearching,
+        hasEmbeddings,
+        isEmbedderReady,
+        search: semanticSearch,
+        clearResults: clearSemanticResults,
+        initEmbedder,
+    } = useSemanticVerseSearch({
+        threshold: 0.65,
+        limit: 3,
+        debounceMs: 400,
+    })
 
     const page = useAppStore((state) => state.quickActionsPage)
     const setQuickActionsPage = useAppStore((state) => state.setQuickActionsPage)
@@ -97,6 +107,27 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
 
         initHymns()
     }, [getAllHymns])
+
+    // Initialize embedder early for faster first search
+    useEffect(() => {
+        if (hasEmbeddings && !isEmbedderReady) {
+            initEmbedder()
+        }
+    }, [hasEmbeddings, isEmbedderReady, initEmbedder])
+
+    // Trigger semantic search when search input changes
+    useEffect(() => {
+        if (searchInput.length >= 3 && hasEmbeddings) {
+            // Only do semantic search if it doesn't look like a bible reference
+            const looksLikeReference = /^(genesis|exodus|leviticus|numbers|deuteronomy|joshua|judges|ruth|1?\s?samuel|2?\s?kings|1?\s?chronicles|2?\s?chronicles|ezra|nehemiah|esther|job|psalms?|proverbs?|ecclesiastes|song of solomon|isaiah|jeremiah|lamentations|ezekiel|daniel|hosea|joel|amos|obadiah|jonah|micah|nahum|habakkuk|zephaniah|haggai|zechariah|malachi|matthew|mark|luke|john|acts|romans|1?\s?corinthians|2?\s?corinthians|galatians|ephesians|philippians|colossians|1?\s?thessalonians|2?\s?thessalonians|1?\s?timothy|2?\s?timothy|titus|philemon|hebrews|james|1?\s?peter|2?\s?peter|1?\s?john|2?\s?john|3?\s?john|jude|revelation)\s*\d*/i.test(searchInput)
+
+            if (!looksLikeReference) {
+                semanticSearch(searchInput)
+            }
+        } else if (searchInput.length < 3) {
+            clearSemanticResults()
+        }
+    }, [searchInput, hasEmbeddings, semanticSearch, clearSemanticResults])
 
     // Parse bible chapter and verse from search input
     const bibleChapterAndVerse = useMemo(() => {
@@ -227,6 +258,26 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
             return
         }
 
+        // Handle semantic verse result selection
+        if (actionStr.startsWith('semantic-verse:')) {
+            // Parse the reference format: "bookNumber:chapter:verse" (e.g., "45:3:23")
+            const referenceData = actionStr.replace('semantic-verse:', '')
+            try {
+                const scripture = await fetchScripture(referenceData)
+                if (scripture) {
+                    const slide = createBibleSlide(scripture)
+                    if (slide) {
+                        appendActiveSlide(slide)
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch scripture from semantic search:', e)
+            }
+            setSearchInput('')
+            clearSemanticResults()
+            return
+        }
+
         if (actionStr.startsWith('hymn:')) {
             const hymnNumber = typeof action === 'object' && action.hymnIndex ? action.hymnIndex : null
             if (!hymnNumber) return
@@ -261,7 +312,7 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
             openModal('editor')
             return
         }
-    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule])
+    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule, clearSemanticResults])
 
     // Handle sidebar action click
     const handleSidebarAction = useCallback((actionStr: string) => {
@@ -270,8 +321,9 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
 
     // Handle keyboard navigation
     const handleInputKeydown = useCallback((e: React.KeyboardEvent) => {
-        const currentActions = searchInput.length >= 2 ? searchedActions : []
-        const maxIndex = currentActions.length - 1
+        // Combine regular actions with semantic results for navigation
+        const totalResults = searchedActions.length + semanticResults.length
+        const maxIndex = totalResults - 1
 
         switch (e.key) {
             case 'ArrowDown':
@@ -288,17 +340,28 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
                 break
             case 'Enter':
                 e.preventDefault()
-                const action = currentActions?.[focusedIndex]
-                if (action) {
-                    executeAction(action)
+                // Check if we're in semantic results range
+                if (focusedIndex >= searchedActions.length) {
+                    const semanticIndex = focusedIndex - searchedActions.length
+                    const verse = semanticResults[semanticIndex]
+                    if (verse) {
+                        // Use bookNumber:chapter:verse format for fetchScripture
+                        executeAction(`semantic-verse:${verse.bookNumber}:${verse.chapter}:${verse.verse}`)
+                    }
+                } else {
+                    const action = searchedActions?.[focusedIndex]
+                    if (action) {
+                        executeAction(action)
+                    }
                 }
                 break
             case 'Escape':
                 setSearchInput('')
                 setFocusedIndex(0)
+                clearSemanticResults()
                 break
         }
-    }, [searchInput, searchedActions, focusedIndex, executeAction])
+    }, [searchedActions, semanticResults, focusedIndex, executeAction, clearSemanticResults])
 
     // Get icon for action
     const getActionIcon = (iconStr: string): React.ReactNode => {
@@ -328,6 +391,7 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
                             onClick={() => {
                                 setSearchInput('')
                                 setFocusedIndex(0)
+                                clearSemanticResults()
                             }}
                             className="absolute right-1.5 top-1/2 transform -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                         >
@@ -342,6 +406,7 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
                 {searchInput.length >= 2 ? (
                     /* Search Results */
                     <div className="space-y-0.5">
+                        {/* Regular action results */}
                         {searchedActions.map((action, index) => (
                             <button
                                 key={action.name}
@@ -364,7 +429,61 @@ export function QuickActionsSidebar({ compact = false }: QuickActionsSidebarProp
                                 )}
                             </button>
                         ))}
-                        {searchedActions.length === 0 && (
+
+                        {/* Semantic verse results */}
+                        {semanticResults.length > 0 && (
+                            <>
+                                {/* Divider if we have both types of results */}
+                                {searchedActions.length > 0 && (
+                                    <div className="border-t border-[var(--border-subtle)] my-2" />
+                                )}
+                                <div className="px-2 py-1 text-[10px] text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3" />
+                                    Related Verses
+                                </div>
+                                {semanticResults.map((verse, index) => {
+                                    const globalIndex = searchedActions.length + index
+                                    return (
+                                        <button
+                                            key={verse._id}
+                                            onClick={() => executeAction(`semantic-verse:${verse.bookNumber}:${verse.chapter}:${verse.verse}`)}
+                                            className={`
+                                                w-full flex flex-col gap-0.5 px-2 py-1.5 rounded-lg text-left text-xs
+                                                transition-colors
+                                                ${globalIndex === focusedIndex
+                                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                                    : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                                                }
+                                            `}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <span className="flex-shrink-0">
+                                                    <Book className="w-4 h-4" />
+                                                </span>
+                                                <span className="font-medium truncate">{verse.reference}</span>
+                                                <span className="text-[10px] text-[var(--text-muted)] ml-auto">
+                                                    {Math.round(verse.score * 100)}% match
+                                                </span>
+                                            </div>
+                                            <span className="text-[11px] text-[var(--text-secondary)] line-clamp-2 pl-6">
+                                                {verse.text}
+                                            </span>
+                                        </button>
+                                    )
+                                })}
+                            </>
+                        )}
+
+                        {/* Loading indicator for semantic search */}
+                        {isSemanticSearching && (
+                            <div className="flex items-center justify-center gap-2 py-2 text-xs text-[var(--text-muted)]">
+                                <div className="w-3 h-3 border-2 border-[var(--accent-teal)] border-t-transparent rounded-full animate-spin" />
+                                Searching verses...
+                            </div>
+                        )}
+
+                        {/* No results message */}
+                        {searchedActions.length === 0 && semanticResults.length === 0 && !isSemanticSearching && (
                             <p className="text-xs text-[var(--text-muted)] text-center py-4">
                                 No results
                             </p>

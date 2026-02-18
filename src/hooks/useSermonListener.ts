@@ -280,6 +280,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
 
         setIsLoading(true)
+        // Set the current verse immediately so the reference updates
+        setCurrentVerse(verse)
         try {
             const scripture = await fetchScripture(label, defaultBibleVersion)
             if (scripture) {
