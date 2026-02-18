@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Clock, Plus, Play, Pause, RotateCcw } from 'lucide-react'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
+import type { Slide } from '../../types'
 
 interface AddCountdownModalProps {
     isOpen: boolean
     onClose: () => void
     onAdd: (countdown: CountdownData) => void
+    editingSlide?: Slide | null
 }
 
 export interface CountdownData {
@@ -25,12 +27,49 @@ const DEFAULT_BG: BackgroundSelection = {
     backgroundType: 'gradient',
 }
 
-export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalProps) {
+export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddCountdownModalProps) {
     const [hours, setHours] = useState(0)
     const [minutes, setMinutes] = useState(5)
     const [seconds, setSeconds] = useState(0)
     const [title, setTitle] = useState('')
     const [selectedBg, setSelectedBg] = useState<BackgroundSelection>(DEFAULT_BG)
+
+    // Pre-populate form when editing an existing slide
+    useEffect(() => {
+        if (editingSlide && editingSlide.type === 'countdown') {
+            // Parse time from contents[1] (format: "HH:MM:SS" or "MM:SS")
+            const timeStr = editingSlide.contents?.[1] || '00:05:00'
+            const parts = timeStr.split(':').map(Number)
+            if (parts.length === 3) {
+                setHours(parts[0] || 0)
+                setMinutes(parts[1] || 0)
+                setSeconds(parts[2] || 0)
+            } else if (parts.length === 2) {
+                setHours(0)
+                setMinutes(parts[0] || 0)
+                setSeconds(parts[1] || 0)
+            }
+            // Parse title from contents[0]
+            const titleContent = editingSlide.contents?.[0] || ''
+            const strippedTitle = titleContent.replace(/<[^>]*>/g, '').trim()
+            setTitle(strippedTitle)
+            // Set background
+            if (editingSlide.background) {
+                setSelectedBg({
+                    background: editingSlide.background,
+                    backgroundType: editingSlide.backgroundType || 'gradient',
+                    backgroundStorageId: editingSlide.backgroundStorageId,
+                })
+            }
+        } else {
+            // Reset to defaults for new countdown
+            setHours(0)
+            setMinutes(5)
+            setSeconds(0)
+            setTitle('')
+            setSelectedBg(DEFAULT_BG)
+        }
+    }, [editingSlide, isOpen])
 
     const presets = [
         { label: '1 min', h: 0, m: 1, s: 0 },
@@ -45,7 +84,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
         e.preventDefault()
 
         onAdd({
-            id: `countdown_${Date.now()}`,
+            id: editingSlide?.id || `countdown_${Date.now()}`,
             hours,
             minutes,
             seconds,
@@ -89,7 +128,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
                         <Clock className="w-5 h-5 text-blue-600" />
                     </div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">
-                        Add Countdown
+                        {editingSlide ? 'Edit Countdown' : 'Add Countdown'}
                     </h3>
                     <button
                         onClick={onClose}
@@ -208,7 +247,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
                             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                         >
                             <Plus className="w-4 h-4" />
-                            Add Countdown
+                            {editingSlide ? 'Update Countdown' : 'Add Countdown'}
                         </button>
                     </div>
                 </form>

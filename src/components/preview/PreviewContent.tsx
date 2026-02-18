@@ -116,7 +116,16 @@ export function PreviewContent() {
 
     const handleEditSlide = useCallback((slide: Slide) => {
         setEditingSlide(slide)
-        openModal('editor')
+        // Open the appropriate editor based on slide type and layout
+        if (slide.layout === 'lower-third') {
+            openModal('lowerThirdEditor')
+        } else if (slide.type === 'countdown') {
+            openModal('countdownModal')
+        } else if (slide.type === 'alert') {
+            openModal('alertModal')
+        } else {
+            openModal('editor')
+        }
     }, [setEditingSlide, openModal])
 
     const handleSaveToLibrary = useCallback((slide: Slide) => {

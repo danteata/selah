@@ -28,6 +28,7 @@ export default function Dashboard() {
     const undo = useAppStore((state) => state.undo)
     const redo = useAppStore((state) => state.redo)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
 
     // Get modal state and actions from Zustand store
     const modals = useAppStore((state) => state.modals)
@@ -186,15 +187,18 @@ export default function Dashboard() {
     const handleCountdownCreate = (countdownData: CountdownData) => {
         const timeString = `${String(countdownData.hours).padStart(2, '0')}:${String(countdownData.minutes).padStart(2, '0')}:${String(countdownData.seconds).padStart(2, '0')}`
 
+        // Check if we're editing an existing slide
+        const isEditing = editingSlide?.id === countdownData.id
+
         const slide: Slide = {
-            id: `slide_${Date.now()}`,
-            index: 0,
+            id: countdownData.id,
+            index: isEditing ? editingSlide?.index ?? 0 : 0,
             name: `Countdown: ${countdownData.title}`,
             type: 'countdown',
             layout: 'countdown',
             contents: [countdownData.title, timeString],
-            userId: '',
-            churchId: '',
+            userId: isEditing ? editingSlide?.userId || '' : '',
+            churchId: isEditing ? editingSlide?.churchId || '' : '',
             scheduleId: activeSchedule?._id || '',
             background: countdownData.background,
             backgroundType: countdownData.backgroundType,
@@ -205,12 +209,14 @@ export default function Dashboard() {
                 timeLeft: timeString,
                 content: countdownData.title,
             },
-            slideStyle: {
-                fontSize: 17.5,
-                alignment: 'center',
-            },
+            slideStyle: isEditing ? editingSlide?.slideStyle ?? { fontSize: 17.5, alignment: 'center' } : { fontSize: 17.5, alignment: 'center' },
         }
-        appendActiveSlide(slide)
+
+        if (isEditing) {
+            updateActiveSlide(slide)
+        } else {
+            appendActiveSlide(slide)
+        }
         closeModal('countdownModal')
     }
 
@@ -310,6 +316,7 @@ export default function Dashboard() {
                 <AddAlertModal
                     isOpen={modals.alertModal}
                     onClose={() => closeModal('alertModal')}
+                    editingSlide={editingSlide}
                 />
             )}
 
@@ -318,6 +325,7 @@ export default function Dashboard() {
                     isOpen={modals.countdownModal}
                     onClose={() => closeModal('countdownModal')}
                     onAdd={handleCountdownCreate}
+                    editingSlide={editingSlide}
                 />
             )}
 

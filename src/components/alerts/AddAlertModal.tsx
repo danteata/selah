@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Bell, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Alert, Slide } from '../../types'
@@ -7,6 +7,7 @@ import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundP
 interface AddAlertModalProps {
     isOpen: boolean
     onClose: () => void
+    editingSlide?: Slide | null
 }
 
 const DEFAULT_BG: BackgroundSelection = {
@@ -30,7 +31,7 @@ const ALERT_STYLES = [
     },
 ]
 
-export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
+export function AddAlertModal({ isOpen, onClose, editingSlide }: AddAlertModalProps) {
     const [content, setContent] = useState('')
     const [title, setTitle] = useState('')
     const [duration, setDuration] = useState(5)
@@ -41,14 +42,52 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
     const setAlerts = useAppStore((state) => state.setAlerts)
     const alerts = useAppStore((state) => state.alerts)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
+
+    // Pre-populate form when editing an existing slide
+    useEffect(() => {
+        if (editingSlide && editingSlide.type === 'alert') {
+            // Parse title and content from contents array
+            const contents = editingSlide.contents || []
+            if (contents.length >= 2) {
+                // Has title and content
+                const titleHtml = contents[0] || ''
+                const contentHtml = contents[1] || ''
+                setTitle(titleHtml.replace(/<[^>]*>/g, '').trim())
+                setContent(contentHtml.replace(/<[^>]*>/g, '').trim())
+            } else if (contents.length === 1) {
+                // Only content, no title
+                setTitle('')
+                setContent(contents[0].replace(/<[^>]*>/g, '').trim())
+            }
+            // Set alert style based on layout
+            setAlertStyle(editingSlide.layout === 'lower-third' ? 'banner' : 'fullscreen')
+            // Set background
+            if (editingSlide.background) {
+                setSelectedBg({
+                    background: editingSlide.background,
+                    backgroundType: editingSlide.backgroundType || 'gradient',
+                    backgroundStorageId: editingSlide.backgroundStorageId,
+                })
+            }
+        } else {
+            // Reset to defaults for new alert
+            setContent('')
+            setTitle('')
+            setDuration(5)
+            setPriority('medium')
+            setAlertStyle('fullscreen')
+            setSelectedBg(DEFAULT_BG)
+        }
+    }, [editingSlide, isOpen])
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
         if (!content.trim()) return
 
         const newAlert: Alert = {
-            id: `alert_${Date.now()}`,
+            id: editingSlide?.id || `alert_${Date.now()}`,
             title: title.trim() || undefined,
             content: content.trim(),
             duration,
@@ -59,19 +98,19 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
         // Always add to alerts store (for overlay/banner system)
         setAlerts([...alerts, newAlert])
 
-        // Also create a slide so it appears in the schedule
+        // Create or update the slide
         const slide: Slide = {
-            id: `slide_alert_${Date.now()}`,
-            index: 0,
+            id: editingSlide?.id || `slide_alert_${Date.now()}`,
+            index: editingSlide?.index ?? 0,
             name: title.trim() || `Alert: ${content.trim().slice(0, 30)}${content.length > 30 ? '…' : ''}`,
             type: 'alert',
             layout: alertStyle === 'banner' ? 'lower-third' : 'full-text',
             contents: title.trim()
                 ? [`<p style="font-size:1.4em;font-weight:700;">${title.trim()}</p>`, `<p>${content.trim()}</p>`]
                 : [`<p>${content.trim()}</p>`],
-            userId: '',
-            churchId: '',
-            scheduleId: activeSchedule?._id || '',
+            userId: editingSlide?.userId || '',
+            churchId: editingSlide?.churchId || '',
+            scheduleId: editingSlide?.scheduleId || activeSchedule?._id || '',
             background: selectedBg.background,
             backgroundType: selectedBg.backgroundType,
             backgroundStorageId: selectedBg.backgroundStorageId ?? null,
@@ -87,7 +126,11 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
             },
         }
 
-        appendActiveSlide(slide)
+        if (editingSlide) {
+            updateActiveSlide(slide)
+        } else {
+            appendActiveSlide(slide)
+        }
 
         // Reset
         setContent('')
@@ -113,7 +156,7 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
                         <Bell className="w-5 h-5 text-orange-600" />
                     </div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">
-                        Create Alert
+                        {editingSlide ? 'Edit Alert' : 'Create Alert'}
                     </h3>
                     <button
                         onClick={onClose}
@@ -261,7 +304,7 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
                             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
                         >
                             <Plus className="w-4 h-4" />
-                            Create Alert
+                            {editingSlide ? 'Update Alert' : 'Create Alert'}
                         </button>
                     </div>
                 </form>
