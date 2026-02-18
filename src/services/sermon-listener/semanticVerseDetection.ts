@@ -25,7 +25,7 @@ import {
 
 // Configuration
 const SEMANTIC_DETECTION_THRESHOLD = 0.55; // Minimum similarity score (lowered for better detection)
-const SEMANTIC_DETECTION_LIMIT = 5; // Max results per search
+const SEMANTIC_DETECTION_LIMIT = 3; // Max results per search (per query)
 const MIN_TEXT_LENGTH = 50; // Minimum characters before attempting detection
 const MIN_SENTENCE_LENGTH = 20; // Minimum characters for a sentence to search
 const MAX_TEXT_LENGTH = 500; // Maximum characters to embed (truncated)

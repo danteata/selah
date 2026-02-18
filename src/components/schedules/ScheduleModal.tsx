@@ -28,7 +28,7 @@ export function ScheduleModal({ isOpen, onClose }: ScheduleModalProps) {
             month: 'short',
             day: '2-digit'
         }
-        return `CoW Schedule ${date.toLocaleDateString('en-GB', options)}`
+        return `Schedule ${date.toLocaleDateString('en-GB', options)}`
     }
 
     const useDefaultName = () => {

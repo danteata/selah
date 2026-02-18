@@ -24,7 +24,7 @@ import type { DetectedVerse, SemanticVerseMatch } from '../services/sermon-liste
 import type { Slide, Scripture, BibleVersion } from '../types'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
-const MAX_DETECTED_VERSES = 3
+const MAX_DETECTED_VERSES_PER_QUERY = 3 // Max verses per semantic search query
 
 export interface SavedSermonTranscript {
     id: string
@@ -193,8 +193,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const optionsRef = useRef(options)
     optionsRef.current = options
 
-    // Track processed verses to avoid duplicates
-    const processedVersesRef = useRef<Set<string>>(new Set())
+    // Track transcript buffer for context
     const transcriptBufferRef = useRef('')
 
     // Semantic detector ref
@@ -341,43 +340,35 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             ? [...verses, contextVerse]
             : verses
 
-        // Filter by confidence and check for new verses
+        // Filter by confidence
         const confidenceOrder = { high: 3, medium: 2, low: 1 }
         const minConfidenceLevel = confidenceOrder[minConfidence]
 
+        // Collect all valid verses from this query
+        const queryVerses: DetectedVerse[] = []
         for (const verse of candidateVerses) {
             const verseConfidence = confidenceOrder[verse.confidence]
             if (verseConfidence < minConfidenceLevel) continue
+            queryVerses.push(verse)
+        }
 
-            // Check if already processed
-            const verseKey = verse.reference
-            if (processedVersesRef.current.has(verseKey)) continue
+        // Sort by confidence and limit to max per query
+        queryVerses.sort((a, b) => confidenceOrder[b.confidence] - confidenceOrder[a.confidence])
+        const limitedQueryVerses = queryVerses.slice(0, MAX_DETECTED_VERSES_PER_QUERY)
 
-            // Mark as processed
-            processedVersesRef.current.add(verseKey)
+        // If we found verses from regex, update state
+        if (limitedQueryVerses.length > 0) {
+            // Replace detected verses with this query's results (per-query limit)
+            setDetectedVerses(limitedQueryVerses)
 
-            // Add to detected verses and limit to max
-            setDetectedVerses(prev => {
-                // Avoid duplicates in state
-                if (prev.some(v => v.reference === verse.reference)) return prev
-
-                // Add new verse and sort by confidence (high > medium > low)
-                const confidenceOrder = { high: 3, medium: 2, low: 1 }
-                const updated = [...prev, verse].sort((a, b) =>
-                    confidenceOrder[b.confidence] - confidenceOrder[a.confidence]
-                )
-
-                // Limit to MAX_DETECTED_VERSES
-                return updated.slice(0, MAX_DETECTED_VERSES)
-            })
-
-            // Set as current verse - this will be the highest confidence verse
-            // (We'll select the best matched verse after all processing)
+            // Set the highest confidence verse as current
+            const bestVerse = limitedQueryVerses[0]
+            setCurrentVerse(bestVerse)
 
             // Auto-lookup if enabled
             if (autoLookup) {
-                lookupVerse(verse).then(scripture => {
-                    optionsRef.current.onVerseDetected?.(verse, scripture)
+                lookupVerse(bestVerse).then(scripture => {
+                    optionsRef.current.onVerseDetected?.(bestVerse, scripture)
 
                     // Auto-display if enabled
                     if (autoDisplay && scripture) {
@@ -390,7 +381,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     }
                 })
             } else {
-                optionsRef.current.onVerseDetected?.(verse, null)
+                optionsRef.current.onVerseDetected?.(bestVerse, null)
             }
         }
 
@@ -401,13 +392,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             semanticDetectorRef.current.addText(text).then((semanticMatches) => {
                 if (!semanticMatches) return // Throttled or buffer too short
 
+                // Convert semantic matches to DetectedVerse format
+                const semanticVerses: DetectedVerse[] = []
                 for (const match of semanticMatches) {
-                    // Check if already processed
-                    if (processedVersesRef.current.has(match.reference)) continue
-
-                    // Mark as processed
-                    processedVersesRef.current.add(match.reference)
-
                     // Convert book number to book name if needed
                     let bookName = match.book
                     const bookNum = parseInt(match.book, 10)
@@ -429,27 +416,28 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         startIndex: 0,
                         endIndex: text.length,
                     }
+                    semanticVerses.push(detectedVerse)
+                }
 
-                    // Add to detected verses and limit to max
-                    setDetectedVerses(prev => {
-                        if (prev.some(v => v.reference === match.reference)) return prev
+                // Sort by score (highest first) and limit to max per query
+                semanticVerses.sort((a, b) => {
+                    const confOrder = { high: 3, medium: 2, low: 1 }
+                    return confOrder[b.confidence] - confOrder[a.confidence]
+                })
+                const limitedSemanticVerses = semanticVerses.slice(0, MAX_DETECTED_VERSES_PER_QUERY)
 
-                        // Add new verse and sort by confidence (high > medium > low)
-                        const confidenceOrder = { high: 3, medium: 2, low: 1 }
-                        const updated = [...prev, detectedVerse].sort((a, b) =>
-                            confidenceOrder[b.confidence] - confidenceOrder[a.confidence]
-                        )
+                if (limitedSemanticVerses.length > 0) {
+                    // Replace detected verses with this query's results
+                    setDetectedVerses(limitedSemanticVerses)
 
-                        // Limit to MAX_DETECTED_VERSES
-                        return updated.slice(0, MAX_DETECTED_VERSES)
-                    })
-
-                    // Current verse will be set by the effect that watches detectedVerses
+                    // Set the highest confidence verse as current
+                    const bestVerse = limitedSemanticVerses[0]
+                    setCurrentVerse(bestVerse)
 
                     // Auto-lookup if enabled
                     if (autoLookup) {
-                        lookupVerse(detectedVerse).then(scripture => {
-                            optionsRef.current.onVerseDetected?.(detectedVerse, scripture)
+                        lookupVerse(bestVerse).then(scripture => {
+                            optionsRef.current.onVerseDetected?.(bestVerse, scripture)
                         })
                     }
                 }
@@ -621,7 +609,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setCurrentVerse(null)
         setCurrentScripture(null)
         setError(null)
-        processedVersesRef.current.clear()
         transcriptBufferRef.current = ''
         unifiedTranscriptionService.clearTranscript()
     }, [])
@@ -631,7 +618,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      */
     const removeVerse = useCallback((verse: DetectedVerse) => {
         setDetectedVerses(prev => prev.filter(v => v.reference !== verse.reference))
-        processedVersesRef.current.delete(verse.reference)
     }, [])
 
     /**
@@ -698,20 +684,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             return false
         }
     }, [transcript])
-
-    // Select the best matched verse (highest confidence) when detectedVerses changes
-    useEffect(() => {
-        if (detectedVerses.length > 0 && !currentVerse) {
-            // The list is already sorted by confidence, so the first one is the best match
-            const bestVerse = detectedVerses[0]
-            setCurrentVerse(bestVerse)
-
-            // Auto-lookup the best verse if enabled
-            if (autoLookup) {
-                lookupVerse(bestVerse)
-            }
-        }
-    }, [detectedVerses, currentVerse, autoLookup, lookupVerse])
 
     // Cleanup on unmount
     useEffect(() => {
