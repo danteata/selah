@@ -276,4 +276,36 @@ export default defineSchema({
         .index("by_reference", ["reference"])
         .index("by_book_chapter", ["book", "chapter"])
         .index("by_version", ["version"]),
+
+    // Transcripts table - for sermon listener transcripts
+    transcripts: defineTable({
+        _id: v.optional(v.string()),
+        title: v.string(),
+        transcript: v.string(),
+        // Detected verses from the sermon
+        detectedVerses: v.optional(v.array(v.object({
+            reference: v.string(),
+            book: v.string(),
+            chapter: v.number(),
+            verseStart: v.number(),
+            verseEnd: v.optional(v.number()),
+            confidence: v.string(),
+        }))),
+        // Transcription provider used
+        provider: v.string(),
+        // Language used for transcription
+        language: v.optional(v.string()),
+        // Schedule this transcript is associated with
+        scheduleId: v.optional(v.string()),
+        // Church this transcript belongs to
+        churchId: v.string(),
+        // User who created the transcript
+        createdBy: v.string(),
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    })
+        .index("by_schedule", ["scheduleId"])
+        .index("by_church", ["churchId"])
+        .index("by_creator", ["createdBy"])
+        .index("by_schedule_created", ["scheduleId", "createdAt"]),
 });

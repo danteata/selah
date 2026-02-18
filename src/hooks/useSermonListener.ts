@@ -200,24 +200,40 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Semantic detector ref
     const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
-    // Check support on mount
+    // Check support on mount and when settings change
     useEffect(() => {
         const checkSupport = async () => {
-            const available = await unifiedTranscriptionService.isProviderAvailable(provider)
-            if (!available && (provider === 'whisper' || provider === 'whisper-cpp')) {
+            // Get the current provider from settings
+            const settingsProvider = sermonSettings?.transcriptionProvider || 'web-speech'
+            const targetProvider = providerOverride || settingsProvider
+
+            console.log('[useSermonListener] Checking provider availability:', {
+                targetProvider,
+                settingsProvider,
+                providerOverride,
+                currentProvider: provider,
+            })
+
+            const available = await unifiedTranscriptionService.isProviderAvailable(targetProvider)
+            console.log('[useSermonListener] Provider available:', targetProvider, available)
+
+            if (!available && (targetProvider === 'whisper' || targetProvider === 'whisper-cpp')) {
                 const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
                 if (webSpeechAvailable) {
                     setProvider('web-speech')
                     setIsSupported(true)
-                    const sourceProvider = provider === 'whisper-cpp' ? 'Whisper.cpp' : 'Whisper'
+                    const sourceProvider = targetProvider === 'whisper-cpp' ? 'Whisper.cpp' : 'Whisper'
                     setError(`${sourceProvider} is not configured. Falling back to Web Speech API.`)
+                    console.warn('[useSermonListener] Falling back to Web Speech API')
                     return
                 }
             }
+
+            setProvider(targetProvider)
             setIsSupported(available)
         }
         checkSupport()
-    }, [provider])
+    }, [provider, providerOverride, sermonSettings?.transcriptionProvider])
 
     // Initialize semantic detector
     useEffect(() => {
@@ -509,6 +525,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             console.warn('Already listening')
             return false
         }
+
+        console.log('[useSermonListener] Starting transcription with provider:', provider, {
+            sermonSettingsProvider: sermonSettings?.transcriptionProvider,
+            whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
+        })
 
         // Configure transcription
         const success = await unifiedTranscriptionService.start({

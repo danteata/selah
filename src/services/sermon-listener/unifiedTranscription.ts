@@ -225,8 +225,15 @@ class UnifiedTranscriptionService {
             this.options = { ...this.options, ...options }
         }
 
+        console.log('[UnifiedTranscription] Starting with options:', {
+            requestedProvider: options?.provider,
+            currentProvider: this.currentProvider,
+            whisperCppEndpoint: options?.whisperCppEndpoint,
+        })
+
         // Switch provider if specified
         if (options?.provider && options.provider !== this.currentProvider) {
+            console.log('[UnifiedTranscription] Switching provider from', this.currentProvider, 'to', options.provider)
             const switched = await this.setProvider(options.provider, options)
             if (!switched) return false
         }

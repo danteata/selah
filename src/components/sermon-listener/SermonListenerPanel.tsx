@@ -5,10 +5,13 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useSermonListener } from '../../hooks/useSermonListener'
+import { useTranscripts } from '../../hooks/useTranscripts'
+import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, Book, Send, Trash2, Loader2 } from 'lucide-react'
+import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar } from 'lucide-react'
 import type { Scripture, BibleVerse } from '../../types'
+import type { Transcript } from '../../hooks/useTranscripts'
 
 interface SermonListenerPanelProps {
     /** Whether to auto-display detected verses */
@@ -31,7 +34,14 @@ export function SermonListenerPanel({
     compact = false,
 }: SermonListenerPanelProps) {
     const [autoDisplayEnabled, setAutoDisplayEnabled] = useState(autoDisplay)
+    const [showSavedTranscripts, setShowSavedTranscripts] = useState(false)
+    const [showSaveDialog, setShowSaveDialog] = useState(false)
+    const [transcriptTitle, setTranscriptTitle] = useState('')
+    const [isSaving, setIsSaving] = useState(false)
+    const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null)
     const transcriptRef = useRef<HTMLDivElement>(null)
+
+    const activeSchedule = useAppStore((state) => state.activeSchedule)
 
     const {
         isListening,
@@ -57,6 +67,15 @@ export function SermonListenerPanel({
         onVerseDetected,
     })
 
+    // Use the transcripts hook with the active schedule
+    const {
+        transcripts,
+        scheduleTranscripts,
+        isLoading: transcriptsLoading,
+        createTranscript,
+        deleteTranscript,
+    } = useTranscripts(activeSchedule?._id)
+
     // Auto-scroll transcript
     useEffect(() => {
         if (transcriptRef.current) {
@@ -73,6 +92,58 @@ export function SermonListenerPanel({
     const handleVerseClick = (verse: DetectedVerse) => {
         lookupVerse(verse)
     }
+
+    // Handle save transcript
+    const handleSaveTranscript = async () => {
+        if (!transcript.trim()) return
+
+        setIsSaving(true)
+        const title = transcriptTitle.trim() || `Sermon Transcript ${new Date().toLocaleDateString()}`
+
+        const result = await createTranscript({
+            title,
+            transcript,
+            detectedVerses,
+            provider,
+            language,
+            scheduleId: activeSchedule?._id,
+        })
+
+        setIsSaving(false)
+
+        if (result) {
+            setShowSaveDialog(false)
+            setTranscriptTitle('')
+            // Optionally reset after saving
+            // reset()
+        }
+    }
+
+    // Handle delete transcript
+    const handleDeleteTranscript = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation()
+        if (confirm('Are you sure you want to delete this transcript?')) {
+            await deleteTranscript(id)
+            if (selectedTranscript?._id === id) {
+                setSelectedTranscript(null)
+            }
+        }
+    }
+
+    // Format date for display
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString)
+        return date.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        })
+    }
+
+    // Get the transcripts to display based on active schedule
+    const displayTranscripts = activeSchedule?._id ? scheduleTranscripts : transcripts
 
     // Not supported message
     if (!isSupported) {
@@ -116,6 +187,11 @@ export function SermonListenerPanel({
                     <p className="text-xs font-medium truncate text-gray-700 dark:text-gray-300">
                         {isListening ? 'Listening...' : 'Sermon Listener'}
                     </p>
+                    {activeSchedule && (
+                        <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                            Schedule: {activeSchedule.name}
+                        </p>
+                    )}
                 </div>
 
                 {/* Auto-display toggle - compact */}
@@ -231,14 +307,26 @@ export function SermonListenerPanel({
                 <div className="flex-1 min-h-0 p-2 rounded-lg bg-gray-100 dark:bg-gray-800 flex flex-col">
                     <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Transcript</span>
-                        {transcript && (
-                            <button
-                                onClick={reset}
-                                className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                            >
-                                Clear
-                            </button>
-                        )}
+                        <div className="flex items-center gap-1">
+                            {transcript && (
+                                <button
+                                    onClick={() => setShowSaveDialog(true)}
+                                    className="flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-600"
+                                    title="Save transcript"
+                                >
+                                    <Save className="w-3 h-3" />
+                                    Save
+                                </button>
+                            )}
+                            {transcript && (
+                                <button
+                                    onClick={reset}
+                                    className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 ml-2"
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
                     </div>
                     <div
                         ref={transcriptRef}
@@ -260,6 +348,168 @@ export function SermonListenerPanel({
                     </div>
                 </div>
             )}
+
+            {/* Save Dialog */}
+            {showSaveDialog && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 w-80 max-w-[90vw]">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                                Save Transcript
+                            </h3>
+                            <button
+                                onClick={() => setShowSaveDialog(false)}
+                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="mb-3">
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Title
+                            </label>
+                            <input
+                                type="text"
+                                value={transcriptTitle}
+                                onChange={(e) => setTranscriptTitle(e.target.value)}
+                                placeholder={`Sermon Transcript ${new Date().toLocaleDateString()}`}
+                                className="w-full px-2 py-1.5 text-sm border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                            />
+                        </div>
+
+                        {activeSchedule && (
+                            <div className="mb-3 p-2 rounded bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-600 dark:text-blue-400">
+                                <Calendar className="w-3 h-3 inline mr-1" />
+                                Will be associated with: {activeSchedule.name}
+                            </div>
+                        )}
+
+                        {detectedVerses.length > 0 && (
+                            <div className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                                {detectedVerses.length} detected verse{detectedVerses.length !== 1 ? 's' : ''} will be saved with this transcript
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                            <button
+                                onClick={() => setShowSaveDialog(false)}
+                                className="px-3 py-1.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleSaveTranscript}
+                                disabled={isSaving || !transcript.trim()}
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                            >
+                                {isSaving ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                    <Save className="w-3 h-3" />
+                                )}
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Saved Transcripts Section */}
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
+                <button
+                    onClick={() => setShowSavedTranscripts(!showSavedTranscripts)}
+                    className="flex items-center justify-between w-full p-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                >
+                    <span className="flex items-center gap-1">
+                        <FileText className="w-3 h-3" />
+                        Saved Transcripts
+                        {displayTranscripts && displayTranscripts.length > 0 && (
+                            <span className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded-full text-[10px]">
+                                {displayTranscripts.length}
+                            </span>
+                        )}
+                    </span>
+                    {showSavedTranscripts ? (
+                        <ChevronUp className="w-3 h-3" />
+                    ) : (
+                        <ChevronDown className="w-3 h-3" />
+                    )}
+                </button>
+
+                {showSavedTranscripts && (
+                    <div className="mt-1 max-h-48 overflow-y-auto space-y-1">
+                        {transcriptsLoading ? (
+                            <div className="p-2 text-center text-xs text-gray-500 dark:text-gray-400">
+                                <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                            </div>
+                        ) : displayTranscripts && displayTranscripts.length > 0 ? (
+                            displayTranscripts.map((t) => (
+                                <div
+                                    key={t._id}
+                                    onClick={() => setSelectedTranscript(selectedTranscript?._id === t._id ? null : t)}
+                                    className={`p-2 rounded cursor-pointer transition-colors ${selectedTranscript?._id === t._id
+                                            ? 'bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700'
+                                            : 'bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                        }`}
+                                >
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
+                                                {t.title}
+                                            </p>
+                                            <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                                {formatDate(t.createdAt)}
+                                            </p>
+                                            {t.detectedVerses && t.detectedVerses.length > 0 && (
+                                                <div className="flex items-center gap-1 mt-1">
+                                                    <Book className="w-2.5 h-2.5 text-blue-500" />
+                                                    <span className="text-[10px] text-blue-500">
+                                                        {t.detectedVerses.length} verse{t.detectedVerses.length !== 1 ? 's' : ''}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button
+                                            onClick={(e) => handleDeleteTranscript(t._id, e)}
+                                            className="p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            <Trash2 className="w-3 h-3" />
+                                        </button>
+                                    </div>
+
+                                    {/* Expanded view */}
+                                    {selectedTranscript?._id === t._id && (
+                                        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                            <p className="text-[10px] text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                                {t.transcript.substring(0, 500)}
+                                                {t.transcript.length > 500 && '...'}
+                                            </p>
+                                            {t.detectedVerses && t.detectedVerses.length > 0 && (
+                                                <div className="mt-2 flex flex-wrap gap-1">
+                                                    {t.detectedVerses.map((v, idx) => (
+                                                        <span
+                                                            key={idx}
+                                                            className="px-1.5 py-0.5 text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded"
+                                                        >
+                                                            {v.reference}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ))
+                        ) : (
+                            <div className="p-3 text-center text-xs text-gray-500 dark:text-gray-400">
+                                No saved transcripts
+                                {activeSchedule?._id && ' for this schedule'}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
 
             {/* Empty state - compact */}
             {!isListening && detectedVerses.length === 0 && !transcript && (
