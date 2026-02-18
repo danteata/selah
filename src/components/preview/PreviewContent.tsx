@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
@@ -26,6 +26,7 @@ export function PreviewContent() {
     const toggleBulkSelectMode = useAppStore((state) => state.toggleBulkSelectMode)
     const toggleSlideSelection = useAppStore((state) => state.toggleSlideSelection)
     const clearSelectedSlides = useAppStore((state) => state.clearSelectedSlides)
+    const setSelectedSlideIds = useAppStore((state) => state.setSelectedSlideIds)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
     const openModal = useAppStore((state) => state.openModal)
 
@@ -97,6 +98,21 @@ export function PreviewContent() {
         })
         clearSelectedSlides()
     }, [selectedSlideIds, slides, removeActiveSlide, clearSelectedSlides])
+
+    // Check if all slides are selected
+    const allSelected = slides.length > 0 && selectedSlideIds.length === slides.length
+    const someSelected = selectedSlideIds.length > 0 && selectedSlideIds.length < slides.length
+
+    // Handle select all / deselect all
+    const handleSelectAll = useCallback(() => {
+        if (allSelected) {
+            // Deselect all
+            setSelectedSlideIds([])
+        } else {
+            // Select all slides
+            setSelectedSlideIds(slides.map(slide => slide.id))
+        }
+    }, [allSelected, slides, setSelectedSlideIds])
 
     const handleEditSlide = useCallback((slide: Slide) => {
         setEditingSlide(slide)
@@ -285,6 +301,17 @@ export function PreviewContent() {
                         <LayoutGrid className="w-4 h-4" />
                         {bulkSelectMode ? 'Cancel' : 'Select'}
                     </button>
+
+                    {bulkSelectMode && slides.length > 0 && (
+                        <button
+                            onClick={handleSelectAll}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
+                            title={allSelected ? 'Deselect all' : 'Select all'}
+                        >
+                            <CheckSquare className={`w-4 h-4 ${someSelected ? 'text-primary-500' : ''}`} />
+                            {allSelected ? 'Deselect All' : 'Select All'}
+                        </button>
+                    )}
 
                     {bulkSelectMode && selectedSlideIds.length > 0 && (
                         <button
