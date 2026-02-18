@@ -497,6 +497,38 @@ export function useSlideCreation() {
         return tempSlide
     }, [preSlideCreation, settings])
 
+    const createLowerThirdSlide = useCallback((title?: string, subtitle?: string): Slide => {
+        const tempSlide = preSlideCreation()
+        tempSlide.layout = slideLayoutTypes.lower_third
+        tempSlide.type = slideTypes.text
+        tempSlide.background =
+            settings.defaultBackground.default?.background ||
+            settings.defaultBackground.text?.background
+        tempSlide.backgroundVideoKey =
+            settings.defaultBackground.default?.backgroundVideoKey ||
+            settings.defaultBackground.text?.backgroundVideoKey
+        tempSlide.backgroundType =
+            settings.defaultBackground.default?.backgroundType ||
+            settings.defaultBackground.text?.backgroundType
+
+        const displayTitle = title || 'Speaker Name'
+        tempSlide.name = displayTitle
+        tempSlide.contents = [`<p>${displayTitle}</p>`]
+
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            fontSize: 3.5,
+            alignment: 'left',
+            font: settings.defaultFont,
+            lowerThirdStyle: 'standard',
+            lowerThirdPosition: 'left',
+            lowerThirdAccentColor: '#0d9488',
+            lowerThirdSubtitle: subtitle || '',
+        }
+
+        return tempSlide
+    }, [preSlideCreation, settings])
+
     return {
         preSlideCreation,
         createTextSlide,
@@ -508,6 +540,7 @@ export function useSlideCreation() {
         createMediaSlide,
         createMultipleMediaSlides,
         createCountdownSlide,
+        createLowerThirdSlide,
         duplicateSlide,
         generateObjectId,
     }

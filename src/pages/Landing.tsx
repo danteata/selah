@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
+import { gsap } from '../lib/gsap'
+import { useScrollReveal } from '../hooks/useScrollReveal'
 import {
     Music,
     Book,
@@ -13,7 +15,6 @@ import {
     Moon,
     Keyboard,
     RefreshCw,
-    ChevronRight,
     Play,
     Check,
     Star,
@@ -152,38 +153,53 @@ function NavBar({ scrolled, mobileMenuOpen, setMobileMenuOpen }: {
 // ─────────────────────────────────────────────────────────────
 
 function HeroSection() {
+    const heroRef = useRef<HTMLElement>(null)
+
+    useEffect(() => {
+        const el = heroRef.current
+        if (!el) return
+        const ctx = gsap.context(() => {
+            gsap.set(['.hero-badge', '.hero-line', '.hero-subtitle', '.hero-cta', '.hero-stat'], { opacity: 0 })
+            const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
+            tl.to('.hero-badge', { opacity: 1, scale: 1, y: 0, duration: 0.6, delay: 0.1 })
+                .fromTo('.hero-line', { opacity: 0, y: 44 }, { opacity: 1, y: 0, duration: 0.75, stagger: 0.14 }, '-=0.35')
+                .to('.hero-subtitle', { opacity: 1, y: 0, duration: 0.6 }, '-=0.25')
+                .to('.hero-cta', { opacity: 1, y: 0, duration: 0.5, stagger: 0.1 }, '-=0.3')
+                .to('.hero-stat', { opacity: 1, y: 0, duration: 0.45, stagger: 0.08 }, '-=0.2')
+        }, el)
+        return () => ctx.revert()
+    }, [])
+
     return (
-        <section className="relative pt-36 pb-28 lg:pt-48 lg:pb-40 overflow-hidden">
+        <section ref={heroRef} className="relative pt-36 pb-28 lg:pt-48 lg:pb-40 overflow-hidden">
             <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 0%, rgba(13,148,136,0.12) 0%, transparent 70%), radial-gradient(ellipse 60% 40% at 80% 50%, rgba(245,158,11,0.06) 0%, transparent 60%), var(--bg-primary)' }} />
             <div className="absolute inset-0 opacity-30" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)', backgroundSize: '48px 48px' }} />
             <div className="absolute top-1/4 left-1/4 w-64 h-64 rounded-full pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(13,148,136,0.15) 0%, transparent 70%)', filter: 'blur(40px)' }} />
             <div className="absolute top-1/3 right-1/4 w-80 h-80 rounded-full pointer-events-none" style={{ background: 'radial-gradient(circle, rgba(245,158,11,0.08) 0%, transparent 70%)', filter: 'blur(60px)' }} />
             <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="text-center max-w-5xl mx-auto">
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8 text-xs font-semibold uppercase tracking-widest"
+                    <div className="hero-badge inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8 text-xs font-semibold uppercase tracking-widest"
                         style={{ background: 'rgba(13,148,136,0.12)', color: '#2dd4bf', border: '1px solid rgba(13,148,136,0.25)' }}>
                         <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
                         AI-Powered Worship Presentation
                     </div>
                     <h1 style={{ fontFamily: 'Crimson Pro, serif', fontSize: 'clamp(3rem, 8vw, 6rem)', fontWeight: 700, lineHeight: 1.05, letterSpacing: '-0.03em', color: 'var(--text-primary)' }} className="mb-6">
-                        Every word.
-                        <br />
-                        <span style={{ background: 'linear-gradient(135deg, #2dd4bf 0%, #0d9488 40%, #f59e0b 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+                        <span className="hero-line block">Every word.</span>
+                        <span className="hero-line block" style={{ background: 'linear-gradient(135deg, #2dd4bf 0%, #0d9488 40%, #f59e0b 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
                             Every verse.
                         </span>
-                        <br />
-                        Every moment.
+                        <span className="hero-line block">Every moment.</span>
                     </h1>
-                    <p className="text-lg lg:text-xl max-w-2xl mx-auto mb-10 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                    <p className="hero-subtitle text-lg lg:text-xl max-w-2xl mx-auto mb-10 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
                         Selah listens to your sermon, detects scripture in real time, and puts the right verse on screen — before you even ask.
                     </p>
                     <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
-                        <Link to="/signup" className="group flex items-center gap-2 px-7 py-3.5 font-semibold rounded-2xl text-white transition-all hover:opacity-90 hover:shadow-xl"
+                        <Link to="/signup" className="hero-cta group flex items-center gap-2 px-7 py-3.5 font-semibold rounded-2xl text-white transition-all hover:opacity-90 hover:shadow-xl"
                             style={{ background: 'linear-gradient(135deg, #0d9488, #0f766e)', boxShadow: '0 8px 32px rgba(13,148,136,0.3)' }}>
                             Start Free Trial
                             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                         </Link>
-                        <Link to="/login" className="flex items-center gap-2 px-7 py-3.5 font-semibold rounded-2xl transition-all hover:opacity-80"
+                        <Link to="/login" className="hero-cta flex items-center gap-2 px-7 py-3.5 font-semibold rounded-2xl transition-all hover:opacity-80"
                             style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)', background: 'var(--bg-secondary)' }}>
                             <Play className="w-4 h-4" style={{ color: '#2dd4bf' }} />
                             Sign In
@@ -191,7 +207,7 @@ function HeroSection() {
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-8 lg:gap-16">
                         {stats.map((s) => (
-                            <div key={s.label} className="text-center">
+                            <div key={s.label} className="hero-stat text-center">
                                 <div style={{ fontFamily: 'Crimson Pro, serif', fontSize: '2.25rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>{s.value}</div>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.label}</div>
                             </div>
@@ -208,12 +224,14 @@ function HeroSection() {
 // ─────────────────────────────────────────────────────────────
 
 function SermonListenerSection({ activeTranscriptLine, detectedVerse }: { activeTranscriptLine: number; detectedVerse: string | null }) {
+    const colLeftRef = useScrollReveal<HTMLDivElement>('fade-right', { start: 'top 82%' })
+    const colRightRef = useScrollReveal<HTMLDivElement>('fade-left', { start: 'top 82%', delay: 0.1 })
     return (
         <section id="ai-listener" className="py-24 lg:py-36 relative overflow-hidden">
             <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 70% 60% at 30% 50%, rgba(13,148,136,0.08) 0%, transparent 70%), var(--bg-secondary)' }} />
             <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="grid lg:grid-cols-2 gap-16 items-center">
-                    <div>
+                    <div ref={colLeftRef}>
                         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 text-xs font-semibold uppercase tracking-widest"
                             style={{ background: 'rgba(13,148,136,0.12)', color: '#2dd4bf', border: '1px solid rgba(13,148,136,0.25)' }}>
                             <Mic className="w-3 h-3" /> AI Sermon Listener
@@ -239,7 +257,7 @@ function SermonListenerSection({ activeTranscriptLine, detectedVerse }: { active
                             ))}
                         </div>
                     </div>
-                    <div className="relative">
+                    <div ref={colRightRef} className="relative">
                         <div className="rounded-3xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)', boxShadow: '0 32px 80px rgba(0,0,0,0.4)' }}>
                             <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-secondary)' }}>
                                 <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#ef4444' }} />
@@ -284,10 +302,12 @@ function SermonListenerSection({ activeTranscriptLine, detectedVerse }: { active
 // ─────────────────────────────────────────────────────────────
 
 function CoreFeaturesSection() {
+    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
+    const gridRef = useScrollReveal<HTMLDivElement>('stagger', { start: 'top 85%', staggerAmount: 0.07 })
     return (
         <section id="features" className="py-24 lg:py-36 relative">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="text-center mb-16">
+                <div ref={headingRef} className="text-center mb-16">
                     <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-5 text-xs font-semibold uppercase tracking-widest"
                         style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)' }}>
                         <Zap className="w-3 h-3" /> Core Features
@@ -299,7 +319,7 @@ function CoreFeaturesSection() {
                         Songs, scripture, media, countdowns, announcements — all in one unified, real-time platform built for live services.
                     </p>
                 </div>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div ref={gridRef} className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
                     {coreFeatures.map((f) => (
                         <div key={f.title} className="group relative p-6 rounded-3xl transition-all duration-300 hover:-translate-y-1"
                             style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
@@ -330,13 +350,15 @@ function CoreFeaturesSection() {
 // ─────────────────────────────────────────────────────────────
 
 function DashboardSection() {
+    const colLeftRef = useScrollReveal<HTMLDivElement>('fade-right', { start: 'top 82%' })
+    const colRightRef = useScrollReveal<HTMLDivElement>('scale', { start: 'top 82%', delay: 0.15 })
     return (
         <section className="py-24 lg:py-36 relative overflow-hidden">
             <div className="absolute inset-0" style={{ background: 'var(--bg-secondary)' }} />
             <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 60% 60% at 70% 50%, rgba(245,158,11,0.06) 0%, transparent 70%)' }} />
             <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="grid lg:grid-cols-2 gap-16 items-center">
-                    <div>
+                    <div ref={colLeftRef}>
                         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 text-xs font-semibold uppercase tracking-widest"
                             style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)' }}>
                             <LayoutDashboard className="w-3 h-3" /> Adaptive Dashboard
@@ -360,7 +382,7 @@ function DashboardSection() {
                             ))}
                         </div>
                     </div>
-                    <div className="rounded-3xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)', boxShadow: '0 32px 80px rgba(0,0,0,0.4)' }}>
+                    <div ref={colRightRef} className="rounded-3xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)', boxShadow: '0 32px 80px rgba(0,0,0,0.4)' }}>
                         <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-secondary)' }}>
                             <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#ef4444' }} />
                             <div className="w-2.5 h-2.5 rounded-full" style={{ background: '#f59e0b' }} />
@@ -393,18 +415,20 @@ function DashboardSection() {
 // ─────────────────────────────────────────────────────────────
 
 function TechHighlightsSection() {
+    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
+    const gridRef = useScrollReveal<HTMLDivElement>('stagger-fast', { start: 'top 85%', staggerAmount: 0.06 })
     return (
         <section className="py-20 relative overflow-hidden">
             <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 50%, #134e4a 100%)' }} />
             <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
             <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="text-center mb-12">
+                <div ref={headingRef} className="text-center mb-12">
                     <h2 style={{ fontFamily: 'Crimson Pro, serif', fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)', fontWeight: 700, color: '#ffffff' }} className="mb-3">
                         Built for the realities of live services
                     </h2>
                     <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '1rem' }}>Rock-solid technology under the hood, invisible when everything goes right.</p>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div ref={gridRef} className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     {technicalHighlights.map((h) => (
                         <div key={h.title} className="text-center p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}>
                             <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: 'rgba(255,255,255,0.12)' }}>
@@ -425,10 +449,12 @@ function TechHighlightsSection() {
 // ─────────────────────────────────────────────────────────────
 
 function TestimonialsSection() {
+    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
+    const cardsRef = useScrollReveal<HTMLDivElement>('stagger', { start: 'top 85%', staggerAmount: 0.1 })
     return (
         <section className="py-24 lg:py-36">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="text-center mb-16">
+                <div ref={headingRef} className="text-center mb-16">
                     <div className="flex items-center justify-center gap-1 mb-4">
                         {[1, 2, 3, 4, 5].map((i) => <Star key={i} className="w-5 h-5 fill-amber-400 text-amber-400" />)}
                     </div>
@@ -436,7 +462,7 @@ function TestimonialsSection() {
                         Trusted by church media teams
                     </h2>
                 </div>
-                <div className="grid md:grid-cols-3 gap-6">
+                <div ref={cardsRef} className="grid md:grid-cols-3 gap-6">
                     {testimonials.map((t) => (
                         <div key={t.author} className="p-7 rounded-3xl flex flex-col" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-default)' }}>
                             <div className="flex items-center gap-1 mb-5">
@@ -464,6 +490,8 @@ function TestimonialsSection() {
 // ─────────────────────────────────────────────────────────────
 
 function PricingSection() {
+    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
+    const plansRef = useScrollReveal<HTMLDivElement>('stagger', { start: 'top 85%', staggerAmount: 0.1 })
     const plans = [
         {
             name: 'Free', price: '$0', period: 'forever', description: 'Perfect for getting started and smaller congregations.',
@@ -484,13 +512,13 @@ function PricingSection() {
     return (
         <section id="pricing" className="py-24 lg:py-36" style={{ background: 'var(--bg-secondary)' }}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="text-center mb-16">
+                <div ref={headingRef} className="text-center mb-16">
                     <h2 style={{ fontFamily: 'Crimson Pro, serif', fontSize: 'clamp(2rem, 4vw, 3rem)', fontWeight: 700, color: 'var(--text-primary)' }} className="mb-4">
                         Simple, honest pricing
                     </h2>
                     <p style={{ color: 'var(--text-secondary)' }}>Start free. Upgrade when you're ready. No long-term contracts.</p>
                 </div>
-                <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                <div ref={plansRef} className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
                     {plans.map((p) => (
                         <div key={p.name} className="p-7 rounded-3xl flex flex-col relative" style={{
                             background: p.highlighted ? 'linear-gradient(135deg, rgba(13,148,136,0.15), rgba(13,148,136,0.05))' : 'var(--bg-card)',
@@ -536,10 +564,11 @@ function PricingSection() {
 // ─────────────────────────────────────────────────────────────
 
 function CtaSection() {
+    const contentRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
     return (
         <section className="py-24 lg:py-36 relative overflow-hidden">
             <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 80% 70% at 50% 50%, rgba(13,148,136,0.12) 0%, transparent 70%), var(--bg-primary)' }} />
-            <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <div ref={contentRef} className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
                 <h2 style={{ fontFamily: 'Crimson Pro, serif', fontSize: 'clamp(2.25rem, 5vw, 4rem)', fontWeight: 700, lineHeight: 1.1, color: 'var(--text-primary)' }} className="mb-6">
                     Ready to transform<br />
                     <span style={{ background: 'linear-gradient(135deg, #2dd4bf 0%, #0d9488 50%, #f59e0b 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>

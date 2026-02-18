@@ -18,6 +18,7 @@ export type AppEvents = {
     'add-song': Slide | undefined | [Slide]
     'remove-alert': undefined
     'new-countdown': Slide | undefined | [Slide]
+    'new-lower-third': Slide | undefined | [Slide]
     'new-search-bible': Slide | undefined | [Slide]
     'go-live': undefined
     'close-live-window': undefined
@@ -270,6 +271,11 @@ export interface SlideStyle {
     lineSpacing?: string
     textOutlined?: boolean
     bibleVersion?: string
+    // Lower Third settings
+    lowerThirdStyle?: 'standard' | 'minimalist' | 'accent-bar' | 'gradient-bar'
+    lowerThirdPosition?: 'left' | 'center' | 'right'
+    lowerThirdAccentColor?: string
+    lowerThirdSubtitle?: string
 }
 
 export interface Advert {
@@ -404,6 +410,7 @@ export const slideLayoutTypes = {
     bible: 'bible',
     countdown: 'countdown',
     empty: 'empty',
+    lower_third: 'lower-third',
 } as const
 
 export const backgroundTypes = {
@@ -437,6 +444,7 @@ export const appWideActions = {
     addSong: 'add-song',
     removeAlert: 'remove-alert',
     newCountdown: 'new-countdown',
+    newLowerThird: 'new-lower-third',
     newSearchBible: 'new-search-bible',
     goLive: 'go-live',
     closeLiveWindow: 'close-live-window',
@@ -688,6 +696,15 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newCountdown,
         meta: '',
         type: slideTypes.countdown,
+        tier: 'teams',
+    },
+    {
+        icon: 'i-lucide-panel-bottom',
+        name: 'Add Lower Third',
+        desc: 'Display speaker name, title, or reference',
+        action: appWideActions.newLowerThird,
+        meta: 'lower third name title speaker overlay banner',
+        type: slideTypes.text,
         tier: 'teams',
     },
     {

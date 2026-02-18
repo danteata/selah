@@ -30,6 +30,7 @@ export interface ModalState {
     countdownModal: boolean
     libraryPanel: boolean
     scheduleModal: boolean
+    lowerThirdEditor: boolean
 }
 
 export interface AppState {
@@ -107,6 +108,7 @@ const initialModalState: ModalState = {
     countdownModal: false,
     libraryPanel: false,
     scheduleModal: false,
+    lowerThirdEditor: false,
 }
 
 const initialState: AppState = {
@@ -710,7 +712,7 @@ export const useAppStore = create<AppStore>()(
             closeModal: (modal) => {
                 set((state) => ({
                     modals: { ...state.modals, [modal]: false },
-                    editingSlide: modal === 'editor' ? null : state.editingSlide
+                    editingSlide: (modal === 'editor' || modal === 'lowerThirdEditor') ? null : state.editingSlide
                 }))
             },
 

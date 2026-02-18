@@ -179,40 +179,113 @@ export default function LiveView() {
             )}
 
             {/* Content */}
-            <div
-                className="absolute inset-0 flex items-center justify-center"
-                style={{
-                    paddingLeft: `${slide.slideStyle?.windowPadding?.left || 64}px`,
-                    paddingRight: `${slide.slideStyle?.windowPadding?.right || 64}px`,
-                    paddingTop: `${slide.slideStyle?.windowPadding?.top || 64}px`,
-                    paddingBottom: `${slide.slideStyle?.windowPadding?.bottom || 64}px`,
-                }}
-            >
+            {slide.layout === 'lower-third' ? (
+                /* Lower Third Layout */
                 <div
-                    className="text-center max-w-full tiptap-preview"
+                    className="absolute inset-x-0 bottom-0"
                     style={{
-                        fontSize: `${slide.slideStyle?.fontSize || 4.5}vw`,
-                        fontFamily: slide.slideStyle?.font || 'Inter',
-                        textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
-                        textTransform: slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none' || 'none',
-                        lineHeight: 1.4,
-                        textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
+                        padding: '0',
                     }}
                 >
-                    {slide.contents.map((content, index) => (
+                    <div
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'center',
+                            alignItems: slide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
+                                : slide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
+                                    : 'flex-start',
+                            padding: '24px 48px',
+                            ...(slide.slideStyle?.lowerThirdStyle === 'standard' ? {
+                                background: 'rgba(0, 0, 0, 0.75)',
+                                backdropFilter: 'blur(12px)',
+                            } : slide.slideStyle?.lowerThirdStyle === 'minimalist' ? {
+                                background: 'transparent',
+                            } : slide.slideStyle?.lowerThirdStyle === 'accent-bar' ? {
+                                background: 'rgba(0, 0, 0, 0.75)',
+                                backdropFilter: 'blur(12px)',
+                                borderLeft: `6px solid ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
+                            } : slide.slideStyle?.lowerThirdStyle === 'gradient-bar' ? {
+                                background: `linear-gradient(135deg, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
+                                backdropFilter: 'blur(12px)',
+                            } : {
+                                background: 'rgba(0, 0, 0, 0.75)',
+                                backdropFilter: 'blur(12px)',
+                            }),
+                        }}
+                    >
                         <div
-                            key={index}
-                            className="text-white drop-shadow-lg"
+                            className="tiptap-preview"
                             style={{
-                                color: slide.type === 'countdown' ? 'white' : undefined,
-                                fontWeight: slide.type === 'countdown' ? 'bold' : undefined,
-                                marginBottom: index < slide.contents.length - 1 ? '0.4em' : 0
+                                fontFamily: slide.slideStyle?.font || 'Inter',
+                                textAlign: (slide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left',
                             }}
-                            dangerouslySetInnerHTML={{ __html: content }}
-                        />
-                    ))}
+                        >
+                            {slide.contents.map((content, index) => (
+                                <div
+                                    key={index}
+                                    className="text-white drop-shadow-lg"
+                                    style={{
+                                        fontSize: `${slide.slideStyle?.fontSize || 3.5}vw`,
+                                        fontWeight: 600,
+                                        lineHeight: 1.3,
+                                    }}
+                                    dangerouslySetInnerHTML={{ __html: content }}
+                                />
+                            ))}
+                            {slide.slideStyle?.lowerThirdSubtitle && (
+                                <div
+                                    className="text-white/80 drop-shadow-lg"
+                                    style={{
+                                        fontSize: `${(slide.slideStyle?.fontSize || 3.5) * 0.55}vw`,
+                                        marginTop: '0.3em',
+                                        fontWeight: 400,
+                                        letterSpacing: '0.02em',
+                                    }}
+                                >
+                                    {slide.slideStyle.lowerThirdSubtitle}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
-            </div>
+            ) : (
+                /* Default Centered Layout */
+                <div
+                    className="absolute inset-0 flex items-center justify-center"
+                    style={{
+                        paddingLeft: `${slide.slideStyle?.windowPadding?.left || 64}px`,
+                        paddingRight: `${slide.slideStyle?.windowPadding?.right || 64}px`,
+                        paddingTop: `${slide.slideStyle?.windowPadding?.top || 64}px`,
+                        paddingBottom: `${slide.slideStyle?.windowPadding?.bottom || 64}px`,
+                    }}
+                >
+                    <div
+                        className="text-center max-w-full tiptap-preview"
+                        style={{
+                            fontSize: `${slide.slideStyle?.fontSize || 4.5}vw`,
+                            fontFamily: slide.slideStyle?.font || 'Inter',
+                            textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
+                            textTransform: slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none' || 'none',
+                            lineHeight: 1.4,
+                            textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
+                        }}
+                    >
+                        {slide.contents.map((content, index) => (
+                            <div
+                                key={index}
+                                className="text-white drop-shadow-lg"
+                                style={{
+                                    color: slide.type === 'countdown' ? 'white' : undefined,
+                                    fontWeight: slide.type === 'countdown' ? 'bold' : undefined,
+                                    marginBottom: index < slide.contents.length - 1 ? '0.4em' : 0
+                                }}
+                                dangerouslySetInnerHTML={{ __html: content }}
+                            />
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Title overlay for hymns/songs */}
             {slide.title && settings.songAndHymnLabelsVisibility && (

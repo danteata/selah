@@ -1,4 +1,4 @@
-import { BookOpen, Music, Church, FileText, Image, Clock, type LucideIcon } from 'lucide-react'
+import { BookOpen, Music, Church, FileText, Image, Clock, PanelBottom, type LucideIcon } from 'lucide-react'
 
 interface SlideChipProps {
     slideType: string
@@ -35,6 +35,11 @@ const typeConfig: Record<string, { label: string; icon: LucideIcon; color: strin
         label: 'Timer',
         icon: Clock,
         color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+    },
+    'lower-third': {
+        label: 'Lower Third',
+        icon: PanelBottom,
+        color: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300',
     },
 }
 

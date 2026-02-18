@@ -10,7 +10,7 @@ interface QuickActionHandlersResult {
 
 export function useQuickActionHandlers(): QuickActionHandlersResult {
     const { on } = useEmitter()
-    const { createTextSlide, createCountdownSlide } = useSlideCreation()
+    const { createTextSlide, createCountdownSlide, createLowerThirdSlide } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -104,8 +104,15 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
             setActiveAlert(null)
         }))
 
+        // Create Lower Third Slide - open editor with new lower third slide
+        unsubs.push(on(appWideActions.newLowerThird, () => {
+            const newSlide = createLowerThirdSlide()
+            setEditingSlide(newSlide)
+            openModal('lowerThirdEditor')
+        }))
+
         return () => unsubs.forEach((u) => u())
-    }, [on, createTextSlide, openModal, closeModal, setEditingSlide, setQuickActionsPage, setDarkMode, setActiveAlert])
+    }, [on, createTextSlide, createLowerThirdSlide, openModal, closeModal, setEditingSlide, setQuickActionsPage, setDarkMode, setActiveAlert])
 
     return {
         handleSlideEditorSave,

@@ -93,12 +93,40 @@ export function SlideCard({
                     />
                 )}
                 {slide.contents[0] && slide.contents[0] !== '<p></p>' && slide.contents[0] !== '' && (
-                    <div className="absolute inset-0 flex items-center justify-center p-4">
-                        <div
-                            className="text-white text-xs text-center line-clamp-3 drop-shadow-lg tiptap-preview"
-                            dangerouslySetInnerHTML={{ __html: slide.contents[0] }}
-                        />
-                    </div>
+                    slide.layout === 'lower-third' ? (
+                        <div className="absolute inset-x-0 bottom-0">
+                            <div
+                                className="px-3 py-2"
+                                style={{
+                                    background: slide.slideStyle?.lowerThirdStyle === 'minimalist' ? 'transparent'
+                                        : slide.slideStyle?.lowerThirdStyle === 'gradient-bar'
+                                            ? `linear-gradient(135deg, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`
+                                            : 'rgba(0,0,0,0.75)',
+                                    borderLeft: slide.slideStyle?.lowerThirdStyle === 'accent-bar'
+                                        ? `3px solid ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`
+                                        : undefined,
+                                    textAlign: (slide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left',
+                                }}
+                            >
+                                <div
+                                    className="text-white text-xs font-semibold line-clamp-1 drop-shadow-lg tiptap-preview"
+                                    dangerouslySetInnerHTML={{ __html: slide.contents[0] }}
+                                />
+                                {slide.slideStyle?.lowerThirdSubtitle && (
+                                    <div className="text-white/70 text-[9px] line-clamp-1 mt-0.5">
+                                        {slide.slideStyle.lowerThirdSubtitle}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="absolute inset-0 flex items-center justify-center p-4">
+                            <div
+                                className="text-white text-xs text-center line-clamp-3 drop-shadow-lg tiptap-preview"
+                                dangerouslySetInnerHTML={{ __html: slide.contents[0] }}
+                            />
+                        </div>
+                    )
                 )}
 
                 {/* Quick Go Live button - appears on hover */}

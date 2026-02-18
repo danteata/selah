@@ -149,6 +149,11 @@ export default defineSchema({
             lineSpacing: v.optional(v.string()),
             textOutlined: v.optional(v.boolean()),
             bibleVersion: v.optional(v.string()),
+            // Lower Third settings
+            lowerThirdStyle: v.optional(v.string()),
+            lowerThirdPosition: v.optional(v.string()),
+            lowerThirdAccentColor: v.optional(v.string()),
+            lowerThirdSubtitle: v.optional(v.string()),
         })),
         saved: v.optional(v.boolean()),
         createdAt: v.optional(v.string()),

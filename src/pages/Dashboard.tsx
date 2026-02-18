@@ -6,6 +6,7 @@ import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiv
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
 import { SlideEditor } from '../components/editor/SlideEditor'
+import { LowerThirdEditor } from '../components/editor/LowerThirdEditor'
 import { MediaPicker } from '../components/media/MediaPicker'
 import { TemplateBrowser } from '../components/templates/TemplateBrowser'
 import { AddAlertModal } from '../components/alerts/AddAlertModal'
@@ -327,6 +328,15 @@ export default function Dashboard() {
                 <ScheduleModal
                     isOpen={modals.scheduleModal}
                     onClose={() => closeModal('scheduleModal')}
+                />
+            )}
+
+            {modals.lowerThirdEditor && editingSlide && (
+                <LowerThirdEditor
+                    slide={editingSlide}
+                    isOpen={modals.lowerThirdEditor}
+                    onClose={() => closeModal('lowerThirdEditor')}
+                    onSave={handleSlideEditorSave}
                 />
             )}
 
