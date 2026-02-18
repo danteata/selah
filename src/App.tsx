@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import LiveView from './pages/LiveView'
 import ChurchSetup from './pages/ChurchSetup'
+import JoinChurch from './pages/JoinChurch'
 import Landing from './pages/Landing'
 import LoginPage from './pages/auth/Login'
 import SignupPage from './pages/auth/Signup'
@@ -49,6 +50,19 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/test" element={<TestPage />} />
+              <Route
+                path="/join/:code"
+                element={
+                  <>
+                    <SignedIn>
+                      <JoinChurch />
+                    </SignedIn>
+                    <SignedOut>
+                      <Navigate to="/login" replace />
+                    </SignedOut>
+                  </>
+                }
+              />
               <Route
                 path="/"
                 element={

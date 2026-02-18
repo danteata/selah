@@ -41,6 +41,8 @@ export default defineSchema({
         userIds: v.optional(v.array(v.string())),
         storageUsed: v.optional(v.number()),
         subscriptionPlan: v.union(v.literal("free"), v.literal("teams")),
+        // Default invite code for quick sharing
+        defaultInviteCode: v.optional(v.string()),
         createdAt: v.string(),
         updatedAt: v.string(),
     }),
@@ -313,4 +315,42 @@ export default defineSchema({
         .index("by_church", ["churchId"])
         .index("by_creator", ["createdBy"])
         .index("by_schedule_created", ["scheduleId", "createdAt"]),
+
+    // Invitations table - for team member invitations
+    invitations: defineTable({
+        // Unique invite code (URL-safe, used in join links)
+        code: v.string(),
+        // Church this invitation belongs to
+        churchId: v.string(),
+        // Type of invitation
+        type: v.union(
+            v.literal("link"),      // Generic shareable link
+            v.literal("email")      // Direct email invitation
+        ),
+        // For email invitations: recipient email
+        email: v.optional(v.string()),
+        // User who created the invitation
+        createdBy: v.string(),
+        // Status tracking
+        status: v.union(
+            v.literal("pending"),    // Not yet accepted
+            v.literal("accepted"),   // User joined via this invite
+            v.literal("revoked"),    // Admin revoked the invite
+            v.literal("expired")     // Past expiration date
+        ),
+        // Who accepted the invitation (filled on join)
+        acceptedBy: v.optional(v.string()),
+        acceptedAt: v.optional(v.string()),
+        // Timestamps
+        createdAt: v.string(),
+        updatedAt: v.string(),
+        // Optional expiration (null = never expires)
+        expiresAt: v.optional(v.string()),
+        // Optional note from inviter
+        message: v.optional(v.string()),
+    })
+        .index("by_code", ["code"])
+        .index("by_church", ["churchId"])
+        .index("by_email", ["email"])
+        .index("by_status", ["status"]),
 });

@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { BibleVersionSettings } from './BibleVersionSettings'
 import { SermonListenerSettings } from '../sermon-listener'
+import { TeamManagementPanel } from '../team/TeamManagementPanel'
+import { useUserRole } from '../../hooks/useUserRole'
 
-type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener'
+type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -15,6 +17,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: SettingsModalProps) {
     const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
+    const { isAdmin, currentUser } = useUserRole()
 
     const settings = useAppStore((state) => state.settings)
     const setSlideStyles = useAppStore((state) => state.setSlideStyles)
@@ -56,6 +59,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         { id: 'background' as const, label: 'Background', icon: Palette },
         { id: 'bible' as const, label: 'Bible', icon: Book },
         { id: 'sermon-listener' as const, label: 'Sermon Listener', icon: Mic },
+        ...(isAdmin && currentUser?.churchId ? [{ id: 'team' as const, label: 'Team', icon: Users }] : []),
         { id: 'profile' as const, label: 'Profile', icon: User },
         { id: 'storage' as const, label: 'Storage', icon: HardDrive },
         { id: 'shortcuts' as const, label: 'Shortcuts', icon: Keyboard },
@@ -125,6 +129,9 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                             />
                         )}
                         {activeTab === 'sermon-listener' && <SermonListenerSettings />}
+                        {activeTab === 'team' && isAdmin && currentUser?.churchId && (
+                            <TeamManagementPanel churchId={currentUser.churchId} isAdmin={isAdmin} />
+                        )}
                         {activeTab === 'profile' && <ProfileSettings />}
                         {activeTab === 'storage' && <StorageSettings />}
                         {activeTab === 'shortcuts' && <ShortcutsSettings />}
