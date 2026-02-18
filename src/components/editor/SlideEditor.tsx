@@ -7,6 +7,7 @@ import {
 import { useAppStore } from '../../store/appStore'
 import type { Slide, SlideStyle } from '../../types'
 import { TipTapEditor } from './TipTapEditor'
+import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 
 interface SlideEditorProps {
     slide: Slide | null
@@ -78,6 +79,15 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
             onSave(editedSlide)
             onClose()
         }
+    }
+
+    const handleBackgroundChange = (selection: BackgroundSelection) => {
+        setEditedSlide({
+            ...editedSlide,
+            background: selection.background,
+            backgroundType: selection.backgroundType,
+            backgroundStorageId: selection.backgroundStorageId,
+        })
     }
 
     const alignmentOptions = [
@@ -220,6 +230,18 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                             >
                                 + Add Content Block
                             </button>
+
+                            {/* Background Picker */}
+                            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                <BackgroundPicker
+                                    value={{
+                                        background: editedSlide.background || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                        backgroundType: editedSlide.backgroundType || 'gradient',
+                                        backgroundStorageId: editedSlide.backgroundStorageId,
+                                    }}
+                                    onChange={handleBackgroundChange}
+                                />
+                            </div>
                         </div>
                     </div>
 

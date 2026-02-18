@@ -1,20 +1,47 @@
 import { useState } from 'react'
-import { X, Bell, Clock, AlertCircle, Plus } from 'lucide-react'
+import { X, Bell, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import type { Alert } from '../../types'
+import type { Alert, Slide } from '../../types'
+import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 
 interface AddAlertModalProps {
     isOpen: boolean
     onClose: () => void
 }
 
+const DEFAULT_BG: BackgroundSelection = {
+    label: 'Midnight',
+    background: 'linear-gradient(135deg, #0f172a, #1e293b)',
+    backgroundType: 'gradient',
+}
+
+const ALERT_STYLES = [
+    {
+        id: 'fullscreen',
+        label: 'Full Screen',
+        desc: 'Full slide in the schedule',
+        icon: '⬛',
+    },
+    {
+        id: 'banner',
+        label: 'Banner',
+        desc: 'Lower-third overlay',
+        icon: '▬',
+    },
+]
+
 export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
     const [content, setContent] = useState('')
+    const [title, setTitle] = useState('')
     const [duration, setDuration] = useState(5)
     const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
+    const [alertStyle, setAlertStyle] = useState<'banner' | 'fullscreen'>('fullscreen')
+    const [selectedBg, setSelectedBg] = useState<BackgroundSelection>(DEFAULT_BG)
 
     const setAlerts = useAppStore((state) => state.setAlerts)
     const alerts = useAppStore((state) => state.alerts)
+    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const activeSchedule = useAppStore((state) => state.activeSchedule)
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
@@ -22,16 +49,53 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
 
         const newAlert: Alert = {
             id: `alert_${Date.now()}`,
+            title: title.trim() || undefined,
             content: content.trim(),
             duration,
             priority,
             createdAt: new Date().toISOString(),
         }
 
+        // Always add to alerts store (for overlay/banner system)
         setAlerts([...alerts, newAlert])
+
+        // Also create a slide so it appears in the schedule
+        const slide: Slide = {
+            id: `slide_alert_${Date.now()}`,
+            index: 0,
+            name: title.trim() || `Alert: ${content.trim().slice(0, 30)}${content.length > 30 ? '…' : ''}`,
+            type: 'alert',
+            layout: alertStyle === 'banner' ? 'lower-third' : 'full-text',
+            contents: title.trim()
+                ? [`<p style="font-size:1.4em;font-weight:700;">${title.trim()}</p>`, `<p>${content.trim()}</p>`]
+                : [`<p>${content.trim()}</p>`],
+            userId: '',
+            churchId: '',
+            scheduleId: activeSchedule?._id || '',
+            background: selectedBg.background,
+            backgroundType: selectedBg.backgroundType,
+            backgroundStorageId: selectedBg.backgroundStorageId ?? null,
+            slideStyle: {
+                fontSize: alertStyle === 'banner' ? 3.5 : 5,
+                alignment: 'center',
+                brightness: 80,
+                blur: 0,
+                ...(alertStyle === 'banner' && {
+                    lowerThirdStyle: 'standard',
+                    lowerThirdPosition: 'center',
+                }),
+            },
+        }
+
+        appendActiveSlide(slide)
+
+        // Reset
         setContent('')
+        setTitle('')
         setDuration(5)
         setPriority('medium')
+        setAlertStyle('fullscreen')
+        setSelectedBg(DEFAULT_BG)
         onClose()
     }
 
@@ -42,9 +106,9 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
             onClick={(e) => e.target === e.currentTarget && onClose()}
         >
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
+            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
                 {/* Header */}
-                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
+                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
                     <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
                         <Bell className="w-5 h-5 text-orange-600" />
                     </div>
@@ -60,11 +124,50 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
                 </div>
 
                 {/* Form */}
-                <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto flex-1">
+
+                    {/* Alert Style */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Display Style
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {ALERT_STYLES.map((s) => (
+                                <button
+                                    key={s.id}
+                                    type="button"
+                                    onClick={() => setAlertStyle(s.id as 'banner' | 'fullscreen')}
+                                    className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-all ${alertStyle === s.id
+                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300'
+                                        }`}
+                                >
+                                    <span className="text-2xl">{s.icon}</span>
+                                    <span className="text-sm font-medium">{s.label}</span>
+                                    <span className="text-[11px] text-center opacity-70">{s.desc}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Title (optional) */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Title <span className="text-gray-400">(optional)</span>
+                        </label>
+                        <input
+                            type="text"
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                            placeholder="Announcement"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                    </div>
+
                     {/* Content */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Alert Message
+                            Message <span className="text-red-500">*</span>
                         </label>
                         <textarea
                             value={content}
@@ -72,14 +175,33 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
                             placeholder="Enter your announcement..."
                             rows={3}
                             required
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                         />
                     </div>
+
+                    {/* Background Picker */}
+                    <BackgroundPicker
+                        value={selectedBg}
+                        onChange={setSelectedBg}
+                        previewChildren={
+                            <div className="text-center px-3">
+                                {title && (
+                                    <p className="text-white font-semibold text-sm leading-tight drop-shadow">{title}</p>
+                                )}
+                                {content && (
+                                    <p className="text-white/80 text-xs mt-0.5 line-clamp-2">{content}</p>
+                                )}
+                                {!title && !content && (
+                                    <p className="text-white/50 text-xs">Alert preview</p>
+                                )}
+                            </div>
+                        }
+                    />
 
                     {/* Duration */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Display Duration
+                            Banner Duration <span className="text-gray-400 font-normal">(when shown as overlay)</span>
                         </label>
                         <div className="flex gap-2">
                             {[3, 5, 10, 15, 30].map((d) => (
@@ -88,7 +210,7 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
                                     type="button"
                                     onClick={() => setDuration(d)}
                                     className={`flex-1 py-2 text-sm rounded-lg transition-colors ${duration === d
-                                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 ring-2 ring-primary-500'
+                                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500'
                                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                                         }`}
                                 >
@@ -114,7 +236,7 @@ export function AddAlertModal({ isOpen, onClose }: AddAlertModalProps) {
                                     type="button"
                                     onClick={() => setPriority(p.id as 'low' | 'medium' | 'high')}
                                     className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-lg transition-colors ${priority === p.id
-                                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 ring-2 ring-primary-500'
+                                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500'
                                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                                         }`}
                                 >

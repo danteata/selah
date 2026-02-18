@@ -184,7 +184,6 @@ export default function Dashboard() {
 
     // Handle countdown creation - convert CountdownData to Countdown slide
     const handleCountdownCreate = (countdownData: CountdownData) => {
-        const totalSeconds = countdownData.hours * 3600 + countdownData.minutes * 60 + countdownData.seconds
         const timeString = `${String(countdownData.hours).padStart(2, '0')}:${String(countdownData.minutes).padStart(2, '0')}:${String(countdownData.seconds).padStart(2, '0')}`
 
         const slide: Slide = {
@@ -197,11 +196,18 @@ export default function Dashboard() {
             userId: '',
             churchId: '',
             scheduleId: activeSchedule?._id || '',
+            background: countdownData.background,
+            backgroundType: countdownData.backgroundType,
+            backgroundStorageId: countdownData.backgroundStorageId ?? null,
             data: {
                 id: countdownData.id,
                 time: timeString,
                 timeLeft: timeString,
                 content: countdownData.title,
+            },
+            slideStyle: {
+                fontSize: 17.5,
+                alignment: 'center',
             },
         }
         appendActiveSlide(slide)

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap, Sparkles } from 'lucide-react'
+import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap, Sparkles, PanelBottom } from 'lucide-react'
 import fuzzysort from 'fuzzysort'
 import { useHymn, useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
@@ -37,6 +37,7 @@ const SIDEBAR_ACTIONS = [
     { id: 'hymn', icon: <Music className="w-4 h-4" />, label: 'Hymn', action: appWideActions.newHymn },
     { id: 'song', icon: <Music className="w-4 h-4" />, label: 'Song', action: appWideActions.newSong },
     { id: 'slide', icon: <FileText className="w-4 h-4" />, label: 'Slide', action: appWideActions.newSlide },
+    { id: 'lower-third', icon: <PanelBottom className="w-4 h-4" />, label: 'Lower Third', action: appWideActions.newLowerThird },
     { id: 'media', icon: <Image className="w-4 h-4" />, label: 'Media', action: appWideActions.newMedia },
     { id: 'template', icon: <Layout className="w-4 h-4" />, label: 'Templates', action: appWideActions.newTemplates },
     { id: 'countdown', icon: <Clock className="w-4 h-4" />, label: 'Countdown', action: appWideActions.newCountdown },
@@ -311,6 +312,31 @@ export function QuickActionsSidebar() {
             }
             setEditingSlide(newSlide)
             openModal('editor')
+            return
+        }
+
+        if (actionStr === appWideActions.newLowerThird) {
+            const newSlide: Slide = {
+                id: `slide_${Date.now()}`,
+                index: 0,
+                name: 'Lower Third',
+                type: 'text',
+                layout: 'lower-third',
+                contents: ['<p>Speaker Name</p>'],
+                userId: '',
+                churchId: '',
+                scheduleId: activeSchedule?._id || '',
+                slideStyle: {
+                    fontSize: 3.5,
+                    alignment: 'left',
+                    lowerThirdStyle: 'standard',
+                    lowerThirdPosition: 'left',
+                    lowerThirdAccentColor: '#0d9488',
+                    lowerThirdSubtitle: '',
+                },
+            }
+            setEditingSlide(newSlide)
+            openModal('lowerThirdEditor')
             return
         }
     }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule, clearSemanticResults])

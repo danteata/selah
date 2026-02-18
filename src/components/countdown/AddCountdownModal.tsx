@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Clock, Plus, Play, Pause, RotateCcw } from 'lucide-react'
+import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 
 interface AddCountdownModalProps {
     isOpen: boolean
@@ -13,6 +14,15 @@ export interface CountdownData {
     minutes: number
     seconds: number
     title: string
+    background: string
+    backgroundType: string
+    backgroundStorageId?: string | null
+}
+
+const DEFAULT_BG: BackgroundSelection = {
+    label: 'Midnight',
+    background: 'linear-gradient(135deg, #0f172a, #1e293b)',
+    backgroundType: 'gradient',
 }
 
 export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalProps) {
@@ -20,6 +30,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
     const [minutes, setMinutes] = useState(5)
     const [seconds, setSeconds] = useState(0)
     const [title, setTitle] = useState('')
+    const [selectedBg, setSelectedBg] = useState<BackgroundSelection>(DEFAULT_BG)
 
     const presets = [
         { label: '1 min', h: 0, m: 1, s: 0 },
@@ -39,6 +50,9 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
             minutes,
             seconds,
             title: title.trim() || 'Countdown',
+            background: selectedBg.background,
+            backgroundType: selectedBg.backgroundType,
+            backgroundStorageId: selectedBg.backgroundStorageId ?? null,
         })
 
         // Reset form
@@ -46,6 +60,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
         setMinutes(5)
         setSeconds(0)
         setTitle('')
+        setSelectedBg(DEFAULT_BG)
         onClose()
     }
 
@@ -57,14 +72,19 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
 
     if (!isOpen) return null
 
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const previewTime = hours > 0
+        ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+        : `${pad(minutes)}:${pad(seconds)}`
+
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
             onClick={(e) => e.target === e.currentTarget && onClose()}
         >
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
+            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
                 {/* Header */}
-                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
+                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
                     <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
                         <Clock className="w-5 h-5 text-blue-600" />
                     </div>
@@ -80,18 +100,18 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
                 </div>
 
                 {/* Form */}
-                <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto flex-1">
                     {/* Title */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Title (optional)
+                            Title <span className="text-gray-400">(optional)</span>
                         </label>
                         <input
                             type="text"
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
                             placeholder="Service starts in..."
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         />
                     </div>
 
@@ -108,7 +128,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
                                     onChange={(e) => setHours(Math.max(0, Math.min(23, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="23"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Hours</p>
                             </div>
@@ -120,7 +140,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
                                     onChange={(e) => setMinutes(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="59"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Minutes</p>
                             </div>
@@ -132,7 +152,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
                                     onChange={(e) => setSeconds(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="59"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Seconds</p>
                             </div>
@@ -157,6 +177,22 @@ export function AddCountdownModal({ isOpen, onClose, onAdd }: AddCountdownModalP
                             ))}
                         </div>
                     </div>
+
+                    {/* Background Picker */}
+                    <BackgroundPicker
+                        value={selectedBg}
+                        onChange={setSelectedBg}
+                        previewChildren={
+                            <div className="text-center">
+                                <div className="font-mono font-bold text-white text-2xl leading-none drop-shadow tabular-nums">
+                                    {previewTime}
+                                </div>
+                                {title && (
+                                    <div className="text-white/70 text-xs mt-1">{title}</div>
+                                )}
+                            </div>
+                        }
+                    />
 
                     {/* Actions */}
                     <div className="flex justify-end gap-3 pt-2">

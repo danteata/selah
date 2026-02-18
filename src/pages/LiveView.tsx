@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Maximize2, Minimize2, X } from 'lucide-react'
-import type { Slide } from '../types'
+import type { Slide, Countdown } from '../types'
 import { useFileUrl } from '../hooks/useTemplates'
 
 const STORAGE_KEY = 'selah-live-state'
@@ -22,6 +22,11 @@ export default function LiveView() {
     const [currentSlideId, setCurrentSlideId] = useState(searchParams.get('slide') || '')
     const [liveState, setLiveState] = useState<LiveState | null>(null)
     const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
+
+    // Countdown timer state
+    const [countdownSeconds, setCountdownSeconds] = useState<number>(0)
+    const [countdownPaused, setCountdownPaused] = useState(false)
+    const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
     // Initialize BroadcastChannel for cross-window communication
     useEffect(() => {
@@ -120,6 +125,78 @@ export default function LiveView() {
             })
         }
     }, [settings.liveWindowFullscreen])
+
+    // Parse "HH:MM:SS" time string into total seconds
+    const parseTimeToSeconds = useCallback((timeStr: string): number => {
+        const parts = timeStr.split(':').map(Number)
+        if (parts.length === 3) {
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        } else if (parts.length === 2) {
+            return parts[0] * 60 + parts[1]
+        }
+        return 0
+    }, [])
+
+    // Initialize countdown when a countdown slide becomes active
+    useEffect(() => {
+        if (!slide || slide.type !== 'countdown') {
+            // Clean up interval if not a countdown slide
+            if (countdownIntervalRef.current) {
+                clearInterval(countdownIntervalRef.current)
+                countdownIntervalRef.current = null
+            }
+            return
+        }
+
+        // Parse the total seconds from the slide data
+        const countdownData = slide.data as Countdown | undefined
+        const timeStr = countdownData?.time || slide.contents[1] || '00:05:00'
+        const totalSeconds = parseTimeToSeconds(timeStr)
+
+        setCountdownSeconds(totalSeconds)
+        setCountdownPaused(false)
+    }, [slide?.id, slide?.type]) // Re-initialize when the slide changes
+
+    // Run the countdown interval
+    useEffect(() => {
+        if (!slide || slide.type !== 'countdown' || countdownPaused) {
+            if (countdownIntervalRef.current) {
+                clearInterval(countdownIntervalRef.current)
+                countdownIntervalRef.current = null
+            }
+            return
+        }
+
+        countdownIntervalRef.current = setInterval(() => {
+            setCountdownSeconds((prev) => {
+                if (prev <= 1) {
+                    clearInterval(countdownIntervalRef.current!)
+                    countdownIntervalRef.current = null
+                    return 0
+                }
+                return prev - 1
+            })
+        }, 1000)
+
+        return () => {
+            if (countdownIntervalRef.current) {
+                clearInterval(countdownIntervalRef.current)
+                countdownIntervalRef.current = null
+            }
+        }
+    }, [slide?.id, slide?.type, countdownPaused])
+
+    // Format seconds into HH:MM:SS or MM:SS
+    const formatCountdownTime = useCallback((totalSeconds: number): string => {
+        const h = Math.floor(totalSeconds / 3600)
+        const m = Math.floor((totalSeconds % 3600) / 60)
+        const s = totalSeconds % 60
+        const pad = (n: number) => String(n).padStart(2, '0')
+        if (h > 0) {
+            return `${pad(h)}:${pad(m)}:${pad(s)}`
+        }
+        return `${pad(m)}:${pad(s)}`
+    }, [])
 
     // Keyboard shortcut for fullscreen (F key)
     useEffect(() => {
@@ -249,6 +326,62 @@ export default function LiveView() {
                         </div>
                     </div>
                 </div>
+            ) : slide.type === 'countdown' ? (
+                /* Countdown Layout - live ticking timer */
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    {/* Title */}
+                    {slide.contents[0] && (
+                        <div
+                            className="text-white/80 drop-shadow-lg mb-6 text-center"
+                            style={{
+                                fontSize: '4vw',
+                                fontFamily: slide.slideStyle?.font || 'Inter',
+                                fontWeight: 400,
+                                letterSpacing: '0.04em',
+                            }}
+                        >
+                            {slide.contents[0]}
+                        </div>
+                    )}
+
+                    {/* Live countdown display */}
+                    <div
+                        className="text-white drop-shadow-2xl font-mono font-bold tabular-nums"
+                        style={{
+                            fontSize: '20vw',
+                            fontFamily: slide.slideStyle?.font || 'monospace',
+                            lineHeight: 1,
+                            letterSpacing: '-0.02em',
+                            textShadow: '0 4px 32px rgba(0,0,0,0.6)',
+                        }}
+                    >
+                        {formatCountdownTime(countdownSeconds)}
+                    </div>
+
+                    {/* Finished state */}
+                    {countdownSeconds === 0 && (
+                        <div
+                            className="text-white/60 mt-8 text-center"
+                            style={{
+                                fontSize: '3vw',
+                                fontFamily: slide.slideStyle?.font || 'Inter',
+                            }}
+                        >
+                            Time&apos;s up!
+                        </div>
+                    )}
+
+                    {/* Pause/Resume controls (hover) */}
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation()
+                            setCountdownPaused((p) => !p)
+                        }}
+                        className="absolute bottom-12 left-1/2 -translate-x-1/2 opacity-0 hover:opacity-100 focus:opacity-100 transition-opacity px-6 py-3 bg-black/50 text-white rounded-full text-sm backdrop-blur-sm"
+                    >
+                        {countdownPaused ? '▶ Resume' : '⏸ Pause'}
+                    </button>
+                </div>
             ) : (
                 /* Default Centered Layout */
                 <div
@@ -276,8 +409,6 @@ export default function LiveView() {
                                 key={index}
                                 className="text-white drop-shadow-lg"
                                 style={{
-                                    color: slide.type === 'countdown' ? 'white' : undefined,
-                                    fontWeight: slide.type === 'countdown' ? 'bold' : undefined,
                                     marginBottom: index < slide.contents.length - 1 ? '0.4em' : 0
                                 }}
                                 dangerouslySetInnerHTML={{ __html: content }}

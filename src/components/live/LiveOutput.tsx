@@ -1,17 +1,38 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useMultiMonitor } from '../../hooks/useMultiMonitor'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
-import type { Slide, Scripture } from '../../types'
+import type { Slide, Scripture, Countdown } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
 import { BibleVerseNavigator } from '../bible/BibleVerseNavigator'
 
+// Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
+function parseTimeStringToSeconds(timeStr: string): number {
+    const parts = timeStr.split(':').map(Number)
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    if (parts.length === 2) return parts[0] * 60 + parts[1]
+    return 0
+}
+
+// Helper: format total seconds to "HH:MM:SS" or "MM:SS"
+function formatSecondsToTime(totalSeconds: number): string {
+    const h = Math.floor(totalSeconds / 3600)
+    const m = Math.floor((totalSeconds % 3600) / 60)
+    const s = totalSeconds % 60
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
+}
+
 export function LiveOutput() {
     const [ctrlOrMetaActive, setCtrlOrMetaActive] = useState(false)
     const [showScreenPicker, setShowScreenPicker] = useState(false)
+
+    // Countdown preview state
+    const [previewCountdownSeconds, setPreviewCountdownSeconds] = useState(0)
+    const previewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
     const { isPresenting, selectedScreenId, detectScreens, openLiveViewOnScreen, terminatePresentation } = useMultiMonitor()
 
@@ -146,6 +167,45 @@ export function LiveOutput() {
         await openLiveViewOnScreen(screenId, liveSlideId || undefined)
         setShowScreenPicker(false)
     }, [openLiveViewOnScreen, liveSlideId])
+
+    // Initialize & run countdown preview when live slide is a countdown
+    useEffect(() => {
+        // Clear any existing interval
+        if (previewIntervalRef.current) {
+            clearInterval(previewIntervalRef.current)
+            previewIntervalRef.current = null
+        }
+
+        if (!liveSlide || liveSlide.type !== 'countdown') {
+            setPreviewCountdownSeconds(0)
+            return
+        }
+
+        // Parse initial time from slide data
+        const countdownData = liveSlide.data as Countdown | undefined
+        const timeStr = countdownData?.time || liveSlide.contents[1] || '00:05:00'
+        const initialSeconds = parseTimeStringToSeconds(timeStr)
+        setPreviewCountdownSeconds(initialSeconds)
+
+        // Start ticking
+        previewIntervalRef.current = setInterval(() => {
+            setPreviewCountdownSeconds((prev) => {
+                if (prev <= 1) {
+                    clearInterval(previewIntervalRef.current!)
+                    previewIntervalRef.current = null
+                    return 0
+                }
+                return prev - 1
+            })
+        }, 1000)
+
+        return () => {
+            if (previewIntervalRef.current) {
+                clearInterval(previewIntervalRef.current)
+                previewIntervalRef.current = null
+            }
+        }
+    }, [liveSlide?.id, liveSlide?.type])
 
     // Handle stop presenting
     const handleStopLive = useCallback(async () => {
@@ -326,7 +386,21 @@ export function LiveOutput() {
                                 playsInline
                             />
                         )}
-                        {liveSlide.contents[0] && (
+                        {/* Countdown preview - live ticking */}
+                        {liveSlide.type === 'countdown' ? (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center p-2 bg-gray-900/60">
+                                {liveSlide.contents[0] && (
+                                    <p className="text-white/70 text-[9px] mb-1 text-center truncate max-w-full px-1">
+                                        {liveSlide.contents[0]}
+                                    </p>
+                                )}
+                                <div className="text-white font-mono font-bold tabular-nums leading-none"
+                                    style={{ fontSize: 'clamp(14px, 4vw, 28px)' }}
+                                >
+                                    {formatSecondsToTime(previewCountdownSeconds)}
+                                </div>
+                            </div>
+                        ) : liveSlide.contents[0] ? (
                             <div className="absolute inset-0 flex items-center justify-center p-6">
                                 <div
                                     className="text-white text-center drop-shadow-lg tiptap-preview"
@@ -334,7 +408,7 @@ export function LiveOutput() {
                                     dangerouslySetInnerHTML={{ __html: liveSlide.contents[0] }}
                                 />
                             </div>
-                        )}
+                        ) : null}
 
                         {/* Live badge */}
                         <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs font-medium rounded-full">
