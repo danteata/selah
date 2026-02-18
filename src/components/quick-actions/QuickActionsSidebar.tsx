@@ -63,9 +63,10 @@ export function QuickActionsSidebar() {
         clearResults: clearSemanticResults,
         initEmbedder,
     } = useSemanticVerseSearch({
-        threshold: 0.65,
+        threshold: 0.55, // Lower base threshold for short phrases
         limit: 3,
         debounceMs: 400,
+        minQueryLength: 2, // Allow searches with just 2 characters
     })
 
     const page = useAppStore((state) => state.quickActionsPage)
@@ -117,14 +118,14 @@ export function QuickActionsSidebar() {
 
     // Trigger semantic search when search input changes
     useEffect(() => {
-        if (searchInput.length >= 3 && hasEmbeddings) {
+        if (searchInput.length >= 2 && hasEmbeddings) {
             // Only do semantic search if it doesn't look like a bible reference
             const looksLikeReference = /^(genesis|exodus|leviticus|numbers|deuteronomy|joshua|judges|ruth|1?\s?samuel|2?\s?kings|1?\s?chronicles|2?\s?chronicles|ezra|nehemiah|esther|job|psalms?|proverbs?|ecclesiastes|song of solomon|isaiah|jeremiah|lamentations|ezekiel|daniel|hosea|joel|amos|obadiah|jonah|micah|nahum|habakkuk|zephaniah|haggai|zechariah|malachi|matthew|mark|luke|john|acts|romans|1?\s?corinthians|2?\s?corinthians|galatians|ephesians|philippians|colossians|1?\s?thessalonians|2?\s?thessalonians|1?\s?timothy|2?\s?timothy|titus|philemon|hebrews|james|1?\s?peter|2?\s?peter|1?\s?john|2?\s?john|3?\s?john|jude|revelation)\s*\d*/i.test(searchInput)
 
             if (!looksLikeReference) {
                 semanticSearch(searchInput)
             }
-        } else if (searchInput.length < 3) {
+        } else if (searchInput.length < 2) {
             clearSemanticResults()
         }
     }, [searchInput, hasEmbeddings, semanticSearch, clearSemanticResults])

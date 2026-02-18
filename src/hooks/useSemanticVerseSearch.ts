@@ -38,7 +38,7 @@ export interface SemanticVerseResult {
 }
 
 interface UseSemanticVerseSearchOptions {
-    /** Minimum similarity threshold (0-1, default 0.65) */
+    /** Minimum similarity threshold (0-1, default 0.55 for short phrases) */
     threshold?: number
     /** Maximum results to return (default 5) */
     limit?: number
@@ -48,6 +48,8 @@ interface UseSemanticVerseSearchOptions {
     debounceMs?: number
     /** Prefer local embeddings over remote (default true) */
     preferLocal?: boolean
+    /** Minimum query length for semantic search (default 2) */
+    minQueryLength?: number
 }
 
 interface UseSemanticVerseSearchReturn {
@@ -74,6 +76,29 @@ interface UseSemanticVerseSearchReturn {
 }
 
 /**
+ * Calculate dynamic threshold based on query length.
+ * Shorter queries need lower thresholds to find matches.
+ */
+function calculateDynamicThreshold(query: string, baseThreshold: number): number {
+    const wordCount = query.trim().split(/\s+/).length
+
+    // For very short queries (2-3 words), use much lower threshold
+    if (wordCount <= 3) {
+        return Math.max(0.45, baseThreshold - 0.20)
+    }
+    // For short queries (4-5 words), use moderately lower threshold
+    if (wordCount <= 5) {
+        return Math.max(0.50, baseThreshold - 0.15)
+    }
+    // For medium queries (6-8 words), slightly lower threshold
+    if (wordCount <= 8) {
+        return Math.max(0.55, baseThreshold - 0.10)
+    }
+    // For longer queries, use base threshold
+    return baseThreshold
+}
+
+/**
  * Hook for semantic verse search using vector embeddings.
  * Supports both local (IndexedDB) and remote (Convex) embeddings.
  */
@@ -86,6 +111,7 @@ export function useSemanticVerseSearch(
         version,
         debounceMs = 300,
         preferLocal = true,
+        minQueryLength = 2,
     } = options
 
     const convex = useConvex()
@@ -171,7 +197,7 @@ export function useSemanticVerseSearch(
         }
 
         // Validate inputs
-        if (!query.trim()) {
+        if (!query.trim() || query.trim().length < minQueryLength) {
             setResults([])
             return
         }
@@ -179,6 +205,10 @@ export function useSemanticVerseSearch(
         if (!hasEmbeddings) {
             return
         }
+
+        // Calculate dynamic threshold based on query length
+        const dynamicThreshold = calculateDynamicThreshold(query, threshold)
+        console.log('[useSemanticVerseSearch] Query:', query, 'Word count:', query.trim().split(/\s+/).length, 'Dynamic threshold:', dynamicThreshold)
 
         // Debounce the search
         debounceRef.current = setTimeout(async () => {
@@ -206,11 +236,11 @@ export function useSemanticVerseSearch(
 
                 // Prefer local search if available
                 if (preferLocal && hasLocalEmbeddings && localEmbeddingsCache.current) {
-                    console.log('[useSemanticVerseSearch] Using local embeddings search')
+                    console.log('[useSemanticVerseSearch] Using local embeddings search with threshold:', dynamicThreshold)
                     const localResults = findSimilarLocally(
                         embeddingResult.embedding,
                         localEmbeddingsCache.current,
-                        threshold,
+                        dynamicThreshold,
                         limit
                     )
                     searchResults = localResults.map(r => {
@@ -249,10 +279,10 @@ export function useSemanticVerseSearch(
                     })
                 } else {
                     // Fall back to Convex vector search
-                    console.log('[useSemanticVerseSearch] Using Convex vector search')
+                    console.log('[useSemanticVerseSearch] Using Convex vector search with threshold:', dynamicThreshold)
                     const convexResults = await convex.action(api.verseEmbeddings.findSimilarVerses, {
                         queryEmbedding: embeddingResult.embedding,
-                        threshold,
+                        threshold: dynamicThreshold,
                         limit,
                         version,
                     })
@@ -282,7 +312,7 @@ export function useSemanticVerseSearch(
                 }
             }
         }, debounceMs)
-    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, convex, threshold, limit, version, debounceMs, preferLocal])
+    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, convex, threshold, limit, version, debounceMs, preferLocal, minQueryLength])
 
     // Clear results
     const clearResults = useCallback(() => {
