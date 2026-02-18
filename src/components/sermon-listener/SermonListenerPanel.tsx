@@ -9,7 +9,7 @@ import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar } from 'lucide-react'
+import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter } from 'lucide-react'
 import type { Scripture, BibleVerse } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 
@@ -39,6 +39,7 @@ export function SermonListenerPanel({
     const [transcriptTitle, setTranscriptTitle] = useState('')
     const [isSaving, setIsSaving] = useState(false)
     const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null)
+    const [showOnlyBestMatches, setShowOnlyBestMatches] = useState(true) // Default to showing only best matches
     const transcriptRef = useRef<HTMLDivElement>(null)
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
@@ -259,9 +260,26 @@ export function SermonListenerPanel({
             {detectedVerses.length > 0 && (
                 <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                            {detectedVerses.length} verse{detectedVerses.length !== 1 ? 's' : ''}
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                {showOnlyBestMatches
+                                    ? `${detectedVerses.filter(v => v.isBestMatch).length} confirmed`
+                                    : `${detectedVerses.length} total`
+                                } verse{detectedVerses.length !== 1 ? 's' : ''}
+                            </span>
+                            {/* Filter toggle */}
+                            <button
+                                onClick={() => setShowOnlyBestMatches(!showOnlyBestMatches)}
+                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${showOnlyBestMatches
+                                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
+                                        : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                    }`}
+                                title={showOnlyBestMatches ? 'Showing only confirmed verses' : 'Showing all detected verses'}
+                            >
+                                <Filter className="w-3 h-3" />
+                                {showOnlyBestMatches ? 'Confirmed' : 'All'}
+                            </button>
+                        </div>
                         <button
                             onClick={reset}
                             className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
@@ -270,17 +288,25 @@ export function SermonListenerPanel({
                         </button>
                     </div>
                     <div className="flex flex-wrap gap-1">
-                        {detectedVerses.map((verse, idx) => (
+                        {(showOnlyBestMatches
+                            ? detectedVerses.filter(v => v.isBestMatch)
+                            : detectedVerses
+                        ).map((verse, idx) => (
                             <div
                                 key={`${verse.reference}-${idx}`}
                                 className={`group flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors ${currentVerse?.reference === verse.reference
-                                    ? 'bg-blue-500 text-white'
-                                    : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
+                                        ? 'bg-blue-500 text-white'
+                                        : verse.isBestMatch
+                                            ? 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
+                                            : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
                                     }`}
                                 onClick={() => handleVerseClick(verse)}
                             >
                                 <Book className="w-3 h-3" />
                                 <span>{formatVerseForDisplay(verse)}</span>
+                                {!verse.isBestMatch && (
+                                    <span className="text-[8px] opacity-60 ml-0.5">?</span>
+                                )}
                                 {isLoading && currentVerse?.reference === verse.reference && (
                                     <Loader2 className="w-3 h-3 animate-spin" />
                                 )}
@@ -290,8 +316,8 @@ export function SermonListenerPanel({
                                         removeVerse(verse)
                                     }}
                                     className={`ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
-                                        ? 'text-white/70 hover:text-white'
-                                        : 'text-gray-400 hover:text-red-500'
+                                            ? 'text-white/70 hover:text-white'
+                                            : 'text-gray-400 hover:text-red-500'
                                         }`}
                                 >
                                     <Trash2 className="w-3 h-3" />
@@ -449,8 +475,8 @@ export function SermonListenerPanel({
                                     key={t._id}
                                     onClick={() => setSelectedTranscript(selectedTranscript?._id === t._id ? null : t)}
                                     className={`p-2 rounded cursor-pointer transition-colors ${selectedTranscript?._id === t._id
-                                            ? 'bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700'
-                                            : 'bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                        ? 'bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700'
+                                        : 'bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800'
                                         }`}
                                 >
                                     <div className="flex items-start justify-between">

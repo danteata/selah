@@ -20,6 +20,10 @@ export interface DetectedVerse {
     endIndex: number
     /** Confidence level of detection */
     confidence: 'high' | 'medium' | 'low'
+    /** Whether this was the best match from its query (primary vs probable) */
+    isBestMatch?: boolean
+    /** Detection type - how this verse was detected */
+    detectionType?: 'regex' | 'semantic'
 }
 
 // Book name mappings (common variations to standard names)

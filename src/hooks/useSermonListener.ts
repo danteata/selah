@@ -349,19 +349,31 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         for (const verse of candidateVerses) {
             const verseConfidence = confidenceOrder[verse.confidence]
             if (verseConfidence < minConfidenceLevel) continue
-            queryVerses.push(verse)
+            queryVerses.push({
+                ...verse,
+                detectionType: 'regex' as const,
+            })
         }
 
         // Sort by confidence and limit to max per query
         queryVerses.sort((a, b) => confidenceOrder[b.confidence] - confidenceOrder[a.confidence])
         const limitedQueryVerses = queryVerses.slice(0, MAX_DETECTED_VERSES_PER_QUERY)
 
+        // Mark the best match
+        if (limitedQueryVerses.length > 0) {
+            limitedQueryVerses[0].isBestMatch = true
+        }
+
         // If we found verses from regex, update state
         if (limitedQueryVerses.length > 0) {
-            // Replace detected verses with this query's results (per-query limit)
-            setDetectedVerses(limitedQueryVerses)
+            // Accumulate verses across queries, avoiding duplicates
+            setDetectedVerses(prev => {
+                const existingRefs = new Set(prev.map(v => v.reference))
+                const newVerses = limitedQueryVerses.filter(v => !existingRefs.has(v.reference))
+                return [...prev, ...newVerses]
+            })
 
-            // Set the highest confidence verse as current
+            // Set the highest confidence verse from this query as current
             const bestVerse = limitedQueryVerses[0]
             setCurrentVerse(bestVerse)
 
@@ -415,6 +427,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         confidence: match.score >= 0.85 ? 'high' : match.score >= 0.75 ? 'medium' : 'low',
                         startIndex: 0,
                         endIndex: text.length,
+                        detectionType: 'semantic' as const,
                     }
                     semanticVerses.push(detectedVerse)
                 }
@@ -426,11 +439,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 })
                 const limitedSemanticVerses = semanticVerses.slice(0, MAX_DETECTED_VERSES_PER_QUERY)
 
+                // Mark the best match
                 if (limitedSemanticVerses.length > 0) {
-                    // Replace detected verses with this query's results
-                    setDetectedVerses(limitedSemanticVerses)
+                    limitedSemanticVerses[0].isBestMatch = true
+                }
 
-                    // Set the highest confidence verse as current
+                if (limitedSemanticVerses.length > 0) {
+                    // Accumulate verses across queries, avoiding duplicates
+                    setDetectedVerses(prev => {
+                        const existingRefs = new Set(prev.map(v => v.reference))
+                        const newVerses = limitedSemanticVerses.filter(v => !existingRefs.has(v.reference))
+                        return [...prev, ...newVerses]
+                    })
+
+                    // Set the highest confidence verse from this query as current
                     const bestVerse = limitedSemanticVerses[0]
                     setCurrentVerse(bestVerse)
 
