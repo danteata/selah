@@ -34,6 +34,10 @@ export interface UnifiedTranscriptionOptions {
     fasterWhisperEndpoint?: string
     fasterWhisperModel?: 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3'
     fasterWhisperChunkDurationMs?: number
+    /** Audio capture mode: 'browser-wav' (encode in browser) or 'server-decode' (send webm to server) */
+    fasterWhisperAudioCaptureMode?: 'browser-wav' | 'server-decode'
+    /** Disable browser audio processing for server-decode mode */
+    fasterWhisperDisableBrowserProcessing?: boolean
     // ElevenLabs-specific options
     elevenLabsApiKey?: string
     elevenLabsModelId?: string
@@ -178,6 +182,8 @@ class UnifiedTranscriptionService {
                 endpoint: options?.fasterWhisperEndpoint,
                 model: options?.fasterWhisperModel,
                 chunkDurationMs: options?.fasterWhisperChunkDurationMs,
+                audioCaptureMode: options?.fasterWhisperAudioCaptureMode,
+                disableBrowserAudioProcessing: options?.fasterWhisperDisableBrowserProcessing,
                 onProgress: options?.onProgress,
                 onStatus: (status) => console.log('[FasterWhisper]', status),
             })
@@ -429,6 +435,8 @@ class UnifiedTranscriptionService {
                 endpoint: this.options.fasterWhisperEndpoint,
                 model: this.options.fasterWhisperModel,
                 chunkDurationMs: this.options.fasterWhisperChunkDurationMs,
+                audioCaptureMode: this.options.fasterWhisperAudioCaptureMode,
+                disableBrowserAudioProcessing: this.options.fasterWhisperDisableBrowserProcessing,
                 onProgress: this.options.onProgress,
             })
             if (!initialized) {

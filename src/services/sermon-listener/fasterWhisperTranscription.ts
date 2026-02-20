@@ -14,6 +14,13 @@ const DIRECT_ENDPOINT = 'http://127.0.0.1:8000' // Direct access when not using 
 const DEFAULT_CHUNK_DURATION_MS = 3000 // 3 seconds for better context and less hallucination
 const REQUEST_TIMEOUT_MS = 20000 // 20 seconds - base.en processes fast enough
 
+/**
+ * Audio capture mode for transcription
+ * - 'browser-wav': Current approach - capture PCM via AudioContext, encode to WAV in browser
+ * - 'server-decode': Alternative - capture webm/opus via MediaRecorder, let server decode
+ */
+export type AudioCaptureMode = 'browser-wav' | 'server-decode'
+
 export interface FasterWhisperConfig {
     endpoint?: string
     language?: string
@@ -23,6 +30,8 @@ export interface FasterWhisperConfig {
     onStatus?: (status: string) => void
     vadFilter?: boolean // Enable Voice Activity Detection to filter silence
     hotwords?: string // Biblical terms to improve recognition
+    audioCaptureMode?: AudioCaptureMode // Which audio capture method to use
+    disableBrowserAudioProcessing?: boolean // Disable browser noise suppression/AGC for server-decode mode
 }
 
 // Biblical hotwords to improve recognition of religious terms
@@ -88,6 +97,18 @@ interface FasterWhisperResponse {
 type ResultCallback = (result: FasterWhisperTranscriptionResult) => void
 type ErrorCallback = (error: string) => void
 
+/** Timing metrics for performance comparison */
+export interface TranscriptionMetrics {
+    captureMode: AudioCaptureMode
+    audioCaptureTime: number // ms to capture audio
+    encodingTime: number // ms to encode (0 for server-decode)
+    networkTime: number // ms for network request
+    serverTime: number // ms for server processing (if reported)
+    totalTime: number // total ms from capture to result
+    audioSize: number // bytes sent to server
+    textLength: number // characters in result
+}
+
 class FasterWhisperTranscriptionService {
     private config: FasterWhisperConfig = {}
     private isInitialized = false
@@ -99,6 +120,14 @@ class FasterWhisperTranscriptionService {
     private audioBuffer: Float32Array[] = []
     private activeRequests = 0
     private readonly maxConcurrentRequests = 3 // Higher since faster-whisper is more efficient
+
+    // MediaRecorder-based capture (for server-decode mode)
+    private mediaRecorder: MediaRecorder | null = null
+    private recorderChunks: Blob[] = []
+    private recorderInterval: ReturnType<typeof setInterval> | null = null
+
+    // Metrics tracking
+    private lastMetrics: TranscriptionMetrics | null = null
 
     async init(config: FasterWhisperConfig = {}): Promise<boolean> {
         if (this.isInitializing) {
@@ -116,6 +145,8 @@ class FasterWhisperTranscriptionService {
             chunkDurationMs: DEFAULT_CHUNK_DURATION_MS,
             vadFilter: true, // Enable VAD to filter silence and reduce hallucinations
             hotwords: DEFAULT_HOTWORDS, // Biblical terms for better recognition
+            audioCaptureMode: 'browser-wav', // Default to current approach
+            disableBrowserAudioProcessing: false,
             ...this.config,
             ...config,
         }
@@ -198,6 +229,20 @@ class FasterWhisperTranscriptionService {
         return Boolean(this.getEndpoint())
     }
 
+    /**
+     * Get the last transcription metrics for performance comparison
+     */
+    getLastMetrics(): TranscriptionMetrics | null {
+        return this.lastMetrics
+    }
+
+    /**
+     * Get the current audio capture mode
+     */
+    getAudioCaptureMode(): AudioCaptureMode {
+        return this.config.audioCaptureMode || 'browser-wav'
+    }
+
     async transcribeAudio(audioBlob: Blob): Promise<FasterWhisperTranscriptionResult | null> {
         if (!this.isAvailable()) {
             console.warn('faster-whisper service not initialized')
@@ -239,20 +284,200 @@ class FasterWhisperTranscriptionService {
             return false
         }
 
+        // Choose capture mode
+        const captureMode = this.config.audioCaptureMode || 'browser-wav'
+        console.log(`[FasterWhisper] Starting realtime transcription with mode: ${captureMode}`)
+
+        // Configure audio constraints based on mode
+        const disableProcessing = this.config.disableBrowserAudioProcessing && captureMode === 'server-decode'
+        const audioConstraints: MediaTrackConstraints = {
+            channelCount: 1,
+            noiseSuppression: disableProcessing ? false : true,
+            echoCancellation: disableProcessing ? false : true,
+            autoGainControl: disableProcessing ? false : true,
+        }
+
         try {
             this.mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    channelCount: 1,
-                    noiseSuppression: true,
-                    echoCancellation: true,
-                    autoGainControl: true,
-                },
+                audio: audioConstraints,
             })
         } catch {
             onError('Microphone permission is required for transcription')
             return false
         }
 
+        // Route to appropriate capture method
+        if (captureMode === 'server-decode') {
+            return this.startMediaRecorderCapture(onResult, onError, chunkDurationMs)
+        } else {
+            return this.startAudioContextCapture(onResult, onError, chunkDurationMs)
+        }
+    }
+
+    /**
+     * MediaRecorder-based capture (server-decode mode)
+     * Captures webm/opus and sends directly to server for decoding
+     */
+    private async startMediaRecorderCapture(
+        onResult: ResultCallback,
+        onError: ErrorCallback,
+        chunkDurationMs?: number
+    ): Promise<boolean> {
+        try {
+            const mimeType = this.getSupportedMimeType()
+            if (!mimeType) {
+                onError('No supported audio MIME type found for MediaRecorder')
+                return false
+            }
+
+            console.log('[FasterWhisper] Using MediaRecorder with MIME type:', mimeType)
+
+            const chunkDuration = chunkDurationMs || this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS
+
+            // Audio level monitoring for debugging
+            let audioContext: AudioContext | null = null
+            let analyser: AnalyserNode | null = null
+            try {
+                audioContext = new AudioContext()
+                const source = audioContext.createMediaStreamSource(this.mediaStream!)
+                analyser = audioContext.createAnalyser()
+                analyser.fftSize = 256
+                source.connect(analyser)
+            } catch (e) {
+                console.warn('[FasterWhisper] Could not create audio analyser:', e)
+            }
+
+            this.mediaRecorder = new MediaRecorder(this.mediaStream!, {
+                mimeType,
+                // Request higher audio quality
+                audioBitsPerSecond: 128000,
+            })
+            this.recorderChunks = []
+
+            this.mediaRecorder.ondataavailable = async (event) => {
+                if (event.data.size > 0) {
+                    this.recorderChunks.push(event.data)
+                    console.log('[FasterWhisper] MediaRecorder data available:', event.data.size, 'bytes')
+                }
+            }
+
+            this.mediaRecorder.onstop = async () => {
+                // Process any remaining chunks when recorder stops
+                if (this.recorderChunks.length > 0) {
+                    const captureEndTime = performance.now()
+                    const chunks = [...this.recorderChunks]
+                    this.recorderChunks = []
+                    await this.processMediaRecorderChunk(chunks, captureEndTime, onResult, onError)
+                }
+            }
+
+            // Audio level monitoring
+            const checkAudioLevel = () => {
+                if (!this.isStreaming || !analyser) return
+
+                const dataArray = new Uint8Array(analyser.frequencyBinCount)
+                analyser.getByteFrequencyData(dataArray)
+                const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+                console.log('[FasterWhisper] Audio level:', average.toFixed(1), '(0-255)')
+
+                if (average < 5) {
+                    console.warn('[FasterWhisper] Very low audio level - microphone may not be capturing')
+                }
+            }
+
+            // Process chunks at regular intervals using ondataavailable
+            // MediaRecorder will fire ondataavailable every 'timeslice' ms
+            this.recorderInterval = setInterval(() => {
+                if (!this.isStreaming || this.recorderChunks.length === 0) return
+
+                // Check audio level
+                checkAudioLevel()
+
+                const captureEndTime = performance.now()
+                const chunks = [...this.recorderChunks]
+                this.recorderChunks = []
+
+                // Only process if we have meaningful data (at least 10KB)
+                const totalSize = chunks.reduce((sum, c) => sum + c.size, 0)
+                if (totalSize < 10000) {
+                    console.log('[FasterWhisper] Skipping small chunk:', totalSize, 'bytes')
+                    return
+                }
+
+                if (this.activeRequests < this.maxConcurrentRequests) {
+                    this.activeRequests++
+                    this.processMediaRecorderChunk(chunks, captureEndTime, onResult, onError)
+                        .finally(() => {
+                            this.activeRequests--
+                        })
+                }
+            }, chunkDuration)
+
+            this.mediaRecorder.onerror = (event) => {
+                console.error('[FasterWhisper] MediaRecorder error:', event)
+                onError('MediaRecorder encountered an error')
+            }
+
+            // Start recording with timeslice to get regular data
+            // Use a smaller timeslice for more frequent data
+            this.mediaRecorder.start(Math.min(chunkDuration, 1000))
+
+            this.isStreaming = true
+            this.config.onStatus?.(`faster-whisper realtime transcription started (server-decode mode, ${mimeType})`)
+            console.log('[FasterWhisper] Started MediaRecorder capture')
+
+            return true
+        } catch (error) {
+            console.error('[FasterWhisper] Failed to setup MediaRecorder capture:', error)
+            onError('Failed to initialize MediaRecorder capture')
+            this.cleanupMedia()
+            return false
+        }
+    }
+
+    /**
+     * Process a MediaRecorder chunk - send webm directly to server
+     */
+    private async processMediaRecorderChunk(
+        chunks: Blob[],
+        captureEndTime: number,
+        onResult: ResultCallback,
+        onError: ErrorCallback
+    ): Promise<void> {
+        const captureStartTime = captureEndTime - (this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS)
+        const audioCaptureTime = captureEndTime - captureStartTime
+
+        try {
+            // Combine chunks into single blob
+            const mimeType = this.getSupportedMimeType() || 'audio/webm'
+            const audioBlob = new Blob(chunks, { type: mimeType })
+
+            console.log('[FasterWhisper] MediaRecorder chunk:', {
+                size: audioBlob.size,
+                type: audioBlob.type,
+                chunks: chunks.length,
+            })
+
+            // Send directly to server for decoding
+            const result = await this.transcribeAudioDirect(audioBlob, audioCaptureTime)
+
+            if (result?.text) {
+                onResult(result)
+            }
+        } catch (error) {
+            console.error('[FasterWhisper] MediaRecorder chunk processing failed:', error)
+            onError('Failed to process audio chunk')
+        }
+    }
+
+    /**
+     * AudioContext-based capture (browser-wav mode) - original implementation
+     */
+    private async startAudioContextCapture(
+        onResult: ResultCallback,
+        onError: ErrorCallback,
+        chunkDurationMs?: number
+    ): Promise<boolean> {
         try {
             // Create AudioContext with 16kHz sample rate (optimal for speech recognition)
             const targetSampleRate = 16000
@@ -268,7 +493,7 @@ class FasterWhisperTranscriptionService {
             console.log('[FasterWhisper] AudioContext sample rate:', nativeSampleRate,
                 needsResampling ? '(will resample to 16kHz)' : '(optimal)')
 
-            const source = this.audioContext.createMediaStreamSource(this.mediaStream)
+            const source = this.audioContext.createMediaStreamSource(this.mediaStream!)
 
             this.audioBuffer = []
             const chunkDuration = chunkDurationMs || this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS
@@ -332,6 +557,18 @@ class FasterWhisperTranscriptionService {
         this.isStreaming = false
 
         try {
+            // Stop MediaRecorder if active
+            if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                this.mediaRecorder.stop()
+            }
+
+            // Clear recorder interval
+            if (this.recorderInterval) {
+                clearInterval(this.recorderInterval)
+                this.recorderInterval = null
+            }
+
+            // Stop ScriptProcessor if active
             if (this.scriptProcessor) {
                 this.scriptProcessor.disconnect()
                 this.scriptProcessor.onaudioprocess = null
@@ -383,25 +620,45 @@ class FasterWhisperTranscriptionService {
         onResult: ResultCallback,
         onError: ErrorCallback
     ): Promise<void> {
+        const captureStartTime = performance.now()
         try {
             // Log audio level for debugging
             const maxAmp = this.getMaxAmplitude(combined)
             console.log('[FasterWhisper] Audio level:', maxAmp.toFixed(4), '| Samples:', combined.length)
 
             // Resample if needed
+            const encodeStartTime = performance.now()
             const resampled = needsResampling
                 ? this.resample(combined, nativeSampleRate, targetSampleRate)
                 : combined
 
             // Encode as WAV
             const wavBlob = this.encodeWav(resampled, targetSampleRate)
+            const encodingTime = performance.now() - encodeStartTime
+
             console.log('[FasterWhisper] Sending chunk:', {
                 samples: resampled.length,
                 duration: (resampled.length / targetSampleRate).toFixed(2) + 's',
                 size: wavBlob.size,
+                encodingTime: encodingTime.toFixed(1) + 'ms',
             })
 
+            const networkStartTime = performance.now()
             const result = await this.transcribeWav(wavBlob)
+            const networkTime = performance.now() - networkStartTime
+
+            // Record metrics
+            this.lastMetrics = {
+                captureMode: 'browser-wav',
+                audioCaptureTime: 0, // Calculated differently for AudioContext
+                encodingTime,
+                networkTime,
+                serverTime: 0, // Not reported by server
+                totalTime: performance.now() - captureStartTime,
+                audioSize: wavBlob.size,
+                textLength: result?.text?.length || 0,
+            }
+
             if (result?.text) {
                 onResult(result)
             }
@@ -569,11 +826,18 @@ class FasterWhisperTranscriptionService {
      */
     private async transcribeWav(wavBlob: Blob): Promise<FasterWhisperTranscriptionResult | null> {
         const endpoint = this.getEndpoint()
-        const language = this.config.language || 'en'
+        // Use 'en' for English-only models, not 'en-US'
+        const language = (this.config.language || 'en').split('-')[0]
         const model = this.getModelId()
 
         const file = new File([wavBlob], `fasterwhisper-chunk-${Date.now()}.wav`, {
             type: 'audio/wav',
+        })
+
+        console.log('[FasterWhisper] Sending WAV transcription request:', {
+            size: file.size,
+            language,
+            model,
         })
 
         const formData = new FormData()
@@ -641,7 +905,165 @@ class FasterWhisperTranscriptionService {
         }
     }
 
+    /**
+     * Transcribe audio blob directly (server-decode mode)
+     * Sends webm/opus directly to server for FFmpeg decoding
+     */
+    private async transcribeAudioDirect(
+        audioBlob: Blob,
+        audioCaptureTime: number
+    ): Promise<FasterWhisperTranscriptionResult | null> {
+        const startTime = performance.now()
+        const endpoint = this.getEndpoint()
+        // Use 'en' for English-only models, not 'en-US'
+        const language = (this.config.language || 'en').split('-')[0]
+        const model = this.getModelId()
+
+        // Determine file extension based on MIME type
+        const extension = this.getFileExtension(audioBlob.type)
+        const filename = `fasterwhisper-chunk-${Date.now()}${extension}`
+
+        const file = new File([audioBlob], filename, {
+            type: audioBlob.type || 'audio/webm',
+        })
+
+        console.log('[FasterWhisper] Sending direct transcription request:', {
+            filename,
+            type: file.type,
+            size: file.size,
+            language,
+            model,
+        })
+
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('model', model)
+        formData.append('language', language)
+        formData.append('response_format', 'json')
+
+        // Disable VAD filter for server-decode mode - VAD is too aggressive with webm/opus
+        // Note: speaches uses 'vad_filter' parameter, but we need to NOT send it at all
+        // to disable VAD, or send vad_filter=false as string
+        // 
+        // For server-decode mode, we skip VAD entirely since the audio is already compressed
+        // and VAD thresholds are calibrated for raw PCM/WAV
+        // 
+        // IMPORTANT: Do NOT append vad_filter at all for server-decode mode
+
+        // Add hotwords for better biblical term recognition
+        if (this.config.hotwords) {
+            formData.append('hotwords', this.config.hotwords)
+        }
+
+        // Increase timeout for server-side decoding (FFmpeg needs time)
+        const timeout = 30000 // 30 seconds
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+        try {
+            const networkStartTime = performance.now()
+            const response = await fetch(`${endpoint}/v1/audio/transcriptions`, {
+                method: 'POST',
+                body: formData,
+                signal: controller.signal,
+            })
+
+            clearTimeout(timeoutId)
+            const networkTime = performance.now() - networkStartTime
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => '')
+                console.error('[FasterWhisper] Direct request failed:', response.status, errorText)
+                return null
+            }
+
+            const json = await response.json() as FasterWhisperResponse
+            console.log('[FasterWhisper] Direct response:', json.text?.substring(0, 100))
+
+            // Record metrics
+            this.lastMetrics = {
+                captureMode: 'server-decode',
+                audioCaptureTime,
+                encodingTime: 0, // No browser encoding
+                networkTime,
+                serverTime: 0, // Not reported by server
+                totalTime: performance.now() - startTime,
+                audioSize: audioBlob.size,
+                textLength: json.text?.length || 0,
+            }
+
+            return {
+                text: json.text || '',
+                language: json.language || language,
+                segments: json.segments,
+            }
+        } catch (error) {
+            clearTimeout(timeoutId)
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.error('[FasterWhisper] Direct request timed out after', REQUEST_TIMEOUT_MS, 'ms')
+            } else {
+                console.error('[FasterWhisper] Direct transcription error:', error)
+            }
+            return null
+        }
+    }
+
+    /**
+     * Get supported MIME type for MediaRecorder
+     */
+    private getSupportedMimeType(): string | null {
+        const mimeTypes = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/ogg;codecs=opus',
+            'audio/mp4',
+        ]
+
+        for (const mimeType of mimeTypes) {
+            if (MediaRecorder.isTypeSupported(mimeType)) {
+                return mimeType
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Get file extension from MIME type
+     */
+    private getFileExtension(mimeType: string): string {
+        const extensions: Record<string, string> = {
+            'audio/webm': '.webm',
+            'audio/webm;codecs=opus': '.webm',
+            'audio/ogg': '.ogg',
+            'audio/ogg;codecs=opus': '.ogg',
+            'audio/mp4': '.m4a',
+            'audio/wav': '.wav',
+        }
+        return extensions[mimeType] || '.webm'
+    }
+
     private cleanupMedia(): void {
+        // Clean up MediaRecorder
+        if (this.mediaRecorder) {
+            if (this.mediaRecorder.state !== 'inactive') {
+                this.mediaRecorder.stop()
+            }
+            this.mediaRecorder.ondataavailable = null
+            this.mediaRecorder.onerror = null
+            this.mediaRecorder = null
+        }
+
+        // Clear recorder interval
+        if (this.recorderInterval) {
+            clearInterval(this.recorderInterval)
+            this.recorderInterval = null
+        }
+
+        // Clean up recorder chunks
+        this.recorderChunks = []
+
+        // Clean up ScriptProcessor
         if (this.scriptProcessor) {
             this.scriptProcessor.disconnect()
             this.scriptProcessor.onaudioprocess = null

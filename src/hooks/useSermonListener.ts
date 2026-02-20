@@ -164,10 +164,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const minConfidence = minConfidenceOverride ?? 'high'
     const enableSemanticDetection = options.enableSemanticDetection ?? true
 
+    // Extract provider from settings - use memoized value for stable dependency
+    const settingsProvider = sermonSettings?.transcriptionProvider || 'web-speech'
+    const targetProvider = providerOverride || settingsProvider
+
     // Determine provider from settings or override
     const getInitialProvider = (): TranscriptionProvider => {
-        if (providerOverride) return providerOverride
-        return sermonSettings?.transcriptionProvider || 'web-speech'
+        return targetProvider
     }
 
     // State
@@ -271,15 +274,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Check support on mount and when settings change
     useEffect(() => {
         const checkSupport = async () => {
-            // Get the current provider from settings
-            const settingsProvider = sermonSettings?.transcriptionProvider || 'web-speech'
-            const targetProvider = providerOverride || settingsProvider
-
             console.log('[useSermonListener] Checking provider availability:', {
                 targetProvider,
                 settingsProvider,
                 providerOverride,
-                currentProvider: provider,
             })
 
             const available = await unifiedTranscriptionService.isProviderAvailable(targetProvider)
@@ -301,7 +299,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             setIsSupported(available)
         }
         checkSupport()
-    }, [provider, providerOverride, sermonSettings?.transcriptionProvider])
+    }, [targetProvider])
 
     // Initialize semantic detector
     useEffect(() => {

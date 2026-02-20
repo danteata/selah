@@ -352,6 +352,10 @@ export interface AppSettings {
         fasterWhisperModel?: 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3'
         /** Chunk size for faster-whisper transcription */
         fasterWhisperChunkDurationMs?: number
+        /** Audio capture mode: 'browser-wav' (encode in browser) or 'server-decode' (send webm to server) */
+        fasterWhisperAudioCaptureMode?: 'browser-wav' | 'server-decode'
+        /** Disable browser audio processing (noise suppression, AGC) for server-decode mode */
+        fasterWhisperDisableBrowserProcessing?: boolean
         /** ElevenLabs API key */
         elevenLabsApiKey?: string
         /** ElevenLabs model ID */

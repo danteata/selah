@@ -63,6 +63,13 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [fasterWhisperChunkDurationMs, setFasterWhisperChunkDurationMs] = useState(
         sermonSettings?.fasterWhisperChunkDurationMs ?? 2000
     )
+    // Audio capture mode for Faster-Whisper
+    const [fasterWhisperAudioCaptureMode, setFasterWhisperAudioCaptureMode] = useState<'browser-wav' | 'server-decode'>(
+        sermonSettings?.fasterWhisperAudioCaptureMode || 'browser-wav'
+    )
+    const [fasterWhisperDisableBrowserProcessing, setFasterWhisperDisableBrowserProcessing] = useState(
+        sermonSettings?.fasterWhisperDisableBrowserProcessing ?? false
+    )
 
     // ElevenLabs settings
     const [elevenLabsApiKey, setElevenLabsApiKey] = useState(sermonSettings?.elevenLabsApiKey || '')
@@ -119,6 +126,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 fasterWhisperEndpoint: fasterWhisperEndpoint.trim() || DEFAULT_FASTER_WHISPER_ENDPOINT,
                 fasterWhisperModel,
                 fasterWhisperChunkDurationMs: fasterWhisperChunkDurationMs > 0 ? fasterWhisperChunkDurationMs : 2000,
+                fasterWhisperAudioCaptureMode,
+                fasterWhisperDisableBrowserProcessing,
                 elevenLabsApiKey: elevenLabsApiKey.trim() || undefined,
                 elevenLabsModelId: elevenLabsModelId.trim() || 'scribe_v1',
                 elevenLabsChunkDurationMs: elevenLabsChunkDurationMs > 0 ? elevenLabsChunkDurationMs : DEFAULT_CHUNK_DURATION_MS,
@@ -176,6 +185,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             fasterWhisperEndpoint: fasterWhisperEndpoint.trim() || DEFAULT_FASTER_WHISPER_ENDPOINT,
             fasterWhisperModel,
             fasterWhisperChunkDurationMs,
+            fasterWhisperAudioCaptureMode,
+            fasterWhisperDisableBrowserProcessing,
             elevenLabsApiKey: elevenLabsApiKey.trim() || undefined,
             elevenLabsModelId: elevenLabsModelId.trim() || 'scribe_v1',
             elevenLabsChunkDurationMs,
@@ -488,6 +499,46 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             Faster-Whisper processes efficiently - 2000ms recommended for good balance.
                         </p>
                     </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Audio Capture Mode</label>
+                        <select
+                            value={fasterWhisperAudioCaptureMode}
+                            onChange={(event) => setFasterWhisperAudioCaptureMode(event.target.value as 'browser-wav' | 'server-decode')}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                        >
+                            <option value="browser-wav">Browser WAV (current) - Encode in browser, send WAV</option>
+                            <option value="server-decode">Server Decode - Send webm/opus directly to server</option>
+                        </select>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            <strong>Browser WAV:</strong> Current approach. Browser encodes to WAV using AudioContext.<br />
+                            <strong>Server Decode:</strong> Sends webm/opus directly. Server uses FFmpeg for better quality resampling.
+                        </p>
+                    </div>
+
+                    {fasterWhisperAudioCaptureMode === 'server-decode' && (
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                id="disableBrowserProcessing"
+                                checked={fasterWhisperDisableBrowserProcessing}
+                                onChange={(event) => setFasterWhisperDisableBrowserProcessing(event.target.checked)}
+                                className="rounded border-gray-300 dark:border-gray-600"
+                            />
+                            <label htmlFor="disableBrowserProcessing" className="text-sm text-gray-700 dark:text-gray-300">
+                                Disable browser audio processing (noise suppression, AGC, echo cancellation)
+                            </label>
+                        </div>
+                    )}
+
+                    {fasterWhisperAudioCaptureMode === 'server-decode' && fasterWhisperDisableBrowserProcessing && (
+                        <div className="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700">
+                            <p className="text-sm text-yellow-800 dark:text-yellow-300">
+                                <strong>Note:</strong> Disabling browser audio processing lets Whisper's VAD handle noise.
+                                This may improve accuracy for clean audio but could reduce quality in noisy environments.
+                            </p>
+                        </div>
+                    )}
 
                     <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700">
                         <p className="text-sm text-green-800 dark:text-green-300">

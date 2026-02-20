@@ -47,7 +47,7 @@ function JoinChurchRoute() {
         <JoinChurch />
       </SignedIn>
       <SignedOut>
-        <Navigate to="/login" replace state={{ from: location.pathname }} />
+        <Navigate to="/signup" replace state={{ from: location.pathname }} />
       </SignedOut>
     </>
   )
