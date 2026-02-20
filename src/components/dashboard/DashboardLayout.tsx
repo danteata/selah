@@ -217,7 +217,7 @@ export function DashboardLayout({
     const renderPanelContent = (panelId: PanelId) => {
         switch (panelId) {
             case 'quickActions':
-                return <QuickActionsSidebar compact={true} />
+                return <QuickActionsSidebar />
             case 'previewContent':
                 return <PreviewContent />
             case 'liveOutput':

@@ -332,8 +332,8 @@ export interface AppSettings {
     sermonListener?: {
         /** Enable sermon listener feature */
         enabled?: boolean
-        /** Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' | 'elevenlabs' */
-        transcriptionProvider?: 'web-speech' | 'whisper' | 'whisper-cpp' | 'elevenlabs'
+        /** Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs' */
+        transcriptionProvider?: 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs'
         /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
         whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
         /** Optional server endpoint for chunked transcription */
@@ -346,6 +346,12 @@ export interface AppSettings {
         whisperCppEndpoint?: string
         /** Chunk size for whisper.cpp local transcription */
         whisperCppChunkDurationMs?: number
+        /** Faster-Whisper server endpoint (CTranslate2-based, 2-4x faster) */
+        fasterWhisperEndpoint?: string
+        /** Faster-Whisper model */
+        fasterWhisperModel?: 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3'
+        /** Chunk size for faster-whisper transcription */
+        fasterWhisperChunkDurationMs?: number
         /** ElevenLabs API key */
         elevenLabsApiKey?: string
         /** ElevenLabs model ID */

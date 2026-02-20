@@ -63,19 +63,48 @@ const DEFAULT_CONFIG: SemanticDetectionConfig = {
 /**
  * Split text into sentences for individual searching.
  * Handles common speech patterns and Bible verse contexts.
+ * Uses smart regex to avoid splitting on abbreviations and Bible references.
  */
 function splitIntoSentences(text: string): string[] {
-    // Split on sentence-ending punctuation followed by space or end
-    // Also split on double spaces (common in speech recognition gaps)
     const sentences: string[] = [];
 
     // First, split on double spaces (speech recognition often adds these)
     const doubleSpaceParts = text.split(/\s{2,}/);
 
+    // Common abbreviations that shouldn't trigger sentence splits
+    // Titles: St., Dr., Mr., Mrs., Ms., Rev., Prof., Sr., Jr.
+    // Biblical: Gen., Exod., Lev., Num., Deut., Ps., Prov., Eccl., Isa., Jer., Ezek., Matt., Mark., Luke., John., Acts., Rom., Cor., Gal., Eph., Phil., Col., Thess., Tim., Tit., Phlm., Heb., Jas., Pet., Jude., Rev.
+    // Other: vs., etc., e.g., i.e., cf., v., vv., ch., chs.
+    const abbreviations = [
+        // Titles
+        'St', 'Dr', 'Mr', 'Mrs', 'Ms', 'Rev', 'Prof', 'Sr', 'Jr',
+        // Old Testament books
+        'Gen', 'Exod', 'Lev', 'Num', 'Deut', 'Josh', 'Judg', 'Ruth', 'Sam', 'Kgs', 'Chron', 'Ezra', 'Neh', 'Esth', 'Job', 'Ps', 'Pss', 'Prov', 'Eccl', 'Song', 'Isa', 'Jer', 'Lam', 'Ezek', 'Dan', 'Hos', 'Joel', 'Amos', 'Obad', 'Jonah', 'Mic', 'Nah', 'Hab', 'Zeph', 'Hag', 'Zech', 'Mal',
+        // New Testament books
+        'Matt', 'Mark', 'Luke', 'John', 'Acts', 'Rom', 'Cor', 'Gal', 'Eph', 'Phil', 'Col', 'Thess', 'Tim', 'Tit', 'Phlm', 'Heb', 'Jas', 'Pet', 'Jude', 'Rev',
+        // Other common abbreviations
+        'vs', 'etc', 'e', 'i', 'cf', 'v', 'vv', 'ch', 'chs', 'chap', 'chaps'
+    ];
+
+    // Build regex pattern that avoids splitting on abbreviations
+    // Pattern: split on . ! ? only when NOT preceded by an abbreviation
+    // and NOT preceded by a digit (like 3:16)
+    const abbrevPattern = abbreviations.join('|');
+
     for (const part of doubleSpaceParts) {
-        // Then split on sentence boundaries: . ! ? followed by space or end
-        // But avoid splitting on common abbreviations and Bible references
-        const sentenceParts = part.split(/(?<=[.!?])\s+(?=[A-Z])/);
+        // Split on sentence boundaries with negative lookbehind for:
+        // 1. Abbreviations (St., Dr., etc.)
+        // 2. Digits (to avoid splitting 3:16)
+        // 3. Single capital letters (to avoid splitting "A. " or "B. ")
+        const sentencePattern = new RegExp(
+            `(?<!\\b(?:${abbrevPattern}))` + // Not after abbreviation
+            `(?<!\\d)` +                      // Not after digit
+            `(?<!\\s[A-Z])` +                 // Not after single capital letter
+            `[.!?]` +                         // Sentence-ending punctuation
+            `(?=\\s+[A-Z]|\\s*$)`             // Followed by space + capital or end
+        );
+
+        const sentenceParts = part.split(sentencePattern);
 
         for (const sentence of sentenceParts) {
             const trimmed = sentence.trim();

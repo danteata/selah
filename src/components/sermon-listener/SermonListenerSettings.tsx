@@ -5,6 +5,7 @@
  * - Web Speech API
  * - Whisper API endpoint
  * - Whisper.cpp local endpoint (offline)
+ * - Faster-Whisper (CTranslate2-based, 2-4x faster)
  * - ElevenLabs Speech-to-Text
  */
 
@@ -19,7 +20,11 @@ interface SermonListenerSettingsProps {
     onClose?: () => void
 }
 
-const DEFAULT_WHISPER_CPP_ENDPOINT = 'http://127.0.0.1:8080/inference'
+const DEFAULT_WHISPER_CPP_ENDPOINT = '/whisper-cpp/inference' // Use Vite proxy
+const DEFAULT_FASTER_WHISPER_ENDPOINT = '/faster-whisper' // Use Vite proxy to avoid CORS
+const DIRECT_WHISPER_CPP_ENDPOINT = 'http://127.0.0.1:8080/inference'
+const DIRECT_FASTER_WHISPER_ENDPOINT = 'http://127.0.0.1:8000'
+const DEFAULT_CHUNK_DURATION_MS = 2500 // Reduced from 5000ms for faster feedback
 
 export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps = {}) {
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
@@ -38,21 +43,32 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [whisperEndpoint, setWhisperEndpoint] = useState(sermonSettings?.whisperEndpoint || '')
     const [whisperApiKey, setWhisperApiKey] = useState(sermonSettings?.whisperApiKey || '')
     const [whisperChunkDurationMs, setWhisperChunkDurationMs] = useState(
-        sermonSettings?.whisperChunkDurationMs ?? 5000
+        sermonSettings?.whisperChunkDurationMs ?? DEFAULT_CHUNK_DURATION_MS
     )
 
     const [whisperCppEndpoint, setWhisperCppEndpoint] = useState(
         sermonSettings?.whisperCppEndpoint || DEFAULT_WHISPER_CPP_ENDPOINT
     )
     const [whisperCppChunkDurationMs, setWhisperCppChunkDurationMs] = useState(
-        sermonSettings?.whisperCppChunkDurationMs ?? 5000
+        sermonSettings?.whisperCppChunkDurationMs ?? DEFAULT_CHUNK_DURATION_MS
+    )
+
+    // Faster-Whisper settings
+    const [fasterWhisperEndpoint, setFasterWhisperEndpoint] = useState(
+        sermonSettings?.fasterWhisperEndpoint || DEFAULT_FASTER_WHISPER_ENDPOINT
+    )
+    const [fasterWhisperModel, setFasterWhisperModel] = useState<'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3'>(
+        sermonSettings?.fasterWhisperModel || 'base'
+    )
+    const [fasterWhisperChunkDurationMs, setFasterWhisperChunkDurationMs] = useState(
+        sermonSettings?.fasterWhisperChunkDurationMs ?? 2000
     )
 
     // ElevenLabs settings
     const [elevenLabsApiKey, setElevenLabsApiKey] = useState(sermonSettings?.elevenLabsApiKey || '')
     const [elevenLabsModelId, setElevenLabsModelId] = useState(sermonSettings?.elevenLabsModelId || 'scribe_v1')
     const [elevenLabsChunkDurationMs, setElevenLabsChunkDurationMs] = useState(
-        sermonSettings?.elevenLabsChunkDurationMs ?? 5000
+        sermonSettings?.elevenLabsChunkDurationMs ?? DEFAULT_CHUNK_DURATION_MS
     )
 
     const [isLoading, setIsLoading] = useState(false)
@@ -61,12 +77,14 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [webSpeechAvailable, setWebSpeechAvailable] = useState(false)
     const [whisperAvailable, setWhisperAvailable] = useState(false)
     const [whisperCppAvailable, setWhisperCppAvailable] = useState(false)
+    const [fasterWhisperAvailable, setFasterWhisperAvailable] = useState(false)
     const [elevenLabsAvailable, setElevenLabsAvailable] = useState(false)
 
     useEffect(() => {
         unifiedTranscriptionService.isProviderAvailable('web-speech').then(setWebSpeechAvailable)
         unifiedTranscriptionService.isProviderAvailable('whisper').then(setWhisperAvailable)
         unifiedTranscriptionService.isProviderAvailable('whisper-cpp').then(setWhisperCppAvailable)
+        unifiedTranscriptionService.isProviderAvailable('faster-whisper').then(setFasterWhisperAvailable)
         unifiedTranscriptionService.isProviderAvailable('elevenlabs').then(setElevenLabsAvailable)
     }, [])
 
@@ -77,6 +95,10 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const isWhisperCppConfigured = useMemo(() => {
         return Boolean(whisperCppEndpoint.trim() || whisperCppAvailable)
     }, [whisperCppAvailable, whisperCppEndpoint])
+
+    const isFasterWhisperConfigured = useMemo(() => {
+        return Boolean(fasterWhisperEndpoint.trim() || fasterWhisperAvailable)
+    }, [fasterWhisperAvailable, fasterWhisperEndpoint])
 
     const isElevenLabsConfigured = useMemo(() => {
         return Boolean(elevenLabsApiKey.trim() || elevenLabsAvailable)
@@ -91,12 +113,15 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 whisperModel,
                 whisperEndpoint: whisperEndpoint.trim() || undefined,
                 whisperApiKey: whisperApiKey.trim() || undefined,
-                whisperChunkDurationMs: whisperChunkDurationMs > 0 ? whisperChunkDurationMs : 5000,
+                whisperChunkDurationMs: whisperChunkDurationMs > 0 ? whisperChunkDurationMs : DEFAULT_CHUNK_DURATION_MS,
                 whisperCppEndpoint: whisperCppEndpoint.trim() || DEFAULT_WHISPER_CPP_ENDPOINT,
-                whisperCppChunkDurationMs: whisperCppChunkDurationMs > 0 ? whisperCppChunkDurationMs : 5000,
+                whisperCppChunkDurationMs: whisperCppChunkDurationMs > 0 ? whisperCppChunkDurationMs : DEFAULT_CHUNK_DURATION_MS,
+                fasterWhisperEndpoint: fasterWhisperEndpoint.trim() || DEFAULT_FASTER_WHISPER_ENDPOINT,
+                fasterWhisperModel,
+                fasterWhisperChunkDurationMs: fasterWhisperChunkDurationMs > 0 ? fasterWhisperChunkDurationMs : 2000,
                 elevenLabsApiKey: elevenLabsApiKey.trim() || undefined,
                 elevenLabsModelId: elevenLabsModelId.trim() || 'scribe_v1',
-                elevenLabsChunkDurationMs: elevenLabsChunkDurationMs > 0 ? elevenLabsChunkDurationMs : 5000,
+                elevenLabsChunkDurationMs: elevenLabsChunkDurationMs > 0 ? elevenLabsChunkDurationMs : DEFAULT_CHUNK_DURATION_MS,
                 autoDisplay,
                 autoLookup,
                 language,
@@ -125,6 +150,12 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             return
         }
 
+        if (newProvider === 'faster-whisper' && !isFasterWhisperConfigured) {
+            setProvider('web-speech')
+            setProviderError('Faster-Whisper needs a server endpoint before it can be used.')
+            return
+        }
+
         if (newProvider === 'elevenlabs' && !isElevenLabsConfigured) {
             setProvider('web-speech')
             setProviderError('ElevenLabs needs an API key before it can be used.')
@@ -142,6 +173,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             whisperChunkDurationMs,
             whisperCppEndpoint: whisperCppEndpoint.trim() || DEFAULT_WHISPER_CPP_ENDPOINT,
             whisperCppChunkDurationMs,
+            fasterWhisperEndpoint: fasterWhisperEndpoint.trim() || DEFAULT_FASTER_WHISPER_ENDPOINT,
+            fasterWhisperModel,
+            fasterWhisperChunkDurationMs,
             elevenLabsApiKey: elevenLabsApiKey.trim() || undefined,
             elevenLabsModelId: elevenLabsModelId.trim() || 'scribe_v1',
             elevenLabsChunkDurationMs,
@@ -228,6 +262,27 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             </div>
                             {provider === 'whisper-cpp' && (
                                 <IconWrapper name="i-bx-check" className="text-blue-500" />
+                            )}
+                        </div>
+                    </button>
+
+                    <button
+                        onClick={() => !isLoading && handleProviderChange('faster-whisper')}
+                        disabled={isLoading}
+                        className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'faster-whisper'
+                            ? 'border-green-500 bg-green-500/10 dark:bg-green-500/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                            }`}
+                    >
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="font-medium text-gray-900 dark:text-white">Faster-Whisper (Recommended)</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
+                                    CTranslate2-based, 2-4x faster than whisper.cpp
+                                </div>
+                            </div>
+                            {provider === 'faster-whisper' && (
+                                <IconWrapper name="i-bx-check" className="text-green-500" />
                             )}
                         </div>
                     </button>
@@ -379,6 +434,65 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         <p className="text-sm text-amber-800 dark:text-amber-300">
                             <strong>Setup required (Docker recommended):</strong> The whisper.cpp server must be running.
                             Run it with: <code className="px-1 rounded bg-gray-200 dark:bg-gray-800">bun run whisper:start</code> or <code className="px-1 rounded bg-gray-200 dark:bg-gray-800">npm run whisper:start</code>
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {provider === 'faster-whisper' && (
+                <div className="mb-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Faster-Whisper Server Endpoint</label>
+                        <input
+                            value={fasterWhisperEndpoint}
+                            onChange={(event) => setFasterWhisperEndpoint(event.target.value)}
+                            placeholder={DEFAULT_FASTER_WHISPER_ENDPOINT}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                        />
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            OpenAI-compatible endpoint (e.g., faster-whisper-server on port 8000)
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Model</label>
+                        <select
+                            value={fasterWhisperModel}
+                            onChange={(event) => setFasterWhisperModel(event.target.value as typeof fasterWhisperModel)}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                        >
+                            <option value="tiny">Tiny - Fastest, lowest accuracy</option>
+                            <option value="tiny.en">Tiny (English) - Fast, English only</option>
+                            <option value="base">Base - Balanced (recommended)</option>
+                            <option value="base.en">Base (English) - Balanced, English only</option>
+                            <option value="small">Small - Good accuracy</option>
+                            <option value="small.en">Small (English) - Good accuracy, English only</option>
+                            <option value="medium">Medium - High accuracy</option>
+                            <option value="medium.en">Medium (English) - High accuracy, English only</option>
+                            <option value="large-v3">Large V3 - Best accuracy</option>
+                            <option value="distil-large-v3">Distil Large V3 - Fast + accurate</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Chunk Duration (ms)</label>
+                        <input
+                            type="number"
+                            min={1000}
+                            step={500}
+                            value={fasterWhisperChunkDurationMs}
+                            onChange={(event) => setFasterWhisperChunkDurationMs(Number(event.target.value || 2000))}
+                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                        />
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Faster-Whisper processes efficiently - 2000ms recommended for good balance.
+                        </p>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700">
+                        <p className="text-sm text-green-800 dark:text-green-300">
+                            <strong>Recommended for best performance:</strong> Faster-Whisper uses CTranslate2 for 2-4x faster inference than whisper.cpp.
+                            Install with: <code className="px-1 rounded bg-gray-200 dark:bg-gray-800">uvx speaches</code> or via Docker: <code className="px-1 rounded bg-gray-200 dark:bg-gray-800">docker run -p 8000:8000 ghcr.io/speaches-ai/speaches:latest</code>
                         </p>
                     </div>
                 </div>

@@ -55,8 +55,8 @@ export function useScripture() {
                 return null
             }
 
-            console.log(`Successfully fetched ${version} from Convex (${result.data.length} verses)`)
-            return result.data as BibleVerse[]
+            console.log(`Found ${version} metadata on Convex (verse data is stored in file storage)`)
+            return null
         } catch (error) {
             console.error('Error fetching from Convex:', error)
             return null

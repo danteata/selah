@@ -196,6 +196,75 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Track transcript buffer for context
     const transcriptBufferRef = useRef('')
 
+    // Track recent chunks for deduplication
+    const recentChunksRef = useRef<string[]>([])
+    const MAX_RECENT_CHUNKS = 5
+
+    /**
+     * Check if text is a duplicate or near-duplicate of recent chunks
+     * Returns true if the text should be skipped (is a duplicate)
+     */
+    const isDuplicateText = useCallback((newText: string): boolean => {
+        if (!newText || newText.length < 5) return false
+
+        const normalizedNew = newText.toLowerCase().trim()
+
+        // Check against recent chunks
+        for (const recent of recentChunksRef.current) {
+            const normalizedRecent = recent.toLowerCase().trim()
+
+            // Exact match
+            if (normalizedNew === normalizedRecent) {
+                return true
+            }
+
+            // Check if new text is contained in recent or vice versa
+            if (normalizedNew.includes(normalizedRecent) || normalizedRecent.includes(normalizedNew)) {
+                // If one is significantly longer, it might be an extension
+                const lengthRatio = Math.min(normalizedNew.length, normalizedRecent.length) /
+                    Math.max(normalizedNew.length, normalizedRecent.length)
+                if (lengthRatio > 0.7) {
+                    return true
+                }
+            }
+
+            // Check for repeated patterns (e.g., "Okay. Okay. Okay.")
+            const words = normalizedNew.split(/\s+/)
+            if (words.length >= 3) {
+                // Check if the same phrase is repeated
+                const phrase = words.slice(0, 3).join(' ')
+                const repeatedPattern = new RegExp(`(${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*){2,}`, 'i')
+                if (repeatedPattern.test(normalizedNew)) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }, [])
+
+    /**
+     * Clean up repeated phrases in text
+     * E.g., "Okay. Okay. Okay." -> "Okay."
+     */
+    const cleanRepeatedPhrases = useCallback((text: string): string => {
+        if (!text) return text
+
+        // Remove immediate repetitions of short phrases (1-5 words)
+        // Pattern: "word. word. word." or "word, word, word,"
+        const patterns = [
+            /(\b[\w']+(?:\s+[\w']+){0,4}?[.,!?]?\s*)\1{2,}/gi,
+            /(\b[\w']+\b\s*)\1{3,}/gi,
+        ]
+
+        let cleaned = text
+        for (const pattern of patterns) {
+            cleaned = cleaned.replace(pattern, '$1')
+        }
+
+        return cleaned
+    }, [])
+
     // Semantic detector ref
     const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
@@ -333,8 +402,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const processTranscript = useCallback((text: string) => {
         if (!text) return
 
+        console.log('[useSermonListener] Processing transcript for verses:', text.substring(0, 100))
+
         // Regex-based verse detection
         const verses = detectVerses(text)
+        console.log('[useSermonListener] Detected verses:', verses.length, verses.map(v => v.reference))
         const contextVerse = extractVerseFromContext(text, 300)
         const candidateVerses = contextVerse
             ? [...verses, contextVerse]
@@ -565,21 +637,37 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             },
             onResult: (text, isFinal) => {
                 console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal })
+
+                // Clean up repeated phrases in the incoming text
+                const cleanedText = cleanRepeatedPhrases(text)
+
+                // Skip if this is a duplicate of recent content
+                if (isDuplicateText(cleanedText)) {
+                    console.log('[useSermonListener] Skipping duplicate text:', cleanedText.substring(0, 50))
+                    return
+                }
+
                 if (isFinal) {
+                    // Add to recent chunks for deduplication
+                    recentChunksRef.current.push(cleanedText)
+                    if (recentChunksRef.current.length > MAX_RECENT_CHUNKS) {
+                        recentChunksRef.current.shift()
+                    }
+
                     setInterimTranscript('')
                     setTranscript((prev) => {
-                        const combinedTranscript = `${prev} ${text}`.trim()
+                        const combinedTranscript = `${prev} ${cleanedText}`.trim()
                         transcriptBufferRef.current = combinedTranscript
                         console.log('[useSermonListener] Updated transcript:', combinedTranscript.substring(0, 100))
                         processTranscript(combinedTranscript)
                         return combinedTranscript
                     })
                 } else {
-                    setInterimTranscript(text)
-                    const rollingContext = `${transcriptBufferRef.current} ${text}`.trim()
+                    setInterimTranscript(cleanedText)
+                    const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
                     processTranscript(rollingContext)
                 }
-                onTranscriptUpdate?.(text, !isFinal)
+                onTranscriptUpdate?.(cleanedText, !isFinal)
             },
             onError: (err, message) => {
                 const resolvedError = message || err
@@ -632,6 +720,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setCurrentScripture(null)
         setError(null)
         transcriptBufferRef.current = ''
+        recentChunksRef.current = []
         unifiedTranscriptionService.clearTranscript()
     }, [])
 

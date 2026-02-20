@@ -2,15 +2,16 @@
  * Unified Transcription Service
  * 
  * Provides a unified interface for speech transcription that can switch between
- * Web Speech API, Whisper.cpp, and ElevenLabs based on user settings.
+ * Web Speech API, Whisper.cpp, Faster-Whisper, and ElevenLabs based on user settings.
  */
 
 import { speechRecognitionService } from './speechRecognition'
 import { whisperTranscriptionService } from './whisperTranscription'
 import { whisperCppTranscriptionService } from './whisperCppTranscription'
+import { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
 import { elevenLabsTranscriptionService } from './elevenLabsTranscription'
 
-export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | 'elevenlabs'
+export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs'
 
 export interface UnifiedTranscriptionOptions {
     provider?: TranscriptionProvider
@@ -29,6 +30,10 @@ export interface UnifiedTranscriptionOptions {
     whisperChunkDurationMs?: number
     whisperCppEndpoint?: string
     whisperCppChunkDurationMs?: number
+    // Faster-Whisper options
+    fasterWhisperEndpoint?: string
+    fasterWhisperModel?: 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3'
+    fasterWhisperChunkDurationMs?: number
     // ElevenLabs-specific options
     elevenLabsApiKey?: string
     elevenLabsModelId?: string
@@ -48,7 +53,7 @@ export interface TranscriptionStatus {
 /**
  * Unified Transcription Service
  * 
- * Switches between Web Speech API, Whisper.cpp, and ElevenLabs based on settings
+ * Switches between Web Speech API, Whisper.cpp, Faster-Whisper, and ElevenLabs based on settings
  */
 class UnifiedTranscriptionService {
     private currentProvider: TranscriptionProvider = 'web-speech'
@@ -59,6 +64,7 @@ class UnifiedTranscriptionService {
     private options: UnifiedTranscriptionOptions = {}
     private whisperInitialized = false
     private whisperCppInitialized = false
+    private fasterWhisperInitialized = false
     private elevenLabsInitialized = false
 
     /**
@@ -72,6 +78,8 @@ class UnifiedTranscriptionService {
                 return whisperTranscriptionService.isConfigured()
             case 'whisper-cpp':
                 return whisperCppTranscriptionService.isConfigured()
+            case 'faster-whisper':
+                return fasterWhisperTranscriptionService.isConfigured()
             case 'elevenlabs':
                 return elevenLabsTranscriptionService.isConfigured()
             default:
@@ -93,9 +101,11 @@ class UnifiedTranscriptionService {
                 ? this.whisperInitialized
                 : this.currentProvider === 'whisper-cpp'
                     ? this.whisperCppInitialized
-                    : this.currentProvider === 'elevenlabs'
-                        ? this.elevenLabsInitialized
-                        : undefined,
+                    : this.currentProvider === 'faster-whisper'
+                        ? this.fasterWhisperInitialized
+                        : this.currentProvider === 'elevenlabs'
+                            ? this.elevenLabsInitialized
+                            : undefined,
         }
     }
 
@@ -159,6 +169,30 @@ class UnifiedTranscriptionService {
             }
         }
 
+        if (provider === 'faster-whisper') {
+            this.isLoading = true
+            this.options.onStatusChange?.(this.getStatus())
+
+            const initialized = await fasterWhisperTranscriptionService.init({
+                language: options?.language || 'en',
+                endpoint: options?.fasterWhisperEndpoint,
+                model: options?.fasterWhisperModel,
+                chunkDurationMs: options?.fasterWhisperChunkDurationMs,
+                onProgress: options?.onProgress,
+                onStatus: (status) => console.log('[FasterWhisper]', status),
+            })
+
+            this.fasterWhisperInitialized = initialized
+            this.isLoading = false
+            this.isReady = initialized
+
+            if (!initialized) {
+                this.error = 'Failed to initialize Faster-Whisper'
+                this.options.onStatusChange?.(this.getStatus())
+                return false
+            }
+        }
+
         if (provider === 'elevenlabs') {
             this.isLoading = true
             this.options.onStatusChange?.(this.getStatus())
@@ -196,7 +230,9 @@ class UnifiedTranscriptionService {
                 ? this.whisperInitialized
                 : provider === 'whisper-cpp'
                     ? this.whisperCppInitialized
-                    : this.elevenLabsInitialized
+                    : provider === 'faster-whisper'
+                        ? this.fasterWhisperInitialized
+                        : this.elevenLabsInitialized
         this.options.onStatusChange?.(this.getStatus())
         return true
     }
@@ -250,6 +286,9 @@ class UnifiedTranscriptionService {
             }
             if (this.currentProvider === 'whisper-cpp') {
                 return await this.startWhisperCpp()
+            }
+            if (this.currentProvider === 'faster-whisper') {
+                return await this.startFasterWhisper()
             }
             return await this.startElevenLabs()
         } catch (err) {
@@ -381,6 +420,50 @@ class UnifiedTranscriptionService {
     }
 
     /**
+     * Start Faster-Whisper transcription (CTranslate2-based, 2-4x faster)
+     */
+    private async startFasterWhisper(): Promise<boolean> {
+        if (!this.fasterWhisperInitialized) {
+            const initialized = await fasterWhisperTranscriptionService.init({
+                language: this.options.language || 'en',
+                endpoint: this.options.fasterWhisperEndpoint,
+                model: this.options.fasterWhisperModel,
+                chunkDurationMs: this.options.fasterWhisperChunkDurationMs,
+                onProgress: this.options.onProgress,
+            })
+            if (!initialized) {
+                this.error = 'Faster-Whisper provider is not configured correctly.'
+                return false
+            }
+            this.fasterWhisperInitialized = true
+        }
+
+        const started = await fasterWhisperTranscriptionService.startRealtimeTranscription(
+            (result) => {
+                this.options.onResult?.(result.text, true, undefined)
+            },
+            (error) => {
+                this.error = error
+                this.isListening = false
+                this.options.onError?.(error)
+                this.options.onStatusChange?.(this.getStatus())
+            },
+            this.options.fasterWhisperChunkDurationMs
+        )
+
+        if (!started) {
+            this.error = 'Failed to start Faster-Whisper transcription stream'
+            this.options.onStatusChange?.(this.getStatus())
+            return false
+        }
+
+        this.isListening = true
+        this.options.onStart?.()
+        this.options.onStatusChange?.(this.getStatus())
+        return true
+    }
+
+    /**
      * Start ElevenLabs transcription
      */
     private async startElevenLabs(): Promise<boolean> {
@@ -436,6 +519,8 @@ class UnifiedTranscriptionService {
             await whisperTranscriptionService.stopRealtimeTranscription()
         } else if (this.currentProvider === 'whisper-cpp') {
             await whisperCppTranscriptionService.stopRealtimeTranscription()
+        } else if (this.currentProvider === 'faster-whisper') {
+            await fasterWhisperTranscriptionService.stopRealtimeTranscription()
         } else if (this.currentProvider === 'elevenlabs') {
             await elevenLabsTranscriptionService.stopRealtimeTranscription()
         }

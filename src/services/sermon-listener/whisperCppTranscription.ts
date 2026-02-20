@@ -6,7 +6,10 @@
  * running on the same machine.
  */
 
-const DEFAULT_WHISPER_CPP_ENDPOINT = 'http://127.0.0.1:8080/inference'
+const DEFAULT_WHISPER_CPP_ENDPOINT = '/whisper-cpp/inference' // Use Vite proxy to avoid CORS
+const DIRECT_ENDPOINT = 'http://127.0.0.1:8080/inference' // Direct access when not using proxy
+const DEFAULT_CHUNK_DURATION_MS = 2500 // Reduced from 5000ms for faster feedback
+const REQUEST_TIMEOUT_MS = 15000 // Timeout for transcription requests
 
 export interface WhisperCppConfig {
     endpoint?: string
@@ -44,12 +47,14 @@ class WhisperCppTranscriptionService {
     private modelLoaded = false
     private mediaRecorder: MediaRecorder | null = null
     private mediaStream: MediaStream | null = null
-    private processingQueue: Promise<void> = Promise.resolve()
     private isStreaming = false
     // AudioContext-based capture (replaces MediaRecorder for raw PCM)
     private audioContext: AudioContext | null = null
     private scriptProcessor: ScriptProcessorNode | null = null
     private audioBuffer: Float32Array[] = []
+    // Track active requests for parallel processing (max 2 concurrent)
+    private activeRequests = 0
+    private readonly maxConcurrentRequests = 2
 
     async init(config: WhisperCppConfig = {}): Promise<boolean> {
         if (this.isInitializing) {
@@ -63,7 +68,7 @@ class WhisperCppTranscriptionService {
         this.config = {
             endpoint: DEFAULT_WHISPER_CPP_ENDPOINT,
             language: 'en',
-            chunkDurationMs: 5000,
+            chunkDurationMs: DEFAULT_CHUNK_DURATION_MS,
             ...this.config,
             ...config,
         }
@@ -228,7 +233,7 @@ class WhisperCppTranscriptionService {
 
             // Buffer to accumulate audio samples
             this.audioBuffer = []
-            const chunkDuration = chunkDurationMs || this.config.chunkDurationMs || 5000
+            const chunkDuration = chunkDurationMs || this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS
             // Calculate samples based on the AudioContext's actual sample rate
             const samplesPerChunk = nativeSampleRate * (chunkDuration / 1000)
 
@@ -259,36 +264,17 @@ class WhisperCppTranscriptionService {
                     // Clear the buffer
                     this.audioBuffer = []
 
-                    // Process the chunk
-                    this.processingQueue = this.processingQueue
-                        .then(async () => {
-                            // Check audio level
-                            const maxAmp = this.getMaxAmplitude(combined)
-                            console.log('[Whisper.cpp] Audio level:', maxAmp.toFixed(4), '| Samples:', combined.length, '| Sample rate:', nativeSampleRate, needsResampling ? '(resampling...)' : '(no resampling)')
-
-                            // Resample only if needed (when AudioContext couldn't be set to 16kHz)
-                            const resampled = needsResampling
-                                ? this.resample(combined, nativeSampleRate, targetSampleRate)
-                                : combined
-
-                            // Convert to WAV
-                            const wavBlob = this.encodeWav(resampled, targetSampleRate)
-                            console.log('[Whisper.cpp] Sending chunk:', {
-                                nativeSamples: combined.length,
-                                resampledSamples: resampled.length,
-                                duration: (resampled.length / targetSampleRate).toFixed(2) + 's',
-                                size: wavBlob.size,
+                    // Process the chunk in parallel (up to max concurrent requests)
+                    if (this.activeRequests < this.maxConcurrentRequests) {
+                        this.activeRequests++
+                        this.processChunkAsync(combined, nativeSampleRate, targetSampleRate, needsResampling, onResult, onError)
+                            .finally(() => {
+                                this.activeRequests--
                             })
-
-                            const result = await this.transcribeWav(wavBlob)
-                            if (result?.text) {
-                                onResult(result)
-                            }
-                        })
-                        .catch((error) => {
-                            console.error('[Whisper.cpp] Chunk processing failed:', error)
-                            onError('Failed to process audio chunk')
-                        })
+                    } else {
+                        // Skip this chunk if we're at max capacity (prevents memory buildup)
+                        console.log('[Whisper.cpp] Skipping chunk - max concurrent requests reached')
+                    }
                 }
             }
 
@@ -325,7 +311,12 @@ class WhisperCppTranscriptionService {
                 await this.audioContext.close()
             }
 
-            await this.processingQueue
+            // Wait for active requests to complete (with timeout)
+            const maxWait = 5000
+            const startTime = Date.now()
+            while (this.activeRequests > 0 && Date.now() - startTime < maxWait) {
+                await new Promise(resolve => setTimeout(resolve, 100))
+            }
         } catch (error) {
             console.error('[Whisper.cpp] Failed to stop transcription:', error)
         } finally {
@@ -338,13 +329,58 @@ class WhisperCppTranscriptionService {
         this.isInitialized = false
         this.modelLoaded = false
         this.isStreaming = false
-        this.processingQueue = Promise.resolve()
+        this.activeRequests = 0
         this.audioBuffer = []
+    }
+
+    /**
+     * Process a chunk asynchronously (allows parallel processing)
+     */
+    private async processChunkAsync(
+        combined: Float32Array,
+        nativeSampleRate: number,
+        targetSampleRate: number,
+        needsResampling: boolean,
+        onResult: ResultCallback,
+        onError: ErrorCallback
+    ): Promise<void> {
+        try {
+            // Check audio level
+            const maxAmp = this.getMaxAmplitude(combined)
+            console.log('[Whisper.cpp] Audio level:', maxAmp.toFixed(4), '| Samples:', combined.length, '| Sample rate:', nativeSampleRate, needsResampling ? '(resampling...)' : '(no resampling)')
+
+            // Resample only if needed (when AudioContext couldn't be set to 16kHz)
+            const resampled = needsResampling
+                ? this.resample(combined, nativeSampleRate, targetSampleRate)
+                : combined
+
+            // Convert to WAV
+            const wavBlob = this.encodeWav(resampled, targetSampleRate)
+            console.log('[Whisper.cpp] Sending chunk:', {
+                nativeSamples: combined.length,
+                resampledSamples: resampled.length,
+                duration: (resampled.length / targetSampleRate).toFixed(2) + 's',
+                size: wavBlob.size,
+            })
+
+            const result = await this.transcribeWav(wavBlob)
+            if (result?.text) {
+                onResult(result)
+            }
+        } catch (error) {
+            console.error('[Whisper.cpp] Chunk processing failed:', error)
+            onError('Failed to process audio chunk')
+        }
     }
 
     private getEndpoint(): string {
         const endpointFromEnv = import.meta.env.VITE_WHISPER_CPP_ENDPOINT as string | undefined
-        return (this.config.endpoint || endpointFromEnv || DEFAULT_WHISPER_CPP_ENDPOINT).trim()
+        const configured = this.config.endpoint || endpointFromEnv || DEFAULT_WHISPER_CPP_ENDPOINT
+        // If using direct URL (127.0.0.1), switch to proxy path for CORS avoidance
+        if (configured.startsWith('http://127.0.0.1') || configured.startsWith('http://localhost')) {
+            return DEFAULT_WHISPER_CPP_ENDPOINT // Use proxy
+        }
+        return configured.trim()
     }
 
     /**
@@ -362,11 +398,18 @@ class WhisperCppTranscriptionService {
         formData.append('file', file)
         formData.append('language', language)
 
+        // Create abort controller for timeout
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
         try {
             const response = await fetch(endpoint, {
                 method: 'POST',
                 body: formData,
+                signal: controller.signal,
             })
+
+            clearTimeout(timeoutId)
 
             if (!response.ok) {
                 const errorText = await response.text().catch(() => '')
@@ -398,7 +441,12 @@ class WhisperCppTranscriptionService {
 
             return null
         } catch (error) {
-            console.error('[Whisper.cpp] Transcription error:', error)
+            clearTimeout(timeoutId)
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.error('[Whisper.cpp] Request timed out after', REQUEST_TIMEOUT_MS, 'ms')
+            } else {
+                console.error('[Whisper.cpp] Transcription error:', error)
+            }
             return null
         }
     }
@@ -566,7 +614,8 @@ class WhisperCppTranscriptionService {
     }
 
     /**
-     * Resample audio data using linear interpolation
+     * Resample audio data using cubic interpolation for better quality
+     * This reduces artifacts that can affect transcription accuracy
      */
     private resample(samples: Float32Array, fromRate: number, toRate: number): Float32Array {
         const ratio = fromRate / toRate
@@ -576,11 +625,21 @@ class WhisperCppTranscriptionService {
         for (let i = 0; i < newLength; i++) {
             const srcIndex = i * ratio
             const srcIndexFloor = Math.floor(srcIndex)
-            const srcIndexCeil = Math.min(srcIndexFloor + 1, samples.length - 1)
             const fraction = srcIndex - srcIndexFloor
 
-            // Linear interpolation
-            result[i] = samples[srcIndexFloor] * (1 - fraction) + samples[srcIndexCeil] * fraction
+            // Cubic interpolation using 4-point Hermite
+            const y0 = samples[Math.max(0, srcIndexFloor - 1)]
+            const y1 = samples[srcIndexFloor]
+            const y2 = samples[Math.min(srcIndexFloor + 1, samples.length - 1)]
+            const y3 = samples[Math.min(srcIndexFloor + 2, samples.length - 1)]
+
+            // Hermite interpolation coefficients
+            const c0 = y1
+            const c1 = 0.5 * (y2 - y0)
+            const c2 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3
+            const c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2)
+
+            result[i] = ((c3 * fraction + c2) * fraction + c1) * fraction + c0
         }
 
         return result

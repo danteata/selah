@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConvexReactClient } from 'convex/react'
 import { ConvexProviderWithClerk } from 'convex/react-clerk'
 import { ClerkProvider, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import LiveView from './pages/LiveView'
 import ChurchSetup from './pages/ChurchSetup'
@@ -38,6 +38,21 @@ function AuthenticatedApp() {
   return <Dashboard />
 }
 
+// Wrapper component to handle redirect with current location
+function JoinChurchRoute() {
+  const location = useLocation()
+  return (
+    <>
+      <SignedIn>
+        <JoinChurch />
+      </SignedIn>
+      <SignedOut>
+        <Navigate to="/login" replace state={{ from: location.pathname }} />
+      </SignedOut>
+    </>
+  )
+}
+
 function App() {
   return (
     <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY!}>
@@ -50,19 +65,7 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/test" element={<TestPage />} />
-              <Route
-                path="/join/:code"
-                element={
-                  <>
-                    <SignedIn>
-                      <JoinChurch />
-                    </SignedIn>
-                    <SignedOut>
-                      <Navigate to="/login" replace />
-                    </SignedOut>
-                  </>
-                }
-              />
+              <Route path="/join/:code" element={<JoinChurchRoute />} />
               <Route
                 path="/"
                 element={
