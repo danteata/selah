@@ -397,6 +397,39 @@ export async function hasCachedEmbeddings(version: string): Promise<boolean> {
     return cached.length > 0;
 }
 
+/**
+ * Clear cached embeddings for a specific version.
+ */
+export async function clearCachedEmbeddingsForVersion(version: string): Promise<number> {
+    try {
+        const db = await openVerseCache();
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
+        const index = store.index('by_version');
+
+        // Get all embeddings for this version
+        const request = index.openCursor(IDBKeyRange.only(version));
+        let deleted = 0;
+
+        return new Promise((resolve, reject) => {
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (cursor) {
+                    cursor.delete();
+                    deleted++;
+                    cursor.continue();
+                } else {
+                    resolve(deleted);
+                }
+            };
+            request.onerror = () => reject(request.error);
+        });
+    } catch (error) {
+        console.error('[Embeddings] Failed to clear cached embeddings for version:', error);
+        return 0;
+    }
+}
+
 export default {
     initializeEmbedder,
     isEmbedderReady,
@@ -407,5 +440,6 @@ export default {
     getCachedVerseEmbeddings,
     cacheVerseEmbeddings,
     clearCachedVerseEmbeddings,
+    clearCachedEmbeddingsForVersion,
     hasCachedEmbeddings,
 };

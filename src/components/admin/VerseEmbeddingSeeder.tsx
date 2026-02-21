@@ -1,8 +1,12 @@
 /**
- * Verse Embedding Seeder Component
+ * Verse Embedding Seeder Component (Admin Only)
  * 
- * Allows admins to seed verse embeddings for semantic Bible verse detection.
+ * Allows superadmins to seed verse embeddings to Convex for cross-device sync.
  * Uses Transformers.js to generate embeddings locally (FREE, no API costs).
+ * 
+ * NOTE: Regular users can cache embeddings locally via SermonListenerSettings.
+ * This component is for superadmins who want to upload embeddings to Convex
+ * for cross-device synchronization.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -340,7 +344,10 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
                         Access Denied
                     </h2>
                     <p className="text-gray-600">
-                        Only superadmins can seed verse embeddings.
+                        Only superadmins can upload embeddings to Convex for cross-device sync.
+                    </p>
+                    <p className="text-gray-500 text-sm mt-2">
+                        Users can cache embeddings locally via Sermon Listener Settings.
                     </p>
                 </div>
             </div>
@@ -352,10 +359,10 @@ export function VerseEmbeddingSeeder({ onClose }: VerseEmbeddingSeederProps) {
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h2 className="text-xl font-semibold text-gray-900">
-                        Verse Embedding Seeder
+                        Verse Embedding Seeder (Admin)
                     </h2>
                     <p className="text-sm text-gray-500 mt-1">
-                        Generate embeddings for semantic Bible verse detection (FREE, runs locally)
+                        Upload embeddings to Convex for cross-device sync (local caching available to all users)
                     </p>
                 </div>
                 {onClose && (
