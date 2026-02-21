@@ -27,6 +27,12 @@ export interface UnifiedTranscriptionOptions {
     onResult?: (transcript: string, isFinal: boolean, confidence?: number) => void
     onError?: (error: string, message?: string) => void
     onStatusChange?: (status: TranscriptionStatus) => void
+    /** Called when speech is detected (VAD speech start) */
+    onSpeechStart?: () => void
+    /** Called when speech ends (VAD speech end) */
+    onSpeechEnd?: () => void
+    /** Called with audio level (0-1) for visualization */
+    onAudioLevel?: (level: number) => void
     // Whisper-specific options
     whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
     whisperEndpoint?: string
@@ -556,6 +562,12 @@ class UnifiedTranscriptionService {
                 minSpeechFrames: this.options.vadMinSpeechFrames,
                 preSpeechPadFrames: this.options.vadPreSpeechPadFrames,
                 redemptionFrames: this.options.vadRedemptionFrames,
+                onSpeechStart: () => {
+                    this.options.onSpeechStart?.()
+                },
+                onSpeechEnd: () => {
+                    this.options.onSpeechEnd?.()
+                },
             })
             if (!initialized) {
                 this.error = 'VAD provider is not configured correctly.'

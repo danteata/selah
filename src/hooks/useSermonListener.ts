@@ -87,6 +87,8 @@ export interface SermonListenerState {
     semanticDetectorReady: boolean
     /** Whether semantic search is in progress */
     isSemanticSearching: boolean
+    /** Whether speech is currently being detected (audio activity) */
+    isSpeechDetected: boolean
 }
 
 export interface SermonListenerActions {
@@ -190,6 +192,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Semantic detection state
     const [semanticDetectorReady, setSemanticDetectorReady] = useState(false)
     const [isSemanticSearching, setIsSemanticSearching] = useState(false)
+
+    // Speech detection state (for visual feedback)
+    const [isSpeechDetected, setIsSpeechDetected] = useState(false)
 
     // Refs for callback stability
     const optionsRef = useRef(options)
@@ -758,6 +763,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             onStatusChange: (status: TranscriptionStatus) => {
                 setIsListening(status.isListening)
             },
+            onSpeechStart: () => {
+                setIsSpeechDetected(true)
+            },
+            onSpeechEnd: () => {
+                setIsSpeechDetected(false)
+            },
         })
 
         return success
@@ -793,6 +804,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         unifiedTranscriptionService.stop()
         setIsListening(false)
         setInterimTranscript('')
+        setIsSpeechDetected(false)
     }, [])
 
     /**
@@ -805,6 +817,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setCurrentVerse(null)
         setCurrentScripture(null)
         setError(null)
+        setIsSpeechDetected(false)
         transcriptBufferRef.current = ''
         recentChunksRef.current = []
         detectedRefsRef.current = new Set() // Clear detected refs
@@ -910,6 +923,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         semanticDetectionEnabled: enableSemanticDetection,
         semanticDetectorReady,
         isSemanticSearching,
+        isSpeechDetected,
         // Actions
         start,
         stop,

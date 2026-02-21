@@ -55,6 +55,7 @@ export function SermonListenerPanel({
         error,
         isLoading,
         provider,
+        isSpeechDetected,
         start,
         stop,
         reset,
@@ -174,7 +175,7 @@ export function SermonListenerPanel({
     return (
         <div className={`flex flex-col h-full ${compact ? 'gap-2' : 'gap-3'}`}>
             {/* Header with controls - compact inline layout */}
-            <div className={`flex items-center gap-2 ${compact ? 'p-1.5' : 'p-2'} rounded-lg bg-gray-100 dark:bg-gray-800`}>
+            <div className={`flex items-center gap-2 ${compact ? 'p-1.5' : 'p-2'} rounded-lg bg-gray-100 dark:bg-gray-800 ${isSpeechDetected ? 'ring-2 ring-green-500/50 animate-[speech-glow_1s_ease-in-out_infinite]' : ''}`}>
                 <div className={`relative flex-shrink-0 ${isListening ? 'animate-pulse' : ''}`}>
                     {isListening ? (
                         <Square className="w-5 h-5 text-red-500" />
@@ -184,7 +185,31 @@ export function SermonListenerPanel({
                     {isListening && (
                         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full animate-ping" />
                     )}
+                    {/* Speech detection pulse ring */}
+                    {isSpeechDetected && (
+                        <span className="absolute inset-0 rounded-full bg-green-500/30 animate-[speech-pulse-ring_1s_ease-out_infinite]" />
+                    )}
                 </div>
+
+                {/* Audio waveform visualization when speech is detected */}
+                {isListening && (
+                    <div className={`flex items-center justify-center gap-[2px] h-5 ${isSpeechDetected ? 'opacity-100' : 'opacity-30'} transition-opacity duration-200`}>
+                        {[...Array(5)].map((_, i) => (
+                            <div
+                                key={i}
+                                className={`w-1 rounded-full ${isSpeechDetected ? 'bg-green-500' : 'bg-gray-400 dark:bg-gray-500'}`}
+                                style={{
+                                    animationName: isSpeechDetected ? 'waveform-bar' : 'none',
+                                    animationDuration: `${0.4 + i * 0.1}s`,
+                                    animationTimingFunction: 'ease-in-out',
+                                    animationIterationCount: 'infinite',
+                                    animationDelay: `${i * 0.08}s`,
+                                    height: '4px'
+                                }}
+                            />
+                        ))}
+                    </div>
+                )}
 
                 <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium truncate text-gray-700 dark:text-gray-300">
@@ -332,9 +357,17 @@ export function SermonListenerPanel({
 
             {/* Transcript section - compact */}
             {(isListening || transcript || interimTranscript) && (
-                <div className="flex-1 min-h-0 p-2 rounded-lg bg-gray-100 dark:bg-gray-800 flex flex-col">
+                <div className={`flex-1 min-h-0 p-2 rounded-lg bg-gray-100 dark:bg-gray-800 flex flex-col transition-all duration-300 ${isSpeechDetected ? 'ring-2 ring-green-500/30' : ''}`}>
                     <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Transcript</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Transcript</span>
+                            {isSpeechDetected && (
+                                <span className="flex items-center gap-1 text-[10px] text-green-500 font-medium">
+                                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                                    Speaking
+                                </span>
+                            )}
+                        </div>
                         <div className="flex items-center gap-1">
                             {transcript && (
                                 <button
@@ -358,7 +391,7 @@ export function SermonListenerPanel({
                     </div>
                     <div
                         ref={transcriptRef}
-                        className="flex-1 p-2 rounded text-xs overflow-y-auto bg-white dark:bg-gray-900"
+                        className={`flex-1 p-2 rounded text-xs overflow-y-auto bg-white dark:bg-gray-900 transition-all duration-200 ${isSpeechDetected ? 'border border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : ''}`}
                     >
                         <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">
                             {transcript}
