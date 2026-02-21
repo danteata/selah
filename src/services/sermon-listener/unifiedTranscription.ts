@@ -3,6 +3,9 @@
  * 
  * Provides a unified interface for speech transcription that can switch between
  * Web Speech API, Whisper.cpp, Faster-Whisper, and ElevenLabs based on user settings.
+ * 
+ * VAD (Voice Activity Detection) can be enabled as an option with Faster-Whisper
+ * for smart chunking that eliminates word cutoffs at boundaries.
  */
 
 import { speechRecognitionService } from './speechRecognition'
@@ -10,6 +13,7 @@ import { whisperTranscriptionService } from './whisperTranscription'
 import { whisperCppTranscriptionService } from './whisperCppTranscription'
 import { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
 import { elevenLabsTranscriptionService } from './elevenLabsTranscription'
+import { vadTranscriptionService } from './vadTranscriptionService'
 
 export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs'
 
@@ -38,6 +42,14 @@ export interface UnifiedTranscriptionOptions {
     fasterWhisperAudioCaptureMode?: 'browser-wav' | 'server-decode'
     /** Disable browser audio processing for server-decode mode */
     fasterWhisperDisableBrowserProcessing?: boolean
+    /** Enable VAD for smart chunking with faster-whisper */
+    useVAD?: boolean
+    // VAD-specific options (used when useVAD is true)
+    vadPositiveSpeechThreshold?: number
+    vadNegativeSpeechThreshold?: number
+    vadMinSpeechFrames?: number
+    vadPreSpeechPadFrames?: number
+    vadRedemptionFrames?: number
     // ElevenLabs-specific options
     elevenLabsApiKey?: string
     elevenLabsModelId?: string
@@ -57,7 +69,7 @@ export interface TranscriptionStatus {
 /**
  * Unified Transcription Service
  * 
- * Switches between Web Speech API, Whisper.cpp, Faster-Whisper, and ElevenLabs based on settings
+ * Switches between Web Speech API, Whisper.cpp, Faster-Whisper, VAD, and ElevenLabs based on settings
  */
 class UnifiedTranscriptionService {
     private currentProvider: TranscriptionProvider = 'web-speech'
@@ -69,6 +81,7 @@ class UnifiedTranscriptionService {
     private whisperInitialized = false
     private whisperCppInitialized = false
     private fasterWhisperInitialized = false
+    private vadInitialized = false
     private elevenLabsInitialized = false
 
     /**
@@ -89,6 +102,13 @@ class UnifiedTranscriptionService {
             default:
                 return false
         }
+    }
+
+    /**
+     * Check if VAD is available (for use with faster-whisper)
+     */
+    async isVADAvailable(): Promise<boolean> {
+        return vadTranscriptionService.isConfigured()
     }
 
     /**
@@ -427,8 +447,14 @@ class UnifiedTranscriptionService {
 
     /**
      * Start Faster-Whisper transcription (CTranslate2-based, 2-4x faster)
+     * If useVAD is enabled, uses VAD for smart chunking instead of fixed intervals
      */
     private async startFasterWhisper(): Promise<boolean> {
+        // If VAD is enabled, use VAD-based transcription
+        if (this.options.useVAD) {
+            return await this.startVAD()
+        }
+
         if (!this.fasterWhisperInitialized) {
             const initialized = await fasterWhisperTranscriptionService.init({
                 language: this.options.language || 'en',
@@ -516,6 +542,53 @@ class UnifiedTranscriptionService {
     }
 
     /**
+     * Start VAD-based transcription
+     * Uses browser VAD to detect speech boundaries, then sends complete utterances
+     */
+    private async startVAD(): Promise<boolean> {
+        if (!this.vadInitialized) {
+            const initialized = await vadTranscriptionService.init({
+                language: this.options.language || 'en',
+                endpoint: this.options.fasterWhisperEndpoint,
+                model: this.options.fasterWhisperModel,
+                positiveSpeechThreshold: this.options.vadPositiveSpeechThreshold,
+                negativeSpeechThreshold: this.options.vadNegativeSpeechThreshold,
+                minSpeechFrames: this.options.vadMinSpeechFrames,
+                preSpeechPadFrames: this.options.vadPreSpeechPadFrames,
+                redemptionFrames: this.options.vadRedemptionFrames,
+            })
+            if (!initialized) {
+                this.error = 'VAD provider is not configured correctly.'
+                return false
+            }
+            this.vadInitialized = true
+        }
+
+        const started = await vadTranscriptionService.startRealtimeTranscription(
+            (result) => {
+                this.options.onResult?.(result.text, true, undefined)
+            },
+            (error) => {
+                this.error = error
+                this.isListening = false
+                this.options.onError?.(error)
+                this.options.onStatusChange?.(this.getStatus())
+            }
+        )
+
+        if (!started) {
+            this.error = 'Failed to start VAD transcription stream'
+            this.options.onStatusChange?.(this.getStatus())
+            return false
+        }
+
+        this.isListening = true
+        this.options.onStart?.()
+        this.options.onStatusChange?.(this.getStatus())
+        return true
+    }
+
+    /**
      * Stop transcription
      */
     async stop(): Promise<void> {
@@ -528,7 +601,12 @@ class UnifiedTranscriptionService {
         } else if (this.currentProvider === 'whisper-cpp') {
             await whisperCppTranscriptionService.stopRealtimeTranscription()
         } else if (this.currentProvider === 'faster-whisper') {
-            await fasterWhisperTranscriptionService.stopRealtimeTranscription()
+            // Check if VAD is being used with faster-whisper
+            if (this.options.useVAD) {
+                await vadTranscriptionService.stop()
+            } else {
+                await fasterWhisperTranscriptionService.stopRealtimeTranscription()
+            }
         } else if (this.currentProvider === 'elevenlabs') {
             await elevenLabsTranscriptionService.stopRealtimeTranscription()
         }

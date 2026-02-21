@@ -70,6 +70,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [fasterWhisperDisableBrowserProcessing, setFasterWhisperDisableBrowserProcessing] = useState(
         sermonSettings?.fasterWhisperDisableBrowserProcessing ?? false
     )
+    // VAD toggle for faster-whisper
+    const [useVAD, setUseVAD] = useState(sermonSettings?.useVAD ?? false)
 
     // ElevenLabs settings
     const [elevenLabsApiKey, setElevenLabsApiKey] = useState(sermonSettings?.elevenLabsApiKey || '')
@@ -85,6 +87,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [whisperAvailable, setWhisperAvailable] = useState(false)
     const [whisperCppAvailable, setWhisperCppAvailable] = useState(false)
     const [fasterWhisperAvailable, setFasterWhisperAvailable] = useState(false)
+    const [vadAvailable, setVadAvailable] = useState(false)
     const [elevenLabsAvailable, setElevenLabsAvailable] = useState(false)
 
     useEffect(() => {
@@ -93,6 +96,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         unifiedTranscriptionService.isProviderAvailable('whisper-cpp').then(setWhisperCppAvailable)
         unifiedTranscriptionService.isProviderAvailable('faster-whisper').then(setFasterWhisperAvailable)
         unifiedTranscriptionService.isProviderAvailable('elevenlabs').then(setElevenLabsAvailable)
+        // Check VAD availability separately
+        unifiedTranscriptionService.isVADAvailable().then(setVadAvailable)
     }, [])
 
     const isWhisperConfigured = useMemo(() => {
@@ -128,6 +133,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 fasterWhisperChunkDurationMs: fasterWhisperChunkDurationMs > 0 ? fasterWhisperChunkDurationMs : 2000,
                 fasterWhisperAudioCaptureMode,
                 fasterWhisperDisableBrowserProcessing,
+                useVAD,
                 elevenLabsApiKey: elevenLabsApiKey.trim() || undefined,
                 elevenLabsModelId: elevenLabsModelId.trim() || 'scribe_v1',
                 elevenLabsChunkDurationMs: elevenLabsChunkDurationMs > 0 ? elevenLabsChunkDurationMs : DEFAULT_CHUNK_DURATION_MS,
@@ -539,6 +545,44 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             </p>
                         </div>
                     )}
+
+                    {/* VAD Smart Chunking Toggle */}
+                    <div className="p-4 rounded-lg bg-cyan-50 dark:bg-cyan-900/30 border border-cyan-200 dark:border-cyan-700">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="useVAD"
+                                    checked={useVAD}
+                                    onChange={(event) => setUseVAD(event.target.checked)}
+                                    className="rounded border-gray-300 dark:border-gray-600"
+                                />
+                                <label htmlFor="useVAD" className="font-medium text-cyan-800 dark:text-cyan-300">
+                                    Enable VAD Smart Chunking
+                                </label>
+                            </div>
+                            {vadAvailable ? (
+                                <span className="text-xs px-2 py-1 rounded bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300">
+                                    Available
+                                </span>
+                            ) : (
+                                <span className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                                    Loading...
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-sm text-cyan-700 dark:text-cyan-400">
+                            <strong>Recommended for best quality.</strong> Uses browser-based Voice Activity Detection
+                            to detect speech boundaries. Eliminates word cutoffs at chunk boundaries by only sending
+                            complete utterances to the transcription server.
+                        </p>
+                        {useVAD && (
+                            <p className="mt-2 text-xs text-cyan-600 dark:text-cyan-500">
+                                ✓ VAD will detect when speech starts and ends, sending complete utterances for transcription.
+                                Chunk duration setting is ignored when VAD is enabled.
+                            </p>
+                        )}
+                    </div>
 
                     <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700">
                         <p className="text-sm text-green-800 dark:text-green-300">

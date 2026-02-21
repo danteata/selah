@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSignIn, useClerk, useUser } from '@clerk/clerk-react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Cloud } from 'lucide-react'
 import { useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
@@ -8,6 +8,7 @@ import { api } from '../../../convex/_generated/api'
 export default function LoginPage() {
     const { signIn, isLoaded, setActive } = useSignIn()
     const navigate = useNavigate()
+    const location = useLocation()
 
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -17,6 +18,9 @@ export default function LoginPage() {
 
     // Convex mutation to create user
     const upsertUser = useMutation(api.users.upsertUser)
+
+    // Get redirect path from location state (for invite links)
+    const from = (location.state as { from?: string })?.from
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -40,7 +44,8 @@ export default function LoginPage() {
                     fullname: email.split('@')[0], // Use email username as fallback
                     email,
                 })
-                navigate('/dashboard')
+                // Redirect to the original destination (invite link) or dashboard
+                navigate(from || '/dashboard')
             } else {
                 console.log('Sign in needs additional steps:', result)
             }
@@ -59,7 +64,7 @@ export default function LoginPage() {
             await signIn.authenticateWithRedirect({
                 strategy: 'oauth_google',
                 redirectUrl: '/sso-callback',
-                redirectUrlComplete: '/',
+                redirectUrlComplete: from || '/',
             })
         } catch (err: any) {
             console.error('Google sign in error:', err)
@@ -194,7 +199,7 @@ export default function LoginPage() {
                 {/* Sign Up Link */}
                 <p className="text-center mt-6 text-gray-600 dark:text-gray-400">
                     Don't have an account?{' '}
-                    <Link to="/signup" className="text-primary-600 hover:text-primary-700 font-medium">
+                    <Link to="/signup" state={from ? { from } : undefined} className="text-primary-600 hover:text-primary-700 font-medium">
                         Sign up free
                     </Link>
                 </p>

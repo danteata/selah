@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useSignUp, useUser } from '@clerk/clerk-react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, Mail, Lock, User, Church, ArrowRight, Cloud, Check } from 'lucide-react'
-import { useMutation } from 'convex/react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { Eye, EyeOff, Mail, Lock, User, Church, ArrowRight, Cloud, Check, Users } from 'lucide-react'
+import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 
 type SignupStep = 'account' | 'church' | 'verify'
@@ -10,11 +10,29 @@ type SignupStep = 'account' | 'church' | 'verify'
 export default function SignupPage() {
     const { signUp, isLoaded, setActive } = useSignUp()
     const navigate = useNavigate()
+    const location = useLocation()
 
     // Convex mutations
     const createChurch = useMutation(api.churches.createChurch)
     const joinChurch = useMutation(api.churches.joinChurch)
     const upsertUser = useMutation(api.users.upsertUser)
+
+    // Get redirect path from location state (for invite links)
+    const from = (location.state as { from?: string })?.from
+
+    // Extract invite code from the redirect path
+    const inviteCode = useMemo(() => {
+        if (from?.startsWith('/join/')) {
+            return from.replace('/join/', '')
+        }
+        return null
+    }, [from])
+
+    // Fetch invitation details if we have an invite code
+    const invitationData = useQuery(
+        api.invitations.getInvitationByCode,
+        inviteCode ? { code: inviteCode } : 'skip'
+    )
 
     const [step, setStep] = useState<SignupStep>('account')
     const [isLoading, setIsLoading] = useState(false)
@@ -80,8 +98,13 @@ export default function SignupPage() {
                     fullname: fullName,
                     email,
                 })
-                // Continue to church setup
-                setStep('church')
+                // If in invite flow, go directly to the join page to accept
+                // Otherwise continue to church setup
+                if (isInviteFlow && from) {
+                    navigate(from)
+                } else {
+                    setStep('church')
+                }
             }
         } catch (err: any) {
             console.error('Verification error:', err)
@@ -103,11 +126,13 @@ export default function SignupPage() {
                     name: churchName,
                     type: 'church',
                 })
-                navigate('/')
+                // Redirect to the original destination (invite link) or home
+                navigate(from || '/')
             } else {
                 // Join existing church
                 await joinChurch({ inviteCode: churchCode })
-                navigate('/')
+                // Redirect to the original destination (invite link) or home
+                navigate(from || '/')
             }
         } catch (err: any) {
             console.error('Church setup error:', err)
@@ -124,13 +149,17 @@ export default function SignupPage() {
             await signUp.authenticateWithRedirect({
                 strategy: 'oauth_google',
                 redirectUrl: '/sso-callback',
-                redirectUrlComplete: '/signup?step=church',
+                redirectUrlComplete: from || '/',
             })
         } catch (err: any) {
             console.error('Google sign up error:', err)
             setError('Failed to sign up with Google.')
         }
     }
+
+    // Determine if we're in invite flow
+    const isInviteFlow = inviteCode && invitationData?.isValid && invitationData?.church
+    const invitedChurch = invitationData?.church
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-primary-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4">
@@ -141,20 +170,41 @@ export default function SignupPage() {
                         <Cloud className="w-8 h-8 text-white" />
                     </div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                        {step === 'account' && 'Create your account'}
+                        {step === 'account' && (isInviteFlow ? 'Join the team' : 'Create your account')}
                         {step === 'verify' && 'Verify your email'}
                         {step === 'church' && 'Set up your church'}
                     </h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-1">
-                        {step === 'account' && 'Start your journey with Selah'}
+                        {step === 'account' && (isInviteFlow
+                            ? `Create your account to join ${invitedChurch?.name}'s media team`
+                            : 'Start your journey with Selah')}
                         {step === 'verify' && 'Enter the code we sent to your email'}
                         {step === 'church' && 'Create a new church or join an existing one'}
                     </p>
                 </div>
 
-                {/* Progress Steps */}
+                {/* Invitation Banner - only show on account step when there's a valid invite */}
+                {step === 'account' && isInviteFlow && invitedChurch && (
+                    <div className="mb-6 p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-xl">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 bg-primary-100 dark:bg-primary-800/30 rounded-xl flex items-center justify-center">
+                                <Users className="w-6 h-6 text-primary-600 dark:text-primary-400" />
+                            </div>
+                            <div>
+                                <p className="font-medium text-gray-900 dark:text-white">
+                                    You're invited to join
+                                </p>
+                                <p className="text-sm text-primary-600 dark:text-primary-400 font-semibold">
+                                    {invitedChurch.name}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Progress Steps - hide church step if in invite flow */}
                 <div className="flex items-center justify-center gap-2 mb-6">
-                    {['account', 'verify', 'church'].map((s, i) => (
+                    {['account', 'verify', 'church'].filter(s => !isInviteFlow || s !== 'church').map((s, i) => (
                         <div key={s} className="flex items-center gap-2">
                             <div
                                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${step === s
@@ -170,7 +220,7 @@ export default function SignupPage() {
                                     i + 1
                                 )}
                             </div>
-                            {i < 2 && (
+                            {i < (isInviteFlow ? 1 : 2) && (
                                 <div
                                     className={`w-12 h-0.5 ${['account', 'verify', 'church'].indexOf(step) > i
                                         ? 'bg-green-500'
@@ -428,7 +478,7 @@ export default function SignupPage() {
                 {step === 'account' && (
                     <p className="text-center mt-6 text-gray-600 dark:text-gray-400">
                         Already have an account?{' '}
-                        <Link to="/login" className="text-primary-600 hover:text-primary-700 font-medium">
+                        <Link to="/login" state={from ? { from } : undefined} className="text-primary-600 hover:text-primary-700 font-medium">
                             Sign in
                         </Link>
                     </p>

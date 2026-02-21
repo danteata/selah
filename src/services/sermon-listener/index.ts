@@ -17,6 +17,8 @@ export { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
 export type { FasterWhisperConfig, FasterWhisperTranscriptionResult } from './fasterWhisperTranscription'
 export { elevenLabsTranscriptionService } from './elevenLabsTranscription'
 export type { ElevenLabsConfig, ElevenLabsTranscriptionResult } from './elevenLabsTranscription'
+export { vadTranscriptionService } from './vadTranscriptionService'
+export type { VADTranscriptionConfig, VADUtterance } from './vadTranscriptionService'
 export { unifiedTranscriptionService } from './unifiedTranscription'
 export type { TranscriptionProvider, UnifiedTranscriptionOptions, TranscriptionStatus } from './unifiedTranscription'
 

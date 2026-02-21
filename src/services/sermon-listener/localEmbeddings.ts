@@ -9,21 +9,24 @@
  * - Generates 384-dimensional embeddings
  * - Works offline after initial model download
  * - Model is cached in browser storage
+ * 
+ * NOTE: Loads @xenova/transformers from CDN as an ES module to avoid Vite 
+ * bundling issues with onnxruntime-web. The onnxruntime-web package has issues
+ * when pre-bundled by Vite, causing "Cannot read properties of undefined
+ * (reading 'registerBackend')" errors.
  */
 
-import { pipeline, env } from '@xenova/transformers';
-
-// Configure Transformers.js for browser usage
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-// Singleton for the embedding pipeline
-let embedder: Awaited<ReturnType<typeof pipeline>> | null = null;
-let loadingPromise: Promise<Awaited<ReturnType<typeof pipeline>>> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let embedder: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let loadingPromise: Promise<any> | null = null;
 
 // Model configuration
 const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
 const EMBEDDING_DIMENSIONS = 384;
+
+// CDN URL for Transformers.js
+const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
 export interface EmbeddingResult {
     embedding: number[];
@@ -41,10 +44,28 @@ export interface VerseMatch {
 }
 
 /**
+ * Load Transformers.js from CDN as ES module to avoid Vite bundling issues.
+ * This prevents the onnxruntime-web "registerBackend" error.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadTransformersFromCDN(): Promise<any> {
+    // Use ES module import from CDN
+    // This bypasses Vite's bundling entirely
+    const moduleUrl = `${TRANSFORMERS_CDN}/dist/transformers.min.js`;
+
+    // Dynamic import from absolute URL - Vite won't intercept this
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const module = await import(/* @vite-ignore */ moduleUrl) as any;
+    return module;
+}
+
+/**
  * Get or initialize the embedding pipeline.
  * Uses singleton pattern to avoid re-loading the model.
+ * Loads Transformers.js from CDN to avoid Vite bundling issues.
  */
-async function getEmbedder(): Promise<Awaited<ReturnType<typeof pipeline>>> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getEmbedder(): Promise<any> {
     if (embedder) {
         return embedder;
     }
@@ -54,15 +75,27 @@ async function getEmbedder(): Promise<Awaited<ReturnType<typeof pipeline>>> {
         return loadingPromise;
     }
 
-    // Start loading
-    loadingPromise = pipeline('feature-extraction', MODEL_NAME, {
-        quantized: true, // Use quantized model for smaller size
-        progress_callback: (progress: { status: string; progress?: number }) => {
-            if (progress.status === 'progress' && progress.progress) {
-                console.log(`[Embeddings] Loading model: ${Math.round(progress.progress)}%`);
-            }
-        },
-    });
+    // Start loading - use CDN to avoid bundling issues
+    loadingPromise = (async () => {
+        // Load Transformers.js from CDN
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const transformers = await loadTransformersFromCDN() as any;
+
+        // Configure Transformers.js for browser usage
+        transformers.env.allowLocalModels = false;
+        transformers.env.useBrowserCache = true;
+
+        const model = await transformers.pipeline('feature-extraction', MODEL_NAME, {
+            quantized: true, // Use quantized model for smaller size
+            progress_callback: (progress: { status: string; progress?: number }) => {
+                if (progress.status === 'progress' && progress.progress) {
+                    console.log(`[Embeddings] Loading model: ${Math.round(progress.progress)}%`);
+                }
+            },
+        });
+
+        return model;
+    })();
 
     embedder = await loadingPromise;
     loadingPromise = null;

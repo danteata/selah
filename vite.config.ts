@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+  ],
   server: {
     strictPort: true,
     port: 3000,
@@ -28,4 +30,16 @@ export default defineConfig({
     },
   },
   envPrefix: ['VITE_'],
+  optimizeDeps: {
+    // Exclude onnxruntime-web from optimization to avoid dynamic import issues
+    // Note: @xenova/transformers is loaded from CDN, not bundled
+    exclude: ['onnxruntime-web'],
+  },
+  build: {
+    // Ensure WASM files are handled correctly
+    target: 'esnext',
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+  },
 })

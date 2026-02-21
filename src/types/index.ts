@@ -356,6 +356,18 @@ export interface AppSettings {
         fasterWhisperAudioCaptureMode?: 'browser-wav' | 'server-decode'
         /** Disable browser audio processing (noise suppression, AGC) for server-decode mode */
         fasterWhisperDisableBrowserProcessing?: boolean
+        /** Enable VAD (Voice Activity Detection) for smart chunking - works with faster-whisper */
+        useVAD?: boolean
+        /** VAD positive speech threshold (0-1) */
+        vadPositiveSpeechThreshold?: number
+        /** VAD negative speech threshold (0-1) */
+        vadNegativeSpeechThreshold?: number
+        /** VAD minimum speech frames */
+        vadMinSpeechFrames?: number
+        /** VAD pre-speech padding frames */
+        vadPreSpeechPadFrames?: number
+        /** VAD redemption frames (silence before cutting) */
+        vadRedemptionFrames?: number
         /** ElevenLabs API key */
         elevenLabsApiKey?: string
         /** ElevenLabs model ID */
