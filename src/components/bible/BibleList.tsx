@@ -310,62 +310,67 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
 
             {/* Smart Search */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-                <div className="flex gap-2">
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={query}
-                            onChange={(e) => {
-                                setQuery(e.target.value)
-                                setShowSuggestions(true)
-                            }}
-                            onKeyDown={handleKeyDown}
-                            onFocus={() => setShowSuggestions(true)}
-                            placeholder="e.g., John 3:16 or Jn 3:16-18"
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
-                        />
+                {/* Search Input - Full width */}
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        value={query}
+                        onChange={(e) => {
+                            setQuery(e.target.value)
+                            setShowSuggestions(true)
+                        }}
+                        onKeyDown={handleKeyDown}
+                        onFocus={() => setShowSuggestions(true)}
+                        placeholder="e.g., John 3:16 or Jn 3:16-18"
+                        className="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
+                    />
 
-                        {/* Book Suggestions Dropdown */}
-                        {showSuggestions && bookSuggestions.length > 0 && !scripture && (
-                            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
-                                {bookSuggestions.map((book) => (
-                                    <button
-                                        key={book}
-                                        onClick={() => {
-                                            setQuery(book + ' ')
-                                            inputRef.current?.focus()
-                                        }}
-                                        className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                    >
-                                        {book}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
+                    {/* Book Suggestions Dropdown */}
+                    {showSuggestions && bookSuggestions.length > 0 && !scripture && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
+                            {bookSuggestions.map((book) => (
+                                <button
+                                    key={book}
+                                    onClick={() => {
+                                        setQuery(book + ' ')
+                                        inputRef.current?.focus()
+                                    }}
+                                    className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                                >
+                                    {book}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Version Selector and Action Button - Second row */}
+                <div className="flex items-center justify-between mt-3">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">Version:</span>
+                        <select
+                            value={selectedVersion}
+                            onChange={(e) => changeVersion(e.target.value)}
+                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500"
+                        >
+                            {bibleVersionObjects.map((v) => (
+                                <option key={v.id} value={v.id}>{v.id}</option>
+                            ))}
+                        </select>
                     </div>
-
-                    {/* Version Selector */}
-                    <select
-                        value={selectedVersion}
-                        onChange={(e) => changeVersion(e.target.value)}
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
-                    >
-                        {bibleVersionObjects.map((v) => (
-                            <option key={v.id} value={v.id}>{v.id}</option>
-                        ))}
-                    </select>
 
                     <button
                         onClick={handleSearch}
                         disabled={loading}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                        className="px-5 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
-                        {loading ? '...' : 'Go'}
+                        {loading ? 'Searching...' : 'Search'}
                     </button>
                 </div>
-                <p className="text-sm text-gray-500 mt-2">
+
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                     Type book name (or abbreviation like "Jn" for John), chapter:verse
                 </p>
             </div>
@@ -489,8 +494,8 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
                                     <button
                                         onClick={() => setSelectedTemplate(null)}
                                         className={`p-2 rounded-lg border ${selectedTemplate
-                                                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-600'
-                                                : 'border-gray-300 dark:border-gray-600 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                            ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-600'
+                                            : 'border-gray-300 dark:border-gray-600 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
                                             }`}
                                         title={selectedTemplate ? `Using: ${selectedTemplate.name}` : 'Use template'}
                                     >
@@ -512,8 +517,8 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
                                             key={template._id}
                                             onClick={() => setSelectedTemplate(selectedTemplate?._id === template._id ? null : template)}
                                             className={`px-3 py-1 text-xs rounded-full transition-colors ${selectedTemplate?._id === template._id
-                                                    ? 'bg-primary-500 text-white'
-                                                    : 'bg-gray-100 dark:bg-gray-700 hover:bg-primary-100 dark:hover:bg-primary-900/30 text-gray-700 dark:text-gray-300'
+                                                ? 'bg-primary-500 text-white'
+                                                : 'bg-gray-100 dark:bg-gray-700 hover:bg-primary-100 dark:hover:bg-primary-900/30 text-gray-700 dark:text-gray-300'
                                                 }`}
                                         >
                                             {template.name}

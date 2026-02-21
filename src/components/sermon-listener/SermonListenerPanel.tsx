@@ -89,8 +89,10 @@ export function SermonListenerPanel({
         console.log('[SermonListenerPanel] Transcript updated:', transcript?.substring(0, 100))
     }, [transcript])
 
-    // Handle verse click - display on live
+    // Handle verse click - set as current and lookup
     const handleVerseClick = (verse: DetectedVerse) => {
+        // Just lookup the verse content, don't change currentVerse
+        // The current verse should always be the latest detected
         lookupVerse(verse)
     }
 
@@ -271,8 +273,8 @@ export function SermonListenerPanel({
                             <button
                                 onClick={() => setShowOnlyBestMatches(!showOnlyBestMatches)}
                                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${showOnlyBestMatches
-                                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
-                                        : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
+                                    : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                                     }`}
                                 title={showOnlyBestMatches ? 'Showing only confirmed verses' : 'Showing all detected verses'}
                             >
@@ -295,10 +297,10 @@ export function SermonListenerPanel({
                             <div
                                 key={`${verse.reference}-${idx}`}
                                 className={`group flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors ${currentVerse?.reference === verse.reference
-                                        ? 'bg-blue-500 text-white'
-                                        : verse.isBestMatch
-                                            ? 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
-                                            : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
+                                    ? 'bg-blue-500 text-white'
+                                    : verse.isBestMatch
+                                        ? 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
+                                        : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
                                     }`}
                                 onClick={() => handleVerseClick(verse)}
                             >
@@ -316,8 +318,8 @@ export function SermonListenerPanel({
                                         removeVerse(verse)
                                     }}
                                     className={`ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
-                                            ? 'text-white/70 hover:text-white'
-                                            : 'text-gray-400 hover:text-red-500'
+                                        ? 'text-white/70 hover:text-white'
+                                        : 'text-gray-400 hover:text-red-500'
                                         }`}
                                 >
                                     <Trash2 className="w-3 h-3" />

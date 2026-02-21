@@ -14,7 +14,7 @@ import { useAppStore } from '../../store/appStore'
 import { unifiedTranscriptionService } from '../../services/sermon-listener'
 import type { TranscriptionProvider } from '../../services/sermon-listener'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Info } from 'lucide-react'
+import { Info, Check } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
     onClose?: () => void
@@ -83,6 +83,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [isLoading, setIsLoading] = useState(false)
     const [loadingProgress, setLoadingProgress] = useState(0)
     const [providerError, setProviderError] = useState<string | null>(null)
+    const [showSaveSuccess, setShowSaveSuccess] = useState(false)
     const [webSpeechAvailable, setWebSpeechAvailable] = useState(false)
     const [whisperAvailable, setWhisperAvailable] = useState(false)
     const [whisperCppAvailable, setWhisperCppAvailable] = useState(false)
@@ -142,7 +143,12 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 language,
             },
         })
-        onClose?.()
+        // Show success toast
+        setShowSaveSuccess(true)
+        setTimeout(() => {
+            setShowSaveSuccess(false)
+            onClose?.()
+        }, 1500)
     }
 
     const handleProviderChange = async (newProvider: TranscriptionProvider) => {
@@ -214,7 +220,14 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     }
 
     return (
-        <div className="p-6 rounded-lg bg-white dark:bg-gray-800">
+        <div className="p-6 rounded-lg bg-white dark:bg-gray-800 relative">
+            {/* Success Toast */}
+            {showSaveSuccess && (
+                <div className="absolute top-4 right-4 z-50 flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg shadow-lg animate-fade-in">
+                    <Check className="w-4 h-4" />
+                    <span className="text-sm font-medium">Settings saved!</span>
+                </div>
+            )}
             <h2 className="text-xl font-bold mb-6 text-gray-900 dark:text-white">Sermon Listener Settings</h2>
 
             <div className="mb-6">

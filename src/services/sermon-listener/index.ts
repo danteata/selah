@@ -43,4 +43,4 @@ export {
     resetSemanticDetector,
     SemanticVerseDetector,
 } from './semanticVerseDetection'
-export type { SemanticVerseMatch, SemanticDetectionConfig } from './semanticVerseDetection'
+export type { SemanticVerseMatch, SemanticDetectionConfig, ExcludedRange } from './semanticVerseDetection'

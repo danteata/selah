@@ -47,7 +47,7 @@ const BOOK_MAPPINGS: Record<string, string> = {
     'neh': 'Nehemiah', 'nehemiah': 'Nehemiah',
     'esth': 'Esther', 'esther': 'Esther',
     'job': 'Job',
-    'ps': 'Psalms', 'psalm': 'Psalms', 'psalms': 'Psalms',
+    'ps': 'Psalms', 'psalm': 'Psalms', 'psalms': 'Psalms', 'pslm': 'Psalms',
     'prov': 'Proverbs', 'proverbs': 'Proverbs',
     'eccl': 'Ecclesiastes', 'eccles': 'Ecclesiastes', 'ecclesiastes': 'Ecclesiastes',
     'song': 'Song of Solomon', 'songs': 'Song of Solomon', 'song of solomon': 'Song of Solomon', 'song of songs': 'Song of Solomon',
@@ -96,6 +96,54 @@ const BOOK_MAPPINGS: Record<string, string> = {
     '3 jn': '3 John', '3 john': '3 John', 'third john': '3 John',
     'jude': 'Jude',
     'rev': 'Revelation', 'revelation': 'Revelation', 'revelations': 'Revelation',
+
+    // ASR (Automatic Speech Recognition) common errors and phonetic variations
+    // John -> Join, Joan, Jon, Jean (common ASR misrecognitions)
+    'join': 'John', 'joan': 'John', 'jon': 'John', 'jean': 'John',
+    // Psalms -> sanct, som, sum, psalm (phonetic variations)
+    'sanct': 'Psalms', 'some': 'Psalms', 'sum': 'Psalms', 'salm': 'Psalms',
+    'sans': 'Psalms', 'saint': 'Psalms',
+    // Matthew -> mathew, mathieu, matty
+    'mathew': 'Matthew', 'mathieu': 'Matthew', 'matty': 'Matthew',
+    // Mark -> marc, marke
+    'marc': 'Mark', 'marke': 'Mark',
+    // Luke -> look, luc
+    'look': 'Luke', 'luc': 'Luke',
+    // Romans -> roman, ramon
+    'roman': 'Romans', 'ramon': 'Romans',
+    // Corinthians -> corinthian, courant, current
+    'corinthian': 'Corinthians', 'courant': 'Corinthians', 'current': 'Corinthians',
+    'core in': 'Corinthians', 'cor in': 'Corinthians',
+    // Galatians -> galatian
+    'galatian': 'Galatians', 'gal ation': 'Galatians',
+    // Ephesians -> ephesian, fish in
+    'ephesian': 'Ephesians', 'fish in': 'Ephesians',
+    // Philippians -> philippian, fill up
+    'philippian': 'Philippians', 'fill up': 'Philippians',
+    // Colossians -> colossian
+    'colossian': 'Colossians',
+    // Thessalonians -> thessalonian
+    'thessalonian': 'Thessalonians',
+    // Timothy -> timmothy, timothee
+    'timmothy': 'Timothy', 'timothee': 'Timothy',
+    // Peter -> peters, pedro
+    'peters': 'Peter', 'pedro': 'Peter', 'peet': 'Peter',
+    // James -> jams, jame
+    'jams': 'James', 'jame': 'James',
+    // Hebrews -> hebrew, he bread
+    'hebrew': 'Hebrews', 'he bread': 'Hebrews',
+    // Genesis -> genes is, jenny's
+    'genes is': 'Genesis', 'jenny is': 'Genesis',
+    // Exodus -> exo dus, ex doubt
+    'exo dus': 'Exodus', 'ex doubt': 'Exodus',
+    // Isaiah -> isa, izzy
+    'izzy': 'Isaiah',
+    // Jeremiah -> jeremi, jeremy
+    'jeremi': 'Jeremiah', 'jeremy': 'Jeremiah',
+    // Ezekiel -> ezekiel, easy kill
+    'easy kill': 'Ezekiel', 'easy keel': 'Ezekiel',
+    // Daniel -> dan, danny
+    'danny': 'Daniel',
 }
 
 // Book names with their corresponding book numbers (for internal use)
@@ -207,8 +255,8 @@ function buildBookPattern(): string {
 
 const BOOK_PATTERN = buildBookPattern()
 
-// Pattern for chapter and verse
-const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*[:\\.]\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
+// Pattern for chapter and verse (supports colon, period, or hyphen as separator)
+const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*[:\\.\\-]\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
 
 // Full verse detection pattern
 const VERSE_PATTERN = new RegExp(
@@ -371,19 +419,33 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
 
         let pointer = tokenIndex + alias.aliasTokens.length
 
+        // Track if we found "chapter" keyword (affects confidence and parsing)
+        let hasChapterKeyword = false
+        let hasVerseKeyword = false
+
+        // Check for "chapter" keyword
         if (tokens[pointer] === 'chapter') {
+            hasChapterKeyword = true
             pointer += 1
         }
 
-        const chapter = parseNumberFromTokens(tokens, pointer)
+        // Parse chapter - use single token if no "chapter" keyword to avoid consuming verse
+        const chapter = hasChapterKeyword
+            ? parseNumberFromTokens(tokens, pointer, 4)  // Allow multi-word like "twenty three"
+            : parseNumberFromTokens(tokens, pointer, 1)  // Single token only
         if (!chapter) continue
         pointer = chapter.nextIndex
 
+        // Check for "verse" or "verses" keyword
         if (tokens[pointer] === 'verse' || tokens[pointer] === 'verses') {
+            hasVerseKeyword = true
             pointer += 1
         }
 
-        const verseStart = parseNumberFromTokens(tokens, pointer)
+        // Parse verse - use single token if no "verse" keyword
+        const verseStart = hasVerseKeyword
+            ? parseNumberFromTokens(tokens, pointer, 4)
+            : parseNumberFromTokens(tokens, pointer, 1)
         if (!verseStart) continue
         pointer = verseStart.nextIndex
 
@@ -410,6 +472,9 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
             searchFrom = endIndex
         }
 
+        // Higher confidence if both chapter and verse keywords are present
+        const confidence = (hasChapterKeyword && hasVerseKeyword) ? 'high' : 'medium'
+
         detected.push({
             raw,
             reference,
@@ -419,7 +484,7 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
             verseEnd,
             startIndex: startIndex === -1 ? 0 : startIndex,
             endIndex: endIndex === -1 ? raw.length : endIndex,
-            confidence: 'medium',
+            confidence,
         })
 
         tokenIndex = Math.max(tokenIndex, pointer - 1)

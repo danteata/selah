@@ -128,7 +128,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 onUpdate={{ setDefaultBibleVersion, setFootnotes }}
                             />
                         )}
-                        {activeTab === 'sermon-listener' && <SermonListenerSettings />}
+                        {activeTab === 'sermon-listener' && <SermonListenerSettings onClose={onClose} />}
                         {activeTab === 'team' && isAdmin && currentUser?.churchId && (
                             <TeamManagementPanel churchId={currentUser.churchId} isAdmin={isAdmin} />
                         )}
