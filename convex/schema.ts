@@ -176,6 +176,8 @@ export default defineSchema({
         cover: v.optional(v.string()),
         author: v.optional(v.string()),
         verses: v.optional(v.array(v.string())),
+        copyright: v.optional(v.string()),
+        ccli: v.optional(v.string()),
         isPublic: v.optional(v.boolean()),
         createdBy: v.optional(v.string()),
         churchId: v.optional(v.string()),

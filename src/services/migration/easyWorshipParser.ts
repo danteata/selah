@@ -2,13 +2,20 @@
  * EasyWorship Song Parser
  * 
  * Parses song data from EasyWorship 6 and 7 exports:
- * - SQLite database (Songs.db)
+ * - SQLite databases (Songs.db, SongWords.db, SongKeys.db)
  * - XML export files
  * - CSV export files
+ * 
+ * EasyWorship 6/7 stores data across multiple SQLite databases:
+ * - Songs.db: Song metadata (title, author, copyright, etc.)
+ * - SongWords.db: Lyrics in RTF format
+ * - SongKeys.db: Search keywords
+ * - SongHistory.db: Usage history
  */
 
-import type { EWSongSQLite, EWSongXML, ParsedSong, EasyWorshipFileType } from './types';
+import type { EWSongSQLite, EWSongWords, ParsedSong, EasyWorshipFileType } from './types';
 import { parseVersesRaw, cleanLyrics, isEasyWorshipFormat } from './verseParser';
+import { parseRTF, extractVerseStructureFromRTF } from './rtfParser';
 
 // Import sql.js for SQLite parsing (browser-based)
 // This is a WebAssembly version of SQLite that works in the browser
@@ -47,8 +54,12 @@ export function detectFileType(file: File): EasyWorshipFileType {
 }
 
 /**
- * Parse EasyWorship SQLite database (Songs.db)
- * Works with both EW6 and EW7 formats
+ * Parse EasyWorship SQLite database(s)
+ * 
+ * Can handle:
+ * - Single Songs.db file (if lyrics are embedded)
+ * - Multiple files: Songs.db + SongWords.db
+ * - A zip file containing all EasyWorship data files
  */
 export async function parseSQLite(file: File): Promise<ParsedSong[]> {
     try {
@@ -58,86 +69,310 @@ export async function parseSQLite(file: File): Promise<ParsedSong[]> {
 
         const db = new sql.Database(uint8Array);
 
-        // Try to find the songs table
-        // EW6: usually "Song" table
-        // EW7: usually "songs" or "Song" table
-        let tableName = 'Song';
-
-        // Check if table exists
+        // Get all table names
         const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
         const tableNames = tables[0]?.values.map((v: any) => v[0]) || [];
 
-        if (tableNames.includes('songs')) {
-            tableName = 'songs';
-        } else if (tableNames.includes('Song')) {
-            tableName = 'Song';
+        console.log('SQLite tables found:', tableNames);
+
+        // Determine which database type this is
+        const hasSongTable = tableNames.some((t: string) => t.toLowerCase() === 'song');
+        const hasWordTable = tableNames.some((t: string) => t.toLowerCase() === 'word');
+
+        if (hasWordTable && !hasSongTable) {
+            // This is SongWords.db - contains lyrics only
+            console.log('Detected SongWords.db (lyrics database)');
+            return parseSongWordsDB(db, tableNames);
+        } else if (hasSongTable) {
+            // This is Songs.db - contains metadata
+            console.log('Detected Songs.db (metadata database)');
+            return parseSongsDB(db, tableNames);
         } else {
-            // Try to find any table with 'song' in the name
-            const songTable = tableNames.find((n: string) => n.toLowerCase().includes('song'));
-            if (songTable) {
-                tableName = songTable;
-            } else {
-                throw new Error('No songs table found in database');
-            }
+            throw new Error('Unrecognized database structure. Expected Songs.db or SongWords.db format.');
         }
-
-        // Query all songs
-        const result = db.exec(`SELECT * FROM "${tableName}"`);
-
-        console.log('Full SQLite result:', JSON.stringify(result, null, 2));
-
-        if (!result.length || !result[0]) {
-            console.log('No results from query');
-            return [];
-        }
-
-        const queryResult = result[0];
-
-        // sql.js returns { lc: [], values: [[]] } - lc contains lowercase column names
-        const columns: string[] = (queryResult as any).lc || queryResult.columns || [];
-        const rows: any[][] = queryResult.values || [];
-
-        if (!rows.length) {
-            console.log('No rows in result');
-            return [];
-        }
-
-        console.log('SQLite query result:', { tableName, columns, rowCount: rows.length });
-
-        // Map column names to lowercase for easier lookup
-        const colIndex: Record<string, number> = {};
-        columns.forEach((col, i) => {
-            colIndex[col.toLowerCase()] = i;
-        });
-
-        // Parse each row into ParsedSong
-        const songs: ParsedSong[] = rows.map(row => {
-            const rawSong: EWSongSQLite = {
-                song_id: row[colIndex['song_id']] ?? row[colIndex['id']],
-                title: row[colIndex['title']] ?? '',
-                author: row[colIndex['author']] ?? row[colIndex['authors']],
-                lyrics: row[colIndex['lyrics']] ?? row[colIndex['words']] ?? '',
-                copyright: row[colIndex['copyright']],
-                ccli_number: row[colIndex['ccli_number']] ?? row[colIndex['cclinumber']],
-                ccli: row[colIndex['ccli']],
-                alternate_title: row[colIndex['alternate_title']] ?? row[colIndex['alternatetitle']],
-                book_name: row[colIndex['book_name']],
-                notes: row[colIndex['notes']],
-                themes: row[colIndex['themes']] ?? row[colIndex['theme']],
-                keywords: row[colIndex['keywords']],
-                publisher: row[colIndex['publisher']],
-                release_year: row[colIndex['release_year']],
-            };
-
-            return parseRawSong(rawSong);
-        });
-
-        db.close();
-        return songs;
     } catch (error) {
         console.error('Error parsing SQLite:', error);
         throw new Error(`Failed to parse SQLite database: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+}
+
+/**
+ * Parse Songs.db - contains song metadata
+ */
+async function parseSongsDB(db: any, tableNames: string[]): Promise<ParsedSong[]> {
+    // Find the song table
+    const songTableName = tableNames.find((t: string) => t.toLowerCase() === 'song') || 'song';
+
+    // Query all songs
+    const result = db.exec(`SELECT * FROM "${songTableName}"`);
+
+    if (!result.length || !result[0]) {
+        console.log('No results from Songs.db query');
+        return [];
+    }
+
+    const queryResult = result[0];
+    const columns: string[] = (queryResult as any).lc || queryResult.columns || [];
+    const rows: any[][] = queryResult.values || [];
+
+    if (!rows.length) {
+        console.log('No rows in Songs.db');
+        return [];
+    }
+
+    console.log(`Found ${rows.length} songs in Songs.db`);
+
+    // Map column names to lowercase for easier lookup
+    const colIndex: Record<string, number> = {};
+    columns.forEach((col, i) => {
+        colIndex[col.toLowerCase()] = i;
+    });
+
+    // Parse each row into ParsedSong
+    const songs: ParsedSong[] = rows.map(row => {
+        const rawSong: EWSongSQLite = {
+            rowid: row[colIndex['rowid']] ?? row[colIndex['id']],
+            song_item_uid: row[colIndex['song_item_uid']],
+            song_rev_uid: row[colIndex['song_rev_uid']],
+            song_uid: row[colIndex['song_uid']],
+            title: row[colIndex['title']] ?? '',
+            author: row[colIndex['author']] ?? '',
+            copyright: row[colIndex['copyright']],
+            administrator: row[colIndex['administrator']],
+            description: row[colIndex['description']],
+            tags: row[colIndex['tags']],
+            reference_number: row[colIndex['reference_number']],
+            provider_id: row[colIndex['provider_id']],
+            vendor_id: row[colIndex['vendor_id']],
+            presentation_id: row[colIndex['presentation_id']],
+            layout_revision: row[colIndex['layout_revision']],
+            revision: row[colIndex['revision']],
+        };
+
+        return parseRawSongFromMetadata(rawSong);
+    });
+
+    db.close();
+    return songs;
+}
+
+/**
+ * Parse SongWords.db - contains lyrics in RTF format
+ */
+async function parseSongWordsDB(db: any, tableNames: string[]): Promise<ParsedSong[]> {
+    // Find the word table
+    const wordTableName = tableNames.find((t: string) => t.toLowerCase() === 'word') || 'word';
+
+    // Query all lyrics
+    const result = db.exec(`SELECT * FROM "${wordTableName}"`);
+
+    if (!result.length || !result[0]) {
+        console.log('No results from SongWords.db query');
+        return [];
+    }
+
+    const queryResult = result[0];
+    const columns: string[] = (queryResult as any).lc || queryResult.columns || [];
+    const rows: any[][] = queryResult.values || [];
+
+    if (!rows.length) {
+        console.log('No rows in SongWords.db');
+        return [];
+    }
+
+    console.log(`Found ${rows.length} lyrics entries in SongWords.db`);
+
+    // Map column names to lowercase for easier lookup
+    const colIndex: Record<string, number> = {};
+    columns.forEach((col, i) => {
+        colIndex[col.toLowerCase()] = i;
+    });
+
+    // Parse each row into ParsedSong (lyrics only, no metadata)
+    const songs: ParsedSong[] = rows.map(row => {
+        const songId = row[colIndex['song_id']];
+        const rtfLyrics = row[colIndex['words']] ?? '';
+
+        // Parse RTF to plain text
+        const plainLyrics = parseRTF(rtfLyrics);
+
+        // Extract verse structure
+        const verseStructure = extractVerseStructureFromRTF(rtfLyrics);
+        const verses = verseStructure
+            .filter(v => v.content.trim())
+            .map(v => v.content);
+
+        return {
+            title: `Song ${songId}`, // Will be matched with Songs.db
+            author: 'Unknown',
+            lyrics: plainLyrics,
+            verses: verses.length > 0 ? verses : (plainLyrics ? [plainLyrics] : []),
+            raw: { rowid: songId, words: rtfLyrics } as any,
+            isValid: plainLyrics.trim().length > 0,
+            validationErrors: plainLyrics.trim() ? [] : ['Missing lyrics'],
+            _songId: songId, // For matching with metadata
+        } as ParsedSong & { _songId: number };
+    });
+
+    db.close();
+    return songs;
+}
+
+/**
+ * Parse multiple EasyWorship database files and merge them
+ * 
+ * @param files - Object containing File objects for each database
+ */
+export async function parseEasyWorshipDatabases(files: {
+    songsDb?: File;
+    songWordsDb?: File;
+    songKeysDb?: File;
+}): Promise<ParsedSong[]> {
+    const sql = await initSqlJs();
+
+    // Parse metadata from Songs.db
+    let songsMetadata: Map<number, EWSongSQLite> = new Map();
+    if (files.songsDb) {
+        const arrayBuffer = await files.songsDb.arrayBuffer();
+        const db = new sql.Database(new Uint8Array(arrayBuffer));
+
+        const result = db.exec('SELECT * FROM song');
+        if (result.length && result[0]) {
+            const columns: string[] = (result[0] as any).lc || result[0].columns || [];
+            const rows: any[][] = result[0].values || [];
+
+            const colIndex: Record<string, number> = {};
+            columns.forEach((col, i) => {
+                colIndex[col.toLowerCase()] = i;
+            });
+
+            for (const row of rows) {
+                const songId = row[colIndex['rowid']];
+                const metadata: EWSongSQLite = {
+                    rowid: songId,
+                    song_item_uid: row[colIndex['song_item_uid']],
+                    song_rev_uid: row[colIndex['song_rev_uid']],
+                    song_uid: row[colIndex['song_uid']],
+                    title: row[colIndex['title']] ?? '',
+                    author: row[colIndex['author']] ?? '',
+                    copyright: row[colIndex['copyright']],
+                    administrator: row[colIndex['administrator']],
+                    description: row[colIndex['description']],
+                    tags: row[colIndex['tags']],
+                    reference_number: row[colIndex['reference_number']],
+                    provider_id: row[colIndex['provider_id']],
+                    vendor_id: row[colIndex['vendor_id']],
+                    presentation_id: row[colIndex['presentation_id']],
+                    layout_revision: row[colIndex['layout_revision']],
+                    revision: row[colIndex['revision']],
+                };
+                songsMetadata.set(songId, metadata);
+            }
+        }
+        db.close();
+    }
+
+    // Parse lyrics from SongWords.db
+    let songsWithLyrics: ParsedSong[] = [];
+    if (files.songWordsDb) {
+        const arrayBuffer = await files.songWordsDb.arrayBuffer();
+        const db = new sql.Database(new Uint8Array(arrayBuffer));
+
+        const result = db.exec('SELECT * FROM word');
+        if (result.length && result[0]) {
+            const columns: string[] = (result[0] as any).lc || result[0].columns || [];
+            const rows: any[][] = result[0].values || [];
+
+            const colIndex: Record<string, number> = {};
+            columns.forEach((col, i) => {
+                colIndex[col.toLowerCase()] = i;
+            });
+
+            for (const row of rows) {
+                const songId = row[colIndex['song_id']];
+                const rtfLyrics = row[colIndex['words']] ?? '';
+
+                // Get metadata if available
+                const metadata = songsMetadata.get(songId);
+
+                // Parse RTF to plain text
+                const plainLyrics = parseRTF(rtfLyrics);
+
+                // Extract verse structure
+                const verseStructure = extractVerseStructureFromRTF(rtfLyrics);
+                const verses = verseStructure
+                    .filter(v => v.content.trim())
+                    .map(v => v.content);
+
+                const song: ParsedSong = {
+                    title: metadata?.title ?? `Song ${songId}`,
+                    author: metadata?.author ?? 'Unknown',
+                    lyrics: plainLyrics,
+                    verses: verses.length > 0 ? verses : (plainLyrics ? [plainLyrics] : []),
+                    copyright: metadata?.copyright,
+                    ccli: metadata?.reference_number,
+                    themes: metadata?.tags?.split(/[;,]/).map(t => t.trim()).filter(Boolean),
+                    raw: metadata || { rowid: songId },
+                    isValid: !!(metadata?.title && plainLyrics.trim()),
+                    validationErrors: [
+                        ...(metadata?.title ? [] : ['Missing title']),
+                        ...(plainLyrics.trim() ? [] : ['Missing lyrics']),
+                    ],
+                };
+
+                songsWithLyrics.push(song);
+            }
+        }
+        db.close();
+    }
+
+    // If we only have Songs.db (no SongWords.db), create songs from metadata only
+    if (songsMetadata.size > 0 && songsWithLyrics.length === 0) {
+        for (const [_, metadata] of songsMetadata) {
+            songsWithLyrics.push(parseRawSongFromMetadata(metadata));
+        }
+    }
+
+    return songsWithLyrics;
+}
+
+/**
+ * Parse a raw song metadata into ParsedSong format
+ */
+function parseRawSongFromMetadata(raw: EWSongSQLite): ParsedSong {
+    const validationErrors: string[] = [];
+
+    // Extract and clean title
+    const title = (raw.title || '').trim();
+    if (!title) {
+        validationErrors.push('Missing title');
+    }
+
+    // Extract and clean author/artist
+    const author = (raw.author || 'Unknown').trim();
+
+    // Note: Lyrics are not in Songs.db, they're in SongWords.db
+    // This is a placeholder for when we only have metadata
+    const lyrics = '';
+    const verses: string[] = [];
+
+    // Extract themes from tags
+    const themes = raw.tags
+        ? raw.tags.split(/[;,]/).map(t => t.trim()).filter(Boolean)
+        : [];
+
+    return {
+        title,
+        author,
+        lyrics,
+        verses,
+        copyright: raw.copyright || undefined,
+        ccli: raw.reference_number || undefined,
+        themes: themes.length > 0 ? themes : undefined,
+        raw,
+        isValid: validationErrors.length === 0,
+        validationErrors,
+    };
 }
 
 /**
@@ -157,30 +392,62 @@ export async function parseXML(file: File): Promise<ParsedSong[]> {
 
         // Find all song elements
         // EW XML format can vary, try common structures
-        const songElements = doc.querySelectorAll('song, Song, SONG');
+        let songElements = doc.querySelectorAll('song, Song, SONG');
 
         if (!songElements.length) {
             // Try alternative format with root container
-            const rootSongs = doc.querySelectorAll('songs > song, Songs > Song, SONGS > SONG');
-            if (!rootSongs.length) {
-                throw new Error('No songs found in XML file');
-            }
+            songElements = doc.querySelectorAll('songs > song, Songs > Song, SONGS > SONG');
+        }
+
+        if (!songElements.length) {
+            throw new Error('No songs found in XML file');
         }
 
         const songs: ParsedSong[] = [];
 
         songElements.forEach(songEl => {
-            const rawSong: EWSongXML = {
-                title: getElementText(songEl, 'title, Title, TITLE'),
-                author: getElementText(songEl, 'author, Author, AUTHOR, authors, Authors'),
-                lyrics: getElementText(songEl, 'lyrics, Lyrics, LYRICS, words, Words'),
-                copyright: getElementText(songEl, 'copyright, Copyright, COPYRIGHT'),
-                ccli: getElementText(songEl, 'ccli, CCLI, ccli_number'),
-                alternate_title: getElementText(songEl, 'alternate_title, alternateTitle'),
-                themes: getElementText(songEl, 'themes, Themes, theme, Theme'),
-            };
+            const title = getElementText(songEl, 'title, Title, TITLE');
+            const author = getElementText(songEl, 'author, Author, AUTHOR, authors, Authors');
+            const lyricsRaw = getElementText(songEl, 'lyrics, Lyrics, LYRICS, words, Words');
+            const copyright = getElementText(songEl, 'copyright, Copyright, COPYRIGHT');
+            const ccli = getElementText(songEl, 'ccli, CCLI, ccli_number');
 
-            songs.push(parseRawSong(rawSong));
+            // Check if lyrics are RTF
+            let lyrics = lyricsRaw;
+            let verses: string[] = [];
+
+            if (lyricsRaw.startsWith('{\\rtf')) {
+                // Parse RTF
+                lyrics = parseRTF(lyricsRaw);
+                const verseStructure = extractVerseStructureFromRTF(lyricsRaw);
+                verses = verseStructure
+                    .filter(v => v.content.trim())
+                    .map(v => v.content);
+            } else if (lyrics) {
+                // Plain text - check for verse markers
+                lyrics = cleanLyrics(lyrics);
+                if (isEasyWorshipFormat(lyrics)) {
+                    verses = parseVersesRaw(lyrics);
+                } else {
+                    verses = [lyrics];
+                }
+            }
+
+            const validationErrors: string[] = [];
+            if (!title) validationErrors.push('Missing title');
+            if (!lyrics) validationErrors.push('Missing lyrics');
+
+            songs.push({
+                title: title || 'Untitled',
+                author: author || 'Unknown',
+                lyrics,
+                verses: verses.length > 0 ? verses : (lyrics ? [lyrics] : []),
+                copyright: copyright || undefined,
+                ccli: ccli || undefined,
+                raw: { title, author, lyrics: lyricsRaw, copyright, ccli },
+                isValid: validationErrors.length === 0,
+                validationErrors,
+            });
         });
 
         return songs;
@@ -224,16 +491,46 @@ export async function parseCSV(file: File): Promise<ParsedSong[]> {
 
             const values = parseCSVLine(line);
 
-            const rawSong: EWSongSQLite = {
-                title: values[colIndex['title']] ?? '',
-                author: values[colIndex['author']] ?? values[colIndex['authors']],
-                lyrics: values[colIndex['lyrics']] ?? values[colIndex['words']] ?? '',
-                copyright: values[colIndex['copyright']],
-                ccli_number: values[colIndex['ccli_number']] ?? values[colIndex['ccli']],
-                alternate_title: values[colIndex['alternate_title']],
-            };
+            const title = values[colIndex['title']] ?? '';
+            const author = values[colIndex['author']] ?? values[colIndex['authors']] ?? 'Unknown';
+            let lyricsRaw = values[colIndex['lyrics']] ?? values[colIndex['words']] ?? '';
+            const copyright = values[colIndex['copyright']];
+            const ccli = values[colIndex['ccli_number']] ?? values[colIndex['ccli']];
 
-            songs.push(parseRawSong(rawSong));
+            // Check if lyrics are RTF
+            let lyrics = lyricsRaw;
+            let verses: string[] = [];
+
+            if (lyricsRaw.startsWith('{\\rtf')) {
+                lyrics = parseRTF(lyricsRaw);
+                const verseStructure = extractVerseStructureFromRTF(lyricsRaw);
+                verses = verseStructure
+                    .filter(v => v.content.trim())
+                    .map(v => v.content);
+            } else if (lyricsRaw) {
+                lyrics = cleanLyrics(lyricsRaw);
+                if (isEasyWorshipFormat(lyrics)) {
+                    verses = parseVersesRaw(lyrics);
+                } else {
+                    verses = [lyrics];
+                }
+            }
+
+            const validationErrors: string[] = [];
+            if (!title) validationErrors.push('Missing title');
+            if (!lyrics) validationErrors.push('Missing lyrics');
+
+            songs.push({
+                title: title || 'Untitled',
+                author,
+                lyrics,
+                verses: verses.length > 0 ? verses : (lyrics ? [lyrics] : []),
+                copyright,
+                ccli,
+                raw: { title, author, lyrics: lyricsRaw, copyright, ccli_number: ccli },
+                isValid: validationErrors.length === 0,
+                validationErrors,
+            });
         }
 
         return songs;
@@ -241,63 +538,6 @@ export async function parseCSV(file: File): Promise<ParsedSong[]> {
         console.error('Error parsing CSV:', error);
         throw new Error(`Failed to parse CSV file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-}
-
-/**
- * Parse a raw song into ParsedSong format
- */
-function parseRawSong(raw: EWSongSQLite | EWSongXML): ParsedSong {
-    const validationErrors: string[] = [];
-
-    // Extract and clean title
-    const title = (raw.title || '').trim();
-    if (!title) {
-        validationErrors.push('Missing title');
-    }
-
-    // Extract and clean author/artist
-    const author = (raw.author || 'Unknown').trim();
-
-    // Extract and clean lyrics
-    let lyrics = cleanLyrics(raw.lyrics || '');
-    if (!lyrics) {
-        validationErrors.push('Missing lyrics');
-        lyrics = '';
-    }
-
-    // Parse verses
-    let verses: string[] = [];
-    if (lyrics) {
-        if (isEasyWorshipFormat(lyrics)) {
-            verses = parseVersesRaw(lyrics);
-        } else {
-            // Plain text - treat as single verse
-            verses = [lyrics];
-        }
-    }
-
-    // Extract CCLI (check both field names)
-    const ccli = raw.ccli || (raw as EWSongSQLite).ccli_number || '';
-
-    // Extract themes
-    const themesRaw = (raw as EWSongSQLite).themes || '';
-    const themes = themesRaw
-        ? themesRaw.split(/[;,]/).map(t => t.trim()).filter(Boolean)
-        : [];
-
-    return {
-        title,
-        author,
-        lyrics,
-        verses,
-        copyright: raw.copyright || undefined,
-        ccli: ccli || undefined,
-        alternateTitle: (raw as EWSongSQLite).alternate_title || undefined,
-        themes: themes.length > 0 ? themes : undefined,
-        raw,
-        isValid: validationErrors.length === 0,
-        validationErrors,
-    };
 }
 
 /**

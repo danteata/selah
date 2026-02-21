@@ -2,13 +2,25 @@
  * Migration Types for EasyWorship to Selah
  */
 
-// EasyWorship raw song format from SQLite
+// EasyWorship 6/7 song format from Songs.db
 export interface EWSongSQLite {
-    song_id?: number;
-    title: string;
-    author?: string;
-    lyrics?: string;
-    copyright?: string;
+    rowid?: number;                         // Primary key
+    song_item_uid?: string;                 // Unique item identifier
+    song_rev_uid?: string;                  // Revision UID
+    song_uid?: string;                      // Song UID
+    title?: string;                         // Song title
+    author?: string;                        // Author/composer
+    copyright?: string;                     // Copyright info
+    administrator?: string;                 // Administrator
+    description?: string;                   // Description
+    tags?: string;                          // Tags
+    reference_number?: string;              // Reference number (e.g., CCLI)
+    provider_id?: number;                   // Provider ID (-1 for local)
+    vendor_id?: number;                     // Vendor ID
+    presentation_id?: number;               // Presentation ID
+    layout_revision?: number;               // Layout revision number
+    revision?: number;                      // Revision number
+    // Legacy fields that may exist in older versions
     ccli_number?: string;
     ccli?: string;
     alternate_title?: string;
@@ -20,6 +32,16 @@ export interface EWSongSQLite {
     keywords?: string;
     publisher?: string;
     release_year?: string;
+}
+
+// EasyWorship words/lyrics from SongWords.db
+export interface EWSongWords {
+    rowid: number;                          // Primary key
+    song_id: number;                        // Foreign key to song.rowid
+    words: string;                          // RTF formatted lyrics
+    slide_uids?: string;                    // Slide UIDs
+    slide_layout_revisions?: number[];      // Layout revisions
+    slide_revisions?: number[];             // Slide revisions
 }
 
 // EasyWorship XML song format
