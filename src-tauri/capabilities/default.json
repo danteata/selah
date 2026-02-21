@@ -1,0 +1,22 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "identifier": "default",
+    "description": "Default capabilities for Selah desktop app",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "core:default",
+        "shell:allow-open",
+        "dialog:default",
+        "fs:default",
+        "fs:allow-read-text-file",
+        "fs:allow-write-text-file",
+        "fs:allow-exists",
+        "fs:allow-mkdir",
+        "fs:allow-remove",
+        "fs:allow-read-dir",
+        "process:default",
+        "updater:default"
+    ]
+}
