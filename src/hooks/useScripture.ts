@@ -48,15 +48,27 @@ export function useScripture() {
     const fetchFromConvex = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
         try {
             console.log(`Fetching Bible version ${version} from Convex...`)
-            const result = await convex.query(api.bibleVersions.getBibleVersion, { id: version })
 
-            if (!result) {
-                console.warn(`Version ${version} not found on Convex`)
+            // Get the file URL from Convex storage
+            const fileResult = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId: version })
+
+            if (!fileResult?.url) {
+                console.warn(`Version ${version} file not found on Convex`)
                 return null
             }
 
-            console.log(`Found ${version} metadata on Convex (verse data is stored in file storage)`)
-            return null
+            console.log(`Found ${version} on Convex, fetching from storage: ${fileResult.url}`)
+
+            // Fetch the actual Bible data from Convex storage
+            const response = await fetch(fileResult.url)
+            if (!response.ok) {
+                console.warn(`Failed to fetch ${version} from Convex storage: ${response.status}`)
+                return null
+            }
+
+            const bibleData = await response.json() as BibleVerse[]
+            console.log(`Successfully fetched ${version} from Convex (${bibleData.length} verses)`)
+            return bibleData
         } catch (error) {
             console.error('Error fetching from Convex:', error)
             return null

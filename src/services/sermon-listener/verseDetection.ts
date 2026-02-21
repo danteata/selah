@@ -98,8 +98,9 @@ const BOOK_MAPPINGS: Record<string, string> = {
     'rev': 'Revelation', 'revelation': 'Revelation', 'revelations': 'Revelation',
 
     // ASR (Automatic Speech Recognition) common errors and phonetic variations
-    // John -> Join, Joan, Jon, Jean (common ASR misrecognitions)
-    'join': 'John', 'joan': 'John', 'jon': 'John', 'jean': 'John',
+    // John -> Join, Joan, Jean (common ASR misrecognitions)
+    // Note: 'jon' is already mapped to 'Jonah' above
+    'join': 'John', 'joan': 'John', 'jean': 'John',
     // Psalms -> sanct, som, sum, psalm (phonetic variations)
     'sanct': 'Psalms', 'some': 'Psalms', 'sum': 'Psalms', 'salm': 'Psalms',
     'sans': 'Psalms', 'saint': 'Psalms',

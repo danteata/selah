@@ -8,10 +8,11 @@
  * - Generate embeddings locally using Transformers.js (FREE)
  * - Cache in IndexedDB for offline use
  * - Select which Bible versions to cache
- * - Auto-seed KJV by default for verse detection to work out of the box
+ * - Background processing with browser notifications
+ * - Accurate progress tracking
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useConvex, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import {
@@ -24,7 +25,21 @@ import {
     clearCachedEmbeddingsForVersion,
 } from '../../services/sermon-listener/localEmbeddings'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Check, Loader2, Download, Trash2, RefreshCw } from 'lucide-react'
+import { Check, Loader2, Download, Trash2, RefreshCw, Bell, BellOff } from 'lucide-react'
+
+// Global background seeding state (persists across modal closes)
+declare global {
+    interface Window {
+        __localSeeding?: Map<string, {
+            versionId: string
+            versionName: string
+            progress: number
+            total: number
+            status: 'seeding' | 'completed' | 'error'
+            error?: string
+        }>
+    }
+}
 
 interface LocalSyncStatus {
     versionId: string
@@ -86,6 +101,59 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
     const [modelLoaded, setModelLoaded] = useState(false)
     const [activeSeeding, setActiveSeeding] = useState<string | null>(null)
     const [showSuccess, setShowSuccess] = useState(false)
+    const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default')
+    const [backgroundSeedingStates, setBackgroundSeedingStates] = useState<Map<string, {
+        versionId: string
+        versionName: string
+        progress: number
+        total: number
+        status: 'seeding' | 'completed' | 'error'
+        error?: string
+    }>>(new Map())
+
+    const seedingAbortControllerRef = useRef<AbortController | null>(null)
+
+    // Initialize background seeding state
+    useEffect(() => {
+        if (!window.__localSeeding) {
+            window.__localSeeding = new Map()
+        }
+        setBackgroundSeedingStates(new Map(window.__localSeeding))
+    }, [])
+
+    // Poll for background seeding updates
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (window.__localSeeding) {
+                setBackgroundSeedingStates(new Map(window.__localSeeding))
+            }
+        }, 1000)
+        return () => clearInterval(interval)
+    }, [])
+
+    // Check notification permission
+    useEffect(() => {
+        if ('Notification' in window) {
+            setNotificationPermission(Notification.permission)
+        }
+    }, [])
+
+    // Request notification permission
+    const requestNotificationPermission = useCallback(async () => {
+        if (!('Notification' in window)) {
+            console.log('Notifications not supported')
+            return
+        }
+        const permission = await Notification.requestPermission()
+        setNotificationPermission(permission)
+    }, [])
+
+    // Show notification
+    const showNotification = useCallback((title: string, body: string) => {
+        if (notificationPermission === 'granted' && 'Notification' in window) {
+            new Notification(title, { body, icon: '/vite.svg' })
+        }
+    }, [notificationPermission])
 
     // Initialize embedding model
     const loadModel = useCallback(async () => {
@@ -143,6 +211,10 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
 
         setActiveSeeding(versionId)
 
+        // Create abort controller for this seeding session
+        seedingAbortControllerRef.current = new AbortController()
+        const signal = seedingAbortControllerRef.current.signal
+
         try {
             // Update status to loading model
             setStatuses((prev) =>
@@ -187,6 +259,22 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                 throw new Error('Bible version data is empty')
             }
 
+            // Use actual verses length for progress tracking
+            const totalVerses = verses.length
+
+            // Initialize background seeding state
+            if (!window.__localSeeding) {
+                window.__localSeeding = new Map()
+            }
+            window.__localSeeding.set(versionId, {
+                versionId,
+                versionName: version.name,
+                progress: 0,
+                total: totalVerses,
+                status: 'seeding',
+            })
+            setBackgroundSeedingStates(new Map(window.__localSeeding))
+
             const BATCH_SIZE = 50
             const allEmbeddings: Array<{
                 reference: string
@@ -200,6 +288,11 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
 
             // Process in batches
             for (let i = 0; i < verses.length; i += BATCH_SIZE) {
+                // Check for abort
+                if (signal.aborted) {
+                    throw new Error('Seeding cancelled')
+                }
+
                 const batch = verses.slice(i, i + BATCH_SIZE)
 
                 // Generate embeddings for batch
@@ -234,14 +327,26 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                     })
                 }
 
-                // Update progress
+                const processedCount = Math.min(i + BATCH_SIZE, totalVerses)
+
+                // Update progress in state
                 setStatuses((prev) =>
                     prev.map((s) =>
                         s.versionId === versionId
-                            ? { ...s, progress: Math.min(i + BATCH_SIZE, verses.length) }
+                            ? { ...s, progress: processedCount, total: totalVerses }
                             : s
                     )
                 )
+
+                // Update background state
+                window.__localSeeding.set(versionId, {
+                    versionId,
+                    versionName: version.name,
+                    progress: processedCount,
+                    total: totalVerses,
+                    status: 'seeding',
+                })
+                setBackgroundSeedingStates(new Map(window.__localSeeding))
 
                 // Small delay to prevent UI freeze
                 await new Promise((resolve) => setTimeout(resolve, 10))
@@ -261,30 +366,64 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                         ? {
                             ...s,
                             status: 'cached',
-                            progress: verses.length,
+                            progress: totalVerses,
+                            total: totalVerses,
                             hasLocalCache: true,
-                            cachedCount: verses.length,
+                            cachedCount: totalVerses,
                         }
                         : s
                 )
             )
 
+            // Update background state to completed
+            window.__localSeeding.set(versionId, {
+                versionId,
+                versionName: version.name,
+                progress: totalVerses,
+                total: totalVerses,
+                status: 'completed',
+            })
+            setBackgroundSeedingStates(new Map(window.__localSeeding))
+
             setShowSuccess(true)
             setTimeout(() => setShowSuccess(false), 2000)
 
+            // Show notification
+            showNotification(
+                'Embedding Complete',
+                `Successfully cached ${totalVerses.toLocaleString()} verses for ${version.name}`
+            )
+
         } catch (error) {
             console.error(`Error seeding ${versionId}:`, error)
+
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+
             setStatuses((prev) =>
                 prev.map((s) =>
                     s.versionId === versionId
-                        ? { ...s, status: 'error', error: error instanceof Error ? error.message : 'Unknown error' }
+                        ? { ...s, status: 'error', error: errorMessage }
                         : s
                 )
             )
+
+            // Update background state to error
+            if (window.__localSeeding) {
+                window.__localSeeding.set(versionId, {
+                    versionId,
+                    versionName: version.name,
+                    progress: 0,
+                    total: 0,
+                    status: 'error',
+                    error: errorMessage,
+                })
+                setBackgroundSeedingStates(new Map(window.__localSeeding))
+            }
         } finally {
             setActiveSeeding(null)
+            seedingAbortControllerRef.current = null
         }
-    }, [bibleVersions, convex, loadModel])
+    }, [bibleVersions, convex, loadModel, showNotification])
 
     // Clear local cache for a version
     const clearLocalCache = useCallback(async (versionId: string) => {
@@ -345,6 +484,50 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                     </p>
                 </div>
             </div>
+
+            {/* Notification Permission */}
+            {notificationPermission !== 'granted' && (
+                <div className="flex items-center justify-between p-3 bg-amber-50 dark:bg-amber-900/30 rounded-lg border border-amber-200 dark:border-amber-700">
+                    <div className="flex items-center gap-2">
+                        <BellOff className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        <span className="text-sm text-amber-800 dark:text-amber-300">
+                            Enable notifications to be alerted when background caching completes
+                        </span>
+                    </div>
+                    <button
+                        onClick={requestNotificationPermission}
+                        className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center gap-1"
+                    >
+                        <Bell className="w-4 h-4" />
+                        Enable
+                    </button>
+                </div>
+            )}
+
+            {/* Background Seeding Info */}
+            {backgroundSeedingStates.size > 0 && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
+                    <p className="text-sm text-blue-800 dark:text-blue-300">
+                        ✨ Background caching in progress. You can close this modal and the process will continue.
+                        You'll be notified when it completes.
+                    </p>
+                    {Array.from(backgroundSeedingStates.values()).map((state) => (
+                        <div key={state.versionId} className="mt-2 text-sm">
+                            <span className="font-medium">{state.versionName}:</span>{' '}
+                            {state.status === 'seeding' ? (
+                                <span>
+                                    {Math.round((state.progress / state.total) * 100)}%
+                                    ({state.progress.toLocaleString()} / {state.total.toLocaleString()} verses)
+                                </span>
+                            ) : state.status === 'completed' ? (
+                                <span className="text-green-600 dark:text-green-400">✓ Completed</span>
+                            ) : (
+                                <span className="text-red-600 dark:text-red-400">✗ Error: {state.error}</span>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {/* Model Status */}
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
@@ -468,12 +651,15 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                             <div className="mt-3">
                                 <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
                                     <span>Generating embeddings...</span>
-                                    <span>{status.progress.toLocaleString()} / {status.total.toLocaleString()}</span>
+                                    <span>
+                                        {Math.round((status.progress / status.total) * 100)}%
+                                        ({status.progress.toLocaleString()} / {status.total.toLocaleString()})
+                                    </span>
                                 </div>
                                 <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                                     <div
                                         className="bg-blue-600 h-2 rounded-full transition-all"
-                                        style={{ width: `${(status.progress / status.total) * 100}%` }}
+                                        style={{ width: `${Math.min((status.progress / status.total) * 100, 100)}%` }}
                                     />
                                 </div>
                             </div>
