@@ -1,3 +1,4 @@
 export { BibleVersionUploader } from './BibleVersionUploader'
-export { VerseEmbeddingSeeder } from './VerseEmbeddingSeeder'
+export { VerseEmbeddingUploader } from './VerseEmbeddingUploader'
 export { GlobalSermonListenerSettingsPanel } from './GlobalSermonListenerSettings'
+export { SongMigrationWizard } from './SongMigrationWizard'

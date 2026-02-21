@@ -14,7 +14,7 @@ import { AddCountdownModal, type CountdownData } from '../components/countdown/A
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
 import { DashboardLayout, DashboardHeader } from '../components/dashboard'
-import { BibleVersionUploader, VerseEmbeddingSeeder, GlobalSermonListenerSettingsPanel } from '../components/admin'
+import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import type { Slide } from '../types'
@@ -419,7 +419,7 @@ export default function Dashboard() {
                                     <BibleVersionUploader onClose={() => setShowAdminPanel(false)} />
                                 )}
                                 {adminTab === 'embeddings' && (
-                                    <VerseEmbeddingSeeder onClose={() => setShowAdminPanel(false)} />
+                                    <VerseEmbeddingUploader onClose={() => setShowAdminPanel(false)} />
                                 )}
                                 {adminTab === 'sermon-settings' && (
                                     <GlobalSermonListenerSettingsPanel

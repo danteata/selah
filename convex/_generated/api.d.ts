@@ -14,6 +14,7 @@ import type * as churches from "../churches.js";
 import type * as emails from "../emails.js";
 import type * as globalAppSettings from "../globalAppSettings.js";
 import type * as invitations from "../invitations.js";
+import type * as migration from "../migration.js";
 import type * as schedules from "../schedules.js";
 import type * as slides from "../slides.js";
 import type * as songs from "../songs.js";
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   emails: typeof emails;
   globalAppSettings: typeof globalAppSettings;
   invitations: typeof invitations;
+  migration: typeof migration;
   schedules: typeof schedules;
   slides: typeof slides;
   songs: typeof songs;

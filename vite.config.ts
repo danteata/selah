@@ -42,4 +42,6 @@ export default defineConfig({
       transformMixedEsModules: true,
     },
   },
+  // Configure WASM file serving
+  assetsInclude: ['**/*.wasm'],
 })

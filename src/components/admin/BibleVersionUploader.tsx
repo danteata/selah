@@ -34,13 +34,13 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
     // Redirect non-superadmins
     if (!roleLoading && !isSuperadmin) {
         return (
-            <div className="bg-white rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
                 <div className="text-center py-12">
                     <div className="text-red-500 text-6xl mb-4">🚫</div>
-                    <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
                         Access Denied
                     </h2>
-                    <p className="text-gray-600">
+                    <p className="text-gray-600 dark:text-gray-400">
                         Only superadmins can upload Bible versions to Convex.
                     </p>
                 </div>
@@ -187,15 +187,15 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
     }
 
     return (
-        <div className="bg-white rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
             <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                     Bible Version Admin - Upload to Convex Storage
                 </h2>
                 {onClose && (
                     <button
                         onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600"
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                     >
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -206,32 +206,18 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-gray-50 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-gray-900">{completedCount}</div>
-                    <div className="text-sm text-gray-500">Uploaded</div>
+                <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-gray-900 dark:text-white">{completedCount}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Uploaded</div>
                 </div>
-                <div className="bg-yellow-50 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-yellow-600">{pendingCount}</div>
-                    <div className="text-sm text-gray-500">Pending</div>
+                <div className="bg-yellow-50 dark:bg-yellow-900/30 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{pendingCount}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Pending</div>
                 </div>
-                <div className="bg-red-50 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-red-600">{errorCount}</div>
-                    <div className="text-sm text-gray-500">Errors</div>
+                <div className="bg-red-50 dark:bg-red-900/30 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">{errorCount}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Errors</div>
                 </div>
-            </div>
-
-            {/* Uploaded By Field */}
-            <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Uploaded By
-                </label>
-                <input
-                    type="text"
-                    value={uploadedBy}
-                    onChange={(e) => setUploadedBy(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Admin name or email"
-                />
             </div>
 
             {/* Upload All Button */}
@@ -240,7 +226,7 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                     <button
                         onClick={uploadAllPending}
                         disabled={isUploading}
-                        className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed"
                     >
                         {isUploading ? 'Uploading...' : `Upload All Pending (${pendingCount})`}
                     </button>
@@ -252,10 +238,10 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                 {versions.map((version) => (
                     <div
                         key={version.id}
-                        className={`flex items-center justify-between p-3 rounded-lg border ${version.status === 'completed' ? 'bg-green-50 border-green-200' :
-                            version.status === 'error' ? 'bg-red-50 border-red-200' :
-                                version.status === 'downloading' || version.status === 'uploading' ? 'bg-blue-50 border-blue-200' :
-                                    'bg-gray-50 border-gray-200'
+                        className={`flex items-center justify-between p-3 rounded-lg border ${version.status === 'completed' ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-700' :
+                            version.status === 'error' ? 'bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-700' :
+                                version.status === 'downloading' || version.status === 'uploading' ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700' :
+                                    'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'
                             }`}
                     >
                         <div className="flex items-center gap-3">
@@ -283,14 +269,14 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                             )}
 
                             <div>
-                                <div className="font-medium text-gray-900">{version.name}</div>
-                                <div className="text-sm text-gray-500">
+                                <div className="font-medium text-gray-900 dark:text-white">{version.name}</div>
+                                <div className="text-sm text-gray-500 dark:text-gray-400">
                                     {version.id}
                                     {version.verseCount && ` • ${version.verseCount.toLocaleString()} verses`}
                                     {version.fileSize && ` • ${formatFileSize(version.fileSize)}`}
                                 </div>
                                 {version.error && (
-                                    <div className="text-sm text-red-600">{version.error}</div>
+                                    <div className="text-sm text-red-600 dark:text-red-400">{version.error}</div>
                                 )}
                             </div>
                         </div>
@@ -300,7 +286,7 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                             <button
                                 onClick={() => uploadVersion(version.id)}
                                 disabled={isUploading}
-                                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600"
                             >
                                 Upload
                             </button>
@@ -309,33 +295,19 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                             <button
                                 onClick={() => uploadVersion(version.id)}
                                 disabled={isUploading}
-                                className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:bg-gray-400"
+                                className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:bg-gray-400 dark:disabled:bg-gray-600"
                             >
                                 Retry
                             </button>
                         )}
                         {(version.status === 'downloading' || version.status === 'uploading') && (
-                            <span className="text-sm text-blue-600 capitalize">{version.status}...</span>
+                            <span className="text-sm text-blue-600 dark:text-blue-400 capitalize">{version.status}...</span>
                         )}
                         {version.status === 'completed' && (
-                            <span className="text-sm text-green-600">✓ Uploaded</span>
+                            <span className="text-sm text-green-600 dark:text-green-400">✓ Uploaded</span>
                         )}
                     </div>
                 ))}
-            </div>
-
-            {/* Info */}
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                <h3 className="font-medium text-blue-900 mb-2">How it works:</h3>
-                <ol className="text-sm text-blue-700 list-decimal list-inside space-y-1">
-                    <li>Bible data is downloaded from the CDN</li>
-                    <li>Data is uploaded to Convex File Storage (single file per version)</li>
-                    <li>Metadata is stored in the database for quick lookups</li>
-                    <li>App caches Bible data locally in IndexedDB for offline use</li>
-                </ol>
-                <p className="text-xs text-blue-600 mt-2">
-                    💡 This hybrid approach minimizes costs: 1 file upload per version vs thousands of database writes
-                </p>
             </div>
         </div>
     )
