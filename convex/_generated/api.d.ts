@@ -12,6 +12,7 @@ import type * as auth from "../auth.js";
 import type * as bibleVersions from "../bibleVersions.js";
 import type * as churches from "../churches.js";
 import type * as emails from "../emails.js";
+import type * as globalAppSettings from "../globalAppSettings.js";
 import type * as invitations from "../invitations.js";
 import type * as schedules from "../schedules.js";
 import type * as slides from "../slides.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   bibleVersions: typeof bibleVersions;
   churches: typeof churches;
   emails: typeof emails;
+  globalAppSettings: typeof globalAppSettings;
   invitations: typeof invitations;
   schedules: typeof schedules;
   slides: typeof slides;

@@ -17,7 +17,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: SettingsModalProps) {
     const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
-    const { isAdmin, currentUser } = useUserRole()
+    const { isAdmin, isSuperadmin, currentUser } = useUserRole()
 
     const settings = useAppStore((state) => state.settings)
     const setSlideStyles = useAppStore((state) => state.setSlideStyles)

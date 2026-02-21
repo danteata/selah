@@ -353,4 +353,53 @@ export default defineSchema({
         .index("by_church", ["churchId"])
         .index("by_email", ["email"])
         .index("by_status", ["status"]),
+
+    // Global App Settings - managed by super admin (system-wide)
+    // These settings apply to ALL users across ALL churches
+    // This is a SINGLE document for the entire system
+    globalAppSettings: defineTable({
+        // Singleton identifier - always "global" for the single settings document
+        _id: v.optional(v.string()),
+
+        // === Sermon Listener Settings ===
+        // Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs'
+        sermonListener_transcriptionProvider: v.optional(v.string()),
+        // Whisper API settings
+        sermonListener_whisperModel: v.optional(v.string()),
+        sermonListener_whisperEndpoint: v.optional(v.string()),
+        sermonListener_whisperApiKey: v.optional(v.string()),
+        sermonListener_whisperChunkDurationMs: v.optional(v.number()),
+        // Whisper.cpp settings
+        sermonListener_whisperCppEndpoint: v.optional(v.string()),
+        sermonListener_whisperCppChunkDurationMs: v.optional(v.number()),
+        // Faster-Whisper settings
+        sermonListener_fasterWhisperEndpoint: v.optional(v.string()),
+        sermonListener_fasterWhisperModel: v.optional(v.string()),
+        sermonListener_fasterWhisperChunkDurationMs: v.optional(v.number()),
+        sermonListener_fasterWhisperAudioCaptureMode: v.optional(v.string()),
+        sermonListener_fasterWhisperDisableBrowserProcessing: v.optional(v.boolean()),
+        // VAD settings
+        sermonListener_useVAD: v.optional(v.boolean()),
+        sermonListener_vadPositiveSpeechThreshold: v.optional(v.number()),
+        sermonListener_vadNegativeSpeechThreshold: v.optional(v.number()),
+        sermonListener_vadMinSpeechFrames: v.optional(v.number()),
+        sermonListener_vadPreSpeechPadFrames: v.optional(v.number()),
+        sermonListener_vadRedemptionFrames: v.optional(v.number()),
+        // ElevenLabs settings
+        sermonListener_elevenLabsApiKey: v.optional(v.string()),
+        sermonListener_elevenLabsModelId: v.optional(v.string()),
+        sermonListener_elevenLabsChunkDurationMs: v.optional(v.number()),
+        // Default language for transcription
+        sermonListener_defaultLanguage: v.optional(v.string()),
+
+        // === Future Global Settings ===
+        // Add more global settings here as needed
+        // e.g., defaultBibleVersion, defaultTheme, etc.
+
+        // Timestamps
+        createdAt: v.optional(v.string()),
+        updatedAt: v.optional(v.string()),
+        // User who last updated the settings
+        updatedBy: v.optional(v.string()),
+    }),
 });

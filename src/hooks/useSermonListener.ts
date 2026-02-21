@@ -4,12 +4,17 @@
  * 
  * Supports both Web Speech API and Whisper.cpp transcription providers
  * Includes semantic verse detection using local embeddings (Transformers.js)
+ * 
+ * Provider settings are now managed globally by super admins via Convex.
+ * User-specific settings (autoLookup, autoDisplay, language override) are stored locally.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useScripture } from './useScripture'
 import { useSlideCreation } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
+import { useUserRole } from './useUserRole'
+import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
 import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
 import {
@@ -159,15 +164,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
 
-    const language = languageOverride || sermonSettings?.language || 'en-US'
+    // Get global settings (system-wide, no churchId needed)
+    const { settings: globalSettings, isLoading: isGlobalSettingsLoading } = useGlobalSermonListenerSettings()
+
+    // User-specific settings from local store
     const autoLookup = autoLookupOverride ?? sermonSettings?.autoLookup ?? true
     const autoDisplay = autoDisplayOverride ?? sermonSettings?.autoDisplay ?? false
     const minConfidence = minConfidenceOverride ?? 'medium'
     const enableSemanticDetection = options.enableSemanticDetection ?? true
 
-    // Extract provider from settings - use memoized value for stable dependency
-    const settingsProvider = sermonSettings?.transcriptionProvider || 'web-speech'
-    const targetProvider = providerOverride || settingsProvider
+    // Language: user override > user setting > global default
+    const language = languageOverride || sermonSettings?.language || globalSettings?.sermonListener_defaultLanguage || 'en-US'
+
+    // Provider from global settings (managed by super admin)
+    const globalProvider = (globalSettings?.sermonListener_transcriptionProvider as TranscriptionProvider) || 'web-speech'
+    const targetProvider = providerOverride || globalProvider
 
     // Determine provider from settings or override
     const getInitialProvider = (): TranscriptionProvider => {
@@ -281,9 +292,15 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Check support on mount and when settings change
     useEffect(() => {
         const checkSupport = async () => {
+            // Skip if global settings are still loading
+            if (isGlobalSettingsLoading) {
+                console.log('[useSermonListener] Waiting for global settings to load...')
+                return
+            }
+
             console.log('[useSermonListener] Checking provider availability:', {
                 targetProvider,
-                settingsProvider,
+                globalProvider,
                 providerOverride,
             })
 
@@ -306,7 +323,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             setIsSupported(available)
         }
         checkSupport()
-    }, [targetProvider])
+    }, [targetProvider, globalProvider, providerOverride, isGlobalSettingsLoading])
 
     // Initialize semantic detector
     useEffect(() => {
@@ -624,6 +641,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     /**
      * Set transcription provider
+     * Note: This is now primarily controlled by global settings.
+     * This function is kept for local fallback/testing purposes.
      */
     const setTranscriptionProvider = useCallback(async (newProvider: TranscriptionProvider): Promise<boolean> => {
         if (isListening) {
@@ -633,17 +652,24 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setIsModelLoading(true)
         setModelLoadingProgress(0)
 
+        // Use global settings for provider configuration
         const success = await unifiedTranscriptionService.setProvider(newProvider, {
             language: language.split('-')[0],
-            whisperModel: sermonSettings?.whisperModel || 'base',
-            whisperEndpoint: sermonSettings?.whisperEndpoint,
-            whisperApiKey: sermonSettings?.whisperApiKey,
-            whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
-            whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
-            whisperCppChunkDurationMs: sermonSettings?.whisperCppChunkDurationMs,
-            elevenLabsApiKey: sermonSettings?.elevenLabsApiKey,
-            elevenLabsModelId: sermonSettings?.elevenLabsModelId,
-            elevenLabsChunkDurationMs: sermonSettings?.elevenLabsChunkDurationMs,
+            whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
+            whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
+            whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
+            whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
+            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
+            whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
+            fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
+            fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
+            fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+            fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
+            fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+            useVAD: globalSettings?.sermonListener_useVAD,
+            elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
+            elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
+            elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
             onProgress: setModelLoadingProgress,
         })
 
@@ -660,15 +686,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [
         isListening,
         language,
-        sermonSettings?.whisperApiKey,
-        sermonSettings?.whisperChunkDurationMs,
-        sermonSettings?.whisperCppChunkDurationMs,
-        sermonSettings?.whisperCppEndpoint,
-        sermonSettings?.whisperEndpoint,
-        sermonSettings?.whisperModel,
-        sermonSettings?.elevenLabsApiKey,
-        sermonSettings?.elevenLabsModelId,
-        sermonSettings?.elevenLabsChunkDurationMs,
+        globalSettings?.sermonListener_whisperApiKey,
+        globalSettings?.sermonListener_whisperChunkDurationMs,
+        globalSettings?.sermonListener_whisperCppChunkDurationMs,
+        globalSettings?.sermonListener_whisperCppEndpoint,
+        globalSettings?.sermonListener_whisperEndpoint,
+        globalSettings?.sermonListener_whisperModel,
+        globalSettings?.sermonListener_fasterWhisperEndpoint,
+        globalSettings?.sermonListener_fasterWhisperModel,
+        globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+        globalSettings?.sermonListener_fasterWhisperAudioCaptureMode,
+        globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+        globalSettings?.sermonListener_useVAD,
+        globalSettings?.sermonListener_elevenLabsApiKey,
+        globalSettings?.sermonListener_elevenLabsModelId,
+        globalSettings?.sermonListener_elevenLabsChunkDurationMs,
     ])
 
     /**
@@ -688,31 +720,31 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
 
         console.log('[useSermonListener] Starting transcription with provider:', provider, {
-            sermonSettingsProvider: sermonSettings?.transcriptionProvider,
-            whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
+            globalProvider: globalSettings?.sermonListener_transcriptionProvider,
+            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
         })
 
-        // Configure transcription
+        // Configure transcription using global settings
         const success = await unifiedTranscriptionService.start({
             provider,
             language,
             continuous: true,
             interimResults: true,
-            whisperModel: sermonSettings?.whisperModel || 'base',
-            whisperEndpoint: sermonSettings?.whisperEndpoint,
-            whisperApiKey: sermonSettings?.whisperApiKey,
-            whisperChunkDurationMs: sermonSettings?.whisperChunkDurationMs,
-            whisperCppEndpoint: sermonSettings?.whisperCppEndpoint,
-            whisperCppChunkDurationMs: sermonSettings?.whisperCppChunkDurationMs,
-            fasterWhisperEndpoint: sermonSettings?.fasterWhisperEndpoint,
-            fasterWhisperModel: sermonSettings?.fasterWhisperModel,
-            fasterWhisperChunkDurationMs: sermonSettings?.fasterWhisperChunkDurationMs,
-            fasterWhisperAudioCaptureMode: sermonSettings?.fasterWhisperAudioCaptureMode,
-            fasterWhisperDisableBrowserProcessing: sermonSettings?.fasterWhisperDisableBrowserProcessing,
-            useVAD: sermonSettings?.useVAD,
-            elevenLabsApiKey: sermonSettings?.elevenLabsApiKey,
-            elevenLabsModelId: sermonSettings?.elevenLabsModelId,
-            elevenLabsChunkDurationMs: sermonSettings?.elevenLabsChunkDurationMs,
+            whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
+            whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
+            whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
+            whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
+            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
+            whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
+            fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
+            fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
+            fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+            fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
+            fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+            useVAD: globalSettings?.sermonListener_useVAD,
+            elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
+            elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
+            elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
             onStart: () => {
                 setIsListening(true)
                 setError(null)
@@ -782,19 +814,19 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         provider,
         sermonSettings?.whisperApiKey,
         sermonSettings?.whisperChunkDurationMs,
-        sermonSettings?.whisperCppChunkDurationMs,
-        sermonSettings?.whisperCppEndpoint,
-        sermonSettings?.whisperEndpoint,
-        sermonSettings?.whisperModel,
-        sermonSettings?.fasterWhisperEndpoint,
-        sermonSettings?.fasterWhisperModel,
-        sermonSettings?.fasterWhisperChunkDurationMs,
-        sermonSettings?.fasterWhisperAudioCaptureMode,
-        sermonSettings?.fasterWhisperDisableBrowserProcessing,
-        sermonSettings?.useVAD,
-        sermonSettings?.elevenLabsApiKey,
-        sermonSettings?.elevenLabsModelId,
-        sermonSettings?.elevenLabsChunkDurationMs,
+        globalSettings?.sermonListener_whisperCppChunkDurationMs,
+        globalSettings?.sermonListener_whisperCppEndpoint,
+        globalSettings?.sermonListener_whisperEndpoint,
+        globalSettings?.sermonListener_whisperModel,
+        globalSettings?.sermonListener_fasterWhisperEndpoint,
+        globalSettings?.sermonListener_fasterWhisperModel,
+        globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+        globalSettings?.sermonListener_fasterWhisperAudioCaptureMode,
+        globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+        globalSettings?.sermonListener_useVAD,
+        globalSettings?.sermonListener_elevenLabsApiKey,
+        globalSettings?.sermonListener_elevenLabsModelId,
+        globalSettings?.sermonListener_elevenLabsChunkDurationMs,
     ])
 
     /**

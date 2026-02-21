@@ -1,6 +1,6 @@
 import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback } from 'react'
-import { Shield, Database, Book, X } from 'lucide-react'
+import { Shield, Database, Book, X, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates } from '../hooks'
 import { SettingsModal } from '../components/settings/SettingsModal'
@@ -14,7 +14,7 @@ import { AddCountdownModal, type CountdownData } from '../components/countdown/A
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
 import { DashboardLayout, DashboardHeader } from '../components/dashboard'
-import { BibleVersionUploader, VerseEmbeddingSeeder } from '../components/admin'
+import { BibleVersionUploader, VerseEmbeddingSeeder, GlobalSermonListenerSettingsPanel } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import type { Slide } from '../types'
@@ -52,10 +52,10 @@ export default function Dashboard() {
 
     // Admin panel state
     const [showAdminPanel, setShowAdminPanel] = useState(false)
-    const [adminTab, setAdminTab] = useState<'bible' | 'embeddings'>('bible')
+    const [adminTab, setAdminTab] = useState<'bible' | 'embeddings' | 'sermon-settings'>('bible')
 
     // Get user role for admin access
-    const { isSuperadmin, canAccessAdmin } = useUserRole()
+    const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
 
     // Templates hook for creating custom templates
     const { createTemplate } = useTemplates()
@@ -401,6 +401,16 @@ export default function Dashboard() {
                                     <Database className="w-4 h-4" />
                                     Verse Embeddings
                                 </button>
+                                <button
+                                    onClick={() => setAdminTab('sermon-settings')}
+                                    className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'sermon-settings'
+                                        ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                                        : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                                        }`}
+                                >
+                                    <Mic className="w-4 h-4" />
+                                    Sermon Settings
+                                </button>
                             </div>
 
                             {/* Content */}
@@ -410,6 +420,11 @@ export default function Dashboard() {
                                 )}
                                 {adminTab === 'embeddings' && (
                                     <VerseEmbeddingSeeder onClose={() => setShowAdminPanel(false)} />
+                                )}
+                                {adminTab === 'sermon-settings' && (
+                                    <GlobalSermonListenerSettingsPanel
+                                        onClose={() => setShowAdminPanel(false)}
+                                    />
                                 )}
                             </div>
                         </div>
