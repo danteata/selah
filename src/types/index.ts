@@ -190,6 +190,9 @@ export interface BibleVersion {
     isDownloaded: boolean
     copyrightContent: string
     isPublicDomain?: boolean
+    verseCount?: number
+    fileSize?: number
+    hasFile?: boolean
 }
 
 export interface Hymn {

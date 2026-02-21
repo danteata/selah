@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Download, Check, Loader2, Cloud, CloudOff, Database, HardDrive, Search, RefreshCw, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useScripture, type BibleVersionStatus } from '../../hooks/useScripture'
@@ -82,7 +82,17 @@ export function BibleVersionSettings() {
     const startTimeRef = useRef<number | null>(null)
     const progressRef = useRef<{ progress: number; time: number }[]>([])
 
-    const bibleVersions = useAppStore((state) => state.bibleVersions) as BibleVersion[]
+    // Fetch available Bible versions from Convex (all users can see all available versions)
+    const convexBibleVersions = useQuery(api.bibleVersions.listBibleVersions)
+
+    // Get static fallback from app store (always call this hook unconditionally)
+    const staticBibleVersions = useAppStore((state) => state.bibleVersions) as BibleVersion[]
+
+    // Use Convex versions if available, otherwise fall back to static list
+    const bibleVersions = useMemo(() => {
+        return (convexBibleVersions || staticBibleVersions) as BibleVersion[]
+    }, [convexBibleVersions, staticBibleVersions])
+
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
 
@@ -90,6 +100,8 @@ export function BibleVersionSettings() {
 
     // Check embedding status for all versions
     const checkEmbeddingStatuses = useCallback(async () => {
+        if (!bibleVersions || bibleVersions.length === 0) return
+
         const statuses: Record<string, EmbeddingSyncStatus> = {}
 
         for (const version of bibleVersions) {
@@ -102,7 +114,7 @@ export function BibleVersionSettings() {
                 embeddingCount: embeddings.length,
                 isSyncing: false,
                 progress: 0,
-                total: version.verseCount,
+                total: version.verseCount || 31102, // Default to KJV verse count
                 stage: 'idle',
             }
         }
@@ -112,6 +124,8 @@ export function BibleVersionSettings() {
 
     // Check status of all versions
     const checkAllVersionStatuses = useCallback(async () => {
+        if (!bibleVersions || bibleVersions.length === 0) return
+
         const statuses: Record<string, BibleVersionStatus> = {}
 
         for (const version of bibleVersions) {
