@@ -78,6 +78,27 @@ def get_model_size(model_id: str) -> str:
     return sizes.get(model_id, 'unknown')
 
 
+def check_vad_available() -> bool:
+    """Check if Silero VAD model is available.
+    
+    The VAD model (silero_vad_v6.onnx) is not bundled with PyInstaller by default.
+    This function checks if it's available before enabling VAD filter.
+    """
+    try:
+        # Check if running in PyInstaller bundle
+        if getattr(sys, 'frozen', False):
+            # Running in PyInstaller bundle - VAD model is not bundled
+            return False
+        
+        # Running in normal Python - check if faster_whisper has VAD assets
+        import faster_whisper
+        faster_whisper_path = Path(faster_whisper.__file__).parent
+        vad_path = faster_whisper_path / 'assets' / 'silero_vad_v6.onnx'
+        return vad_path.exists()
+    except Exception:
+        return False
+
+
 def load_model(model_id: str, device: str = 'auto', compute_type: str = 'auto'):
     """Load the Whisper model."""
     global model, model_name
@@ -150,7 +171,10 @@ def transcribe():
         # Get optional parameters
         language = request.form.get('language', None)
         task = request.form.get('task', 'transcribe')  # transcribe or translate
-        vad_filter = request.form.get('vad_filter', 'true').lower() == 'true'
+        # VAD filter disabled by default - requires silero_vad.onnx which is not bundled
+        # Enable only if the VAD model file is available
+        vad_filter_requested = request.form.get('vad_filter', 'false').lower() == 'true'
+        vad_filter = vad_filter_requested and check_vad_available()
         hotwords = request.form.get('hotwords', None)
         
         # Save to temp file and transcribe
@@ -222,7 +246,9 @@ def transcribe_raw():
         # Get parameters from headers or query
         sample_rate = int(request.headers.get('X-Sample-Rate', 16000))
         language = request.headers.get('X-Language', None)
-        vad_filter = request.headers.get('X-VAD-Filter', 'true').lower() == 'true'
+        # VAD filter disabled by default - requires silero_vad.onnx which is not bundled
+        vad_filter_requested = request.headers.get('X-VAD-Filter', 'false').lower() == 'true'
+        vad_filter = vad_filter_requested and check_vad_available()
         
         # Convert raw PCM to WAV
         with io.BytesIO() as wav_buffer:

@@ -101,10 +101,13 @@ class DesktopWhisperTranscriptionService {
         this.config.onStatus?.('Starting whisper server...');
         this.config.onProgress?.(0.2);
 
+        // Note: Server-side VAD is disabled because the silero_vad_v6.onnx model
+        // is not bundled with the PyInstaller executable. The frontend uses its own
+        // WASM-based VAD for audio chunking at speech pauses.
         const endpoint = await startDesktopWhisperServer({
             model: config.model || 'base.en',
             language: config.language,
-            vadFilter: config.vadFilter,
+            vadFilter: false, // Always disable server-side VAD (model not bundled)
             hotwords: config.hotwords,
         });
 
@@ -247,9 +250,11 @@ class DesktopWhisperTranscriptionService {
             });
 
             // Send to desktop whisper server
+            // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
+            const language = (this.config.language || 'en').split('-')[0];
             const result = await transcribeWithDesktopWhisper(wavBlob, {
-                language: this.config.language,
-                vadFilter: this.config.vadFilter,
+                language,
+                vadFilter: false, // Always disable server-side VAD (model not bundled)
                 hotwords: this.config.hotwords,
             });
 
@@ -372,9 +377,11 @@ class DesktopWhisperTranscriptionService {
             const wavBlob = this.pcmToWav(pcmData);
 
             // Send to desktop whisper server
+            // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
+            const language = (this.config.language || 'en').split('-')[0];
             const result = await transcribeWithDesktopWhisper(wavBlob, {
-                language: this.config.language,
-                vadFilter: this.config.vadFilter,
+                language,
+                vadFilter: false, // Always disable server-side VAD (model not bundled)
                 hotwords: this.config.hotwords,
             });
 
