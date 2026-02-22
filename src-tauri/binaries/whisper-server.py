@@ -19,6 +19,10 @@ Options:
                     Options: auto, int8, float16, float32
 """
 
+# Fix for PyInstaller multiprocessing issue on macOS
+import multiprocessing
+multiprocessing.freeze_support()
+
 import argparse
 import io
 import json
@@ -33,9 +37,10 @@ from typing import Optional
 try:
     from flask import Flask, request, jsonify
     from faster_whisper import WhisperModel
+    from flask_cors import CORS
 except ImportError:
     print("Error: Required packages not installed.")
-    print("Please install with: pip install flask faster-whisper")
+    print("Please install with: pip install flask flask-cors faster-whisper")
     sys.exit(1)
 
 # Configure logging
@@ -46,6 +51,8 @@ logging.basicConfig(
 logger = logging.getLogger('whisper-server')
 
 app = Flask(__name__)
+# Enable CORS for all routes - needed for desktop app to communicate with server
+CORS(app)
 
 # Global model instance
 model: Optional[WhisperModel] = None

@@ -14,8 +14,9 @@ import { whisperCppTranscriptionService } from './whisperCppTranscription'
 import { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
 import { elevenLabsTranscriptionService } from './elevenLabsTranscription'
 import { vadTranscriptionService } from './vadTranscriptionService'
+import { desktopWhisperTranscriptionService } from './desktopWhisperTranscription'
 
-export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs'
+export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs' | 'desktop-whisper'
 
 export interface UnifiedTranscriptionOptions {
     provider?: TranscriptionProvider
@@ -89,6 +90,7 @@ class UnifiedTranscriptionService {
     private fasterWhisperInitialized = false
     private vadInitialized = false
     private elevenLabsInitialized = false
+    private desktopWhisperInitialized = false
 
     /**
      * Check if a provider is available
@@ -105,6 +107,8 @@ class UnifiedTranscriptionService {
                 return fasterWhisperTranscriptionService.isConfigured()
             case 'elevenlabs':
                 return elevenLabsTranscriptionService.isConfigured()
+            case 'desktop-whisper':
+                return desktopWhisperTranscriptionService.isConfigured()
             default:
                 return false
         }
@@ -135,7 +139,9 @@ class UnifiedTranscriptionService {
                         ? this.fasterWhisperInitialized
                         : this.currentProvider === 'elevenlabs'
                             ? this.elevenLabsInitialized
-                            : undefined,
+                            : this.currentProvider === 'desktop-whisper'
+                                ? this.desktopWhisperInitialized
+                                : undefined,
         }
     }
 
@@ -249,6 +255,28 @@ class UnifiedTranscriptionService {
             }
         }
 
+        if (provider === 'desktop-whisper') {
+            this.isLoading = true
+            this.options.onStatusChange?.(this.getStatus())
+
+            const initialized = await desktopWhisperTranscriptionService.init({
+                language: options?.language || 'en',
+                model: options?.fasterWhisperModel,
+                onProgress: options?.onProgress,
+                onStatus: (status) => console.log('[DesktopWhisper]', status),
+            })
+
+            this.desktopWhisperInitialized = initialized
+            this.isLoading = false
+            this.isReady = initialized
+
+            if (!initialized) {
+                this.error = 'Failed to initialize Desktop Whisper. Make sure you are running in the desktop app.'
+                this.options.onStatusChange?.(this.getStatus())
+                return false
+            }
+        }
+
         if (provider === 'web-speech' && !speechRecognitionService.isSupported()) {
             this.error = 'Web Speech API is not supported in this browser'
             this.isReady = false
@@ -264,7 +292,9 @@ class UnifiedTranscriptionService {
                     ? this.whisperCppInitialized
                     : provider === 'faster-whisper'
                         ? this.fasterWhisperInitialized
-                        : this.elevenLabsInitialized
+                        : provider === 'elevenlabs'
+                            ? this.elevenLabsInitialized
+                            : this.desktopWhisperInitialized
         this.options.onStatusChange?.(this.getStatus())
         return true
     }
@@ -321,6 +351,9 @@ class UnifiedTranscriptionService {
             }
             if (this.currentProvider === 'faster-whisper') {
                 return await this.startFasterWhisper()
+            }
+            if (this.currentProvider === 'desktop-whisper') {
+                return await this.startDesktopWhisper()
             }
             return await this.startElevenLabs()
         } catch (err) {
@@ -548,6 +581,47 @@ class UnifiedTranscriptionService {
     }
 
     /**
+     * Start Desktop Whisper transcription (bundled faster-whisper in Tauri)
+     */
+    private async startDesktopWhisper(): Promise<boolean> {
+        if (!this.desktopWhisperInitialized) {
+            const initialized = await desktopWhisperTranscriptionService.init({
+                language: this.options.language || 'en',
+                model: this.options.fasterWhisperModel,
+                onProgress: this.options.onProgress,
+            })
+            if (!initialized) {
+                this.error = 'Desktop Whisper is only available in the desktop app.'
+                return false
+            }
+            this.desktopWhisperInitialized = true
+        }
+
+        const started = await desktopWhisperTranscriptionService.startRealtimeTranscription(
+            (result) => {
+                this.options.onResult?.(result.text, true, undefined)
+            },
+            (error) => {
+                this.error = error
+                this.isListening = false
+                this.options.onError?.(error)
+                this.options.onStatusChange?.(this.getStatus())
+            }
+        )
+
+        if (!started) {
+            this.error = 'Failed to start Desktop Whisper transcription'
+            this.options.onStatusChange?.(this.getStatus())
+            return false
+        }
+
+        this.isListening = true
+        this.options.onStart?.()
+        this.options.onStatusChange?.(this.getStatus())
+        return true
+    }
+
+    /**
      * Start VAD-based transcription
      * Uses browser VAD to detect speech boundaries, then sends complete utterances
      */
@@ -621,6 +695,8 @@ class UnifiedTranscriptionService {
             }
         } else if (this.currentProvider === 'elevenlabs') {
             await elevenLabsTranscriptionService.stopRealtimeTranscription()
+        } else if (this.currentProvider === 'desktop-whisper') {
+            await desktopWhisperTranscriptionService.stop()
         }
 
         this.isListening = false

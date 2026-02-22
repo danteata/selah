@@ -12,7 +12,8 @@ import { useGlobalSermonListenerSettings } from '../../hooks/useGlobalAppSetting
 import { unifiedTranscriptionService } from '../../services/sermon-listener'
 import type { TranscriptionProvider } from '../../services/sermon-listener'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Info, Check, AlertTriangle, Shield, Loader2 } from 'lucide-react'
+import { Info, Check, AlertTriangle, Shield, Loader2, Monitor } from 'lucide-react'
+import { isDesktop } from '@/platform'
 
 const DEFAULT_WHISPER_CPP_ENDPOINT = '/whisper-cpp/inference'
 const DEFAULT_FASTER_WHISPER_ENDPOINT = '/faster-whisper'
@@ -61,6 +62,7 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
     const [fasterWhisperAvailable, setFasterWhisperAvailable] = useState(false)
     const [vadAvailable, setVadAvailable] = useState(false)
     const [elevenLabsAvailable, setElevenLabsAvailable] = useState(false)
+    const [desktopWhisperAvailable, setDesktopWhisperAvailable] = useState(false)
 
     // Initialize form with settings from server
     useEffect(() => {
@@ -92,6 +94,7 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
         unifiedTranscriptionService.isProviderAvailable('whisper-cpp').then(setWhisperCppAvailable)
         unifiedTranscriptionService.isProviderAvailable('faster-whisper').then(setFasterWhisperAvailable)
         unifiedTranscriptionService.isProviderAvailable('elevenlabs').then(setElevenLabsAvailable)
+        unifiedTranscriptionService.isProviderAvailable('desktop-whisper').then(setDesktopWhisperAvailable)
         unifiedTranscriptionService.isVADAvailable().then(setVadAvailable)
     }, [])
 
@@ -140,6 +143,12 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
         if (newProvider === 'elevenlabs' && !isElevenLabsConfigured) {
             setProvider('web-speech')
             setProviderError('ElevenLabs needs an API key before it can be used.')
+            return
+        }
+
+        if (newProvider === 'desktop-whisper' && !isDesktop()) {
+            setProvider('web-speech')
+            setProviderError('Desktop Whisper is only available in the desktop app.')
             return
         }
 
@@ -378,6 +387,40 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
                             </div>
                         </div>
                     </button>
+
+                    {/* Desktop Whisper - Only show in desktop mode */}
+                    {isDesktop() && (
+                        <button
+                            onClick={() => !isLoadingProvider && handleProviderChange('desktop-whisper')}
+                            disabled={isLoadingProvider}
+                            className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'desktop-whisper'
+                                ? 'border-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/20'
+                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                }`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Monitor className="w-5 h-5 text-indigo-500" />
+                                    <div>
+                                        <div className="font-medium text-gray-900 dark:text-white">Desktop Whisper (Offline)</div>
+                                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                                            Bundled faster-whisper - works offline, no server needed
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {!desktopWhisperAvailable && (
+                                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                                            Starting...
+                                        </span>
+                                    )}
+                                    {provider === 'desktop-whisper' && (
+                                        <IconWrapper name="i-bx-check" className="text-indigo-500" />
+                                    )}
+                                </div>
+                            </div>
+                        </button>
+                    )}
                 </div>
 
                 {isLoadingProvider && (

@@ -5,19 +5,29 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_DIR="${SCRIPT_DIR}/dist"
+OUTPUT_DIR="${SCRIPT_DIR}"
 
-# Detect platform
+# Detect platform and architecture for Tauri target triple naming
 OS="$(uname -s)"
+ARCH="$(uname -m)"
+
 case "$OS" in
     Linux*)
-        PLATFORM="linux"
+        if [ "$ARCH" = "aarch64" ]; then
+            TARGET_TRIPLE="aarch64-unknown-linux-gnu"
+        else
+            TARGET_TRIPLE="x86_64-unknown-linux-gnu"
+        fi
         ;;
     Darwin*)
-        PLATFORM="macos"
+        if [ "$ARCH" = "arm64" ]; then
+            TARGET_TRIPLE="aarch64-apple-darwin"
+        else
+            TARGET_TRIPLE="x86_64-apple-darwin"
+        fi
         ;;
     MINGW*|MSYS*|CYGWIN*)
-        PLATFORM="windows"
+        TARGET_TRIPLE="x86_64-pc-windows-msvc"
         ;;
     *)
         echo "Unknown platform: $OS"
@@ -25,11 +35,8 @@ case "$OS" in
         ;;
 esac
 
-echo "Building whisper-server for $PLATFORM..."
+echo "Building whisper-server for $TARGET_TRIPLE..."
 echo "Output directory: $OUTPUT_DIR"
-
-# Create output directory
-mkdir -p "$OUTPUT_DIR"
 
 # Create a virtual environment and install dependencies
 VENV_DIR="${SCRIPT_DIR}/.venv-build"
@@ -44,7 +51,7 @@ pip install -r "${SCRIPT_DIR}/requirements.txt"
 # Build with PyInstaller
 pyinstaller \
     --onefile \
-    --name "selah-whisper-server-${PLATFORM}" \
+    --name "selah-whisper-server-${TARGET_TRIPLE}" \
     --distpath "$OUTPUT_DIR" \
     --workpath "${SCRIPT_DIR}/.build" \
     --specpath "${SCRIPT_DIR}" \
@@ -53,11 +60,11 @@ pyinstaller \
 
 # Cleanup
 rm -rf "${SCRIPT_DIR}/.build"
-rm -rf "${SCRIPT_DIR}/selah-whisper-server-${PLATFORM}.spec"
+rm -rf "${SCRIPT_DIR}/selah-whisper-server-${TARGET_TRIPLE}.spec"
 deactivate
 rm -rf "$VENV_DIR"
 
 echo ""
 echo "Build complete!"
-echo "Binary: ${OUTPUT_DIR}/selah-whisper-server-${PLATFORM}"
-ls -la "$OUTPUT_DIR"
+echo "Binary: ${OUTPUT_DIR}/selah-whisper-server-${TARGET_TRIPLE}"
+ls -la "$OUTPUT_DIR"/selah-whisper-server-*

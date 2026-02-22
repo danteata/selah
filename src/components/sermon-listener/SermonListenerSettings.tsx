@@ -63,6 +63,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 return 'Faster-Whisper'
             case 'elevenlabs':
                 return 'ElevenLabs'
+            case 'desktop-whisper':
+                return 'Desktop Whisper (Offline)'
             default:
                 return 'Web Speech API'
         }
