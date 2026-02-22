@@ -141,6 +141,12 @@ export async function transcribeWithDesktopWhisper(
             formData.append('hotwords', config.hotwords);
         }
 
+        console.log('[DesktopWhisperService] Sending transcription request:', {
+            url: `${DESKTOP_WHISPER_URL}/transcribe`,
+            blobSize: audioBlob.size,
+            blobType: audioBlob.type,
+        });
+
         const response = await fetch(`${DESKTOP_WHISPER_URL}/transcribe`, {
             method: 'POST',
             body: formData,
@@ -148,14 +154,17 @@ export async function transcribeWithDesktopWhisper(
         });
 
         if (!response.ok) {
-            throw new Error(`Transcription failed: ${response.status}`);
+            const errorText = await response.text();
+            console.error('[DesktopWhisperService] Server error response:', errorText);
+            throw new Error(`Transcription failed: ${response.status} - ${errorText}`);
         }
 
         const result = await response.json() as DesktopWhisperResult;
+        console.log('[DesktopWhisperService] Transcription successful:', result);
         return result;
     } catch (error) {
-        console.error('Desktop whisper transcription failed:', error);
-        return null;
+        console.error('[DesktopWhisperService] Transcription failed:', error);
+        throw error;
     }
 }
 

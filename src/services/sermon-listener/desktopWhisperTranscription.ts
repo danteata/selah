@@ -226,8 +226,25 @@ class DesktopWhisperTranscriptionService {
         onError: ErrorCallback
     ): Promise<void> {
         try {
+            // Validate chunk
+            if (!chunk.samples || chunk.samples.length === 0) {
+                console.log('[DesktopWhisper] Empty audio chunk, skipping');
+                return;
+            }
+
+            console.log('[DesktopWhisper] Processing audio chunk:', {
+                samples: chunk.samples.length,
+                duration_ms: chunk.duration_ms,
+                sample_rate: chunk.sample_rate,
+            });
+
             // Convert Float32 samples to WAV
             const wavBlob = float32SamplesToWav(chunk.samples, chunk.sample_rate);
+
+            console.log('[DesktopWhisper] WAV blob created:', {
+                size: wavBlob.size,
+                type: wavBlob.type,
+            });
 
             // Send to desktop whisper server
             const result = await transcribeWithDesktopWhisper(wavBlob, {
@@ -237,6 +254,7 @@ class DesktopWhisperTranscriptionService {
             });
 
             if (result && result.text.trim()) {
+                console.log('[DesktopWhisper] Transcription result:', result.text);
                 onResult({
                     text: result.text.trim(),
                     language: result.language,
@@ -244,7 +262,7 @@ class DesktopWhisperTranscriptionService {
                 });
             }
         } catch (error) {
-            console.error('Error processing native audio chunk:', error);
+            console.error('[DesktopWhisper] Error processing native audio chunk:', error);
             onError(error instanceof Error ? error.message : 'Transcription error');
         }
     }

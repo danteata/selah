@@ -139,9 +139,13 @@ def transcribe():
     try:
         # Check for audio file in request
         if 'audio' not in request.files:
+            logger.error('No audio file provided in request')
             return jsonify({'error': 'No audio file provided'}), 400
         
         audio_file = request.files['audio']
+        
+        # Log file info
+        logger.info(f"Received audio file: {audio_file.filename}, content_type: {audio_file.content_type}")
         
         # Get optional parameters
         language = request.form.get('language', None)
@@ -154,8 +158,18 @@ def transcribe():
             audio_file.save(tmp.name)
             tmp_path = tmp.name
         
+        # Check file size
+        file_size = os.path.getsize(tmp_path)
+        logger.info(f"Saved audio file to {tmp_path}, size: {file_size} bytes")
+        
+        if file_size < 44:
+            logger.error(f"Audio file too small: {file_size} bytes")
+            os.unlink(tmp_path)
+            return jsonify({'error': f'Audio file too small: {file_size} bytes'}), 400
+        
         try:
             # Run transcription
+            logger.info(f"Starting transcription with language={language}, vad_filter={vad_filter}")
             segments, info = model.transcribe(
                 tmp_path,
                 language=language,
@@ -175,6 +189,8 @@ def transcribe():
                     'text': segment.text,
                 })
             
+            logger.info(f"Transcription complete: {len(text)} chars, {len(segment_list)} segments")
+            
             return jsonify({
                 'text': text.strip(),
                 'language': info.language,
@@ -186,7 +202,7 @@ def transcribe():
             os.unlink(tmp_path)
             
     except Exception as e:
-        logger.error(f"Transcription error: {e}")
+        logger.error(f"Transcription error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

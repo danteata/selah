@@ -129,6 +129,35 @@ export async function clearAudioBuffer(): Promise<void> {
  * Convert Float32 PCM samples to WAV Blob
  */
 export function float32SamplesToWav(samples: number[], sampleRate: number = 16000): Blob {
+    if (!samples || samples.length === 0) {
+        console.warn('[NativeAudioCapture] Empty samples array, creating minimal WAV');
+        // Create a minimal silent WAV file
+        const emptyBuffer = new ArrayBuffer(44);
+        const emptyView = new DataView(emptyBuffer);
+
+        // WAV header for empty file
+        const writeString = (offset: number, str: string) => {
+            for (let i = 0; i < str.length; i++) {
+                emptyView.setUint8(offset + i, str.charCodeAt(i));
+            }
+        };
+        writeString(0, 'RIFF');
+        emptyView.setUint32(4, 36, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        emptyView.setUint32(16, 16, true);
+        emptyView.setUint16(20, 1, true);
+        emptyView.setUint16(22, 1, true);
+        emptyView.setUint32(24, sampleRate, true);
+        emptyView.setUint32(28, sampleRate * 2, true);
+        emptyView.setUint16(32, 2, true);
+        emptyView.setUint16(34, 16, true);
+        writeString(36, 'data');
+        emptyView.setUint32(40, 0, true);
+
+        return new Blob([emptyBuffer], { type: 'audio/wav' });
+    }
+
     const float32Array = new Float32Array(samples);
     const buffer = new ArrayBuffer(44 + float32Array.length * 2);
     const view = new DataView(buffer);
@@ -162,6 +191,12 @@ export function float32SamplesToWav(samples: number[], sampleRate: number = 1600
         view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
         offset += 2;
     }
+
+    console.log('[NativeAudioCapture] WAV created:', {
+        samples: samples.length,
+        bufferSize: buffer.byteLength,
+        sampleRate,
+    });
 
     return new Blob([buffer], { type: 'audio/wav' });
 }
@@ -263,10 +298,15 @@ export class NativeAudioCaptureManager {
         try {
             const chunk = await getAudioChunk();
             if (chunk && chunk.samples.length > 0) {
+                console.log('[NativeAudioCapture] Got audio chunk:', {
+                    samples: chunk.samples.length,
+                    duration_ms: chunk.duration_ms,
+                    sample_rate: chunk.sample_rate,
+                });
                 this.onChunkCallback(chunk);
             }
         } catch (error) {
-            console.error('Error polling for audio chunks:', error);
+            console.error('[NativeAudioCapture] Error polling for audio chunks:', error);
             if (this.onErrorCallback) {
                 this.onErrorCallback(error instanceof Error ? error : new Error(String(error)));
             }
