@@ -1,10 +1,25 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio_capture;
+
 use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandChild;
+
+// Import audio capture state and commands
+use audio_capture::{
+    AudioCaptureState,
+    list_audio_devices,
+    start_audio_capture,
+    stop_audio_capture,
+    is_audio_capturing,
+    get_audio_chunk,
+    get_audio_buffer_size,
+    flush_audio_buffer,
+    clear_audio_buffer,
+};
 
 const WHISPER_SERVER_PORT: u16 = 17493;
 
@@ -163,10 +178,20 @@ pub fn run() {
             child: Mutex::new(None),
             server_pid: Mutex::new(None),
         })
+        .manage(AudioCaptureState::new())
         .invoke_handler(tauri::generate_handler![
             start_whisper_server,
             stop_whisper_server,
             get_whisper_server_status,
+            // Audio capture commands
+            list_audio_devices,
+            start_audio_capture,
+            stop_audio_capture,
+            is_audio_capturing,
+            get_audio_chunk,
+            get_audio_buffer_size,
+            flush_audio_buffer,
+            clear_audio_buffer,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

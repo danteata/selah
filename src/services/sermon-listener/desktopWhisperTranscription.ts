@@ -2,8 +2,8 @@
  * Desktop Whisper Transcription Service
  *
  * Provides transcription using the bundled faster-whisper server
- * in the Tauri desktop app. This service wraps the desktopWhisperService
- * to provide a consistent interface with other transcription providers.
+ * in the Tauri desktop app. Uses native audio capture for superior
+ * quality compared to web-based capture.
  */
 
 import { isDesktop } from '@/platform';
@@ -17,15 +17,20 @@ import {
     type DesktopWhisperResult,
     type WhisperServerStatus,
 } from './desktopWhisperService';
+import {
+    nativeAudioCaptureManager,
+    float32SamplesToWav,
+    isNativeAudioCaptureAvailable,
+    type AudioChunk,
+} from './nativeAudioCapture';
 
 const DEFAULT_CHUNK_DURATION_MS = 3000; // 3 seconds
-const DESKTOP_WHISPER_PORT = 17493;
-const DESKTOP_WHISPER_URL = `http://127.0.0.1:${DESKTOP_WHISPER_PORT}`;
 
 export interface DesktopWhisperTranscriptionConfig extends DesktopWhisperConfig {
     chunkDurationMs?: number;
     onProgress?: (progress: number) => void;
     onStatus?: (status: string) => void;
+    useNativeAudio?: boolean; // Option to use native audio capture
 }
 
 export interface DesktopWhisperTranscriptionResult {
@@ -45,16 +50,13 @@ type ErrorCallback = (error: string) => void;
  * Desktop Whisper Transcription Service
  *
  * Manages the bundled whisper server in Tauri desktop app
+ * with native audio capture for superior quality.
  */
 class DesktopWhisperTranscriptionService {
     private isInitialized = false;
     private isRecording = false;
     private config: DesktopWhisperTranscriptionConfig = {};
-    private mediaStream: MediaStream | null = null;
-    private audioContext: AudioContext | null = null;
-    private workletNode: AudioWorkletNode | null = null;
-    private chunkInterval: ReturnType<typeof setInterval> | null = null;
-    private serverEndpoint: string | null = null;
+    private useNativeCapture = true; // Default to native capture
 
     /**
      * Check if running in desktop mode
@@ -82,7 +84,18 @@ class DesktopWhisperTranscriptionService {
         if (!this.checkDesktop()) return false;
 
         this.config = { ...config };
+        this.useNativeCapture = config.useNativeAudio !== false; // Default to true
+
         this.config.onStatus?.('Initializing desktop whisper service...');
+
+        // Check if native audio capture is available
+        if (this.useNativeCapture) {
+            const nativeAvailable = await isNativeAudioCaptureAvailable();
+            if (!nativeAvailable) {
+                console.warn('Native audio capture not available, falling back to web audio');
+                this.useNativeCapture = false;
+            }
+        }
 
         // Start the whisper server
         this.config.onStatus?.('Starting whisper server...');
@@ -100,7 +113,6 @@ class DesktopWhisperTranscriptionService {
             return false;
         }
 
-        this.serverEndpoint = endpoint;
         this.config.onProgress?.(0.5);
         this.config.onStatus?.('Whisper server started, waiting for model to load...');
 
@@ -132,7 +144,7 @@ class DesktopWhisperTranscriptionService {
     }
 
     /**
-     * Start realtime transcription
+     * Start realtime transcription using native audio capture
      */
     async startRealtimeTranscription(
         onResult: ResultCallback,
@@ -158,9 +170,97 @@ class DesktopWhisperTranscriptionService {
             }
         }
 
+        const duration = chunkDurationMs || this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS;
+
+        // Use native audio capture if available
+        if (this.useNativeCapture) {
+            return this.startNativeCapture(onResult, onError, duration);
+        } else {
+            return this.startWebAudioCapture(onResult, onError, duration);
+        }
+    }
+
+    /**
+     * Start native audio capture (Rust-based)
+     */
+    private async startNativeCapture(
+        onResult: ResultCallback,
+        onError: ErrorCallback,
+        chunkDurationMs: number
+    ): Promise<boolean> {
         try {
-            // Get microphone access
-            this.mediaStream = await navigator.mediaDevices.getUserMedia({
+            const started = await nativeAudioCaptureManager.start(
+                async (chunk: AudioChunk) => {
+                    await this.processNativeChunk(chunk, onResult, onError);
+                },
+                (error: Error) => {
+                    onError(error.message);
+                },
+                {
+                    chunkDurationMs,
+                    pollIntervalMs: 500, // Poll every 500ms
+                }
+            );
+
+            if (started) {
+                this.isRecording = true;
+                console.log('Desktop whisper transcription started (native audio capture)');
+                return true;
+            } else {
+                onError('Failed to start native audio capture');
+                return false;
+            }
+        } catch (error) {
+            console.error('Failed to start native audio capture:', error);
+            onError(error instanceof Error ? error.message : 'Failed to start native audio capture');
+            return false;
+        }
+    }
+
+    /**
+     * Process a native audio chunk
+     */
+    private async processNativeChunk(
+        chunk: AudioChunk,
+        onResult: ResultCallback,
+        onError: ErrorCallback
+    ): Promise<void> {
+        try {
+            // Convert Float32 samples to WAV
+            const wavBlob = float32SamplesToWav(chunk.samples, chunk.sample_rate);
+
+            // Send to desktop whisper server
+            const result = await transcribeWithDesktopWhisper(wavBlob, {
+                language: this.config.language,
+                vadFilter: this.config.vadFilter,
+                hotwords: this.config.hotwords,
+            });
+
+            if (result && result.text.trim()) {
+                onResult({
+                    text: result.text.trim(),
+                    language: result.language,
+                    segments: result.segments,
+                });
+            }
+        } catch (error) {
+            console.error('Error processing native audio chunk:', error);
+            onError(error instanceof Error ? error.message : 'Transcription error');
+        }
+    }
+
+    /**
+     * Start web audio capture (fallback)
+     */
+    private async startWebAudioCapture(
+        onResult: ResultCallback,
+        onError: ErrorCallback,
+        chunkDurationMs: number
+    ): Promise<boolean> {
+        // Fallback to web audio capture
+        // This is the original implementation using AudioWorklet
+        try {
+            const mediaStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
@@ -169,9 +269,8 @@ class DesktopWhisperTranscriptionService {
                 },
             });
 
-            // Create audio context
-            this.audioContext = new AudioContext({ sampleRate: 16000 });
-            const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+            const audioContext = new AudioContext({ sampleRate: 16000 });
+            const source = audioContext.createMediaStreamSource(mediaStream);
 
             // Create audio worklet for capturing PCM data
             const workletBlob = new Blob(
@@ -181,7 +280,7 @@ class DesktopWhisperTranscriptionService {
                         constructor() {
                             super();
                             this.buffer = [];
-                            this.bufferSize = 48000; // 3 seconds at 16kHz
+                            this.bufferSize = ${16000 * (chunkDurationMs / 1000)}; // Dynamic buffer size
                         }
                         
                         process(inputs, outputs, parameters) {
@@ -208,34 +307,44 @@ class DesktopWhisperTranscriptionService {
             );
 
             const workletUrl = URL.createObjectURL(workletBlob);
-            await this.audioContext.audioWorklet.addModule(workletUrl);
+            await audioContext.audioWorklet.addModule(workletUrl);
 
-            this.workletNode = new AudioWorkletNode(this.audioContext, 'audio-capture-processor');
-            source.connect(this.workletNode);
-            this.workletNode.connect(this.audioContext.destination);
+            const workletNode = new AudioWorkletNode(audioContext, 'audio-capture-processor');
+            source.connect(workletNode);
+            workletNode.connect(audioContext.destination);
 
             // Handle audio chunks
-            this.workletNode.port.onmessage = async (event) => {
+            workletNode.port.onmessage = async (event) => {
                 if (event.data.buffer) {
                     const pcmData = event.data.buffer as Float32Array;
-                    await this.processChunk(pcmData, onResult, onError);
+                    await this.processWebChunk(pcmData, onResult, onError);
                 }
             };
 
+            // Store references for cleanup
+            this._webMediaStream = mediaStream;
+            this._webAudioContext = audioContext;
+            this._webWorkletNode = workletNode;
+
             this.isRecording = true;
-            console.log('Desktop whisper transcription started');
+            console.log('Desktop whisper transcription started (web audio capture fallback)');
             return true;
         } catch (error) {
-            console.error('Failed to start desktop whisper transcription:', error);
+            console.error('Failed to start web audio capture:', error);
             onError(error instanceof Error ? error.message : 'Failed to start recording');
             return false;
         }
     }
 
+    // Store web audio references for cleanup
+    private _webMediaStream: MediaStream | null = null;
+    private _webAudioContext: AudioContext | null = null;
+    private _webWorkletNode: AudioWorkletNode | null = null;
+
     /**
-     * Process an audio chunk
+     * Process a web audio chunk
      */
-    private async processChunk(
+    private async processWebChunk(
         pcmData: Float32Array,
         onResult: ResultCallback,
         onError: ErrorCallback
@@ -259,13 +368,13 @@ class DesktopWhisperTranscriptionService {
                 });
             }
         } catch (error) {
-            console.error('Error processing audio chunk:', error);
+            console.error('Error processing web audio chunk:', error);
             onError(error instanceof Error ? error.message : 'Transcription error');
         }
     }
 
     /**
-     * Convert Float32 PCM to WAV Blob
+     * Convert Float32 PCM to WAV Blob (for web audio fallback)
      */
     private pcmToWav(float32Array: Float32Array): Blob {
         const buffer = new ArrayBuffer(44 + float32Array.length * 2);
@@ -309,28 +418,25 @@ class DesktopWhisperTranscriptionService {
     async stop(): Promise<void> {
         this.isRecording = false;
 
-        // Clear interval
-        if (this.chunkInterval) {
-            clearInterval(this.chunkInterval);
-            this.chunkInterval = null;
+        // Stop native audio capture
+        if (this.useNativeCapture) {
+            await nativeAudioCaptureManager.stop();
         }
 
-        // Disconnect worklet
-        if (this.workletNode) {
-            this.workletNode.disconnect();
-            this.workletNode = null;
+        // Stop web audio capture (if used)
+        if (this._webWorkletNode) {
+            this._webWorkletNode.disconnect();
+            this._webWorkletNode = null;
         }
 
-        // Close audio context
-        if (this.audioContext) {
-            await this.audioContext.close();
-            this.audioContext = null;
+        if (this._webAudioContext) {
+            await this._webAudioContext.close();
+            this._webAudioContext = null;
         }
 
-        // Stop media stream
-        if (this.mediaStream) {
-            this.mediaStream.getTracks().forEach((track) => track.stop());
-            this.mediaStream = null;
+        if (this._webMediaStream) {
+            this._webMediaStream.getTracks().forEach((track) => track.stop());
+            this._webMediaStream = null;
         }
 
         console.log('Desktop whisper transcription stopped');
@@ -343,7 +449,13 @@ class DesktopWhisperTranscriptionService {
         await this.stop();
         await stopDesktopWhisperServer();
         this.isInitialized = false;
-        this.serverEndpoint = null;
+    }
+
+    /**
+     * Check if using native audio capture
+     */
+    isUsingNativeCapture(): boolean {
+        return this.useNativeCapture;
     }
 }
 
