@@ -2,8 +2,8 @@
  * Desktop Whisper Transcription Service
  *
  * Provides transcription using the bundled faster-whisper server
- * in the Tauri desktop app. Uses native audio capture for superior
- * quality compared to web-based capture.
+ * in the Tauri desktop app. Uses VAD-based audio capture for
+ * superior quality - only sends complete utterances to the server.
  */
 
 import { isDesktop } from '@/platform';
@@ -24,13 +24,62 @@ import {
     type AudioChunk,
 } from './nativeAudioCapture';
 
-const DEFAULT_CHUNK_DURATION_MS = 3000; // 3 seconds
+const DEFAULT_CHUNK_DURATION_MS = 3000; // 3 seconds (fallback for non-VAD mode)
+
+// Type definitions for the VAD library (loaded from CDN)
+type MicVADInstance = {
+    start: () => void
+    pause: () => void
+    destroy: () => Promise<void>
+    listening: boolean
+}
+
+type MicVADStatic = {
+    new: (options: {
+        baseAssetPath?: string
+        onnxWASMBasePath?: string
+        onSpeechStart?: () => void
+        onSpeechEnd?: (audio: Float32Array) => void
+        onVADMisfire?: () => void
+        positiveSpeechThreshold?: number
+        negativeSpeechThreshold?: number
+        minSpeechMs?: number
+        preSpeechPadMs?: number
+        redemptionMs?: number
+    }) => Promise<MicVADInstance>
+}
+
+type VADUtils = {
+    encodeWAV: (audio: Float32Array) => ArrayBuffer
+}
+
+type VADGlobal = {
+    MicVAD: MicVADStatic
+    utils: VADUtils
+}
+
+// Extend Window interface
+declare global {
+    interface Window {
+        vad?: VADGlobal
+        ort?: unknown
+    }
+}
 
 export interface DesktopWhisperTranscriptionConfig extends DesktopWhisperConfig {
     chunkDurationMs?: number;
     onProgress?: (progress: number) => void;
     onStatus?: (status: string) => void;
-    useNativeAudio?: boolean; // Option to use native audio capture
+    useNativeAudio?: boolean; // Option to use native audio capture (fallback)
+    useVAD?: boolean; // Use VAD-based chunking (default: true)
+    // VAD configuration
+    positiveSpeechThreshold?: number;
+    negativeSpeechThreshold?: number;
+    minSpeechMs?: number;
+    preSpeechPadMs?: number;
+    redemptionMs?: number;
+    onSpeechStart?: () => void;
+    onSpeechEnd?: () => void;
 }
 
 export interface DesktopWhisperTranscriptionResult {
@@ -50,13 +99,18 @@ type ErrorCallback = (error: string) => void;
  * Desktop Whisper Transcription Service
  *
  * Manages the bundled whisper server in Tauri desktop app
- * with native audio capture for superior quality.
+ * with VAD-based audio capture for superior quality.
  */
 class DesktopWhisperTranscriptionService {
     private isInitialized = false;
     private isRecording = false;
     private config: DesktopWhisperTranscriptionConfig = {};
-    private useNativeCapture = true; // Default to native capture
+    private useNativeCapture = true; // Fallback for non-VAD mode
+    private useVAD = true; // Default to VAD-based chunking
+    private vad: MicVADInstance | null = null;
+    private vadLoaded = false;
+    private utteranceCount = 0;
+    private abortController: AbortController | null = null;
 
     /**
      * Check if running in desktop mode
@@ -84,12 +138,23 @@ class DesktopWhisperTranscriptionService {
         if (!this.checkDesktop()) return false;
 
         this.config = { ...config };
-        this.useNativeCapture = config.useNativeAudio !== false; // Default to true
+        this.useVAD = config.useVAD !== false; // Default to true
+        this.useNativeCapture = config.useNativeAudio !== false; // Fallback for non-VAD mode
 
         this.config.onStatus?.('Initializing desktop whisper service...');
 
-        // Check if native audio capture is available
-        if (this.useNativeCapture) {
+        // Load VAD scripts if using VAD mode
+        if (this.useVAD) {
+            this.config.onStatus?.('Loading VAD library...');
+            const vadLoaded = await this.loadVADScripts();
+            if (!vadLoaded) {
+                console.warn('VAD library failed to load, falling back to time-based chunking');
+                this.useVAD = false;
+            }
+        }
+
+        // Check if native audio capture is available (for fallback)
+        if (!this.useVAD && this.useNativeCapture) {
             const nativeAvailable = await isNativeAudioCaptureAvailable();
             if (!nativeAvailable) {
                 console.warn('Native audio capture not available, falling back to web audio');
@@ -139,6 +204,52 @@ class DesktopWhisperTranscriptionService {
     }
 
     /**
+     * Load VAD library scripts dynamically
+     */
+    private async loadVADScripts(): Promise<boolean> {
+        // Already loaded
+        if (this.vadLoaded && window.vad?.MicVAD && window.vad?.utils) {
+            return true;
+        }
+
+        return new Promise((resolve) => {
+            // Use the loader script that handles the loading order
+            const loaderScript = document.createElement('script');
+            loaderScript.src = '/vad-loader.js';
+            loaderScript.type = 'text/javascript';
+
+            loaderScript.onerror = () => {
+                console.error('[DesktopWhisper] Failed to load VAD loader script');
+                resolve(false);
+            };
+
+            loaderScript.onload = () => {
+                console.log('[DesktopWhisper] Loader script executed, checking for VAD...');
+
+                // Wait a bit for the async loading to complete
+                let attempts = 0;
+                const maxAttempts = 50; // 5 seconds max
+                const checkInterval = setInterval(() => {
+                    attempts++;
+
+                    if (window.vad?.MicVAD && window.vad?.utils) {
+                        clearInterval(checkInterval);
+                        this.vadLoaded = true;
+                        console.log('[DesktopWhisper] VAD library ready');
+                        resolve(true);
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(checkInterval);
+                        console.error('[DesktopWhisper] Timeout waiting for VAD library');
+                        resolve(false);
+                    }
+                }, 100);
+            };
+
+            document.head.appendChild(loaderScript);
+        });
+    }
+
+    /**
      * Get server status
      */
     async getStatus(): Promise<WhisperServerStatus | null> {
@@ -175,11 +286,121 @@ class DesktopWhisperTranscriptionService {
 
         const duration = chunkDurationMs || this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS;
 
-        // Use native audio capture if available
+        // Use VAD-based capture if available (preferred)
+        if (this.useVAD && this.vadLoaded) {
+            return this.startVADCapture(onResult, onError);
+        }
+
+        // Fall back to native audio capture if available
         if (this.useNativeCapture) {
             return this.startNativeCapture(onResult, onError, duration);
         } else {
             return this.startWebAudioCapture(onResult, onError, duration);
+        }
+    }
+
+    /**
+     * Start VAD-based audio capture (preferred method)
+     * Uses browser-based VAD to detect speech boundaries
+     */
+    private async startVADCapture(
+        onResult: ResultCallback,
+        onError: ErrorCallback
+    ): Promise<boolean> {
+        if (!window.vad?.MicVAD || !window.vad?.utils) {
+            onError('VAD library not loaded');
+            return false;
+        }
+
+        try {
+            console.log('[DesktopWhisper] Starting VAD-based capture');
+
+            this.vad = await window.vad.MicVAD.new({
+                // Asset paths - load from CDN
+                baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
+                onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
+                onSpeechStart: () => {
+                    console.log('[DesktopWhisper] Speech started');
+                    this.config.onSpeechStart?.();
+                    this.config.onStatus?.('speech');
+                },
+                onSpeechEnd: async (audio: Float32Array) => {
+                    console.log('[DesktopWhisper] Speech ended, audio length:', audio.length);
+                    this.config.onSpeechEnd?.();
+                    this.config.onStatus?.('processing');
+
+                    // Process the utterance
+                    await this.processVADUtterance(audio, onResult, onError);
+                },
+                onVADMisfire: () => {
+                    console.log('[DesktopWhisper] VAD misfire - too short, ignoring');
+                    this.config.onStatus?.('listening');
+                },
+                // VAD parameters with defaults
+                positiveSpeechThreshold: this.config.positiveSpeechThreshold ?? 0.6,
+                negativeSpeechThreshold: this.config.negativeSpeechThreshold ?? 0.4,
+                minSpeechMs: this.config.minSpeechMs ?? 250,
+                preSpeechPadMs: this.config.preSpeechPadMs ?? 500,
+                redemptionMs: this.config.redemptionMs ?? 750,
+            });
+
+            this.vad.start();
+            this.isRecording = true;
+            this.config.onStatus?.('listening');
+            console.log('[DesktopWhisper] VAD-based capture started successfully');
+            return true;
+        } catch (error) {
+            console.error('[DesktopWhisper] Failed to start VAD capture:', error);
+            onError('Failed to initialize VAD: ' + (error instanceof Error ? error.message : String(error)));
+            return false;
+        }
+    }
+
+    /**
+     * Process a VAD utterance (complete speech segment)
+     */
+    private async processVADUtterance(
+        audio: Float32Array,
+        onResult: ResultCallback,
+        onError: ErrorCallback
+    ): Promise<void> {
+        const utteranceId = `utt-${Date.now()}-${++this.utteranceCount}`;
+        const startTime = Date.now();
+
+        try {
+            // Convert Float32 PCM to WAV using VAD utils
+            if (!window.vad?.utils) {
+                throw new Error('VAD utils not available');
+            }
+            const wavBuffer = window.vad.utils.encodeWAV(audio);
+            const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+
+            console.log('[DesktopWhisper] Utterance', utteranceId, 'size:', blob.size, 'bytes');
+
+            // Send to desktop whisper server
+            // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
+            const language = (this.config.language || 'en').split('-')[0];
+            const result = await transcribeWithDesktopWhisper(blob, {
+                language,
+                vadFilter: false, // Always disable server-side VAD (model not bundled)
+                hotwords: this.config.hotwords,
+            });
+
+            if (result && result.text.trim()) {
+                const duration = Date.now() - startTime;
+                console.log('[DesktopWhisper] Transcription complete in', duration, 'ms:', result.text.substring(0, 50) + '...');
+                onResult({
+                    text: result.text.trim(),
+                    language: result.language,
+                    segments: result.segments,
+                });
+            }
+
+            this.config.onStatus?.('listening');
+        } catch (error) {
+            console.error('[DesktopWhisper] Error processing VAD utterance:', error);
+            onError(error instanceof Error ? error.message : String(error));
+            this.config.onStatus?.('error');
         }
     }
 
@@ -443,6 +664,17 @@ class DesktopWhisperTranscriptionService {
     async stop(): Promise<void> {
         this.isRecording = false;
 
+        // Abort any pending request
+        this.abortController?.abort();
+        this.abortController = null;
+
+        // Stop VAD capture
+        if (this.vad) {
+            this.vad.pause();
+            await this.vad.destroy();
+            this.vad = null;
+        }
+
         // Stop native audio capture
         if (this.useNativeCapture) {
             await nativeAudioCaptureManager.stop();
@@ -464,6 +696,7 @@ class DesktopWhisperTranscriptionService {
             this._webMediaStream = null;
         }
 
+        this.config.onStatus?.('stopped');
         console.log('Desktop whisper transcription stopped');
     }
 
@@ -474,6 +707,13 @@ class DesktopWhisperTranscriptionService {
         await this.stop();
         await stopDesktopWhisperServer();
         this.isInitialized = false;
+    }
+
+    /**
+     * Check if using VAD-based capture
+     */
+    isUsingVAD(): boolean {
+        return this.useVAD && this.vadLoaded;
     }
 
     /**
