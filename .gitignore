@@ -25,4 +25,7 @@ dist-ssr
 
 # Tauri
 src-tauri/target
-src-tauri/Cargo.lock
+src-tauri/binaries/dist
+src-tauri/binaries/.venv-build
+src-tauri/binaries/.build
+*.spec

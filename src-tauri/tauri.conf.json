@@ -13,6 +13,9 @@
         "active": true,
         "targets": "all",
         "createUpdaterArtifacts": false,
+        "externalBin": [
+            "binaries/selah-whisper-server"
+        ],
         "icon": [
             "icons/32x32.png",
             "icons/128x128.png",
@@ -54,7 +57,14 @@
     },
     "plugins": {
         "shell": {
-            "open": true
+            "open": true,
+            "sidecar": true,
+            "scope": [
+                {
+                    "name": "binaries/selah-whisper-server",
+                    "sidecar": true
+                }
+            ]
         }
     }
 }
