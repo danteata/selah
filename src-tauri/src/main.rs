@@ -11,14 +11,20 @@ use tauri_plugin_shell::process::CommandChild;
 // Import audio capture state and commands
 use audio_capture::{
     AudioCaptureState,
+    // Device listing
     list_audio_devices,
-    start_audio_capture,
-    stop_audio_capture,
-    is_audio_capturing,
+    // New unified capture API
+    is_system_audio_supported,
+    start_capture,
+    stop_capture,
+    is_capturing,
     get_audio_chunk,
-    get_audio_buffer_size,
-    flush_audio_buffer,
-    clear_audio_buffer,
+    get_buffer_size,
+    flush_buffer,
+    clear_buffer,
+    get_capture_type,
+    get_audio_chunk_as_wav,
+    flush_buffer_as_wav,
 };
 
 const WHISPER_SERVER_PORT: u16 = 17493;
@@ -185,13 +191,17 @@ pub fn run() {
             get_whisper_server_status,
             // Audio capture commands
             list_audio_devices,
-            start_audio_capture,
-            stop_audio_capture,
-            is_audio_capturing,
+            is_system_audio_supported,
+            start_capture,
+            stop_capture,
+            is_capturing,
             get_audio_chunk,
-            get_audio_buffer_size,
-            flush_audio_buffer,
-            clear_audio_buffer,
+            get_buffer_size,
+            flush_buffer,
+            clear_buffer,
+            get_capture_type,
+            get_audio_chunk_as_wav,
+            flush_buffer_as_wav,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

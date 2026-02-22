@@ -1,318 +1,307 @@
 /**
  * Native Audio Capture Service
  *
- * Provides high-quality audio capture using native Tauri commands.
- * This service uses the Rust-based audio capture (cpal) for superior
- * audio quality compared to web-based capture.
+ * Provides native audio capture for the desktop app using Tauri.
+ * Supports both microphone and system audio (loopback) capture.
+ *
+ * Benefits over web-based capture:
+ * - Lower latency (direct OS API access)
+ * - System audio capture (what's playing through speakers)
+ * - No browser permission prompts
+ * - Direct 16kHz output for Whisper
  */
 
-import { isDesktop } from '@/platform';
+import { useState, useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 
-// Types for audio device info
+// Type definitions
+export type CaptureType = 'microphone' | 'system' | 'both'
+
 export interface AudioDeviceInfo {
-    name: string;
-    isDefault: boolean;
-    sampleRate: number;
-    channels: number;
+    name: string
+    is_default: boolean
+    sample_rate: number
+    channels: number
+    device_type: 'Input' | 'Output' | 'Loopback'
 }
 
-// Types for audio chunk
 export interface AudioChunk {
-    samples: number[];  // Float32 PCM samples
-    duration_ms: number;
-    sample_rate: number;
+    samples: number[]
+    duration_ms: number
+    sample_rate: number
+}
+
+export interface NativeCaptureConfig {
+    captureType: CaptureType
+    chunkDurationMs?: number
+    onChunk?: (chunk: AudioChunk) => void
+    onStatus?: (status: CaptureStatus) => void
+    onError?: (error: string) => void
+}
+
+export type CaptureStatus = 'idle' | 'starting' | 'capturing' | 'stopping' | 'error'
+
+/**
+ * Check if we're running in Tauri (desktop app)
+ */
+export function isTauriAvailable(): boolean {
+    return typeof window !== 'undefined' && '__TAURI__' in window
 }
 
 /**
- * Check if native audio capture is available
+ * Check if system audio capture is supported
  */
-export async function isNativeAudioCaptureAvailable(): Promise<boolean> {
-    if (!isDesktop()) return false;
+export async function isSystemAudioSupported(): Promise<boolean> {
+    if (!isTauriAvailable()) return false
 
     try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        return true;
+        return await invoke<boolean>('is_system_audio_supported')
     } catch {
-        return false;
+        return false
     }
 }
 
 /**
- * List available audio input devices
+ * List available audio devices
  */
 export async function listAudioDevices(): Promise<AudioDeviceInfo[]> {
-    if (!isDesktop()) {
-        throw new Error('Native audio capture is only available in desktop mode');
+    if (!isTauriAvailable()) {
+        throw new Error('Native audio capture is only available in the desktop app')
     }
 
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<AudioDeviceInfo[]>('list_audio_devices');
+    return await invoke<AudioDeviceInfo[]>('list_audio_devices')
 }
 
 /**
- * Start native audio capture
+ * Native Audio Capture Service
+ *
+ * Uses Tauri's IPC to communicate with native Rust audio capture.
  */
-export async function startNativeAudioCapture(chunkDurationMs?: number): Promise<void> {
-    if (!isDesktop()) {
-        throw new Error('Native audio capture is only available in desktop mode');
-    }
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('start_audio_capture', {
-        chunkDurationMs: chunkDurationMs || 3000
-    });
-}
-
-/**
- * Stop native audio capture
- */
-export async function stopNativeAudioCapture(): Promise<void> {
-    if (!isDesktop()) return;
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('stop_audio_capture');
-}
-
-/**
- * Check if audio is currently being captured
- */
-export async function isAudioCapturing(): Promise<boolean> {
-    if (!isDesktop()) return false;
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<boolean>('is_audio_capturing');
-}
-
-/**
- * Get an audio chunk if available
- */
-export async function getAudioChunk(): Promise<AudioChunk | null> {
-    if (!isDesktop()) return null;
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<AudioChunk | null>('get_audio_chunk');
-}
-
-/**
- * Get current audio buffer size
- */
-export async function getAudioBufferSize(): Promise<number> {
-    if (!isDesktop()) return 0;
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<number>('get_audio_buffer_size');
-}
-
-/**
- * Flush all buffered audio
- */
-export async function flushAudioBuffer(): Promise<AudioChunk> {
-    if (!isDesktop()) {
-        throw new Error('Native audio capture is only available in desktop mode');
-    }
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<AudioChunk>('flush_audio_buffer');
-}
-
-/**
- * Clear the audio buffer
- */
-export async function clearAudioBuffer(): Promise<void> {
-    if (!isDesktop()) return;
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('clear_audio_buffer');
-}
-
-/**
- * Convert Float32 PCM samples to WAV Blob
- */
-export function float32SamplesToWav(samples: number[], sampleRate: number = 16000): Blob {
-    if (!samples || samples.length === 0) {
-        console.warn('[NativeAudioCapture] Empty samples array, creating minimal WAV');
-        // Create a minimal silent WAV file
-        const emptyBuffer = new ArrayBuffer(44);
-        const emptyView = new DataView(emptyBuffer);
-
-        // WAV header for empty file
-        const writeString = (offset: number, str: string) => {
-            for (let i = 0; i < str.length; i++) {
-                emptyView.setUint8(offset + i, str.charCodeAt(i));
-            }
-        };
-        writeString(0, 'RIFF');
-        emptyView.setUint32(4, 36, true);
-        writeString(8, 'WAVE');
-        writeString(12, 'fmt ');
-        emptyView.setUint32(16, 16, true);
-        emptyView.setUint16(20, 1, true);
-        emptyView.setUint16(22, 1, true);
-        emptyView.setUint32(24, sampleRate, true);
-        emptyView.setUint32(28, sampleRate * 2, true);
-        emptyView.setUint16(32, 2, true);
-        emptyView.setUint16(34, 16, true);
-        writeString(36, 'data');
-        emptyView.setUint32(40, 0, true);
-
-        return new Blob([emptyBuffer], { type: 'audio/wav' });
-    }
-
-    const float32Array = new Float32Array(samples);
-    const buffer = new ArrayBuffer(44 + float32Array.length * 2);
-    const view = new DataView(buffer);
-
-    // Helper to write string
-    const writeString = (offset: number, str: string) => {
-        for (let i = 0; i < str.length; i++) {
-            view.setUint8(offset + i, str.charCodeAt(i));
-        }
-    };
-
-    // WAV header
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + float32Array.length * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true); // Subchunk1Size
-    view.setUint16(20, 1, true); // AudioFormat (PCM)
-    view.setUint16(22, 1, true); // NumChannels (mono)
-    view.setUint32(24, sampleRate, true); // SampleRate
-    view.setUint32(28, sampleRate * 2, true); // ByteRate
-    view.setUint16(32, 2, true); // BlockAlign
-    view.setUint16(34, 16, true); // BitsPerSample
-    writeString(36, 'data');
-    view.setUint32(40, float32Array.length * 2, true);
-
-    // Convert Float32 to Int16
-    let offset = 44;
-    for (let i = 0; i < float32Array.length; i++) {
-        const sample = Math.max(-1, Math.min(1, float32Array[i]));
-        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-        offset += 2;
-    }
-
-    console.log('[NativeAudioCapture] WAV created:', {
-        samples: samples.length,
-        bufferSize: buffer.byteLength,
-        sampleRate,
-    });
-
-    return new Blob([buffer], { type: 'audio/wav' });
-}
-
-/**
- * Native Audio Capture Manager
- * 
- * Provides a high-level interface for capturing audio with automatic
- * chunk polling and callback-based processing.
- */
-export class NativeAudioCaptureManager {
-    private isCapturing = false;
-    private pollInterval: ReturnType<typeof setInterval> | null = null;
-    private onChunkCallback: ((chunk: AudioChunk) => void) | null = null;
-    private onErrorCallback: ((error: Error) => void) | null = null;
-
-    /**
-     * Start capturing audio with callbacks
-     */
-    async start(
-        onChunk: (chunk: AudioChunk) => void,
-        onError: (error: Error) => void,
-        options: {
-            chunkDurationMs?: number;
-            pollIntervalMs?: number;
-        } = {}
-    ): Promise<boolean> {
-        if (this.isCapturing) {
-            console.warn('Already capturing');
-            return false;
-        }
-
-        try {
-            // Start capture
-            await startNativeAudioCapture(options.chunkDurationMs || 3000);
-
-            this.isCapturing = true;
-            this.onChunkCallback = onChunk;
-            this.onErrorCallback = onError;
-
-            // Start polling for audio chunks
-            const pollInterval = options.pollIntervalMs || 500; // Poll every 500ms by default
-            this.pollInterval = setInterval(() => this.pollForChunks(), pollInterval);
-
-            console.log('Native audio capture started');
-            return true;
-        } catch (error) {
-            console.error('Failed to start native audio capture:', error);
-            onError(error instanceof Error ? error : new Error(String(error)));
-            return false;
-        }
-    }
-
-    /**
-     * Stop capturing audio
-     */
-    async stop(): Promise<void> {
-        if (!this.isCapturing) return;
-
-        // Stop polling
-        if (this.pollInterval) {
-            clearInterval(this.pollInterval);
-            this.pollInterval = null;
-        }
-
-        // Stop native capture
-        await stopNativeAudioCapture();
-
-        // Process any remaining audio
-        try {
-            const remainingChunk = await flushAudioBuffer();
-            if (remainingChunk.samples.length > 0 && this.onChunkCallback) {
-                this.onChunkCallback(remainingChunk);
-            }
-        } catch (error) {
-            console.error('Error flushing audio buffer:', error);
-        }
-
-        this.isCapturing = false;
-        this.onChunkCallback = null;
-        this.onErrorCallback = null;
-
-        console.log('Native audio capture stopped');
-    }
+class NativeAudioCaptureService {
+    private isCapturing = false
+    private pollInterval: ReturnType<typeof setInterval> | null = null
+    private config: NativeCaptureConfig | null = null
 
     /**
      * Check if currently capturing
      */
     isActive(): boolean {
-        return this.isCapturing;
+        return this.isCapturing
     }
 
     /**
-     * Poll for available audio chunks
+     * Start audio capture
      */
-    private async pollForChunks(): Promise<void> {
-        if (!this.isCapturing || !this.onChunkCallback) return;
+    async start(config: NativeCaptureConfig): Promise<boolean> {
+        if (!isTauriAvailable()) {
+            config.onError?.('Native audio capture is only available in the desktop app')
+            return false
+        }
+
+        if (this.isCapturing) {
+            config.onError?.('Already capturing')
+            return false
+        }
+
+        this.config = config
+        this.isCapturing = true
+        config.onStatus?.('starting')
 
         try {
-            const chunk = await getAudioChunk();
-            if (chunk && chunk.samples.length > 0) {
-                console.log('[NativeAudioCapture] Got audio chunk:', {
-                    samples: chunk.samples.length,
-                    duration_ms: chunk.duration_ms,
-                    sample_rate: chunk.sample_rate,
-                });
-                this.onChunkCallback(chunk);
-            }
+            // Start the native capture
+            await invoke('start_capture', {
+                captureType: config.captureType,
+                chunkDurationMs: config.chunkDurationMs || 3000,
+            })
+
+            config.onStatus?.('capturing')
+            console.log(`[NativeCapture] Started ${config.captureType} capture`)
+
+            // Start polling for audio chunks
+            this.startPolling()
+
+            return true
         } catch (error) {
-            console.error('[NativeAudioCapture] Error polling for audio chunks:', error);
-            if (this.onErrorCallback) {
-                this.onErrorCallback(error instanceof Error ? error : new Error(String(error)));
-            }
+            this.isCapturing = false
+            config.onStatus?.('error')
+            config.onError?.(String(error))
+            console.error('[NativeCapture] Failed to start:', error)
+            return false
         }
+    }
+
+    /**
+     * Stop audio capture
+     */
+    async stop(): Promise<void> {
+        if (!this.isCapturing) return
+
+        this.config?.onStatus?.('stopping')
+
+        // Stop polling
+        if (this.pollInterval) {
+            clearInterval(this.pollInterval)
+            this.pollInterval = null
+        }
+
+        try {
+            await invoke('stop_capture')
+            console.log('[NativeCapture] Stopped capture')
+        } catch (error) {
+            console.error('[NativeCapture] Error stopping:', error)
+        }
+
+        this.isCapturing = false
+        this.config?.onStatus?.('idle')
+    }
+
+    /**
+     * Get current buffer size
+     */
+    async getBufferSize(): Promise<number> {
+        return await invoke<number>('get_buffer_size')
+    }
+
+    /**
+     * Get audio chunk if available
+     */
+    async getAudioChunk(): Promise<AudioChunk | null> {
+        return await invoke<AudioChunk | null>('get_audio_chunk')
+    }
+
+    /**
+     * Get audio chunk as WAV (base64 encoded)
+     */
+    async getAudioChunkAsWav(): Promise<string | null> {
+        return await invoke<string | null>('get_audio_chunk_as_wav')
+    }
+
+    /**
+     * Flush all buffered audio
+     */
+    async flushBuffer(): Promise<AudioChunk> {
+        return await invoke<AudioChunk>('flush_buffer')
+    }
+
+    /**
+     * Flush buffer as WAV (base64 encoded)
+     */
+    async flushBufferAsWav(): Promise<string> {
+        return await invoke<string>('flush_buffer_as_wav')
+    }
+
+    /**
+     * Clear the audio buffer
+     */
+    async clearBuffer(): Promise<void> {
+        await invoke('clear_buffer')
+    }
+
+    /**
+     * Get current capture type
+     */
+    async getCaptureType(): Promise<CaptureType> {
+        return await invoke<CaptureType>('get_capture_type')
+    }
+
+    /**
+     * Start polling for audio chunks
+     */
+    private startPolling(): void {
+        const pollIntervalMs = (this.config?.chunkDurationMs || 3000) / 2
+
+        this.pollInterval = setInterval(async () => {
+            if (!this.isCapturing) return
+
+            try {
+                const chunk = await this.getAudioChunk()
+                if (chunk && chunk.samples.length > 0) {
+                    this.config?.onChunk?.(chunk)
+                }
+            } catch (error) {
+                console.error('[NativeCapture] Poll error:', error)
+            }
+        }, pollIntervalMs)
     }
 }
 
-// Singleton instance
-export const nativeAudioCaptureManager = new NativeAudioCaptureManager();
+// Export singleton instance
+export const nativeAudioCapture = new NativeAudioCaptureService()
+
+/**
+ * Hook for using native audio capture in React components
+ */
+export function useNativeAudioCapture() {
+    const [isCapturing, setIsCapturing] = useState<boolean>(false)
+    const [status, setStatus] = useState<CaptureStatus>('idle')
+    const [error, setError] = useState<string | null>(null)
+    const [isSupported, setIsSupported] = useState<boolean>(false)
+    const [systemAudioSupported, setSystemAudioSupported] = useState<boolean>(false)
+
+    // Check availability on mount
+    useEffect(() => {
+        const checkAvailability = async () => {
+            const tauriAvailable = isTauriAvailable()
+            setIsSupported(tauriAvailable)
+
+            if (tauriAvailable) {
+                const systemSupported = await isSystemAudioSupported()
+                setSystemAudioSupported(systemSupported)
+            }
+        }
+
+        checkAvailability()
+    }, [])
+
+    const start = async (config: Omit<NativeCaptureConfig, 'onChunk' | 'onStatus' | 'onError'> & {
+        onChunk?: (chunk: AudioChunk) => void
+    }): Promise<boolean> => {
+        setError(null)
+
+        const result = await nativeAudioCapture.start({
+            ...config,
+            onChunk: (chunk) => {
+                setIsCapturing(true)
+                config.onChunk?.(chunk)
+            },
+            onStatus: (s) => {
+                setStatus(s)
+                if (s === 'capturing') setIsCapturing(true)
+                else if (s === 'idle') setIsCapturing(false)
+            },
+            onError: (e) => {
+                setError(e)
+                setStatus('error')
+            },
+        })
+
+        return result
+    }
+
+    const stop = async () => {
+        await nativeAudioCapture.stop()
+        setIsCapturing(false)
+        setStatus('idle')
+    }
+
+    const getWavChunk = async (): Promise<string | null> => {
+        return await nativeAudioCapture.getAudioChunkAsWav()
+    }
+
+    const flushWav = async (): Promise<string> => {
+        return await nativeAudioCapture.flushBufferAsWav()
+    }
+
+    return {
+        isCapturing,
+        status,
+        error,
+        isSupported,
+        systemAudioSupported,
+        start,
+        stop,
+        getWavChunk,
+        flushWav,
+        listAudioDevices,
+    }
+}
