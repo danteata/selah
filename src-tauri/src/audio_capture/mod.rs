@@ -80,8 +80,8 @@ pub fn is_system_audio_supported() -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        // Linux support via PulseAudio monitor
-        false // Not implemented yet
+        // Now partially implemented via monitor device search
+        true
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {

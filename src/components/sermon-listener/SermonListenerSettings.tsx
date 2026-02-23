@@ -1,16 +1,10 @@
-/**
- * Sermon Listener Settings Component
- *
- * User-specific settings for the sermon listener feature.
- * Provider configuration is managed globally by super admins.
- */
-
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useGlobalSermonListenerSettings } from '../../hooks/useGlobalAppSettings'
+import { useNativeAudioCapture } from '../../services/sermon-listener/nativeAudioCapture'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Info, Check, Shield, Loader2, Settings } from 'lucide-react'
+import { Info, Check, Shield, Loader2, Settings, Mic, Monitor } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
     onClose?: () => void
@@ -20,6 +14,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
     const setAppSettings = useAppStore((state) => state.setAppSettings)
     const { isSuperadmin } = useUserRole()
+    const { systemAudioSupported } = useNativeAudioCapture()
 
     // Get global settings to display current provider (system-wide, no churchId needed)
     const { settings: globalSettings, isLoading: isGlobalLoading } = useGlobalSermonListenerSettings()
@@ -28,6 +23,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [autoDisplay, setAutoDisplay] = useState(sermonSettings?.autoDisplay ?? false)
     const [autoLookup, setAutoLookup] = useState(sermonSettings?.autoLookup ?? true)
     const [language, setLanguage] = useState(sermonSettings?.language || 'en-US')
+    const [captureSource, setCaptureSource] = useState<'microphone' | 'system'>(sermonSettings?.captureSource || 'microphone')
 
     const [showSaveSuccess, setShowSaveSuccess] = useState(false)
 
@@ -40,6 +36,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 autoDisplay,
                 autoLookup,
                 language,
+                captureSource,
             },
         })
         // Show success toast
@@ -155,6 +152,48 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         </div>
                     </div>
                 </label>
+            </div>
+
+            {/* Capture Source */}
+            <div className="mb-6">
+                <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Audio Source</label>
+                <div className="grid grid-cols-2 gap-3">
+                    <button
+                        onClick={() => setCaptureSource('microphone')}
+                        className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${captureSource === 'microphone'
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-600 dark:text-gray-400'
+                            }`}
+                    >
+                        <Mic className="w-5 h-5" />
+                        <div className="text-left">
+                            <div className="font-medium text-sm">Microphone</div>
+                            <div className="text-xs opacity-70">External or built-in mic</div>
+                        </div>
+                    </button>
+                    <button
+                        onClick={() => systemAudioSupported && setCaptureSource('system')}
+                        disabled={!systemAudioSupported}
+                        className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${!systemAudioSupported
+                                ? 'opacity-50 grayscale cursor-not-allowed border-gray-200 dark:border-gray-700'
+                                : captureSource === 'system'
+                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-600 dark:text-gray-400'
+                            }`}
+                    >
+                        <Monitor className="w-5 h-5" />
+                        <div className="text-left">
+                            <div className="font-medium text-sm">System Audio</div>
+                            <div className="text-xs opacity-70">Capture speaker output</div>
+                        </div>
+                    </button>
+                </div>
+                {!systemAudioSupported && (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                        <Info className="w-3 h-3" />
+                        System audio capture is not supported on this platform or version.
+                    </p>
+                )}
             </div>
 
             {/* Language Override */}

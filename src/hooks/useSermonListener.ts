@@ -728,6 +728,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         const success = await unifiedTranscriptionService.start({
             provider,
             language,
+            captureSource: sermonSettings?.captureSource,
             continuous: true,
             interimResults: true,
             whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',

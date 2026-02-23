@@ -261,7 +261,8 @@ class DesktopWhisperTranscriptionService {
     async startRealtimeTranscription(
         onResult: ResultCallback,
         onError: ErrorCallback,
-        chunkDurationMs?: number
+        chunkDurationMs?: number,
+        captureType: 'microphone' | 'system' = 'microphone'
     ): Promise<boolean> {
         if (!this.checkDesktop()) {
             onError('Desktop whisper is only available in desktop mode');
@@ -284,14 +285,16 @@ class DesktopWhisperTranscriptionService {
 
         const duration = chunkDurationMs || this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS;
 
-        // Use VAD-based capture if available (preferred)
-        if (this.useVAD && this.vadLoaded) {
+        // Use VAD-based capture if available (preferred for microphone)
+        // If captureType is 'system', we MUST use native capture as browser VAD 
+        // doesn't support system audio loopback easily.
+        if (captureType === 'microphone' && this.useVAD && this.vadLoaded) {
             return this.startVADCapture(onResult, onError);
         }
 
         // Fall back to native audio capture if available
         if (this.useNativeCapture) {
-            return this.startNativeCapture(onResult, onError, duration);
+            return this.startNativeCapture(onResult, onError, duration, captureType);
         } else {
             return this.startWebAudioCapture(onResult, onError, duration);
         }
@@ -408,11 +411,13 @@ class DesktopWhisperTranscriptionService {
     private async startNativeCapture(
         onResult: ResultCallback,
         onError: ErrorCallback,
-        chunkDurationMs: number
+        chunkDurationMs: number,
+        captureType: 'microphone' | 'system' = 'microphone'
     ): Promise<boolean> {
         try {
+            console.log(`[DesktopWhisper] Starting native capture with type: ${captureType}`);
             const started = await nativeAudioCaptureManager.startWithEvents({
-                captureType: 'microphone',
+                captureType,
                 chunkDurationMs,
                 onWavChunk: async (wavBase64: string, durationMs: number) => {
                     await this.processWavChunk(wavBase64, durationMs, onResult, onError);

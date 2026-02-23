@@ -383,6 +383,8 @@ export interface AppSettings {
         autoLookup?: boolean
         /** Language for speech recognition */
         language?: string
+        /** Audio capture source: 'microphone' | 'system' */
+        captureSource?: 'microphone' | 'system'
     }
 }
 

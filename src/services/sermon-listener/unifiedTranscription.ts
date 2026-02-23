@@ -21,6 +21,8 @@ export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | '
 export interface UnifiedTranscriptionOptions {
     provider?: TranscriptionProvider
     language?: string
+    /** Audio capture source: 'microphone' | 'system' */
+    captureSource?: 'microphone' | 'system'
     continuous?: boolean
     interimResults?: boolean
     onStart?: () => void
@@ -606,7 +608,9 @@ class UnifiedTranscriptionService {
                 this.isListening = false
                 this.options.onError?.(error)
                 this.options.onStatusChange?.(this.getStatus())
-            }
+            },
+            undefined,
+            this.options.captureSource
         )
 
         if (!started) {
