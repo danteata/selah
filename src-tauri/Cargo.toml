@@ -25,14 +25,15 @@ parking_lot = "0.12"  # For thread-safe mutex
 lazy_static = "1.4"
 base64 = "0.22"  # For encoding audio to base64
 hound = "3.5"  # For WAV encoding
+scopeguard = "1.2.0"  # For RAII guards (COM cleanup, etc.)
 
 # Platform-specific dependencies for system audio capture
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = "0.3"  # macOS 12.3+ system audio capture
 
 [target.'cfg(target_os = "windows")'.dependencies]
+wasapi = "0.22"  # WASAPI loopback for system audio capture
 windows = { version = "0.58", features = [
-    "Win32_Media_Audio",
     "Win32_System_Com",
     "Win32_Foundation",
 ] }

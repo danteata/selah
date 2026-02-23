@@ -13,6 +13,7 @@
 
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 // Type definitions
 export type CaptureType = 'microphone' | 'system' | 'both'
@@ -37,6 +38,25 @@ export interface NativeCaptureConfig {
     onChunk?: (chunk: AudioChunk) => void
     onStatus?: (status: CaptureStatus) => void
     onError?: (error: string) => void
+}
+
+/**
+ * Event-driven capture config (preferred for desktop)
+ * Uses Tauri events for audio chunks — no polling needed
+ */
+export interface NativeCaptureEventConfig {
+    captureType: CaptureType
+    chunkDurationMs?: number
+    /** Called with base64 WAV data (already encoded Rust-side) */
+    onWavChunk?: (wavBase64: string, durationMs: number) => void
+    onStatus?: (status: CaptureStatus) => void
+    onError?: (error: string) => void
+}
+
+/** Payload shape for audio-chunk-wav Tauri events */
+interface AudioChunkWavEvent {
+    wav_base64: string
+    duration_ms: number
 }
 
 export type CaptureStatus = 'idle' | 'starting' | 'capturing' | 'stopping' | 'error'
@@ -80,7 +100,9 @@ export async function listAudioDevices(): Promise<AudioDeviceInfo[]> {
 class NativeAudioCaptureService {
     private isCapturing = false
     private pollInterval: ReturnType<typeof setInterval> | null = null
+    private eventUnlisten: UnlistenFn | null = null
     private config: NativeCaptureConfig | null = null
+    private eventConfig: NativeCaptureEventConfig | null = null
 
     /**
      * Check if currently capturing
@@ -90,7 +112,63 @@ class NativeAudioCaptureService {
     }
 
     /**
-     * Start audio capture
+     * Start audio capture with event-driven WAV delivery (preferred)
+     *
+     * Uses Tauri events instead of polling — Rust emits `audio-chunk-wav`
+     * events with base64 WAV payloads, eliminating JS-side conversion.
+     */
+    async startWithEvents(config: NativeCaptureEventConfig): Promise<boolean> {
+        if (!isTauriAvailable()) {
+            config.onError?.('Native audio capture is only available in the desktop app')
+            return false
+        }
+
+        if (this.isCapturing) {
+            config.onError?.('Already capturing')
+            return false
+        }
+
+        this.eventConfig = config
+        this.isCapturing = true
+        config.onStatus?.('starting')
+
+        try {
+            // Listen for audio chunk events from Rust
+            this.eventUnlisten = await listen<AudioChunkWavEvent>(
+                'audio-chunk-wav',
+                (event) => {
+                    if (this.isCapturing && event.payload.wav_base64) {
+                        config.onWavChunk?.(
+                            event.payload.wav_base64,
+                            event.payload.duration_ms
+                        )
+                    }
+                }
+            )
+
+            // Start the event-driven capture in Rust
+            await invoke('start_capture_with_events', {
+                captureType: config.captureType,
+                chunkDurationMs: config.chunkDurationMs || 3000,
+            })
+
+            config.onStatus?.('capturing')
+            console.log(`[NativeCapture] Started event-driven ${config.captureType} capture`)
+
+            return true
+        } catch (error) {
+            this.isCapturing = false
+            this.eventUnlisten?.();
+            this.eventUnlisten = null
+            config.onStatus?.('error')
+            config.onError?.(String(error))
+            console.error('[NativeCapture] Failed to start event-driven capture:', error)
+            return false
+        }
+    }
+
+    /**
+     * Start audio capture with polling (fallback)
      */
     async start(config: NativeCaptureConfig): Promise<boolean> {
         if (!isTauriAvailable()) {
@@ -137,11 +215,18 @@ class NativeAudioCaptureService {
         if (!this.isCapturing) return
 
         this.config?.onStatus?.('stopping')
+        this.eventConfig?.onStatus?.('stopping')
 
         // Stop polling
         if (this.pollInterval) {
             clearInterval(this.pollInterval)
             this.pollInterval = null
+        }
+
+        // Stop event listener
+        if (this.eventUnlisten) {
+            this.eventUnlisten()
+            this.eventUnlisten = null
         }
 
         try {
@@ -153,6 +238,7 @@ class NativeAudioCaptureService {
 
         this.isCapturing = false
         this.config?.onStatus?.('idle')
+        this.eventConfig?.onStatus?.('idle')
     }
 
     /**
@@ -227,6 +313,81 @@ class NativeAudioCaptureService {
 
 // Export singleton instance
 export const nativeAudioCapture = new NativeAudioCaptureService()
+
+// Alias for backward compatibility
+export const nativeAudioCaptureManager = nativeAudioCapture
+
+/**
+ * Check if native audio capture is available
+ */
+export function isNativeAudioCaptureAvailable(): boolean {
+    return isTauriAvailable()
+}
+
+/**
+ * Convert Float32Array samples to WAV format (base64 encoded)
+ * This is a utility function for web-based audio processing
+ */
+export function float32SamplesToWav(samples: Float32Array, sampleRate: number = 16000): string {
+    const numChannels = 1
+    const bitsPerSample = 16
+
+    // Convert Float32 to Int16
+    const int16Samples = new Int16Array(samples.length)
+    for (let i = 0; i < samples.length; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]))
+        int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+    }
+
+    // Create WAV file
+    const byteRate = sampleRate * numChannels * bitsPerSample / 8
+    const blockAlign = numChannels * bitsPerSample / 8
+    const dataSize = int16Samples.length * 2
+    const headerSize = 44
+    const totalSize = headerSize + dataSize
+
+    const buffer = new ArrayBuffer(totalSize)
+    const view = new DataView(buffer)
+
+    // RIFF header
+    writeString(view, 0, 'RIFF')
+    view.setUint32(4, totalSize - 8, true)
+    writeString(view, 8, 'WAVE')
+
+    // fmt chunk
+    writeString(view, 12, 'fmt ')
+    view.setUint32(16, 16, true) // chunk size
+    view.setUint16(20, 1, true) // PCM format
+    view.setUint16(22, numChannels, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, byteRate, true)
+    view.setUint16(32, blockAlign, true)
+    view.setUint16(34, bitsPerSample, true)
+
+    // data chunk
+    writeString(view, 36, 'data')
+    view.setUint32(40, dataSize, true)
+
+    // Write audio data
+    const dataOffset = 44
+    for (let i = 0; i < int16Samples.length; i++) {
+        view.setInt16(dataOffset + i * 2, int16Samples[i], true)
+    }
+
+    // Convert to base64
+    const bytes = new Uint8Array(buffer)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i])
+    }
+    return btoa(binary)
+}
+
+function writeString(view: DataView, offset: number, str: string): void {
+    for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i))
+    }
+}
 
 /**
  * Hook for using native audio capture in React components

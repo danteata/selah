@@ -19,9 +19,7 @@ import {
 } from './desktopWhisperService';
 import {
     nativeAudioCaptureManager,
-    float32SamplesToWav,
     isNativeAudioCaptureAvailable,
-    type AudioChunk,
 } from './nativeAudioCapture';
 
 const DEFAULT_CHUNK_DURATION_MS = 3000; // 3 seconds (fallback for non-VAD mode)
@@ -413,22 +411,20 @@ class DesktopWhisperTranscriptionService {
         chunkDurationMs: number
     ): Promise<boolean> {
         try {
-            const started = await nativeAudioCaptureManager.start(
-                async (chunk: AudioChunk) => {
-                    await this.processNativeChunk(chunk, onResult, onError);
+            const started = await nativeAudioCaptureManager.startWithEvents({
+                captureType: 'microphone',
+                chunkDurationMs,
+                onWavChunk: async (wavBase64: string, durationMs: number) => {
+                    await this.processWavChunk(wavBase64, durationMs, onResult, onError);
                 },
-                (error: Error) => {
-                    onError(error.message);
+                onError: (errorMsg: string) => {
+                    onError(errorMsg);
                 },
-                {
-                    chunkDurationMs,
-                    pollIntervalMs: 500, // Poll every 500ms
-                }
-            );
+            });
 
             if (started) {
                 this.isRecording = true;
-                console.log('Desktop whisper transcription started (native audio capture)');
+                console.log('Desktop whisper transcription started (event-driven native capture)');
                 return true;
             } else {
                 onError('Failed to start native audio capture');
@@ -442,28 +438,33 @@ class DesktopWhisperTranscriptionService {
     }
 
     /**
-     * Process a native audio chunk
+     * Process a WAV chunk received from Rust via Tauri event
+     * The WAV data is already base64-encoded Rust-side — just decode to Blob
      */
-    private async processNativeChunk(
-        chunk: AudioChunk,
+    private async processWavChunk(
+        wavBase64: string,
+        durationMs: number,
         onResult: ResultCallback,
         onError: ErrorCallback
     ): Promise<void> {
         try {
-            // Validate chunk
-            if (!chunk.samples || chunk.samples.length === 0) {
-                console.log('[DesktopWhisper] Empty audio chunk, skipping');
+            if (!wavBase64 || wavBase64.length === 0) {
+                console.log('[DesktopWhisper] Empty WAV chunk, skipping');
                 return;
             }
 
-            console.log('[DesktopWhisper] Processing audio chunk:', {
-                samples: chunk.samples.length,
-                duration_ms: chunk.duration_ms,
-                sample_rate: chunk.sample_rate,
+            console.log('[DesktopWhisper] Processing WAV chunk:', {
+                base64Length: wavBase64.length,
+                duration_ms: durationMs,
             });
 
-            // Convert Float32 samples to WAV
-            const wavBlob = float32SamplesToWav(chunk.samples, chunk.sample_rate);
+            // Convert base64 WAV to Blob (single conversion — no float32 dance)
+            const binaryString = atob(wavBase64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const wavBlob = new Blob([bytes], { type: 'audio/wav' });
 
             console.log('[DesktopWhisper] WAV blob created:', {
                 size: wavBlob.size,
@@ -488,7 +489,7 @@ class DesktopWhisperTranscriptionService {
                 });
             }
         } catch (error) {
-            console.error('[DesktopWhisper] Error processing native audio chunk:', error);
+            console.error('[DesktopWhisper] Error processing WAV chunk:', error);
             onError(error instanceof Error ? error.message : 'Transcription error');
         }
     }

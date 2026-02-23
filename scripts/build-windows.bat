@@ -11,26 +11,47 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM Check if bun is installed
+REM Detect package manager (prefer bun, fallback to npm)
 where bun >nul 2>nul
-if %ERRORLEVEL% neq 0 (
-    echo Error: Bun is not installed. Please install from https://bun.sh/
-    exit /b 1
+if %ERRORLEVEL% equ 0 (
+    set "PKG_MANAGER=bun"
+    echo Using bun as package manager
+) else (
+    where npm >nul 2>nul
+    if %ERRORLEVEL% equ 0 (
+        set "PKG_MANAGER=npm"
+        echo Using npm as package manager (bun not found)
+    ) else (
+        echo Error: Neither bun nor npm is installed. Please install one of them.
+        exit /b 1
+    )
 )
 
 REM Install dependencies if needed
 if not exist "node_modules" (
     echo Installing dependencies...
-    bun install
+    if "%PKG_MANAGER%"=="bun" (
+        bun install
+    ) else (
+        npm install
+    )
 )
 
 REM Build the frontend
 echo Building frontend...
-bun run build
+if "%PKG_MANAGER%"=="bun" (
+    bun run build
+) else (
+    npm run build
+)
 
 REM Build Tauri app for Windows
 echo Building Tauri app...
-bun run tauri build --target x86_64-pc-windows-msvc
+if "%PKG_MANAGER%"=="bun" (
+    bun run tauri build --target x86_64-pc-windows-msvc
+) else (
+    npm run tauri build -- --target x86_64-pc-windows-msvc
+)
 
 echo.
 echo Build complete! 

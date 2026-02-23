@@ -13,9 +13,10 @@ use audio_capture::{
     AudioCaptureState,
     // Device listing
     list_audio_devices,
-    // New unified capture API
+    // Unified capture API
     is_system_audio_supported,
     start_capture,
+    start_capture_with_events,
     stop_capture,
     is_capturing,
     get_audio_chunk,
@@ -193,6 +194,7 @@ pub fn run() {
             list_audio_devices,
             is_system_audio_supported,
             start_capture,
+            start_capture_with_events,
             stop_capture,
             is_capturing,
             get_audio_chunk,
