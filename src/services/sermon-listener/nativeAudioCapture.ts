@@ -53,10 +53,11 @@ export interface NativeCaptureEventConfig {
     onError?: (error: string) => void
 }
 
-/** Payload shape for audio-chunk-wav Tauri events */
-interface AudioChunkWavEvent {
+/** Payload shape for vad-audio-chunk Tauri events (VAD-based) */
+interface VadAudioChunkEvent {
     wav_base64: string
     duration_ms: number
+    is_speaking: boolean
 }
 
 export type CaptureStatus = 'idle' | 'starting' | 'capturing' | 'stopping' | 'error'
@@ -112,10 +113,11 @@ class NativeAudioCaptureService {
     }
 
     /**
-     * Start audio capture with event-driven WAV delivery (preferred)
+     * Start audio capture with VAD-based event delivery (preferred)
      *
-     * Uses Tauri events instead of polling — Rust emits `audio-chunk-wav`
-     * events with base64 WAV payloads, eliminating JS-side conversion.
+     * Uses Tauri events instead of polling — Rust emits `vad-audio-chunk`
+     * events with base64 WAV payloads when complete speech segments are detected.
+     * This is more efficient than time-based chunking as it only sends speech.
      */
     async startWithEvents(config: NativeCaptureEventConfig): Promise<boolean> {
         if (!isTauriAvailable()) {
@@ -133,11 +135,12 @@ class NativeAudioCaptureService {
         config.onStatus?.('starting')
 
         try {
-            // Listen for audio chunk events from Rust
-            this.eventUnlisten = await listen<AudioChunkWavEvent>(
-                'audio-chunk-wav',
+            // Listen for VAD-based audio chunk events from Rust
+            this.eventUnlisten = await listen<VadAudioChunkEvent>(
+                'vad-audio-chunk',
                 (event) => {
-                    if (this.isCapturing && event.payload.wav_base64) {
+                    // Only process chunks with actual audio data
+                    if (this.isCapturing && event.payload.wav_base64 && event.payload.is_speaking) {
                         config.onWavChunk?.(
                             event.payload.wav_base64,
                             event.payload.duration_ms
@@ -146,14 +149,13 @@ class NativeAudioCaptureService {
                 }
             )
 
-            // Start the event-driven capture in Rust
-            await invoke('start_capture_with_events', {
+            // Start the VAD-based capture in Rust
+            await invoke('start_capture_with_vad', {
                 captureType: config.captureType,
-                chunkDurationMs: config.chunkDurationMs || 3000,
             })
 
             config.onStatus?.('capturing')
-            console.log(`[NativeCapture] Started event-driven ${config.captureType} capture`)
+            console.log(`[NativeCapture] Started VAD-based ${config.captureType} capture`)
 
             return true
         } catch (error) {
@@ -162,7 +164,7 @@ class NativeAudioCaptureService {
             this.eventUnlisten = null
             config.onStatus?.('error')
             config.onError?.(String(error))
-            console.error('[NativeCapture] Failed to start event-driven capture:', error)
+            console.error('[NativeCapture] Failed to start VAD-based capture:', error)
             return false
         }
     }

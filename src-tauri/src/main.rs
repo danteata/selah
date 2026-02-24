@@ -16,7 +16,6 @@ use audio_capture::{
     // Unified capture API
     is_system_audio_supported,
     start_capture,
-    start_capture_with_events,
     start_capture_with_vad,
     init_vad,
     set_vad_enabled,
@@ -197,7 +196,6 @@ pub fn run() {
             list_audio_devices,
             is_system_audio_supported,
             start_capture,
-            start_capture_with_events,
             start_capture_with_vad,
             init_vad,
             set_vad_enabled,

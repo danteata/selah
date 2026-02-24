@@ -303,15 +303,6 @@ pub fn flush_buffer_as_wav(state: tauri::State<'_, AudioCaptureState>) -> String
     chunk.to_wav_base64()
 }
 
-/// Event payload for audio chunk events
-#[derive(Clone, serde::Serialize)]
-struct AudioChunkEvent {
-    /// Base64-encoded WAV data (16kHz mono 16-bit PCM)
-    wav_base64: String,
-    /// Duration of the chunk in milliseconds
-    duration_ms: u32,
-}
-
 /// Event payload for VAD-processed audio chunk events
 #[derive(Clone, serde::Serialize)]
 struct VadAudioChunkEvent {
@@ -486,81 +477,6 @@ pub fn start_capture_with_vad(
                 }
             }
             vad.reset();
-        }
-    });
-
-    Ok(())
-}
-
-/// Tauri command: Start capture with event-driven WAV delivery
-///
-/// Instead of requiring the frontend to poll for chunks, this command
-/// spawns a background thread that monitors the audio buffer and emits
-/// `audio-chunk-wav` events whenever a full chunk is available.
-///
-/// The event payload is a base64-encoded WAV string, ready to be sent
-/// directly to the whisper server — no JS-side conversion needed.
-#[tauri::command]
-pub fn start_capture_with_events(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AudioCaptureState>,
-    capture_type: Option<String>,
-    chunk_duration_ms: Option<u32>,
-) -> Result<(), String> {
-    // Clone what we need for the event emitter thread BEFORE starting capture
-    let is_capturing = state.is_capturing.clone();
-    let audio_buffer = state.audio_buffer.clone();
-    let buffer_size = state.buffer_size.clone();
-    let chunk_size = state.chunk_size_samples.clone();
-
-    // Start the underlying capture
-    let ct = match capture_type.as_deref() {
-        Some("system") => CaptureType::System,
-        Some("both") => CaptureType::Both,
-        _ => CaptureType::Microphone,
-    };
-    start_audio_capture_internal(&state, ct, chunk_duration_ms)?;
-
-    // Spawn a thread that monitors the buffer and emits events
-    std::thread::spawn(move || {
-        use tauri::Emitter;
-
-        let check_interval_ms = 100; // Check every 100ms for low latency
-
-        while is_capturing.load(Ordering::SeqCst) {
-            let target_size = chunk_size.load(Ordering::SeqCst);
-            let current_size = buffer_size.load(Ordering::SeqCst);
-
-            if current_size >= target_size {
-                // Extract chunk and convert to WAV
-                let mut buf = audio_buffer.lock();
-                if buf.len() >= target_size {
-                    let samples: Vec<f32> = buf.drain(..target_size).collect();
-                    buffer_size.store(buf.len(), Ordering::SeqCst);
-                    drop(buf); // Release lock before encoding
-
-                    let duration_ms = (samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
-                    let chunk = AudioChunk {
-                        samples,
-                        duration_ms,
-                        sample_rate: TARGET_SAMPLE_RATE,
-                    };
-
-                    // Only emit if chunk has meaningful audio (not silence)
-                    // Using 0.01 threshold (was 0.001) for better noise filtering
-                    if chunk.has_audio(0.01) {
-                        let wav_base64 = chunk.to_wav_base64();
-                        if !wav_base64.is_empty() {
-                            let _ = app.emit("audio-chunk-wav", AudioChunkEvent {
-                                wav_base64,
-                                duration_ms,
-                            });
-                        }
-                    }
-                }
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
         }
     });
 
