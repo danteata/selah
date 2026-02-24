@@ -88,6 +88,7 @@ impl AudioChunk {
     }
 
     /// Check if chunk has meaningful audio (not silence)
+    /// Uses RMS (root mean square) with a higher threshold to filter out noise
     pub fn has_audio(&self, threshold: f32) -> bool {
         if self.samples.is_empty() {
             return false;
@@ -97,7 +98,12 @@ impl AudioChunk {
         let sum: f32 = self.samples.iter().map(|s| s * s).sum();
         let rms = (sum / self.samples.len() as f32).sqrt();
         
-        rms > threshold
+        // Also check peak amplitude for better detection
+        let peak: f32 = self.samples.iter().map(|s| s.abs()).fold(0.0, |a, b| a.max(b));
+        
+        // Use both RMS and peak for more robust detection
+        // RMS threshold of 0.01 (was 0.001) and peak threshold of 0.05
+        rms > threshold && peak > 0.05
     }
 
     /// Get audio duration in seconds

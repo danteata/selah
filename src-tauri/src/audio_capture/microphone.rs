@@ -98,7 +98,8 @@ pub fn start_microphone_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
-                            let samples: Vec<f32> = data.iter().map(|s| f32::from(*s)).collect();
+                            // Normalize i8 to f32 in range [-1.0, 1.0]
+                            let samples: Vec<f32> = data.iter().map(|s| *s as f32 / 128.0).collect();
                             let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
@@ -121,7 +122,8 @@ pub fn start_microphone_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
-                            let samples: Vec<f32> = data.iter().map(|s| f32::from(*s)).collect();
+                            // Normalize i16 to f32 in range [-1.0, 1.0]
+                            let samples: Vec<f32> = data.iter().map(|s| *s as f32 / 32768.0).collect();
                             let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
@@ -189,6 +191,7 @@ pub fn start_microphone_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
+                            // F64 is typically already in [-1.0, 1.0], just cast to f32
                             let samples: Vec<f32> = data.iter().map(|s| *s as f32).collect();
                             let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
                             let mut buf = buffer.lock();

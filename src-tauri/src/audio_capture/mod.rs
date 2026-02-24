@@ -3,6 +3,7 @@
 //! Provides high-quality audio capture with support for:
 //! - Microphone input (cross-platform via cpal)
 //! - System audio loopback (platform-specific)
+//! - Silero VAD for speech detection
 //!
 //! # Platform Support
 //! - macOS 12.3+: ScreenCaptureKit for system audio
@@ -11,8 +12,10 @@
 
 mod microphone;
 mod types;
+mod vad;
 
 pub use types::*;
+pub use vad::{SileroVad, VadConfig, VadSegmenter};
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -27,6 +30,7 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc::{channel, Sender};
+use tauri::Manager;
 
 pub use microphone::*;
 
@@ -39,6 +43,10 @@ pub struct AudioCaptureState {
     pub capture_type: Arc<Mutex<CaptureType>>,
     pub sample_rate: Arc<Mutex<u32>>,
     pub stop_sender: Mutex<Option<Sender<()>>>,
+    /// VAD segmenter for speech detection
+    pub vad_segmenter: Arc<Mutex<Option<VadSegmenter>>>,
+    /// Whether VAD is enabled
+    pub vad_enabled: Arc<AtomicBool>,
 }
 
 impl AudioCaptureState {
@@ -51,6 +59,8 @@ impl AudioCaptureState {
             capture_type: Arc::new(Mutex::new(CaptureType::Microphone)),
             sample_rate: Arc::new(Mutex::new(TARGET_SAMPLE_RATE)),
             stop_sender: Mutex::new(None),
+            vad_segmenter: Arc::new(Mutex::new(None)),
+            vad_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -107,11 +117,11 @@ pub fn start_capture(
         return Err("System audio capture is not supported on this platform".to_string());
     }
 
-    start_audio_capture_internal(state, ct, chunk_duration_ms)
+    start_audio_capture_internal(&state, ct, chunk_duration_ms)
 }
 
 fn start_audio_capture_internal(
-    state: tauri::State<'_, AudioCaptureState>,
+    state: &tauri::State<'_, AudioCaptureState>,
     capture_type: CaptureType,
     chunk_duration_ms: Option<u32>,
 ) -> Result<(), String> {
@@ -302,6 +312,186 @@ struct AudioChunkEvent {
     duration_ms: u32,
 }
 
+/// Event payload for VAD-processed audio chunk events
+#[derive(Clone, serde::Serialize)]
+struct VadAudioChunkEvent {
+    /// Base64-encoded WAV data (16kHz mono 16-bit PCM)
+    wav_base64: String,
+    /// Duration of the speech segment in milliseconds
+    duration_ms: u32,
+    /// Whether speech is currently detected
+    is_speaking: bool,
+}
+
+/// Tauri command: Initialize VAD with model path
+#[tauri::command]
+pub fn init_vad(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AudioCaptureState>,
+) -> Result<(), String> {
+    // Get the model path from the app's resource directory
+    let resource_path = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource directory: {}", e))?;
+    
+    let model_path = resource_path.join("assets").join("silero_vad.onnx");
+    
+    if !model_path.exists() {
+        return Err(format!("VAD model not found at {:?}", model_path));
+    }
+
+    let segmenter = VadSegmenter::new(&model_path)?;
+    *state.vad_segmenter.lock() = Some(segmenter);
+    state.vad_enabled.store(true, Ordering::SeqCst);
+    
+    println!("[VAD] Initialized successfully from {:?}", model_path);
+    Ok(())
+}
+
+/// Tauri command: Enable or disable VAD
+#[tauri::command]
+pub fn set_vad_enabled(state: tauri::State<'_, AudioCaptureState>, enabled: bool) {
+    state.vad_enabled.store(enabled, Ordering::SeqCst);
+}
+
+/// Tauri command: Start capture with VAD-based event delivery
+///
+/// This command starts audio capture with Silero VAD processing.
+/// Instead of emitting fixed-duration chunks, it emits complete speech segments.
+/// Events are emitted as `vad-audio-chunk` with speech segments only.
+#[tauri::command]
+pub fn start_capture_with_vad(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AudioCaptureState>,
+    capture_type: Option<String>,
+) -> Result<(), String> {
+    // Initialize VAD if not already done
+    if state.vad_segmenter.lock().is_none() {
+        // Get the model path from the app's resource directory
+        let resource_path = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource directory: {}", e))?;
+        
+        let model_path = resource_path.join("assets").join("silero_vad.onnx");
+        
+        if !model_path.exists() {
+            return Err(format!("VAD model not found at {:?}", model_path));
+        }
+
+        let segmenter = VadSegmenter::new(&model_path)?;
+        *state.vad_segmenter.lock() = Some(segmenter);
+        state.vad_enabled.store(true, Ordering::SeqCst);
+    }
+
+    // Clone what we need for the VAD processing thread BEFORE calling start_capture
+    let is_capturing = state.is_capturing.clone();
+    let audio_buffer = state.audio_buffer.clone();
+    let buffer_size = state.buffer_size.clone();
+    let vad_segmenter = state.vad_segmenter.clone();
+    let vad_enabled = state.vad_enabled.clone();
+
+    // Start the underlying capture with smaller chunks for VAD
+    // VAD works best with 512, 768, or 1024 sample chunks (32-64ms at 16kHz)
+    let ct = match capture_type.as_deref() {
+        Some("system") => CaptureType::System,
+        Some("both") => CaptureType::Both,
+        _ => CaptureType::Microphone,
+    };
+    start_audio_capture_internal(&state, ct, Some(32))?; // 32ms chunks
+
+    // Spawn a thread that processes audio through VAD
+    std::thread::spawn(move || {
+        use tauri::Emitter;
+
+        let check_interval_ms = 10; // Check every 10ms for low latency
+
+        while is_capturing.load(Ordering::SeqCst) {
+            if !vad_enabled.load(Ordering::SeqCst) {
+                // VAD disabled, just sleep
+                std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
+                continue;
+            }
+
+            // Get audio samples from buffer
+            let mut buf = audio_buffer.lock();
+            let samples: Vec<f32> = buf.drain(..).collect();
+            buffer_size.store(0, Ordering::SeqCst);
+            drop(buf); // Release lock before VAD processing
+
+            if samples.is_empty() {
+                std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
+                continue;
+            }
+
+            // Process through VAD
+            let mut segmenter = vad_segmenter.lock();
+            if let Some(ref mut vad) = *segmenter {
+                match vad.process(&samples) {
+                    Ok(Some(speech_samples)) => {
+                        // Complete speech segment detected
+                        let duration_ms = (speech_samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
+                        
+                        // Create WAV from speech samples
+                        let chunk = AudioChunk {
+                            samples: speech_samples,
+                            duration_ms,
+                            sample_rate: TARGET_SAMPLE_RATE,
+                        };
+                        
+                        let wav_base64 = chunk.to_wav_base64();
+                        if !wav_base64.is_empty() {
+                            let _ = app.emit("vad-audio-chunk", VadAudioChunkEvent {
+                                wav_base64,
+                                duration_ms,
+                                is_speaking: true,
+                            });
+                        }
+                    }
+                    Ok(None) => {
+                        // No complete segment yet, emit speaking status
+                        let _ = app.emit("vad-audio-chunk", VadAudioChunkEvent {
+                            wav_base64: String::new(),
+                            duration_ms: 0,
+                            is_speaking: vad.is_speaking(),
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[VAD] Error processing audio: {}", e);
+                    }
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
+        }
+
+        // Flush any remaining speech when capture stops
+        let mut segmenter = vad_segmenter.lock();
+        if let Some(ref mut vad) = *segmenter {
+            if let Some(speech_samples) = vad.flush() {
+                let duration_ms = (speech_samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
+                let chunk = AudioChunk {
+                    samples: speech_samples,
+                    duration_ms,
+                    sample_rate: TARGET_SAMPLE_RATE,
+                };
+                let wav_base64 = chunk.to_wav_base64();
+                if !wav_base64.is_empty() {
+                    let _ = app.emit("vad-audio-chunk", VadAudioChunkEvent {
+                        wav_base64,
+                        duration_ms,
+                        is_speaking: false,
+                    });
+                }
+            }
+            vad.reset();
+        }
+    });
+
+    Ok(())
+}
+
 /// Tauri command: Start capture with event-driven WAV delivery
 ///
 /// Instead of requiring the frontend to poll for chunks, this command
@@ -317,14 +507,19 @@ pub fn start_capture_with_events(
     capture_type: Option<String>,
     chunk_duration_ms: Option<u32>,
 ) -> Result<(), String> {
-    // Start the underlying capture
-    start_capture(state.clone(), capture_type, chunk_duration_ms)?;
-
-    // Clone what we need for the event emitter thread
+    // Clone what we need for the event emitter thread BEFORE starting capture
     let is_capturing = state.is_capturing.clone();
     let audio_buffer = state.audio_buffer.clone();
     let buffer_size = state.buffer_size.clone();
     let chunk_size = state.chunk_size_samples.clone();
+
+    // Start the underlying capture
+    let ct = match capture_type.as_deref() {
+        Some("system") => CaptureType::System,
+        Some("both") => CaptureType::Both,
+        _ => CaptureType::Microphone,
+    };
+    start_audio_capture_internal(&state, ct, chunk_duration_ms)?;
 
     // Spawn a thread that monitors the buffer and emits events
     std::thread::spawn(move || {
@@ -352,7 +547,8 @@ pub fn start_capture_with_events(
                     };
 
                     // Only emit if chunk has meaningful audio (not silence)
-                    if chunk.has_audio(0.001) {
+                    // Using 0.01 threshold (was 0.001) for better noise filtering
+                    if chunk.has_audio(0.01) {
                         let wav_base64 = chunk.to_wav_base64();
                         if !wav_base64.is_empty() {
                             let _ = app.emit("audio-chunk-wav", AudioChunkEvent {
