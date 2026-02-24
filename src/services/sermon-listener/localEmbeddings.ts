@@ -215,20 +215,13 @@ export function cosineSimilarity(a: number[], b: number[]): number {
     }
 
     let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
+    // Since vectors are already normalized by the embedder, 
+    // cosine similarity is just the dot product.
     for (let i = 0; i < a.length; i++) {
         dotProduct += a[i] * b[i];
-        normA += a[i] * a[i];
-        normB += b[i] * b[i];
     }
 
-    if (normA === 0 || normB === 0) {
-        return 0;
-    }
-
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    return dotProduct;
 }
 
 /**
@@ -264,7 +257,10 @@ export function findSimilarLocally(
 
     // Log top scores for debugging
     const topScores = scores.slice(0, 3);
-    console.log('[findSimilarLocally] Top scores:', topScores.map(s => ({ reference: s.reference, score: s.score.toFixed(3) })));
+    // Only log occasionally to reduce noise
+    if (Math.random() < 0.05) {
+        console.log('[findSimilarLocally] Top scores:', topScores.map(s => ({ reference: s.reference, score: s.score.toFixed(3) })));
+    }
 
     return scores
         .filter((s) => s.score >= threshold)
@@ -280,7 +276,7 @@ const VERSE_CACHE_DB_NAME = 'selah-verse-embeddings';
 const VERSE_CACHE_STORE_NAME = 'embeddings';
 const VERSE_CACHE_VERSION = 1;
 
-interface CachedVerseEmbedding {
+export interface CachedVerseEmbedding {
     reference: string;
     book: string;
     bookNumber: number;

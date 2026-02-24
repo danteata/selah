@@ -141,16 +141,18 @@ export async function transcribeWithDesktopWhisper(
             formData.append('hotwords', config.hotwords);
         }
 
-        console.log('[DesktopWhisperService] Sending transcription request:', {
-            url: `${DESKTOP_WHISPER_URL}/transcribe`,
-            blobSize: audioBlob.size,
-            blobType: audioBlob.type,
-        });
+        // Only log occasionally to reduce noise
+        if (Math.random() < 0.1) {
+            console.log('[DesktopWhisperService] Sending transcription request:', {
+                url: `${DESKTOP_WHISPER_URL}/transcribe`,
+                blobSize: audioBlob.size,
+            });
+        }
 
         const response = await fetch(`${DESKTOP_WHISPER_URL}/transcribe`, {
             method: 'POST',
             body: formData,
-            signal: AbortSignal.timeout(30000), // 30 second timeout
+            signal: AbortSignal.timeout(120000), // 2 minute timeout for longer audio
         });
 
         if (!response.ok) {
@@ -160,10 +162,12 @@ export async function transcribeWithDesktopWhisper(
         }
 
         const result = await response.json() as DesktopWhisperResult;
-        console.log('[DesktopWhisperService] Transcription successful:', result);
         return result;
     } catch (error) {
-        console.error('[DesktopWhisperService] Transcription failed:', error);
+        // Don't log timeout errors - they're expected occasionally
+        if (error instanceof Error && !error.name.includes('Timeout')) {
+            console.error('[DesktopWhisperService] Transcription failed:', error);
+        }
         throw error;
     }
 }

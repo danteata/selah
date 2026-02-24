@@ -21,6 +21,7 @@ import {
     cacheVerseEmbeddings,
     hasCachedEmbeddings,
     findSimilarLocally,
+    type CachedVerseEmbedding,
 } from './localEmbeddings';
 
 // Configuration
@@ -189,6 +190,8 @@ export class SemanticVerseDetector {
     private textBuffer = '';
     private initialized = false;
     private useLocalFallback = false;
+    private inMemoryEmbeddings = new Map<string, CachedVerseEmbedding[]>();
+    private emptyVersions = new Set<string>();
 
     constructor(config: Partial<SemanticDetectionConfig> = {}) {
         this.config = { ...DEFAULT_CONFIG, ...config };
@@ -275,8 +278,9 @@ export class SemanticVerseDetector {
             return null;
         }
 
-        // Add to buffer
-        this.textBuffer = (this.textBuffer + ' ' + text).trim();
+        // The incoming 'text' from useSermonListener is the full accumulated transcript.
+        // We should replace our buffer with it instead of appending, to avoid exponential growth.
+        this.textBuffer = text.trim();
 
         // Check if we should search
         const now = Date.now();
@@ -317,6 +321,11 @@ export class SemanticVerseDetector {
             return [];
         }
 
+        // Check if we even have any embeddings to search through
+        if (this.useLocalFallback && this.emptyVersions.has(this.config.version || 'ANY')) {
+            return [];
+        }
+
         this.lastSearchTime = Date.now();
         const searchText = this.textBuffer.slice(-MAX_TEXT_LENGTH);
 
@@ -341,10 +350,6 @@ export class SemanticVerseDetector {
      * @param excludedRanges - Ranges to exclude from semantic detection (explicit verse references)
      */
     private async performSegmentedSearch(text: string, excludedRanges: ExcludedRange[] = []): Promise<SemanticVerseMatch[]> {
-        console.log('[SemanticDetector] ========== PERFORM SEGMENTED SEARCH ==========')
-        console.log('[SemanticDetector] Original text:', text.substring(0, 150))
-        console.log('[SemanticDetector] Excluded ranges:', excludedRanges)
-
         const allMatches: SemanticVerseMatch[] = [];
         const matchedReferences = new Set<string>();
 
@@ -356,22 +361,21 @@ export class SemanticVerseDetector {
         const sentences = splitIntoSentences(textWithoutReferences);
         console.log('[SemanticDetector] Split into sentences:', sentences.length, sentences);
 
-        for (const sentence of sentences) {
+        // Deduplicate sentences to avoid redundant searches
+        const uniqueSentences = Array.from(new Set(sentences));
+
+        for (const sentence of uniqueSentences) {
             if (sentence.length < MIN_SENTENCE_LENGTH) {
-                console.log('[SemanticDetector] Skipping sentence (too short):', sentence.substring(0, 50))
                 continue
             };
 
             // Skip sentences that contain explicit verse references
             // These should be caught by regex, not semantic detection
             if (containsExplicitVerseReference(sentence)) {
-                console.log('[SemanticDetector] Skipping sentence (contains explicit verse reference):', sentence.substring(0, 100))
                 continue
             }
 
-            console.log('[SemanticDetector] Searching sentence:', sentence.substring(0, 100))
             const matches = await this.performSearch(sentence);
-            console.log('[SemanticDetector] Matches for sentence:', matches.map(m => ({ reference: m.reference, score: m.score })))
 
             // Add unique matches
             for (const match of matches) {
@@ -383,7 +387,6 @@ export class SemanticVerseDetector {
 
             // If we found good matches, stop searching more sentences
             if (matches.some(m => m.score >= 0.75)) {
-                console.log('[SemanticDetector] Found good match, stopping sentence search')
                 break;
             }
         }
@@ -410,7 +413,9 @@ export class SemanticVerseDetector {
             }
         }
 
-        console.log('[SemanticDetector] Final matches:', allMatches.map(m => ({ reference: m.reference, score: m.score })))
+        if (allMatches.length > 0) {
+            console.log('[SemanticDetector] Found matches:', allMatches.map(m => ({ reference: m.reference, score: m.score })))
+        }
 
         // Sort by score and return top matches
         return allMatches
@@ -429,6 +434,10 @@ export class SemanticVerseDetector {
             let matches: SemanticVerseMatch[] = [];
 
             if (this.useLocalFallback) {
+                // Check if we already know this version is empty
+                if (this.emptyVersions.has(this.config.version || 'ANY')) {
+                    return [];
+                }
                 // Use local similarity search with cached embeddings
                 matches = await this.searchLocally(embedding);
             } else if (this.convexClient) {
@@ -438,7 +447,10 @@ export class SemanticVerseDetector {
 
             return matches;
         } catch (error) {
-            console.error('[SemanticDetector] Search failed:', error);
+            // Only log search errors occasionally to avoid spam
+            if (Math.random() < 0.1) {
+                console.error('[SemanticDetector] Search failed:', error);
+            }
             return [];
         }
     }
@@ -452,9 +464,7 @@ export class SemanticVerseDetector {
      * @returns Text with excluded ranges replaced by spaces
      */
     private excludeRangesFromText(text: string, ranges: ExcludedRange[]): string {
-        console.log('[SemanticDetector] excludeRangesFromText - input text length:', text.length, 'ranges:', ranges.length)
         if (ranges.length === 0) {
-            console.log('[SemanticDetector] No ranges to exclude, returning original text')
             return text;
         }
 
@@ -464,20 +474,14 @@ export class SemanticVerseDetector {
 
         let result = text;
         for (const range of sortedRanges) {
-            console.log('[SemanticDetector] Processing range:', range, 'text length:', text.length)
             // Only process valid ranges within text bounds
             if (range.startIndex >= 0 && range.endIndex <= text.length && range.startIndex < range.endIndex) {
-                const textToExclude = text.slice(range.startIndex, range.endIndex)
-                console.log('[SemanticDetector] Excluding text:', textToExclude)
                 // Replace the range with spaces to preserve character positions
                 const spaces = ' '.repeat(range.endIndex - range.startIndex);
                 result = result.slice(0, range.startIndex) + spaces + result.slice(range.endIndex);
-            } else {
-                console.log('[SemanticDetector] Range out of bounds, skipping')
             }
         }
 
-        console.log('[SemanticDetector] excludeRangesFromText - result:', result.substring(0, 150))
         return result;
     }
 
@@ -518,34 +522,44 @@ export class SemanticVerseDetector {
      * Falls back to any available embeddings if the specific version has none.
      */
     private async searchLocally(embedding: number[]): Promise<SemanticVerseMatch[]> {
-        console.log('[SemanticDetector] Searching locally with version:', this.config.version);
-        let cached = await getCachedVerseEmbeddings(this.config.version);
+        const version = this.config.version || 'ANY';
 
-        // If no embeddings found for specific version, try to get any available embeddings
-        if (cached.length === 0) {
-            console.warn('[SemanticDetector] No cached embeddings for version:', this.config.version, '- trying fallback...');
+        // 1. Try In-Memory Cache first
+        let cached = this.inMemoryEmbeddings.get(version);
 
-            // Try KJV as fallback (most commonly seeded)
-            cached = await getCachedVerseEmbeddings('KJV');
-
-            if (cached.length === 0) {
-                // Try getting all embeddings without version filter
-                cached = await getCachedVerseEmbeddings();
-            }
-
-            if (cached.length === 0) {
-                console.warn('[SemanticDetector] No cached embeddings found in IndexedDB at all');
+        // 2. Load from IndexedDB if not in memory
+        if (!cached) {
+            // Check if we already tried this version and it was empty
+            if (this.emptyVersions.has(version)) {
                 return [];
             }
 
-            console.log('[SemanticDetector] Using fallback embeddings, found:', cached.length);
-        } else {
-            console.log('[SemanticDetector] Found', cached.length, 'cached embeddings for version:', this.config.version);
+            // Only log once per session per version
+            console.log('[SemanticDetector] Loading local embeddings for version:', version);
+            cached = await getCachedVerseEmbeddings(this.config.version);
+
+            if (cached.length === 0) {
+                // Try fallback logic only once
+                if (version !== 'ANY') {
+                    cached = await getCachedVerseEmbeddings('KJV');
+                    if (cached.length === 0) {
+                        cached = await getCachedVerseEmbeddings();
+                    }
+                }
+
+                if (cached.length === 0) {
+                    console.warn('[SemanticDetector] No cached embeddings found in IndexedDB at all');
+                    this.emptyVersions.add(version);
+                    return [];
+                }
+            }
+
+            // Store in memory for next time
+            this.inMemoryEmbeddings.set(version, cached);
         }
 
+        // Perform similarity matching using the cached list
         const matches = findSimilarLocally(embedding, cached, this.config.threshold, this.config.limit);
-
-        console.log('[SemanticDetector] Semantic matches found:', matches.length, 'Top match:', matches[0]);
 
         return matches.map((m) => ({
             reference: m.reference,
@@ -598,6 +612,9 @@ export function getSemanticDetector(
 ): SemanticVerseDetector {
     if (!detectorInstance) {
         detectorInstance = new SemanticVerseDetector(config);
+    } else if (config) {
+        // Update config of existing instance
+        detectorInstance.updateConfig(config);
     }
     return detectorInstance;
 }

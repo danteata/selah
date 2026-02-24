@@ -37,7 +37,7 @@ export {
     clearCachedVerseEmbeddings,
     hasCachedEmbeddings,
 } from './localEmbeddings'
-export type { EmbeddingResult, VerseMatch } from './localEmbeddings'
+export type { EmbeddingResult, VerseMatch, CachedVerseEmbedding } from './localEmbeddings'
 
 // Semantic verse detection
 export {

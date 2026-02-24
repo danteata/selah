@@ -494,8 +494,21 @@ class DesktopWhisperTranscriptionService {
                 });
             }
         } catch (error) {
-            console.error('[DesktopWhisper] Error processing WAV chunk:', error);
-            onError(error instanceof Error ? error.message : 'Transcription error');
+            // Don't spam errors for timeouts - they're expected occasionally
+            const isTimeout = error instanceof Error && (
+                error.name === 'TimeoutError' ||
+                error.message.includes('timed out')
+            );
+
+            if (!isTimeout) {
+                console.error('[DesktopWhisper] Error processing WAV chunk:', error);
+                onError(error instanceof Error ? error.message : 'Transcription error');
+            } else {
+                // Just log timeout occasionally
+                if (Math.random() < 0.1) {
+                    console.warn('[DesktopWhisper] Transcription timeout (server busy), skipping chunk');
+                }
+            }
         }
     }
 
