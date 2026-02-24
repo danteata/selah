@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown } from 'lucide-react'
+import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown, Cpu } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useMultiMonitor } from '../../hooks/useMultiMonitor'
+import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import type { Slide, Scripture, Countdown } from '../../types'
@@ -34,7 +34,15 @@ export function LiveOutput() {
     const [previewCountdownSeconds, setPreviewCountdownSeconds] = useState(0)
     const previewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-    const { isPresenting, selectedScreenId, detectScreens, openLiveViewOnScreen, terminatePresentation } = useMultiMonitor()
+    const {
+        isPresenting,
+        selectedMonitorId,
+        isDesktop,
+        detectMonitors,
+        openLiveWindow,
+        closeLiveWindow,
+        sendSlideToLive,
+    } = useNativeMultiMonitor()
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -140,12 +148,17 @@ export function LiveOutput() {
 
     const handleSetLiveSlide = useCallback((slideId: string) => {
         setLiveSlide(slideId)
-        // Broadcast to other windows
+
+        // Send to live window via native API
         const slide = activeSlides.find(s => s.id === slideId)
         if (slide) {
+            if (isDesktop) {
+                sendSlideToLive(slideId, slide as unknown as Record<string, unknown>)
+            }
+            // Broadcast to other windows (for web mode)
             window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: slide }))
         }
-    }, [setLiveSlide, activeSlides])
+    }, [setLiveSlide, activeSlides, isDesktop, sendSlideToLive])
 
     const handleDeleteSlide = useCallback((slide: Slide) => {
         removeActiveSlide(slide)
@@ -167,15 +180,23 @@ export function LiveOutput() {
 
     // Handle open live with screen picker
     const handleOpenLive = useCallback(async () => {
-        await detectScreens()
+        await detectMonitors()
         setShowScreenPicker(true)
-    }, [detectScreens])
+    }, [detectMonitors])
 
     // Handle screen selection
     const handleScreenSelect = useCallback(async (screenId: string) => {
-        await openLiveViewOnScreen(screenId, liveSlideId || undefined)
+        if (isDesktop) {
+            await openLiveWindow({
+                monitor_id: screenId,
+                fullscreen: true,
+                decorations: false,
+                always_on_top: true,
+                initial_slide_id: liveSlideId || undefined,
+            })
+        }
         setShowScreenPicker(false)
-    }, [openLiveViewOnScreen, liveSlideId])
+    }, [isDesktop, openLiveWindow, liveSlideId])
 
     // Initialize & run countdown preview when live slide is a countdown
     useEffect(() => {
@@ -218,8 +239,8 @@ export function LiveOutput() {
 
     // Handle stop presenting
     const handleStopLive = useCallback(async () => {
-        await terminatePresentation()
-    }, [terminatePresentation])
+        await closeLiveWindow()
+    }, [closeLiveWindow])
 
     // Handle verse selection from BibleVerseNavigator
     const handleVerseSelect = useCallback((scripture: Scripture) => {
@@ -242,15 +263,28 @@ export function LiveOutput() {
 
         // Broadcast the updated slide
         window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
-    }, [liveSlide, generateSlideContent])
+
+        // Send to native live window
+        if (isDesktop) {
+            sendSlideToLive(liveSlide.id, updatedSlide as unknown as Record<string, unknown>)
+        }
+    }, [liveSlide, generateSlideContent, isDesktop, sendSlideToLive])
 
     return (
         <div className="max-w-[400px] bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4 flex flex-col relative">
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    Slide Schedule
-                </h2>
+                <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                        Slide Schedule
+                    </h2>
+                    {isDesktop && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded-full">
+                            <Cpu className="w-3 h-3" />
+                            Native
+                        </span>
+                    )}
+                </div>
                 <div className="flex items-center gap-2">
                     {isPresenting ? (
                         <button

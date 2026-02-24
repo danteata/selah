@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import type { Slide, Countdown } from '../types'
 import { useFileUrl } from '../hooks/useTemplates'
+import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -16,17 +17,70 @@ interface LiveState {
     }
 }
 
+// Check if running in Tauri
+function isTauri(): boolean {
+    return typeof window !== 'undefined' && '__TAURI__' in window
+}
+
 export default function LiveView() {
     const [searchParams] = useSearchParams()
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [currentSlideId, setCurrentSlideId] = useState(searchParams.get('slide') || '')
     const [liveState, setLiveState] = useState<LiveState | null>(null)
     const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
+    const [isDesktop, setIsDesktop] = useState(false)
 
     // Countdown timer state
     const [countdownSeconds, setCountdownSeconds] = useState<number>(0)
     const [countdownPaused, setCountdownPaused] = useState(false)
     const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+    // Initialize desktop mode and native event listeners
+    useEffect(() => {
+        const init = async () => {
+            const desktop = await nativeMultiMonitorService.isDesktop()
+            setIsDesktop(desktop)
+
+            if (desktop) {
+                // Listen for native slide updates
+                const unlistenSlide = await nativeMultiMonitorService.onLiveWindowEvent<{
+                    slideId: string
+                    slideData?: Slide
+                }>('slide-update', (payload) => {
+                    setCurrentSlideId(payload.slideId)
+                    if (payload.slideData) {
+                        setLiveState(prev => {
+                            if (!prev) return prev
+                            const slides = prev.slides.map(s =>
+                                s.id === payload.slideId ? payload.slideData! : s
+                            )
+                            return { ...prev, slides }
+                        })
+                    }
+                })
+
+                // Listen for clear output events
+                const unlistenClear = await nativeMultiMonitorService.onLiveWindowEvent<{
+                    mode: string
+                }>('clear-output', () => {
+                    setCurrentSlideId('')
+                })
+
+                return () => {
+                    unlistenSlide()
+                    unlistenClear()
+                }
+            }
+            return () => { }
+        }
+
+        let cleanup: (() => void) | undefined
+        init().then(fn => { cleanup = fn })
+
+        return () => {
+            cleanup?.()
+        }
+    }, [])
 
     // Initialize BroadcastChannel for cross-window communication
     useEffect(() => {
@@ -97,34 +151,45 @@ export default function LiveView() {
     }
 
     // Toggle fullscreen
-    const toggleFullscreen = useCallback(() => {
-        if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen()
-            setIsFullscreen(true)
+    const toggleFullscreen = useCallback(async () => {
+        if (isDesktop) {
+            // Use native fullscreen toggle
+            await nativeMultiMonitorService.toggleLiveFullscreen()
+            setIsFullscreen(prev => !prev)
         } else {
-            document.exitFullscreen()
-            setIsFullscreen(false)
+            // Use web fullscreen API
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen()
+                setIsFullscreen(true)
+            } else {
+                document.exitFullscreen()
+                setIsFullscreen(false)
+            }
         }
-    }, [])
+    }, [isDesktop])
 
-    // Listen for fullscreen changes
+    // Listen for fullscreen changes (web mode)
     useEffect(() => {
+        if (isDesktop) return
+
         const handleFullscreenChange = () => {
             setIsFullscreen(!!document.fullscreenElement)
         }
 
         document.addEventListener('fullscreenchange', handleFullscreenChange)
         return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-    }, [])
+    }, [isDesktop])
 
-    // Auto-enter fullscreen if setting is enabled
+    // Auto-enter fullscreen if setting is enabled (web mode)
     useEffect(() => {
-        if (settings.liveWindowFullscreen && !document.fullscreenElement) {
+        if (isDesktop || !settings.liveWindowFullscreen) return
+
+        if (!document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(() => {
                 // Ignore errors (user may have denied permission)
             })
         }
-    }, [settings.liveWindowFullscreen])
+    }, [settings.liveWindowFullscreen, isDesktop])
 
     // Parse "HH:MM:SS" time string into total seconds
     const parseTimeToSeconds = useCallback((timeStr: string): number => {
@@ -220,6 +285,9 @@ export default function LiveView() {
                 <div className="text-center">
                     <p className="text-xl mb-2">No slide selected</p>
                     <p className="text-gray-400">Select a slide from the main window to display here</p>
+                    {isDesktop && (
+                        <p className="text-green-400 text-sm mt-4">Running in native desktop mode</p>
+                    )}
                 </div>
             </div>
         )
@@ -367,7 +435,7 @@ export default function LiveView() {
                                 fontFamily: slide.slideStyle?.font || 'Inter',
                             }}
                         >
-                            Time&apos;s up!
+                            Time's up!
                         </div>
                     )}
 
@@ -425,26 +493,28 @@ export default function LiveView() {
                 </div>
             )}
 
-            {/* Controls (show on hover) */}
-            <div className="absolute top-4 right-4 opacity-0 hover:opacity-100 transition-opacity flex gap-2">
-                <button
-                    onClick={toggleFullscreen}
-                    className="p-2 bg-black/50 text-white rounded-lg hover:bg-black/70"
-                    title={isFullscreen ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'}
-                >
-                    {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-                </button>
-                <button
-                    onClick={() => window.close()}
-                    className="p-2 bg-black/50 text-white rounded-lg hover:bg-red-600/70"
-                    title="Close"
-                >
-                    <X className="w-5 h-5" />
-                </button>
-            </div>
+            {/* Controls (show on hover) - only in web mode */}
+            {!isDesktop && (
+                <div className="absolute top-4 right-4 opacity-0 hover:opacity-100 transition-opacity flex gap-2">
+                    <button
+                        onClick={toggleFullscreen}
+                        className="p-2 bg-black/50 text-white rounded-lg hover:bg-black/70"
+                        title={isFullscreen ? 'Exit Fullscreen (F)' : 'Enter Fullscreen (F)'}
+                    >
+                        {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                    </button>
+                    <button
+                        onClick={() => window.close()}
+                        className="p-2 bg-black/50 text-white rounded-lg hover:bg-red-600/70"
+                        title="Close"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+            )}
 
-            {/* Footer hint */}
-            {!isFullscreen && (
+            {/* Footer hint - only in web mode */}
+            {!isDesktop && !isFullscreen && (
                 <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white/50 text-sm">
                     Double-click to enter fullscreen • Ctrl+F
                 </div>

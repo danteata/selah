@@ -2,8 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_capture;
+mod multi_monitor;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandChild;
@@ -28,6 +29,29 @@ use audio_capture::{
     get_capture_type,
     get_audio_chunk_as_wav,
     flush_buffer_as_wav,
+};
+
+// Import multi-monitor state and commands
+use multi_monitor::{
+    MultiMonitorState,
+    // Commands
+    get_monitors,
+    get_primary_monitor,
+    get_best_live_monitor,
+    open_live_window,
+    close_live_window,
+    toggle_live_fullscreen,
+    move_live_to_monitor,
+    get_live_window_state,
+    is_live_window_open,
+    get_current_live_monitor,
+    send_slide_to_live,
+    clear_live_output,
+    get_window_state,
+    save_window_state,
+    update_main_window_state,
+    restore_main_window_state,
+    is_desktop,
 };
 
 const WHISPER_SERVER_PORT: u16 = 17493;
@@ -104,7 +128,7 @@ async fn start_whisper_server(
             "--model", &model_arg,
         ]);
 
-    let (mut rx, child) = sidecar_command.spawn()
+    let (mut _rx, child) = sidecar_command.spawn()
         .map_err(|e| format!("Failed to spawn whisper server: {}", e))?;
 
     // Store the child process
@@ -179,6 +203,9 @@ async fn get_whisper_server_status(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Create multi-monitor state
+    let multi_monitor_state = Arc::new(MultiMonitorState::new());
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -188,6 +215,7 @@ pub fn run() {
             server_pid: Mutex::new(None),
         })
         .manage(AudioCaptureState::new())
+        .manage(multi_monitor_state.clone())
         .invoke_handler(tauri::generate_handler![
             start_whisper_server,
             stop_whisper_server,
@@ -208,8 +236,29 @@ pub fn run() {
             get_capture_type,
             get_audio_chunk_as_wav,
             flush_buffer_as_wav,
+            // Multi-monitor commands
+            get_monitors,
+            get_primary_monitor,
+            get_best_live_monitor,
+            open_live_window,
+            close_live_window,
+            toggle_live_fullscreen,
+            move_live_to_monitor,
+            get_live_window_state,
+            is_live_window_open,
+            get_current_live_monitor,
+            send_slide_to_live,
+            clear_live_output,
+            get_window_state,
+            save_window_state,
+            update_main_window_state,
+            restore_main_window_state,
+            is_desktop,
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            // Initialize multi-monitor state with app handle
+            multi_monitor_state.init(app.handle().clone());
+            
             #[cfg(debug_assertions)]
             {
                 let window = app.get_webview_window("main").unwrap();

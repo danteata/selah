@@ -23,7 +23,11 @@ export {
     useCtrlOrMetaActive
 } from './useKeyboardShortcuts'
 export { useMultiMonitor } from './useMultiMonitor'
+export { useNativeMultiMonitor } from './useNativeMultiMonitor'
+export type { MonitorInfo, LiveWindowState, LiveWindowConfig, WindowState, UseNativeMultiMonitorReturn } from './useNativeMultiMonitor'
 export { useLiveSync } from './useLiveSync'
+export { useWindowStatePersistence } from './useWindowStatePersistence'
+export type { UseWindowStatePersistenceReturn } from './useWindowStatePersistence'
 export { useSermonListener } from './useSermonListener'
 export type { UseSermonListenerReturn, SermonListenerOptions, SermonListenerState, SermonListenerActions } from './useSermonListener'
 export { useTemplates, useFileUrl } from './useTemplates'

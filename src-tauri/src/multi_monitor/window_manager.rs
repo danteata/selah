@@ -1,0 +1,345 @@
+/**
+ * Window Manager for multi-monitor support
+ * 
+ * Handles creating, positioning, and managing the live output window
+ * across multiple monitors.
+ */
+
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tauri::{
+    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, 
+    WebviewWindow, WindowEvent,
+};
+
+use super::types::*;
+use super::state::{MultiMonitorState, LIVE_WINDOW_LABEL};
+
+impl MultiMonitorState {
+    /// Get all available monitors
+    pub fn get_available_monitors(&self) -> Vec<MonitorInfo> {
+        #[cfg(not(target_os = "android"))]
+        {
+            if let Some(app) = self.get_app() {
+                let available = app.available_monitors().unwrap_or_default();
+                
+                return available.into_iter().enumerate().map(|(idx, monitor)| {
+                    let position = monitor.position();
+                    let size = monitor.size();
+                    MonitorInfo {
+                        id: format!("monitor-{}", idx),
+                        name: monitor.name().unwrap_or_else(|_| format!("Monitor {}", idx + 1)),
+                        width: size.width,
+                        height: size.height,
+                        position_x: position.x,
+                        position_y: position.y,
+                        scale_factor: monitor.scale_factor(),
+                        is_primary: monitor.is_primary(),
+                        refresh_rate: None, // Tauri doesn't expose this directly
+                    }
+                }).collect();
+            }
+        }
+        
+        #[cfg(target_os = "android")]
+        {
+            return vec![MonitorInfo {
+                id: "primary".to_string(),
+                name: "Primary Screen".to_string(),
+                width: 1920,
+                height: 1080,
+                position_x: 0,
+                position_y: 0,
+                scale_factor: 1.0,
+                is_primary: true,
+                refresh_rate: None,
+            }];
+        }
+        
+        // Fallback for when app handle is not available
+        vec![]
+    }
+
+    /// Get the primary monitor
+    pub fn get_primary_monitor(&self) -> Option<MonitorInfo> {
+        self.get_available_monitors().into_iter().find(|m| m.is_primary)
+    }
+
+    /// Get the best monitor for live output (first non-primary, or primary if only one)
+    pub fn get_best_monitor_for_live(&self) -> Option<MonitorInfo> {
+        let monitors = self.get_available_monitors();
+        
+        // Prefer external (non-primary) monitor
+        let external = monitors.iter().find(|m| !m.is_primary);
+        external.cloned().or_else(|| monitors.into_iter().next())
+    }
+
+    /// Get monitor by ID
+    pub fn get_monitor_by_id(&self, id: &str) -> Option<MonitorInfo> {
+        self.get_available_monitors().into_iter().find(|m| m.id == id)
+    }
+
+    /// Create the live output window
+    pub fn create_live_window(
+        &self,
+        config: LiveWindowConfig,
+        dev_url: Option<&str>,
+    ) -> Result<WebviewWindow, MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        // Check if live window already exists
+        if let Some(existing) = app.get_webview_window(LIVE_WINDOW_LABEL) {
+            // Close existing window first
+            let _ = existing.close();
+            // Give it a moment to close
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Determine target monitor
+        let target_monitor = if let Some(ref monitor_id) = config.monitor_id {
+            self.get_monitor_by_id(monitor_id)
+        } else {
+            self.get_best_monitor_for_live()
+        };
+
+        let monitor = target_monitor.ok_or_else(|| MultiMonitorError {
+            code: "NO_MONITOR".to_string(),
+            message: "No suitable monitor found for live output".to_string(),
+        })?;
+
+        // Build the URL for the live view
+        let base_url = dev_url.unwrap_or("tauri://localhost");
+        let url = if let Some(ref slide_id) = config.initial_slide_id {
+            format!("{}/live?slide={}", base_url, slide_id)
+        } else {
+            format!("{}/live", base_url)
+        };
+
+        let webview_url: WebviewUrl = url.parse()
+            .map_err(|e: Box<dyn std::error::Error>| MultiMonitorError {
+                code: "URL_PARSE_ERROR".to_string(),
+                message: format!("Failed to parse URL: {}", e),
+            })?;
+
+        // Build the window
+        let mut builder = WebviewWindowBuilder::new(
+            &app,
+            LIVE_WINDOW_LABEL,
+            webview_url,
+        )
+        .title("Selah - Live Output")
+        .inner_size(monitor.width as f64, monitor.height as f64)
+        .position(monitor.position_x as f64, monitor.position_y as f64)
+        .decorations(config.decorations)
+        .always_on_top(config.always_on_top)
+        .visible(true)
+        .focused(false) // Don't steal focus from main window
+        .skip_taskbar(true); // Don't show in taskbar
+
+        // Set fullscreen if requested
+        if config.fullscreen {
+            builder = builder.fullscreen(true);
+        }
+
+        // Create the window
+        let window = builder.build().map_err(|e| MultiMonitorError {
+            code: "WINDOW_CREATE_FAILED".to_string(),
+            message: format!("Failed to create live window: {}", e),
+        })?;
+
+        // Update state
+        self.set_current_live_monitor(Some(monitor.id.clone()));
+        self.set_live_window_state(if config.fullscreen {
+            LiveWindowState::Fullscreen
+        } else {
+            LiveWindowState::Open
+        });
+
+        // Update persisted state
+        self.update_window_state(|state| {
+            state.live_monitor_id = Some(monitor.id.clone());
+            state.live_fullscreen = config.fullscreen;
+        });
+
+        // Set up window close handler
+        let state_for_closure = Arc::new(self.clone_state());
+        
+        let window_for_closure = window.clone();
+        window.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                state_for_closure.set_live_window_state(LiveWindowState::Closed);
+                state_for_closure.set_current_live_monitor(None);
+            }
+        });
+
+        Ok(window)
+    }
+
+    /// Close the live output window
+    pub fn close_live_window(&self) -> Result<(), MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        if let Some(window) = app.get_webview_window(LIVE_WINDOW_LABEL) {
+            window.close().map_err(|e| MultiMonitorError {
+                code: "WINDOW_CLOSE_FAILED".to_string(),
+                message: format!("Failed to close live window: {}", e),
+            })?;
+        }
+
+        self.set_live_window_state(LiveWindowState::Closed);
+        self.set_current_live_monitor(None);
+
+        Ok(())
+    }
+
+    /// Toggle fullscreen on the live window
+    pub fn toggle_live_fullscreen(&self) -> Result<bool, MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        let window = app.get_webview_window(LIVE_WINDOW_LABEL).ok_or_else(|| MultiMonitorError {
+            code: "NO_LIVE_WINDOW".to_string(),
+            message: "Live window is not open".to_string(),
+        })?;
+
+        let is_fullscreen = window.is_fullscreen().map_err(|e| MultiMonitorError {
+            code: "FULLSCREEN_CHECK_FAILED".to_string(),
+            message: format!("Failed to check fullscreen state: {}", e),
+        })?;
+
+        window.set_fullscreen(!is_fullscreen).map_err(|e| MultiMonitorError {
+            code: "FULLSCREEN_TOGGLE_FAILED".to_string(),
+            message: format!("Failed to toggle fullscreen: {}", e),
+        })?;
+
+        let new_state = if !is_fullscreen {
+            LiveWindowState::Fullscreen
+        } else {
+            LiveWindowState::Open
+        };
+        self.set_live_window_state(new_state);
+
+        Ok(!is_fullscreen)
+    }
+
+    /// Move live window to a specific monitor
+    pub fn move_live_to_monitor(&self, monitor_id: &str) -> Result<(), MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        let monitor = self.get_monitor_by_id(monitor_id).ok_or_else(|| MultiMonitorError {
+            code: "MONITOR_NOT_FOUND".to_string(),
+            message: format!("Monitor {} not found", monitor_id),
+        })?;
+
+        let window = app.get_webview_window(LIVE_WINDOW_LABEL).ok_or_else(|| MultiMonitorError {
+            code: "NO_LIVE_WINDOW".to_string(),
+            message: "Live window is not open".to_string(),
+        })?;
+
+        // First exit fullscreen if in it
+        let was_fullscreen = window.is_fullscreen().unwrap_or(false);
+        if was_fullscreen {
+            window.set_fullscreen(false).map_err(|e| MultiMonitorError {
+                code: "FULLSCREEN_EXIT_FAILED".to_string(),
+                message: format!("Failed to exit fullscreen: {}", e),
+            })?;
+        }
+
+        // Move and resize window
+        window.set_position(tauri::Position::Physical(
+            tauri::PhysicalPosition { x: monitor.position_x, y: monitor.position_y }
+        )).map_err(|e| MultiMonitorError {
+            code: "POSITION_FAILED".to_string(),
+            message: format!("Failed to move window: {}", e),
+        })?;
+
+        window.set_size(tauri::Size::Physical(
+            tauri::PhysicalSize { width: monitor.width, height: monitor.height }
+        )).map_err(|e| MultiMonitorError {
+            code: "RESIZE_FAILED".to_string(),
+            message: format!("Failed to resize window: {}", e),
+        })?;
+
+        // Re-enter fullscreen if it was
+        if was_fullscreen {
+            window.set_fullscreen(true).map_err(|e| MultiMonitorError {
+                code: "FULLSCREEN_ENTER_FAILED".to_string(),
+                message: format!("Failed to enter fullscreen: {}", e),
+            })?;
+        }
+
+        self.set_current_live_monitor(Some(monitor_id.to_string()));
+        self.update_window_state(|state| {
+            state.live_monitor_id = Some(monitor_id.to_string());
+        });
+
+        Ok(())
+    }
+
+    /// Send a message to the live window via eval
+    pub fn send_to_live_window(&self, message: &str) -> Result<(), MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        if let Some(window) = app.get_webview_window(LIVE_WINDOW_LABEL) {
+            window.eval(message).map_err(|e| MultiMonitorError {
+                code: "EVAL_FAILED".to_string(),
+                message: format!("Failed to send message to live window: {}", e),
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Emit an event to the live window
+    pub fn emit_to_live_window<T: serde::Serialize + Clone>(&self, event: &str, payload: T) -> Result<(), MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        app.emit_to(LIVE_WINDOW_LABEL, event, payload).map_err(|e| MultiMonitorError {
+            code: "EMIT_FAILED".to_string(),
+            message: format!("Failed to emit event to live window: {}", e),
+        })?;
+
+        Ok(())
+    }
+
+    /// Clone the state for use in closures
+    fn clone_state(&self) -> MultiMonitorStateClone {
+        MultiMonitorStateClone {
+            live_window_state: RwLock::new(self.live_window_state.read().clone()),
+            current_live_monitor: RwLock::new(self.current_live_monitor.read().clone()),
+        }
+    }
+}
+
+/// A lightweight clone-able version of the state for closures
+struct MultiMonitorStateClone {
+    live_window_state: RwLock<LiveWindowState>,
+    current_live_monitor: RwLock<Option<String>>,
+}
+
+impl MultiMonitorStateClone {
+    fn set_live_window_state(&self, state: LiveWindowState) {
+        *self.live_window_state.write() = state;
+    }
+
+    fn set_current_live_monitor(&self, monitor_id: Option<String>) {
+        *self.current_live_monitor.write() = monitor_id;
+    }
+}
