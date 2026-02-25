@@ -117,6 +117,15 @@ export function QuickActionsSidebar() {
         }
     }, [hasEmbeddings, isEmbedderReady, initEmbedder])
 
+    // Listen for focus event from keyboard shortcut
+    useEffect(() => {
+        const handleFocus = () => {
+            searchInputRef.current?.focus()
+        }
+        window.addEventListener('selah:focus-quick-actions', handleFocus)
+        return () => window.removeEventListener('selah:focus-quick-actions', handleFocus)
+    }, [])
+
     // Trigger semantic search when search input changes
     useEffect(() => {
         if (searchInput.length >= 2 && hasEmbeddings) {
