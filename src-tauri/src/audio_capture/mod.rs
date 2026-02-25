@@ -15,7 +15,9 @@ mod types;
 mod vad;
 
 pub use types::*;
-pub use vad::{SileroVad, VadConfig, VadSegmenter};
+pub use vad::VadSegmenter;
+#[allow(unused_imports)]
+pub use vad::{SileroVad, VadConfig};
 
 #[cfg(target_os = "macos")]
 mod macos;

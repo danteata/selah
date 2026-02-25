@@ -4,7 +4,7 @@
  * These commands are exposed to the frontend via Tauri's IPC mechanism.
  */
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{State, AppHandle, Manager};
 use std::sync::Arc;
 
 use super::types::*;
@@ -37,7 +37,7 @@ pub async fn get_best_live_monitor(
 /// Open the live output window
 #[tauri::command]
 pub async fn open_live_window(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, Arc<MultiMonitorState>>,
     config: Option<LiveWindowConfig>,
 ) -> Result<(), MultiMonitorError> {
@@ -160,18 +160,18 @@ pub async fn update_main_window_state(
     state: State<'_, Arc<MultiMonitorState>>,
 ) -> Result<(), MultiMonitorError> {
     if let Some(window) = app.get_webview_window("main") {
-        let position = window.outer_position().ok();
-        let size = window.outer_size().ok();
-        let is_maximized = window.is_maximized().ok();
+        let position: Result<tauri::PhysicalPosition<i32>, _> = window.outer_position();
+        let size: Result<tauri::PhysicalSize<u32>, _> = window.outer_size();
+        let is_maximized: Result<bool, _> = window.is_maximized();
         
         state.update_window_state(|s| {
-            if let Some(pos) = position {
+            if let Ok(pos) = position {
                 s.main_position_x = Some(pos.x);
                 s.main_position_y = Some(pos.y);
             }
-            if let Some(size) = size {
-                s.main_width = Some(size.width);
-                s.main_height = Some(size.height);
+            if let Ok(sz) = size {
+                s.main_width = Some(sz.width);
+                s.main_height = Some(sz.height);
             }
             s.main_maximized = is_maximized.unwrap_or(false);
         });
@@ -191,19 +191,19 @@ pub async fn restore_main_window_state(
     if let Some(window) = app.get_webview_window("main") {
         // Restore position and size if available
         if let (Some(x), Some(y)) = (window_state.main_position_x, window_state.main_position_y) {
-            let _ = window.set_position(tauri::Position::Physical(
+            let _: Result<(), _> = window.set_position(tauri::Position::Physical(
                 tauri::PhysicalPosition { x, y }
             ));
         }
         
         if let (Some(width), Some(height)) = (window_state.main_width, window_state.main_height) {
-            let _ = window.set_size(tauri::Size::Physical(
+            let _: Result<(), _> = window.set_size(tauri::Size::Physical(
                 tauri::PhysicalSize { width, height }
             ));
         }
         
         if window_state.main_maximized {
-            let _ = window.maximize();
+            let _: Result<(), _> = window.maximize();
         }
     }
     

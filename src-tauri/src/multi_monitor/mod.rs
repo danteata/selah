@@ -11,6 +11,6 @@ mod commands;
 mod state;
 mod window_manager;
 
-pub use types::*;
 pub use commands::*;
-pub use state::{MultiMonitorState, LIVE_WINDOW_LABEL};
+pub use state::MultiMonitorState;
+// LIVE_WINDOW_LABEL is used internally by window_manager

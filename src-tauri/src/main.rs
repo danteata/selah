@@ -164,7 +164,7 @@ async fn stop_whisper_server(
 ) -> Result<(), String> {
     let mut child_guard = state.child.lock().unwrap();
     
-    if let Some(mut child) = child_guard.take() {
+    if let Some(child) = child_guard.take() {
         child.kill().map_err(|e| format!("Failed to kill whisper server: {}", e))?;
         println!("Whisper server stopped");
     }

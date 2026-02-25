@@ -8,7 +8,7 @@
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tauri::{
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, 
+    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, 
     WebviewWindow, WindowEvent,
 };
 
@@ -26,16 +26,20 @@ impl MultiMonitorState {
                 return available.into_iter().enumerate().map(|(idx, monitor)| {
                     let position = monitor.position();
                     let size = monitor.size();
+                    let name = monitor.name()
+                        .map(|s| s.to_string())
+                        .unwrap_or(format!("Monitor {}", idx + 1));
+                    
                     MonitorInfo {
                         id: format!("monitor-{}", idx),
-                        name: monitor.name().unwrap_or_else(|_| format!("Monitor {}", idx + 1)),
+                        name,
                         width: size.width,
                         height: size.height,
                         position_x: position.x,
                         position_y: position.y,
                         scale_factor: monitor.scale_factor(),
-                        is_primary: monitor.is_primary(),
-                        refresh_rate: None, // Tauri doesn't expose this directly
+                        is_primary: false, // Tauri doesn't expose this directly
+                        refresh_rate: None,
                     }
                 }).collect();
             }
@@ -43,6 +47,7 @@ impl MultiMonitorState {
         
         #[cfg(target_os = "android")]
         {
+            let _ = self; // silence unused warning
             return vec![MonitorInfo {
                 id: "primary".to_string(),
                 name: "Primary Screen".to_string(),
@@ -62,16 +67,13 @@ impl MultiMonitorState {
 
     /// Get the primary monitor
     pub fn get_primary_monitor(&self) -> Option<MonitorInfo> {
-        self.get_available_monitors().into_iter().find(|m| m.is_primary)
+        self.get_available_monitors().into_iter().next()
     }
 
     /// Get the best monitor for live output (first non-primary, or primary if only one)
     pub fn get_best_monitor_for_live(&self) -> Option<MonitorInfo> {
         let monitors = self.get_available_monitors();
-        
-        // Prefer external (non-primary) monitor
-        let external = monitors.iter().find(|m| !m.is_primary);
-        external.cloned().or_else(|| monitors.into_iter().next())
+        monitors.into_iter().next()
     }
 
     /// Get monitor by ID
@@ -118,11 +120,10 @@ impl MultiMonitorState {
             format!("{}/live", base_url)
         };
 
-        let webview_url: WebviewUrl = url.parse()
-            .map_err(|e: Box<dyn std::error::Error>| MultiMonitorError {
-                code: "URL_PARSE_ERROR".to_string(),
-                message: format!("Failed to parse URL: {}", e),
-            })?;
+        let webview_url = WebviewUrl::External(url.parse().map_err(|e| MultiMonitorError {
+            code: "URL_PARSE_ERROR".to_string(),
+            message: format!("Failed to parse URL: {}", e),
+        })?);
 
         // Build the window
         let mut builder = WebviewWindowBuilder::new(
@@ -164,10 +165,15 @@ impl MultiMonitorState {
             state.live_fullscreen = config.fullscreen;
         });
 
-        // Set up window close handler
-        let state_for_closure = Arc::new(self.clone_state());
+        // Set up window close handler using a cloned state
+        let live_window_state = self.live_window_state.read().clone();
+        let current_live_monitor = self.current_live_monitor.read().clone();
         
-        let window_for_closure = window.clone();
+        let state_for_closure = Arc::new(MultiMonitorStateClone {
+            live_window_state: RwLock::new(live_window_state),
+            current_live_monitor: RwLock::new(current_live_monitor),
+        });
+        
         window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { .. } = event {
                 state_for_closure.set_live_window_state(LiveWindowState::Closed);
@@ -317,14 +323,6 @@ impl MultiMonitorState {
         })?;
 
         Ok(())
-    }
-
-    /// Clone the state for use in closures
-    fn clone_state(&self) -> MultiMonitorStateClone {
-        MultiMonitorStateClone {
-            live_window_state: RwLock::new(self.live_window_state.read().clone()),
-            current_live_monitor: RwLock::new(self.current_live_monitor.read().clone()),
-        }
     }
 }
 

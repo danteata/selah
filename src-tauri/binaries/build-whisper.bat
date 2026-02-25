@@ -1,6 +1,7 @@
 @echo off
 REM Build script for creating standalone whisper-server executables on Windows
 REM This creates platform-specific binaries that can be bundled with Tauri
+REM Uses uv for faster dependency management
 
 set TARGET_TRIPLE=x86_64-pc-windows-msvc
 set SCRIPT_DIR=%~dp0
@@ -9,25 +10,53 @@ set OUTPUT_DIR=%SCRIPT_DIR%
 echo Building whisper-server for %TARGET_TRIPLE%...
 echo Output directory: %OUTPUT_DIR%
 
-REM Check for python
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Error: Python is not installed or not in PATH.
-    exit /b 1
+REM Check for uv (preferred) or python
+uv --version >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Using uv for dependency management...
+    goto :use_uv
 )
 
-REM Create a virtual environment and install dependencies
+python --version >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Using python for dependency management...
+    goto :use_python
+)
+
+echo Error: Neither uv nor Python is installed or in PATH.
+echo Please install uv from https://docs.astral.sh/uv/ or Python 3.8+
+exit /b 1
+
+:use_uv
+REM Create a virtual environment and install dependencies using uv
+set VENV_DIR=%SCRIPT_DIR%.venv-build
+if exist "%VENV_DIR%" rmdir /s /q "%VENV_DIR%"
+
+echo Creating virtual environment with uv...
+uv venv "%VENV_DIR%"
+call "%VENV_DIR%\Scripts\activate"
+
+echo Installing dependencies with uv...
+uv pip install pyinstaller
+uv pip install -r "%SCRIPT_DIR%requirements.txt"
+
+goto :build
+
+:use_python
+REM Create a virtual environment and install dependencies using python
 set VENV_DIR=%SCRIPT_DIR%.venv-build
 if exist "%VENV_DIR%" rmdir /s /q "%VENV_DIR%"
 python -m venv "%VENV_DIR%"
 call "%VENV_DIR%\Scripts\activate"
 
-REM Install dependencies
-echo Installing dependencies...
+echo Installing dependencies with pip...
 python -m pip install --upgrade pip
 pip install pyinstaller
 pip install -r "%SCRIPT_DIR%requirements.txt"
 
+goto :build
+
+:build
 REM Build with PyInstaller
 echo Running PyInstaller...
 pyinstaller ^
@@ -41,10 +70,10 @@ pyinstaller ^
 
 REM Cleanup
 echo Cleaning up...
-rmdir /s /q "%SCRIPT_DIR%.build"
-del "%SCRIPT_DIR%selah-whisper-server-%TARGET_TRIPLE%.spec"
+if exist "%SCRIPT_DIR%.build" rmdir /s /q "%SCRIPT_DIR%.build"
+if exist "%SCRIPT_DIR%selah-whisper-server-%TARGET_TRIPLE%.spec" del "%SCRIPT_DIR%selah-whisper-server-%TARGET_TRIPLE%.spec"
 call deactivate
-rmdir /s /q "%VENV_DIR%"
+if exist "%VENV_DIR%" rmdir /s /q "%VENV_DIR%"
 
 echo.
 echo Build complete!

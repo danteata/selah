@@ -13,13 +13,13 @@ pub const LIVE_WINDOW_LABEL: &str = "live-output";
 /// State for multi-monitor management
 pub struct MultiMonitorState {
     /// The application handle
-    app: RwLock<Option<AppHandle>>,
+    pub(crate) app: RwLock<Option<AppHandle>>,
     /// Current window state for persistence
-    window_state: RwLock<WindowState>,
+    pub(crate) window_state: RwLock<WindowState>,
     /// Current live window state
-    live_window_state: RwLock<LiveWindowState>,
+    pub(crate) live_window_state: RwLock<LiveWindowState>,
     /// Current monitor ID for live output
-    current_live_monitor: RwLock<Option<String>>,
+    pub(crate) current_live_monitor: RwLock<Option<String>>,
 }
 
 impl MultiMonitorState {
@@ -79,7 +79,7 @@ impl MultiMonitorState {
 
     /// Check if live window is open
     pub fn is_live_window_open(&self) -> bool {
-        *self.live_window_state.read() != LiveWindowState::Closed
+        !matches!(self.live_window_state.read().clone(), LiveWindowState::Closed)
     }
 
     /// Load window state from storage
