@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Upload, X, Image, Film, Music, FileText, Check, AlertCircle, Loader2 } from 'lucide-react'
+import { openFileDialog } from '../../utils/fileDialog'
 
 export interface UploadedFile {
     id: string
@@ -35,7 +36,6 @@ export function MediaUpload({
     const [files, setFiles] = useState<UploadedFile[]>([])
     const [isDragging, setIsDragging] = useState(false)
     const [isUploading, setIsUploading] = useState(false)
-    const inputRef = useRef<HTMLInputElement>(null)
 
     const getFileType = (file: File): UploadedFile['type'] => {
         if (file.type.startsWith('image/')) return 'image'
@@ -113,9 +113,17 @@ export function MediaUpload({
         processFiles(e.dataTransfer.files)
     }
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files) {
-            processFiles(e.target.files)
+    const handleFileClick = async () => {
+        try {
+            const selectedFiles = await openFileDialog({
+                multiple,
+                accept,
+            });
+            if (selectedFiles) {
+                processFiles(selectedFiles);
+            }
+        } catch (error) {
+            console.error('Error selecting files:', error);
         }
     }
 
@@ -164,20 +172,12 @@ export function MediaUpload({
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                onClick={() => inputRef.current?.click()}
+                onClick={handleFileClick}
                 className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${isDragging
                     ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
                     : 'border-gray-300 dark:border-gray-700 hover:border-primary-400 dark:hover:border-primary-600'
                     }`}
             >
-                <input
-                    ref={inputRef}
-                    type="file"
-                    accept={accept}
-                    multiple={multiple}
-                    onChange={handleFileChange}
-                    className="hidden"
-                />
                 <Upload className={`w-12 h-12 mx-auto mb-4 ${isDragging ? 'text-primary-500' : 'text-gray-400'
                     }`} />
                 <p className="text-lg font-medium text-gray-700 dark:text-gray-300">

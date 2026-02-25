@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Save, Upload, Image, Palette, Type, Loader2, Video } from 'lucide-react'
 import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
 import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
 import { useConvex } from 'convex/react'
+import { openFileDialog } from '../../utils/fileDialog'
 
 interface CreateTemplateModalProps {
     isOpen: boolean
@@ -24,8 +25,6 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const [isSaving, setIsSaving] = useState(false)
     const [isUploading, setIsUploading] = useState(false)
     const [backgroundStorageId, setBackgroundStorageId] = useState<string | null>(null)
-    const fileInputRef = useRef<HTMLInputElement>(null)
-    const videoInputRef = useRef<HTMLInputElement>(null)
 
     const isEditing = !!editingTemplate
 
@@ -111,104 +110,112 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
         }
     }
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (!file) return
-
-        // Validate file type
-        if (!file.type.startsWith('image/')) {
-            alert('Please upload an image file')
-            return
-        }
-
-        // Validate file size (max 10MB)
-        if (file.size > 10 * 1024 * 1024) {
-            alert('Image must be less than 10MB')
-            return
-        }
-
-        setIsUploading(true)
+    const handleFileUploadClick = async () => {
         try {
-            // Convert to base64 for storage
-            const reader = new FileReader()
-            reader.onload = (event) => {
-                const result = event.target?.result as string
-                setBackground(result)
-                setCustomImageUrl('') // Clear URL input when file is uploaded
-                setIsUploading(false)
-            }
-            reader.onerror = () => {
-                alert('Failed to read file')
-                setIsUploading(false)
-            }
-            reader.readAsDataURL(file)
-        } catch (error) {
-            alert('Failed to process image')
-            setIsUploading(false)
-        }
+            const files = await openFileDialog({
+                multiple: false,
+                accept: 'image/*',
+            });
 
-        // Reset the input so the same file can be selected again
-        if (fileInputRef.current) {
-            fileInputRef.current.value = ''
+            if (!files || files.length === 0) return;
+            const file = files[0];
+
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+                alert('Please upload an image file')
+                return
+            }
+
+            // Validate file size (max 10MB)
+            if (file.size > 10 * 1024 * 1024) {
+                alert('Image must be less than 10MB')
+                return
+            }
+
+            setIsUploading(true)
+            try {
+                // Convert to base64 for storage
+                const reader = new FileReader()
+                reader.onload = (event) => {
+                    const result = event.target?.result as string
+                    setBackground(result)
+                    setCustomImageUrl('') // Clear URL input when file is uploaded
+                    setIsUploading(false)
+                }
+                reader.onerror = () => {
+                    alert('Failed to read file')
+                    setIsUploading(false)
+                }
+                reader.readAsDataURL(file)
+            } catch (error) {
+                alert('Failed to process image')
+                setIsUploading(false)
+            }
+        } catch (error) {
+            console.error('Image upload failed:', error);
         }
     }
 
-    const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (!file) return
-
-        // Validate file type
-        if (!file.type.startsWith('video/')) {
-            alert('Please upload a video file')
-            return
-        }
-
-        // Validate file size (max 50MB for videos)
-        if (file.size > 50 * 1024 * 1024) {
-            alert('Video must be less than 50MB')
-            return
-        }
-
-        setIsUploading(true)
+    const handleVideoUploadClick = async () => {
         try {
-            // Step 1: Get upload URL from Convex
-            const uploadUrl = await generateUploadUrl()
+            const files = await openFileDialog({
+                multiple: false,
+                accept: 'video/*',
+            });
 
-            // Step 2: POST the file to the upload URL
-            const response = await fetch(uploadUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': file.type,
-                },
-                body: file,
-            })
+            if (!files || files.length === 0) return;
+            const file = files[0];
 
-            if (!response.ok) {
-                throw new Error('Failed to upload video')
+            // Validate file type
+            if (!file.type.startsWith('video/')) {
+                alert('Please upload a video file')
+                return
             }
 
-            // Step 3: Get the storage ID from the response
-            const { storageId } = await response.json()
+            // Validate file size (max 50MB for videos)
+            if (file.size > 50 * 1024 * 1024) {
+                alert('Video must be less than 50MB')
+                return
+            }
 
-            // Step 4: Store the storage ID and set a placeholder for preview
-            setBackgroundStorageId(storageId)
-            setBackgroundType('video')
+            setIsUploading(true)
+            try {
+                // Step 1: Get upload URL from Convex
+                const uploadUrl = await generateUploadUrl()
 
-            // Create a local object URL for preview purposes
-            const localUrl = URL.createObjectURL(file)
-            setBackground(localUrl)
-            setCustomImageUrl('')
+                // Step 2: POST the file to the upload URL
+                const response = await fetch(uploadUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': file.type,
+                    },
+                    body: file,
+                })
 
+                if (!response.ok) {
+                    throw new Error('Failed to upload video')
+                }
+
+                // Step 3: Get the storage ID from the response
+                const { storageId } = await response.json()
+
+                // Step 4: Store the storage ID and set a placeholder for preview
+                setBackgroundStorageId(storageId)
+                setBackgroundType('video')
+
+                // Create a local object URL for preview purposes
+                const localUrl = URL.createObjectURL(file)
+                setBackground(localUrl)
+                setCustomImageUrl('')
+
+            } catch (error) {
+                console.error('Video upload error:', error)
+                alert('Failed to upload video. Please try again.')
+            } finally {
+                setIsUploading(false)
+            }
         } catch (error) {
-            console.error('Video upload error:', error)
-            alert('Failed to upload video. Please try again.')
-        } finally {
-            setIsUploading(false)
-        }
-
-        // Reset the input so the same file can be selected again
-        if (videoInputRef.current) {
-            videoInputRef.current.value = ''
+            console.error('Video dialog failed:', error);
         }
     }
 
@@ -438,17 +445,9 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 {/* File Upload */}
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm text-gray-500 dark:text-gray-400">or</span>
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={handleFileUpload}
-                                        className="hidden"
-                                        id="template-image-upload"
-                                    />
                                     <button
                                         type="button"
-                                        onClick={() => fileInputRef.current?.click()}
+                                        onClick={handleFileUploadClick}
                                         disabled={isUploading}
                                         className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-primary-600 dark:text-primary-400 border border-primary-300 dark:border-primary-700 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors disabled:opacity-50"
                                     >
@@ -472,17 +471,9 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
                                 {/* Video Upload */}
                                 <div className="flex flex-col gap-3">
-                                    <input
-                                        ref={videoInputRef}
-                                        type="file"
-                                        accept="video/*"
-                                        onChange={handleVideoUpload}
-                                        className="hidden"
-                                        id="template-video-upload"
-                                    />
                                     <button
                                         type="button"
-                                        onClick={() => videoInputRef.current?.click()}
+                                        onClick={handleVideoUploadClick}
                                         disabled={isUploading}
                                         className="flex items-center justify-center gap-2 px-4 py-8 text-sm font-medium text-primary-600 dark:text-primary-400 border-2 border-dashed border-primary-300 dark:border-primary-700 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors disabled:opacity-50"
                                     >

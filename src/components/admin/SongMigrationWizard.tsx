@@ -16,6 +16,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { parseEasyWorshipFile, parseEasyWorshipDatabases, toSelahSong } from '../../services/migration/easyWorshipParser';
 import type { ParsedSong, MigrationStatus, EasyWorshipFileType } from '../../services/migration/types';
+import { openFileDialog } from '../../utils/fileDialog';
 
 type WizardStep = 'upload' | 'preview' | 'importing' | 'complete';
 
@@ -104,26 +105,47 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     }, []);
 
     // Handle file input change for single file
-    const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            handleSingleFileUpload(file);
+    const handleSingleFileClick = useCallback(async () => {
+        try {
+            const resultFiles = await openFileDialog({
+                multiple: false,
+                accept: '.db,.sqlite,.sqlite3,.xml,.csv',
+            });
+            if (resultFiles && resultFiles.length > 0) {
+                handleSingleFileUpload(resultFiles[0]);
+            }
+        } catch (error) {
+            console.error('Error selecting file:', error);
         }
     }, [handleSingleFileUpload]);
 
     // Handle file input change for Songs.db
-    const handleSongsDbChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setFiles(prev => ({ ...prev, songsDb: file }));
+    const handleSongsDbClick = useCallback(async () => {
+        try {
+            const resultFiles = await openFileDialog({
+                multiple: false,
+                accept: '.db,.sqlite,.sqlite3',
+            });
+            if (resultFiles && resultFiles.length > 0) {
+                setFiles(prev => ({ ...prev, songsDb: resultFiles[0] }));
+            }
+        } catch (error) {
+            console.error('Error selecting file:', error);
         }
     }, []);
 
     // Handle file input change for SongWords.db
-    const handleSongWordsDbChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setFiles(prev => ({ ...prev, songWordsDb: file }));
+    const handleSongWordsDbClick = useCallback(async () => {
+        try {
+            const resultFiles = await openFileDialog({
+                multiple: false,
+                accept: '.db,.sqlite,.sqlite3',
+            });
+            if (resultFiles && resultFiles.length > 0) {
+                setFiles(prev => ({ ...prev, songWordsDb: resultFiles[0] }));
+            }
+        } catch (error) {
+            console.error('Error selecting file:', error);
         }
     }, []);
 
@@ -284,17 +306,14 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             </h3>
                             <div
                                 className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 transition-colors"
-                                onClick={() => {
-                                    const input = document.createElement('input');
-                                    input.type = 'file';
-                                    input.accept = '.db,.sqlite,.sqlite3,.xml,.csv';
-                                    input.onchange = (e) => {
-                                        const files = (e.target as HTMLInputElement).files;
-                                        if (files?.[0]) {
-                                            handleSingleFileUpload(files[0]);
-                                        }
-                                    };
-                                    input.click();
+                                onClick={handleSingleFileClick}
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => {
+                                    e.preventDefault();
+                                    const file = e.dataTransfer.files?.[0];
+                                    if (file) {
+                                        handleSingleFileUpload(file);
+                                    }
                                 }}
                             >
                                 <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
@@ -339,15 +358,9 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                     <p className="text-xs text-gray-500 mb-3">
                                         Contains song titles, authors, copyright info
                                     </p>
-                                    <input
-                                        type="file"
-                                        accept=".db,.sqlite,.sqlite3"
-                                        onChange={handleSongsDbChange}
-                                        className="hidden"
-                                        id="songs-db-input"
-                                    />
-                                    <label
-                                        htmlFor="songs-db-input"
+                                    <button
+                                        type="button"
+                                        onClick={handleSongsDbClick}
                                         className="block w-full px-3 py-2 text-center text-sm border border-gray-300 dark:border-gray-600 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                                     >
                                         {files.songsDb ? (
@@ -357,7 +370,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                         ) : (
                                             'Select Songs.db'
                                         )}
-                                    </label>
+                                    </button>
                                 </div>
 
                                 {/* SongWords.db */}
@@ -371,15 +384,9 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                     <p className="text-xs text-gray-500 mb-3">
                                         Contains lyrics in RTF format
                                     </p>
-                                    <input
-                                        type="file"
-                                        accept=".db,.sqlite,.sqlite3"
-                                        onChange={handleSongWordsDbChange}
-                                        className="hidden"
-                                        id="songwords-db-input"
-                                    />
-                                    <label
-                                        htmlFor="songwords-db-input"
+                                    <button
+                                        type="button"
+                                        onClick={handleSongWordsDbClick}
                                         className="block w-full px-3 py-2 text-center text-sm border border-gray-300 dark:border-gray-600 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                                     >
                                         {files.songWordsDb ? (
@@ -389,7 +396,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                         ) : (
                                             'Select SongWords.db'
                                         )}
-                                    </label>
+                                    </button>
                                 </div>
                             </div>
 
