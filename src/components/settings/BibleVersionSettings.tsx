@@ -616,7 +616,7 @@ export function BibleVersionSettings() {
                                             embeddingStatus?.isSyncing ? (
                                                 <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400">
                                                     <Loader2 className="w-4 h-4 animate-spin" />
-                                                    <span className="text-sm">{embeddingStatus.progress}%</span>
+                                                    <span className="text-sm">{Math.round((embeddingStatus.progress / embeddingStatus.total) * 100)}%</span>
                                                 </div>
                                             ) : embeddingStatus?.hasEmbeddings ? (
                                                 <div className="flex items-center gap-1">
