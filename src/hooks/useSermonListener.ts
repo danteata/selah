@@ -627,7 +627,19 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         if (autoLookup) {
                             lookupVerse(bestSemanticVerse).then(scripture => {
                                 optionsRef.current.onVerseDetected?.(bestSemanticVerse, scripture)
+
+                                // Auto-display if enabled
+                                if (autoDisplay && scripture) {
+                                    // Create a slide using the proper function to apply template
+                                    const slide = createBibleSlide(scripture)
+
+                                    // Add slide to active slides and set as live
+                                    appendActiveSlide(slide)
+                                    setLiveSlide(slide.id)
+                                }
                             })
+                        } else {
+                            optionsRef.current.onVerseDetected?.(bestSemanticVerse, null)
                         }
                     }
                 }
