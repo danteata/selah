@@ -160,22 +160,33 @@ export function QuickActionsSidebar() {
         const match = searchInput
             ?.replace('/', '')
             .match(regex)?.[0]
-            ?.replaceAll(' ', ':')
+            ?.replace(/\s*:\s*/g, ':')  // Normalize spaces around colon
+            .replace(/\s+/g, ':')       // Replace remaining spaces with colon
         return match?.trim()
     }, [searchInput])
 
     // Filtered actions based on search
     const searchedActions = useMemo<QuickAction[]>(() => {
-        const twoDigitNumbers = searchInput
-            ?.replace('/', '')
-            ?.match(/\b\d{2}\b/g)
-
-        if (twoDigitNumbers) return []
-
         const colonIndex = searchInput.indexOf(':')
         const searchInputBeforeColon = colonIndex === -1
             ? searchInput
             : searchInput.substring(0, colonIndex)
+
+        // Check if the input looks like a bible reference pattern
+        // (book name followed by chapter number, optionally with verse after colon)
+        // This pattern matches: "John 3", "Psalm 119", "1 John 2", etc.
+        const looksLikeBibleReference = /^[1-3]?\s*[a-zA-Z]+\s+\d+/.test(searchInputBeforeColon.trim())
+
+        // Only filter out two-digit numbers if it doesn't look like a bible reference
+        // This allows "Psalm 23:4", "John 15:7", "Psalm 119:157" to work
+        // But still filters out standalone hymn numbers like "45"
+        if (!looksLikeBibleReference) {
+            const twoDigitNumbers = searchInputBeforeColon
+                ?.replace('/', '')
+                ?.match(/\b\d{2}\b/g)
+
+            if (twoDigitNumbers) return []
+        }
 
         if (!searchInputBeforeColon.trim()) return []
 
