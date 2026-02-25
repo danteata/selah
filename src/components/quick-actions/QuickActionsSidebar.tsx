@@ -3,14 +3,7 @@ import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, Al
 import fuzzysort from 'fuzzysort'
 import { useHymn, useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
-import {
-    slideTypes,
-    quickActionsArr,
-    bibleBooks,
-    appWideActions,
-    type QuickAction,
-    type Slide
-} from '../../types'
+import { slideTypes, quickActionsArr, bibleBooks, appWideActions, type QuickAction, type Slide, type Scripture } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
@@ -48,6 +41,7 @@ export function QuickActionsSidebar() {
     const [searchInput, setSearchInput] = useState('')
     const [actions, setActions] = useState<QuickAction[]>([])
     const [focusedIndex, setFocusedIndex] = useState(0)
+    const [previewScripture, setPreviewScripture] = useState<{ action: string; scripture: Scripture | null } | null>(null)
 
     const searchInputRef = useRef<HTMLInputElement>(null)
     const { getAllHymns, getHymnByNumber } = useHymn()
@@ -164,6 +158,48 @@ export function QuickActionsSidebar() {
             .replace(/\s+/g, ':')       // Replace remaining spaces with colon
         return match?.trim()
     }, [searchInput])
+
+    // Fetch scripture preview for manual references
+    useEffect(() => {
+        let isMounted = true
+
+        const fetchPreview = async () => {
+            if (!bibleChapterAndVerse) {
+                if (isMounted) setPreviewScripture(null)
+                return
+            }
+
+            // Find the active bible action based on search input
+            const colonIndex = searchInput.indexOf(':')
+            const searchInputBeforeColon = colonIndex === -1 ? searchInput : searchInput.substring(0, colonIndex)
+            const results = fuzzysort.go(searchInputBeforeColon, actions, { keys: ['name', 'desc', 'meta'] })
+            const topResult = results[0]?.obj as QuickAction | undefined
+
+            if (topResult?.type === 'bible' && topResult.bibleBookIndex) {
+                const bookIndex = topResult.bibleBookIndex
+                const reference = `${bookIndex}:${bibleChapterAndVerse}`
+                const actionStr = `bible:${bookIndex}`
+
+                try {
+                    const scripture = await fetchScripture(reference)
+                    if (isMounted) {
+                        setPreviewScripture({ action: actionStr, scripture })
+                    }
+                } catch (e) {
+                    // Ignore fetch failures for preview
+                    if (isMounted) setPreviewScripture({ action: actionStr, scripture: null })
+                }
+            } else {
+                if (isMounted) setPreviewScripture(null)
+            }
+        }
+
+        const timer = setTimeout(fetchPreview, 300) // Debounce for typing
+        return () => {
+            isMounted = false
+            clearTimeout(timer)
+        }
+    }, [bibleChapterAndVerse, searchInput, actions, fetchScripture])
 
     // Filtered actions based on search
     const searchedActions = useMemo<QuickAction[]>(() => {
@@ -454,40 +490,66 @@ export function QuickActionsSidebar() {
                     /* Search Results */
                     <div className="space-y-0.5">
                         {/* Regular action results */}
-                        {searchedActions.map((action, index) => (
-                            <button
-                                key={action.name}
-                                onClick={() => executeAction(action)}
-                                className={`
-                                    w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs
-                                    transition-colors
-                                    ${index === focusedIndex
-                                        ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                        : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
-                                    }
-                                `}
-                            >
-                                <span className="flex-shrink-0">
-                                    {getActionIcon(action.icon)}
-                                </span>
-                                <span className="truncate">{action.name}</span>
-                                {action.type && (
-                                    <SlideChip slideType={action.type} />
-                                )}
-                            </button>
-                        ))}
+                        {searchedActions.map((action, index) => {
+                            // Render rich bible preview if available
+                            if (action.type === 'bible' && previewScripture?.action === action.action && previewScripture.scripture?.content) {
+                                const content = previewScripture.scripture.content
+                                const verseText = Array.isArray(content) ? content.map(v => v.scripture).join(' ') : content
+                                return (
+                                    <button
+                                        key={action.name}
+                                        onClick={() => executeAction(action)}
+                                        className={`
+                                            w-full flex flex-col gap-0.5 px-2 py-1.5 rounded-lg text-left text-xs
+                                            transition-colors
+                                            ${index === focusedIndex
+                                                ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                                : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                                            }
+                                        `}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="flex-shrink-0">
+                                                <Book className="w-4 h-4" />
+                                            </span>
+                                            <span className="font-medium truncate">{previewScripture.scripture.label}</span>
+                                            <SlideChip slideType="bible" />
+                                        </div>
+                                        <span className="text-[11px] text-[var(--text-secondary)] line-clamp-2 pl-6">
+                                            {verseText}
+                                        </span>
+                                    </button>
+                                )
+                            }
+
+                            // Standard rendering
+                            return (
+                                <button
+                                    key={action.name}
+                                    onClick={() => executeAction(action)}
+                                    className={`
+                                        w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs
+                                        transition-colors
+                                        ${index === focusedIndex
+                                            ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                            : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                                        }
+                                    `}
+                                >
+                                    <span className="flex-shrink-0">
+                                        {getActionIcon(action.icon)}
+                                    </span>
+                                    <span className="truncate">{action.name}</span>
+                                    {action.type && (
+                                        <SlideChip slideType={action.type} />
+                                    )}
+                                </button>
+                            )
+                        })}
 
                         {/* Semantic verse results */}
                         {semanticResults.length > 0 && (
                             <>
-                                {/* Divider if we have both types of results */}
-                                {searchedActions.length > 0 && (
-                                    <div className="border-t border-[var(--border-subtle)] my-2" />
-                                )}
-                                <div className="px-2 py-1 text-[10px] text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1">
-                                    <Sparkles className="w-3 h-3" />
-                                    Related Verses
-                                </div>
                                 {semanticResults.map((verse, index) => {
                                     const globalIndex = searchedActions.length + index
                                     return (
@@ -508,6 +570,7 @@ export function QuickActionsSidebar() {
                                                     <Book className="w-4 h-4" />
                                                 </span>
                                                 <span className="font-medium truncate">{verse.reference}</span>
+                                                <SlideChip slideType="bible" />
                                                 <span className="text-[10px] text-[var(--text-muted)] ml-auto">
                                                     {Math.round(verse.score * 100)}% match
                                                 </span>
