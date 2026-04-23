@@ -543,18 +543,22 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
                 </div>
             )}
 
-            {provider === 'faster-whisper' && (
+            {((provider as string) === 'faster-whisper' || (provider as string) === 'desktop-whisper') && (
                 <div className="mb-6 space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Faster-Whisper Configuration</h3>
-                    <div>
-                        <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Faster-Whisper Server Endpoint</label>
-                        <input
-                            value={fasterWhisperEndpoint}
-                            onChange={(e) => setFasterWhisperEndpoint(e.target.value)}
-                            placeholder={DEFAULT_FASTER_WHISPER_ENDPOINT}
-                            className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
-                        />
-                    </div>
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                        {provider === 'desktop-whisper' ? 'Desktop Whisper Configuration' : 'Faster-Whisper Configuration'}
+                    </h3>
+                    {provider === 'faster-whisper' && (
+                        <div>
+                            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Faster-Whisper Server Endpoint</label>
+                            <input
+                                value={fasterWhisperEndpoint}
+                                onChange={(e) => setFasterWhisperEndpoint(e.target.value)}
+                                placeholder={DEFAULT_FASTER_WHISPER_ENDPOINT}
+                                className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                            />
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Model</label>

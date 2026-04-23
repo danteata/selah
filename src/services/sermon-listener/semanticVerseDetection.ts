@@ -192,6 +192,8 @@ export class SemanticVerseDetector {
     private useLocalFallback = false;
     private inMemoryEmbeddings = new Map<string, CachedVerseEmbedding[]>();
     private emptyVersions = new Set<string>();
+    private lastProcessedLength = 0;
+    private initializingPromise: Promise<any> | null = null;
 
     constructor(config: Partial<SemanticDetectionConfig> = {}) {
         this.config = { ...DEFAULT_CONFIG, ...config };
@@ -206,64 +208,82 @@ export class SemanticVerseDetector {
         hasEmbeddings: boolean;
         error?: string;
     }> {
-        try {
-            // Initialize Convex client
-            this.convexClient = new ConvexHttpClient(convexUrl);
-
-            // Check if embeddings exist in Convex
-            let hasEmbeddings = false;
-            try {
-                const stats = await this.convexClient.query(api.verseEmbeddings.getEmbeddingStats, {
-                    version: this.config.version,
-                });
-                hasEmbeddings = stats.hasEmbeddings;
-            } catch (error) {
-                console.warn('[SemanticDetector] Could not check embedding stats, using local fallback');
-                hasEmbeddings = false;
-            }
-
-            if (!hasEmbeddings) {
-                console.warn('[SemanticDetector] No verse embeddings found in database. ' +
-                    'Run seeding first or use local fallback.');
-                this.useLocalFallback = true;
-            }
-
-            // Initialize local embedding model
-            const embedderStatus = await initializeEmbedder();
-            this.initialized = embedderStatus.ready;
-
-            // If using local fallback, check IndexedDB cache
-            let hasLocalCache = false;
-            if (this.useLocalFallback) {
-                // First check for specific version
-                if (this.config.version) {
-                    hasLocalCache = await hasCachedEmbeddings(this.config.version);
-                }
-                // If not found, check for any embeddings (KJV fallback)
-                if (!hasLocalCache) {
-                    hasLocalCache = await hasCachedEmbeddings('KJV');
-                }
-                // If still not found, check for any embeddings at all
-                if (!hasLocalCache) {
-                    const allEmbeddings = await getCachedVerseEmbeddings();
-                    hasLocalCache = allEmbeddings.length > 0;
-                }
-            }
-
+        if (this.initialized) {
             return {
-                ready: this.initialized,
-                modelLoaded: embedderStatus.ready,
-                hasEmbeddings: hasEmbeddings || hasLocalCache,
-            };
-        } catch (error) {
-            console.error('[SemanticDetector] Initialization failed:', error);
-            return {
-                ready: false,
-                modelLoaded: false,
-                hasEmbeddings: false,
-                error: error instanceof Error ? error.message : 'Unknown error',
+                ready: true,
+                modelLoaded: isEmbedderReady(),
+                hasEmbeddings: !this.useLocalFallback,
             };
         }
+
+        if (this.initializingPromise) {
+            return this.initializingPromise;
+        }
+
+        this.initializingPromise = (async () => {
+            try {
+                // Initialize Convex client
+                this.convexClient = new ConvexHttpClient(convexUrl);
+
+                // Check if embeddings exist in Convex
+                let hasEmbeddings = false;
+                try {
+                    const stats = await this.convexClient.query(api.verseEmbeddings.getEmbeddingStats, {
+                        version: this.config.version,
+                    });
+                    hasEmbeddings = stats.hasEmbeddings;
+                } catch (error) {
+                    console.warn('[SemanticDetector] Could not check embedding stats, using local fallback');
+                    hasEmbeddings = false;
+                }
+
+                if (!hasEmbeddings) {
+                    console.warn('[SemanticDetector] No verse embeddings found in database. ' +
+                        'Run seeding first or use local fallback.');
+                    this.useLocalFallback = true;
+                }
+
+                // Initialize local embedding model
+                const embedderStatus = await initializeEmbedder();
+                this.initialized = embedderStatus.ready;
+
+                // If using local fallback, check IndexedDB cache
+                let hasLocalCache = false;
+                if (this.useLocalFallback) {
+                    // First check for specific version
+                    if (this.config.version) {
+                        hasLocalCache = await hasCachedEmbeddings(this.config.version);
+                    }
+                    // If not found, check for any embeddings (KJV fallback)
+                    if (!hasLocalCache) {
+                        hasLocalCache = await hasCachedEmbeddings('KJV');
+                    }
+                    // If still not found, check for any embeddings at all
+                    if (!hasLocalCache) {
+                        const allEmbeddings = await getCachedVerseEmbeddings();
+                        hasLocalCache = allEmbeddings.length > 0;
+                    }
+                }
+
+                return {
+                    ready: this.initialized,
+                    modelLoaded: embedderStatus.ready,
+                    hasEmbeddings: hasEmbeddings || hasLocalCache,
+                };
+            } catch (error) {
+                console.error('[SemanticDetector] Initialization failed:', error);
+                return {
+                    ready: false,
+                    modelLoaded: false,
+                    hasEmbeddings: false,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                };
+            } finally {
+                this.initializingPromise = null;
+            }
+        })();
+
+        return this.initializingPromise;
     }
 
     /**
@@ -278,9 +298,19 @@ export class SemanticVerseDetector {
             return null;
         }
 
-        // The incoming 'text' from useSermonListener is the full accumulated transcript.
-        // We should replace our buffer with it instead of appending, to avoid exponential growth.
-        this.textBuffer = text.trim();
+        // Detect if text was reset (e.g. new session)
+        if (text.length < this.lastProcessedLength) {
+            this.lastProcessedLength = 0;
+            this.textBuffer = '';
+            console.log('[SemanticDetector] Transcript reset detected');
+        }
+
+        // Get only the new part of the transcript
+        const newPart = text.slice(this.lastProcessedLength);
+        if (newPart) {
+            this.textBuffer = (this.textBuffer + ' ' + newPart).trim();
+            this.lastProcessedLength = text.length;
+        }
 
         // Check if we should search
         const now = Date.now();
@@ -334,8 +364,9 @@ export class SemanticVerseDetector {
         const results = await this.pendingSearch;
         this.pendingSearch = null;
 
-        // If we found matches, clear the buffer. Otherwise keep it for next search.
-        if (results.length > 0) {
+        // If we found matches, clear the buffer. 
+        // If the buffer is getting too long without matches, clear it anyway to avoid redundant search.
+        if (results.length > 0 || this.textBuffer.length > MAX_TEXT_LENGTH * 2) {
             this.textBuffer = '';
         }
 
@@ -591,6 +622,7 @@ export class SemanticVerseDetector {
      */
     clearBuffer(): void {
         this.textBuffer = '';
+        this.lastProcessedLength = 0;
     }
 
     /**

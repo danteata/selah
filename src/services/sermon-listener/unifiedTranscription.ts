@@ -264,6 +264,8 @@ class UnifiedTranscriptionService {
             const initialized = await desktopWhisperTranscriptionService.init({
                 language: options?.language || 'en',
                 model: options?.fasterWhisperModel,
+                useVAD: options?.useVAD,
+                chunkDurationMs: options?.fasterWhisperChunkDurationMs,
                 onProgress: options?.onProgress,
                 onStatus: (status) => console.log('[DesktopWhisper]', status),
             })

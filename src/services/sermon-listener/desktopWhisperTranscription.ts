@@ -338,11 +338,11 @@ class DesktopWhisperTranscriptionService {
                     this.config.onStatus?.('listening');
                 },
                 // VAD parameters with defaults
-                positiveSpeechThreshold: this.config.positiveSpeechThreshold ?? 0.6,
-                negativeSpeechThreshold: this.config.negativeSpeechThreshold ?? 0.4,
-                minSpeechMs: this.config.minSpeechMs ?? 250,
+                positiveSpeechThreshold: this.config.positiveSpeechThreshold ?? 0.65,
+                negativeSpeechThreshold: this.config.negativeSpeechThreshold ?? 0.45,
+                minSpeechMs: this.config.minSpeechMs ?? 500,
                 preSpeechPadMs: this.config.preSpeechPadMs ?? 500,
-                redemptionMs: this.config.redemptionMs ?? 750,
+                redemptionMs: this.config.redemptionMs ?? 1000,
             });
 
             this.vad.start();

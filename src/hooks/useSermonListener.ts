@@ -785,13 +785,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     }
 
                     setInterimTranscript('')
-                    setTranscript((prev) => {
-                        const combinedTranscript = `${prev} ${cleanedText}`.trim()
-                        transcriptBufferRef.current = combinedTranscript
-                        console.log('[useSermonListener] Updated transcript:', combinedTranscript.substring(0, 100))
-                        processTranscript(combinedTranscript)
-                        return combinedTranscript
-                    })
+                    const newFullTranscript = `${transcriptBufferRef.current} ${cleanedText}`.trim()
+                    transcriptBufferRef.current = newFullTranscript
+                    setTranscript(newFullTranscript)
+
+                    console.log('[useSermonListener] Updated transcript:', newFullTranscript.substring(0, 100))
+                    processTranscript(newFullTranscript)
                 } else {
                     setInterimTranscript(cleanedText)
                     const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
