@@ -115,6 +115,8 @@ export function LiveOutput() {
     // Arrow key navigation
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            const el = document.activeElement
+            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.getAttribute('contenteditable') === 'true') return
             if (e.key === 'ArrowDown' && nextSlide) {
                 handleSetLiveSlide(nextSlide.id)
             } else if (e.key === 'ArrowUp' && prevSlide) {
@@ -129,6 +131,8 @@ export function LiveOutput() {
     // Number shortcuts (Ctrl/Cmd + 0-9)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            const el = document.activeElement
+            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.getAttribute('contenteditable') === 'true') return
             if (e.ctrlKey || e.metaKey) {
                 const num = parseInt(e.key, 10)
                 if (!isNaN(num) && num >= 0 && num <= 9) {

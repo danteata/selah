@@ -3747,6 +3747,9 @@ name = "selah"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "core-audio-types-rs",
+ "core-foundation 0.10.1",
+ "core-media-rs",
  "cpal",
  "hound",
  "lazy_static",

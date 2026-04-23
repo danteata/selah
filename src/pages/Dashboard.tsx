@@ -1,5 +1,5 @@
 import { useUser, useClerk } from '@clerk/clerk-react'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Shield, Database, Book, X, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates } from '../hooks'
@@ -49,9 +49,6 @@ export default function Dashboard() {
     const editingSlide = useAppStore((state) => state.editingSlide)
     const closeModal = useAppStore((state) => state.closeModal)
     const openModal = useAppStore((state) => state.openModal)
-
-    // Ref to track if any input/textarea is focused
-    const isInputFocusedRef = useRef(false)
 
     // Sync live state to other windows (for multi-monitor support)
     useLiveSync()
@@ -110,16 +107,6 @@ export default function Dashboard() {
     // Quick action handlers - sets up event listeners
     const { handleSlideEditorSave } = useQuickActionHandlers()
 
-    // Helper to check if we should ignore keyboard shortcuts (when typing in inputs)
-    const shouldIgnoreShortcut = useCallback(() => {
-        const activeElement = document.activeElement
-        const isInputFocused = activeElement instanceof HTMLInputElement ||
-            activeElement instanceof HTMLTextAreaElement ||
-            activeElement?.getAttribute('contenteditable') === 'true'
-        isInputFocusedRef.current = isInputFocused
-        return isInputFocused
-    }, [])
-
     // Get slides for the active schedule
     const scheduleSlides = activeSchedule
         ? activeSlides.filter(slide => slide.scheduleId === activeSchedule._id || !slide.scheduleId)
@@ -127,38 +114,33 @@ export default function Dashboard() {
 
     // Navigate slides
     const navigateToNextSlide = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
         const currentIndex = scheduleSlides.findIndex(s => s.id === liveSlideId)
         if (currentIndex < scheduleSlides.length - 1) {
             setLiveSlide(scheduleSlides[currentIndex + 1].id)
         }
-    }, [scheduleSlides, liveSlideId, setLiveSlide, shouldIgnoreShortcut])
+    }, [scheduleSlides, liveSlideId, setLiveSlide])
 
     const navigateToPrevSlide = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
         const currentIndex = scheduleSlides.findIndex(s => s.id === liveSlideId)
         if (currentIndex > 0) {
             setLiveSlide(scheduleSlides[currentIndex - 1].id)
         }
-    }, [scheduleSlides, liveSlideId, setLiveSlide, shouldIgnoreShortcut])
+    }, [scheduleSlides, liveSlideId, setLiveSlide])
 
     const navigateToFirstSlide = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
         if (scheduleSlides.length > 0) {
             setLiveSlide(scheduleSlides[0].id)
         }
-    }, [scheduleSlides, setLiveSlide, shouldIgnoreShortcut])
+    }, [scheduleSlides, setLiveSlide])
 
     const navigateToLastSlide = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
         if (scheduleSlides.length > 0) {
             setLiveSlide(scheduleSlides[scheduleSlides.length - 1].id)
         }
-    }, [scheduleSlides, setLiveSlide, shouldIgnoreShortcut])
+    }, [scheduleSlides, setLiveSlide])
 
     // Delete selected slides
     const deleteSelectedSlides = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
         if (selectedSlideIds.length > 0) {
             selectedSlideIds.forEach(id => {
                 const slide = activeSlides.find(s => s.id === id)
@@ -168,30 +150,25 @@ export default function Dashboard() {
             })
             clearSelectedSlides()
         }
-    }, [selectedSlideIds, activeSlides, removeActiveSlide, clearSelectedSlides, shouldIgnoreShortcut])
+    }, [selectedSlideIds, activeSlides, removeActiveSlide, clearSelectedSlides])
 
     // Toggle live slide (promote current preview slide to live)
     const promoteToLive = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
-        // This will be handled by the PreviewContent component
-        // For now, just set the first slide as live if none selected
         if (!liveSlideId && scheduleSlides.length > 0) {
             setLiveSlide(scheduleSlides[0].id)
         }
-    }, [liveSlideId, scheduleSlides, setLiveSlide, shouldIgnoreShortcut])
+    }, [liveSlideId, scheduleSlides, setLiveSlide])
 
     // Toggle overlay (black/white screen)
     const toggleBlackScreen = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
         const currentOverlay = useAppStore.getState().activeOverlay
         setActiveOverlay(currentOverlay === 'black' ? 'none' : 'black')
-    }, [setActiveOverlay, shouldIgnoreShortcut])
+    }, [setActiveOverlay])
 
     const toggleWhiteScreen = useCallback(() => {
-        if (shouldIgnoreShortcut()) return
         const currentOverlay = useAppStore.getState().activeOverlay
         setActiveOverlay(currentOverlay === 'white' ? 'none' : 'white')
-    }, [setActiveOverlay, shouldIgnoreShortcut])
+    }, [setActiveOverlay])
 
     // Open settings
     const openSettings = useCallback(() => {

@@ -266,12 +266,15 @@ export default function LiveView() {
     // Keyboard shortcut for fullscreen (F key)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && document.fullscreenElement) {
+                document.exitFullscreen()
+                return
+            }
+            const el = document.activeElement
+            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.getAttribute('contenteditable') === 'true') return
             if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault()
                 toggleFullscreen()
-            }
-            if (e.key === 'Escape' && document.fullscreenElement) {
-                document.exitFullscreen()
             }
         }
 

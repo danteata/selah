@@ -32,6 +32,9 @@ ndarray = "0.17"  # For tensor operations with ort (must match ort's ndarray ver
 # Platform-specific dependencies for system audio capture
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = "0.3"  # macOS 12.3+ system audio capture
+core-foundation = "0.10"  # CFError type from screencapturekit
+core-media-rs = "0.3"    # RetainedAudioBufferList from screencapturekit
+core-audio-types-rs = "0.3"  # AudioBuffer type
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.22"  # WASAPI loopback for system audio capture

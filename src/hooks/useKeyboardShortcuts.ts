@@ -5,6 +5,14 @@ interface ShortcutOptions {
     shift?: boolean
     alt?: boolean
     preventDefault?: boolean
+    ignoreInputFocus?: boolean
+}
+
+function isInputElementFocused(): boolean {
+    const el = document.activeElement
+    return el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el?.getAttribute('contenteditable') === 'true'
 }
 
 export function useKeyboardShortcut(
@@ -14,13 +22,14 @@ export function useKeyboardShortcut(
 ) {
     const callbackRef = useRef(callback)
 
-    // Update callback ref when callback changes
     useEffect(() => {
         callbackRef.current = callback
     }, [callback])
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (!options.ignoreInputFocus && isInputElementFocused()) return
+
             const keyMatches = event.key.toLowerCase() === key.toLowerCase()
             const ctrlMatches = options.ctrlOrMeta
                 ? (event.ctrlKey || event.metaKey)
@@ -42,7 +51,7 @@ export function useKeyboardShortcut(
 
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [key, options.ctrlOrMeta, options.shift, options.alt, options.preventDefault])
+    }, [key, options.ctrlOrMeta, options.shift, options.alt, options.preventDefault, options.ignoreInputFocus])
 }
 
 // Hook for multiple shortcuts
@@ -61,7 +70,11 @@ export function useKeyboardShortcuts(
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (isInputElementFocused()) return
+
             shortcutsRef.current.forEach(({ key, callback, options = {} }) => {
+                if (options.ignoreInputFocus === true) return // skip ones that opted out of the global guard
+
                 const keyMatches = event.key.toLowerCase() === key.toLowerCase()
                 const ctrlMatches = options.ctrlOrMeta
                     ? (event.ctrlKey || event.metaKey)
@@ -118,6 +131,7 @@ export function useNumberShortcuts(
 ) {
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (isInputElementFocused()) return
             if (event.ctrlKey || event.metaKey) {
                 const num = parseInt(event.key, 10)
                 if (!isNaN(num) && num >= 0 && num <= 9) {
