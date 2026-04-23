@@ -15,7 +15,9 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "desktop:dev": "tauri dev",
+    "desktop:dev:ndi": "tauri dev -- --features ndi",
     "desktop:build": "tauri build",
+    "desktop:build:ndi": "tauri build -- --features ndi",
     "desktop:build:windows": "tauri build --target x86_64-pc-windows-msvc",
     "desktop:build:mac": "tauri build --target universal-apple-darwin",
     "desktop:build:linux": "tauri build --target x86_64-unknown-linux-gnu"

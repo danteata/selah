@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown, Cpu } from 'lucide-react'
+import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown, Cpu, Radio, RadioTower } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
+import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import type { Slide, Scripture, Countdown } from '../../types'
@@ -42,6 +43,14 @@ export function LiveOutput() {
         closeLiveWindow,
         sendSlideToLive,
     } = useNativeMultiMonitor()
+
+    const {
+        isAvailable: ndiAvailable,
+        isRunning: ndiRunning,
+        isLoading: ndiLoading,
+        startOutput: ndiStart,
+        stopOutput: ndiStop,
+    } = useNdiOutput()
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -301,6 +310,30 @@ export function LiveOutput() {
                     )}
                 </div>
                 <div className="flex items-center gap-2">
+                    {ndiAvailable && (
+                        ndiRunning ? (
+                            <button
+                                onClick={ndiStop}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                                title="Stop NDI output stream"
+                            >
+                                <RadioTower className="w-3.5 h-3.5" />
+                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                NDI
+                            </button>
+                        ) : (
+                            <button
+                                onClick={ndiStart}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2 py-1.5 text-sm border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 disabled:opacity-50"
+                                title="Start NDI output to stream live view over the network"
+                            >
+                                <Radio className="w-3.5 h-3.5" />
+                                NDI
+                            </button>
+                        )
+                    )}
                     {isPresenting ? (
                         <button
                             onClick={handleStopLive}

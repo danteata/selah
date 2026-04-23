@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users, Upload, Zap, RefreshCw } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
+import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { BibleVersionSettings } from './BibleVersionSettings'
 import { SermonListenerSettings } from '../sermon-listener'
 import { TeamManagementPanel } from '../team/TeamManagementPanel'
@@ -169,6 +170,14 @@ function DisplaySettings({
         detectMonitors,
         flashMonitor,
     } = useNativeMultiMonitor()
+    const {
+        isAvailable: ndiAvailable,
+        isRunning: ndiRunning,
+        isLoading: ndiLoading,
+        startOutput: ndiStart,
+        stopOutput: ndiStop,
+        state: ndiState,
+    } = useNdiOutput()
     const [localMonitorId, setLocalMonitorId] = useState<string | null>(null)
     const [flashingId, setFlashingId] = useState<string | null>(null)
 
@@ -362,6 +371,79 @@ function DisplaySettings({
                             }`}
                     />
                 </button>
+            </div>
+
+            {/* NDI Output */}
+            <div>
+                <div className="flex items-center justify-between mb-2">
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                            <Radio className="w-4 h-4" />
+                            NDI Output
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Stream live output over the network via NDI
+                        </p>
+                    </div>
+                    {ndiAvailable && (
+                        ndiRunning ? (
+                            <button
+                                onClick={ndiStop}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                            >
+                                <RadioTower className="w-3.5 h-3.5" />
+                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                Stop
+                            </button>
+                        ) : (
+                            <button
+                                onClick={ndiStart}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 disabled:opacity-50"
+                            >
+                                <Radio className="w-3.5 h-3.5" />
+                                Start NDI
+                            </button>
+                        )
+                    )}
+                </div>
+                {!ndiAvailable && (
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400">
+                        {isDesktop ? (
+                            <>
+                                <p>NDI SDK not detected on this system.</p>
+                                <p className="mt-1">Install <a href="https://ndi.video/type/developer/" target="_blank" rel="noreferrer" className="text-purple-600 hover:underline">NDI Tools</a> (includes the SDK runtime) and restart the app.</p>
+                                {!window.__TAURI_INTERNALS__ && (
+                                    <p className="mt-1">Rebuild with <code className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-[10px]">cargo build --features ndi</code> to enable NDI support.</p>
+                                )}
+                            </>
+                        ) : (
+                            <p>NDI output is only available in the desktop app.</p>
+                        )}
+                    </div>
+                )}
+                {ndiAvailable && ndiState && (
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                        <div className="flex items-center justify-between">
+                            <span>Status</span>
+                            <span className={ndiRunning ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
+                                {ndiRunning ? 'Streaming' : 'Idle'}
+                            </span>
+                        </div>
+                        {ndiRunning && (
+                            <div className="flex items-center justify-between">
+                                <span>Source name</span>
+                                <span className="font-mono">{ndiState.sourceName}</span>
+                            </div>
+                        )}
+                        {ndiState.error && (
+                            <div className="text-red-600 dark:text-red-400">
+                                {ndiState.error}
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     )

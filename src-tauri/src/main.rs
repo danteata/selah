@@ -3,6 +3,7 @@
 
 mod audio_capture;
 mod multi_monitor;
+mod ndi_output;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -52,6 +53,17 @@ use multi_monitor::{
     update_main_window_state,
     restore_main_window_state,
     is_desktop,
+};
+
+use ndi_output::{
+    NdiManager,
+    ndi_is_available,
+    ndi_get_state,
+    ndi_start_output,
+    ndi_stop_output,
+    ndi_send_video_frame,
+    ndi_send_audio_frame,
+    ndi_discover_sources,
 };
 
 const WHISPER_SERVER_PORT: u16 = 17493;
@@ -205,6 +217,7 @@ async fn get_whisper_server_status(
 pub fn run() {
     // Create multi-monitor state
     let multi_monitor_state = Arc::new(MultiMonitorState::new());
+    let ndi_manager = Arc::new(NdiManager::new());
     
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -216,6 +229,7 @@ pub fn run() {
         })
         .manage(AudioCaptureState::new())
         .manage(multi_monitor_state.clone())
+        .manage(ndi_manager.clone())
         .invoke_handler(tauri::generate_handler![
             start_whisper_server,
             stop_whisper_server,
@@ -254,10 +268,21 @@ pub fn run() {
             update_main_window_state,
             restore_main_window_state,
             is_desktop,
+            // NDI commands
+            ndi_is_available,
+            ndi_get_state,
+            ndi_start_output,
+            ndi_stop_output,
+            ndi_send_video_frame,
+            ndi_send_audio_frame,
+            ndi_discover_sources,
         ])
         .setup(move |app| {
             // Initialize multi-monitor state with app handle
             multi_monitor_state.init(app.handle().clone());
+
+            // Initialize NDI manager with app handle
+            ndi_manager.init(app.handle().clone());
             
             #[cfg(debug_assertions)]
             {
