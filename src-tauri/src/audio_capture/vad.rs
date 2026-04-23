@@ -38,8 +38,8 @@ impl Default for VadConfig {
 /// Silero VAD state
 pub struct SileroVad {
     session: Session,
-    h: Array3<f32>,  // Hidden state (2, 1, 64)
-    c: Array3<f32>,  // Cell state (2, 1, 64)
+    h: Array3<f32>, // Hidden state (2, 1, 64)
+    c: Array3<f32>, // Cell state (2, 1, 64)
     sample_rate: i64,
     config: VadConfig,
 }
@@ -79,7 +79,7 @@ impl SileroVad {
     /// Chunk size must be 512, 768, or 1024 samples
     pub fn process(&mut self, audio: &[f32]) -> Result<f32, String> {
         let chunk_size = audio.len();
-        
+
         // Silero VAD expects specific chunk sizes
         if chunk_size != 512 && chunk_size != 768 && chunk_size != 1024 {
             return Err(format!(
@@ -89,7 +89,7 @@ impl SileroVad {
         }
 
         // Create input tensors using fixed dimension arrays for ort 2.0
-        // Input: (1, chunk_size) 
+        // Input: (1, chunk_size)
         let input_array = Array2::from_shape_vec((1, chunk_size), audio.to_vec())
             .map_err(|e| format!("Failed to create input tensor: {}", e))?;
 
@@ -116,12 +116,16 @@ impl SileroVad {
             .into_dyn();
 
         // Get input/output names from the model
-        let input_names: Vec<String> = self.session.inputs()
+        let input_names: Vec<String> = self
+            .session
+            .inputs()
             .iter()
             .map(|input| input.name().to_string())
             .collect();
-        
-        let _output_names: Vec<String> = self.session.outputs()
+
+        let _output_names: Vec<String> = self
+            .session
+            .outputs()
             .iter()
             .map(|output| output.name().to_string())
             .collect();
@@ -135,7 +139,8 @@ impl SileroVad {
         ];
 
         // Run inference
-        let outputs = self.session
+        let outputs = self
+            .session
             .run(inputs)
             .map_err(|e| format!("VAD inference failed: {}", e))?;
 
@@ -143,7 +148,7 @@ impl SileroVad {
         let output = outputs[0]
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("Failed to extract output: {}", e))?;
-        
+
         // output is (&Shape, &[f32]) - get the first element
         let probability = output.1[0];
 
@@ -161,7 +166,7 @@ impl SileroVad {
         let hn_shape: Vec<usize> = shape_slice.iter().map(|d| *d as usize).collect();
         let shape_slice = cn.0.as_ref();
         let cn_shape: Vec<usize> = shape_slice.iter().map(|d| *d as usize).collect();
-        
+
         // Create Array3 from the data
         self.h = ndarray::Array::from_shape_vec(IxDyn(&hn_shape), hn.1.to_vec())
             .map_err(|e| format!("Failed to reshape hn: {}", e))?
@@ -228,7 +233,7 @@ impl VadSegmenter {
     /// Create a VAD segmenter with custom configuration
     pub fn with_config(model_path: &Path, config: VadConfig) -> Result<Self, String> {
         let vad = SileroVad::with_config(model_path, config)?;
-        
+
         Ok(Self {
             vad,
             audio_buffer: Vec::new(),
@@ -236,9 +241,9 @@ impl VadSegmenter {
             is_speaking: false,
             silence_chunks: 0,
             sample_rate: 16000,
-            chunk_size: 512,  // 32ms at 16kHz
+            chunk_size: 512, // 32ms at 16kHz
             pre_speech_buffer: Vec::new(),
-            pre_speech_chunks: 10,  // ~320ms pre-speech buffer
+            pre_speech_chunks: 10, // ~320ms pre-speech buffer
         })
     }
 
@@ -263,15 +268,17 @@ impl VadSegmenter {
                     // Speech started
                     self.is_speaking = true;
                     // Add pre-speech buffer to capture start of words
-                    self.speech_buffer.extend_from_slice(&self.pre_speech_buffer);
+                    self.speech_buffer
+                        .extend_from_slice(&self.pre_speech_buffer);
                 }
                 self.speech_buffer.extend_from_slice(&chunk);
                 self.silence_chunks = 0;
-                
+
                 // Update pre-speech buffer
                 self.pre_speech_buffer.extend_from_slice(&chunk);
                 if self.pre_speech_buffer.len() > self.chunk_size * self.pre_speech_chunks {
-                    let drain_count = self.pre_speech_buffer.len() - self.chunk_size * self.pre_speech_chunks;
+                    let drain_count =
+                        self.pre_speech_buffer.len() - self.chunk_size * self.pre_speech_chunks;
                     self.pre_speech_buffer.drain(..drain_count);
                 }
             } else if self.is_speaking {
@@ -280,7 +287,8 @@ impl VadSegmenter {
                 self.silence_chunks += 1;
 
                 // Check if silence duration exceeds threshold
-                let silence_ms = (self.silence_chunks as u32 * self.chunk_size as u32 * 1000) / self.sample_rate;
+                let silence_ms =
+                    (self.silence_chunks as u32 * self.chunk_size as u32 * 1000) / self.sample_rate;
                 if silence_ms >= self.vad.config().min_silence_ms {
                     // Speech segment ended
                     let speech_samples = self.speech_buffer.len() as u32;
@@ -300,7 +308,8 @@ impl VadSegmenter {
                 // Not speaking, update pre-speech buffer
                 self.pre_speech_buffer.extend_from_slice(&chunk);
                 if self.pre_speech_buffer.len() > self.chunk_size * self.pre_speech_chunks {
-                    let drain_count = self.pre_speech_buffer.len() - self.chunk_size * self.pre_speech_chunks;
+                    let drain_count =
+                        self.pre_speech_buffer.len() - self.chunk_size * self.pre_speech_chunks;
                     self.pre_speech_buffer.drain(..drain_count);
                 }
             }

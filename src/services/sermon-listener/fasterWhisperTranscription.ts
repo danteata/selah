@@ -24,15 +24,16 @@ export type AudioCaptureMode = 'browser-wav' | 'server-decode'
 export interface FasterWhisperConfig {
   endpoint?: string
   language?: string
-  model?: string // Full model ID like 'Systran/faster-whisper-base.en' or short name like 'base'
+  model?: string
   chunkDurationMs?: number
   onProgress?: (progress: number) => void
   onStatus?: (status: string) => void
-  vadFilter?: boolean // Enable Voice Activity Detection to filter silence
-  hotwords?: string // Biblical terms to improve recognition
-  initialPrompt?: string // Prompt to bias transcription vocabulary (prevents offensive word hallucination)
-  audioCaptureMode?: AudioCaptureMode // Which audio capture method to use
-  disableBrowserAudioProcessing?: boolean // Disable browser noise suppression/AGC for server-decode mode
+  vadFilter?: boolean
+  hotwords?: string
+  initialPrompt?: string
+  audioCaptureMode?: AudioCaptureMode
+  disableBrowserAudioProcessing?: boolean
+  microphoneDeviceId?: string
 }
 
 // Biblical hotwords to improve recognition of religious terms
@@ -301,6 +302,10 @@ class FasterWhisperTranscriptionService {
             noiseSuppression: disableProcessing ? false : true,
             echoCancellation: disableProcessing ? false : true,
             autoGainControl: disableProcessing ? false : true,
+        }
+
+        if (this.config.microphoneDeviceId) {
+            audioConstraints.deviceId = { exact: this.config.microphoneDeviceId }
         }
 
         try {

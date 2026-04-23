@@ -23,6 +23,8 @@ export interface UnifiedTranscriptionOptions {
   language?: string
   /** Audio capture source: 'microphone' | 'system' */
   captureSource?: 'microphone' | 'system'
+  /** Selected microphone device ID (browser deviceId or native device name) */
+  microphoneDeviceId?: string
   continuous?: boolean
   interimResults?: boolean
   onStart?: () => void
@@ -417,6 +419,7 @@ class UnifiedTranscriptionService {
                 apiKey: this.options.whisperApiKey,
                 model: this.getWhisperModelName(this.options.whisperModel || 'base'),
                 chunkDurationMs: this.options.whisperChunkDurationMs,
+                microphoneDeviceId: this.options.microphoneDeviceId,
                 onProgress: this.options.onProgress,
             })
             if (!initialized) {
@@ -461,6 +464,7 @@ class UnifiedTranscriptionService {
         endpoint: this.options.whisperCppEndpoint,
         chunkDurationMs: this.options.whisperCppChunkDurationMs,
         initialPrompt: this.options.initialPrompt,
+        microphoneDeviceId: this.options.microphoneDeviceId,
         onProgress: this.options.onProgress,
       })
             if (!initialized) {
@@ -514,6 +518,7 @@ class UnifiedTranscriptionService {
         audioCaptureMode: this.options.fasterWhisperAudioCaptureMode,
         disableBrowserAudioProcessing: this.options.fasterWhisperDisableBrowserProcessing,
         initialPrompt: this.options.initialPrompt,
+        microphoneDeviceId: this.options.microphoneDeviceId,
         onProgress: this.options.onProgress,
       })
       if (!initialized) {
@@ -559,6 +564,7 @@ class UnifiedTranscriptionService {
         modelId: this.options.elevenLabsModelId,
         chunkDurationMs: this.options.elevenLabsChunkDurationMs,
         initialPrompt: this.options.initialPrompt,
+        microphoneDeviceId: this.options.microphoneDeviceId,
         onProgress: this.options.onProgress,
       })
             if (!initialized) {
@@ -602,6 +608,7 @@ class UnifiedTranscriptionService {
         language: this.options.language || 'en',
         model: this.options.fasterWhisperModel,
         initialPrompt: this.options.initialPrompt,
+        microphoneDeviceId: this.options.microphoneDeviceId,
         onProgress: this.options.onProgress,
       })
             if (!initialized) {
@@ -648,6 +655,7 @@ class UnifiedTranscriptionService {
         endpoint: this.options.fasterWhisperEndpoint,
         model: this.options.fasterWhisperModel,
         initialPrompt: this.options.initialPrompt,
+        microphoneDeviceId: this.options.microphoneDeviceId,
         positiveSpeechThreshold: this.options.vadPositiveSpeechThreshold,
         negativeSpeechThreshold: this.options.vadNegativeSpeechThreshold,
         minSpeechFrames: this.options.vadMinSpeechFrames,

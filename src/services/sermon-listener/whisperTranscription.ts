@@ -17,6 +17,7 @@ export interface WhisperConfig {
     model?: string
     language?: string
     chunkDurationMs?: number
+    microphoneDeviceId?: string
     onProgress?: (progress: number) => void
     onStatus?: (status: string) => void
 }
@@ -142,14 +143,10 @@ class WhisperTranscriptionService {
         }
 
         try {
-            this.mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    channelCount: 1,
-                    noiseSuppression: true,
-                    echoCancellation: true,
-                    autoGainControl: true,
-                },
-            })
+            const audio = this.config.microphoneDeviceId
+                ? { deviceId: { exact: this.config.microphoneDeviceId }, channelCount: 1, noiseSuppression: true, echoCancellation: true, autoGainControl: true }
+                : { channelCount: 1, noiseSuppression: true, echoCancellation: true, autoGainControl: true }
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio })
         } catch {
             onError('Microphone permission is required for transcription')
             return false

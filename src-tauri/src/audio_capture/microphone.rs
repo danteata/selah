@@ -4,8 +4,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 
 use super::types::*;
 
@@ -17,18 +17,18 @@ pub fn list_audio_devices() -> Result<Vec<AudioDeviceInfo>, String> {
     let default_name = default_device.as_ref().and_then(|d| d.name().ok());
 
     let mut devices = Vec::new();
-    
+
     match host.input_devices() {
         Ok(device_iter) => {
             for device in device_iter {
                 if let Ok(name) = device.name() {
                     let is_default = default_name.as_ref() == Some(&name);
-                    
+
                     let (sample_rate, channels) = device
                         .default_input_config()
                         .map(|config| (config.sample_rate().0, config.channels()))
                         .unwrap_or((44100, 1));
-                    
+
                     devices.push(AudioDeviceInfo {
                         name,
                         is_default,
@@ -52,17 +52,30 @@ pub fn start_microphone_capture(
     buffer_size: Arc<AtomicUsize>,
     _sample_rate: Arc<Mutex<u32>>,
     stop_rx: Receiver<()>,
+    device_name: Option<String>,
 ) -> Result<(), String> {
-    // Spawn a thread to handle audio capture
     std::thread::spawn(move || {
         let host = match cpal::default_host() {
             h => h,
         };
-        
-        let device = match host.default_input_device() {
+
+        let device = if let Some(ref name) = device_name {
+            host.input_devices()
+                .map_err(|e| eprintln!("Failed to enumerate devices: {}", e))
+                .ok()
+                .and_then(|mut devices| devices.find(|d| d.name().map_or(false, |n| n == *name)))
+                .or_else(|| {
+                    eprintln!("Device '{}' not found, falling back to default", name);
+                    host.default_input_device()
+                })
+        } else {
+            host.default_input_device()
+        };
+
+        let device = match device {
             Some(d) => d,
             None => {
-                eprintln!("No default input device available");
+                eprintln!("No input device available");
                 is_capturing.store(false, Ordering::SeqCst);
                 return;
             }
@@ -90,7 +103,7 @@ pub fn start_microphone_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
-                
+
                 device
                     .build_input_stream(
                         &config,
@@ -99,8 +112,13 @@ pub fn start_microphone_capture(
                                 return;
                             }
                             // Normalize i8 to f32 in range [-1.0, 1.0]
-                            let samples: Vec<f32> = data.iter().map(|s| *s as f32 / 128.0).collect();
-                            let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
+                            let samples: Vec<f32> =
+                                data.iter().map(|s| *s as f32 / 128.0).collect();
+                            let processed = process_audio_samples(
+                                &samples,
+                                source_sample_rate,
+                                source_channels,
+                            );
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -114,7 +132,7 @@ pub fn start_microphone_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
-                
+
                 device
                     .build_input_stream(
                         &config,
@@ -123,8 +141,13 @@ pub fn start_microphone_capture(
                                 return;
                             }
                             // Normalize i16 to f32 in range [-1.0, 1.0]
-                            let samples: Vec<f32> = data.iter().map(|s| *s as f32 / 32768.0).collect();
-                            let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
+                            let samples: Vec<f32> =
+                                data.iter().map(|s| *s as f32 / 32768.0).collect();
+                            let processed = process_audio_samples(
+                                &samples,
+                                source_sample_rate,
+                                source_channels,
+                            );
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -138,7 +161,7 @@ pub fn start_microphone_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
-                
+
                 device
                     .build_input_stream(
                         &config,
@@ -146,8 +169,13 @@ pub fn start_microphone_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
-                            let samples: Vec<f32> = data.iter().map(|s| *s as f32 / i32::MAX as f32).collect();
-                            let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
+                            let samples: Vec<f32> =
+                                data.iter().map(|s| *s as f32 / i32::MAX as f32).collect();
+                            let processed = process_audio_samples(
+                                &samples,
+                                source_sample_rate,
+                                source_channels,
+                            );
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -161,7 +189,7 @@ pub fn start_microphone_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
-                
+
                 device
                     .build_input_stream(
                         &config,
@@ -169,7 +197,8 @@ pub fn start_microphone_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
-                            let processed = process_audio_samples(data, source_sample_rate, source_channels);
+                            let processed =
+                                process_audio_samples(data, source_sample_rate, source_channels);
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -183,7 +212,7 @@ pub fn start_microphone_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
-                
+
                 device
                     .build_input_stream(
                         &config,
@@ -193,7 +222,11 @@ pub fn start_microphone_capture(
                             }
                             // F64 is typically already in [-1.0, 1.0], just cast to f32
                             let samples: Vec<f32> = data.iter().map(|s| *s as f32).collect();
-                            let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
+                            let processed = process_audio_samples(
+                                &samples,
+                                source_sample_rate,
+                                source_channels,
+                            );
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -224,10 +257,10 @@ pub fn start_microphone_capture(
         // Keep the stream alive until we receive a stop signal
         // The stream will be dropped when this thread exits
         let _stream = stream;
-        
+
         // Wait for stop signal
         let _ = stop_rx.recv();
-        
+
         // Stream is dropped here, which stops audio capture
         is_capturing.store(false, Ordering::SeqCst);
     });

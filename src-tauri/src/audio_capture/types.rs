@@ -30,8 +30,8 @@ pub struct AudioDeviceInfo {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum DeviceType {
-    Input,   // Microphone
-    Output,  // Speaker/System
+    Input,    // Microphone
+    Output,   // Speaker/System
     Loopback, // System audio capture
 }
 
@@ -51,7 +51,7 @@ impl AudioChunk {
     pub fn to_wav(&self) -> Result<Vec<u8>, String> {
         let mut buffer = Vec::new();
         let cursor = Cursor::new(&mut buffer);
-        
+
         let spec = WavSpec {
             channels: 1, // Mono
             sample_rate: self.sample_rate,
@@ -66,11 +66,13 @@ impl AudioChunk {
         for sample in &self.samples {
             let clamped = sample.clamp(-1.0, 1.0);
             let i16_sample = (clamped * 32767.0) as i16;
-            writer.write_sample(i16_sample)
+            writer
+                .write_sample(i16_sample)
                 .map_err(|e| format!("Failed to write sample: {}", e))?;
         }
 
-        writer.finalize()
+        writer
+            .finalize()
             .map_err(|e| format!("Failed to finalize WAV: {}", e))?;
 
         Ok(buffer)
@@ -93,14 +95,18 @@ impl AudioChunk {
         if self.samples.is_empty() {
             return false;
         }
-        
+
         // Calculate RMS (root mean square) to detect audio
         let sum: f32 = self.samples.iter().map(|s| s * s).sum();
         let rms = (sum / self.samples.len() as f32).sqrt();
-        
+
         // Also check peak amplitude for better detection
-        let peak: f32 = self.samples.iter().map(|s| s.abs()).fold(0.0, |a, b| a.max(b));
-        
+        let peak: f32 = self
+            .samples
+            .iter()
+            .map(|s| s.abs())
+            .fold(0.0, |a, b| a.max(b));
+
         // Use both RMS and peak for more robust detection
         // RMS threshold of 0.01 (was 0.001) and peak threshold of 0.05
         rms > threshold && peak > 0.05
@@ -152,7 +158,10 @@ pub fn resample_cubic(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32>
         let src_index_floor = src_index.floor() as usize;
         let fraction = src_index - src_index_floor as f64;
 
-        let y0 = samples.get(src_index_floor.saturating_sub(1)).copied().unwrap_or(0.0);
+        let y0 = samples
+            .get(src_index_floor.saturating_sub(1))
+            .copied()
+            .unwrap_or(0.0);
         let y1 = samples.get(src_index_floor).copied().unwrap_or(0.0);
         let y2 = samples.get(src_index_floor + 1).copied().unwrap_or(y1);
         let y3 = samples.get(src_index_floor + 2).copied().unwrap_or(y2);

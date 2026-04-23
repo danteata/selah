@@ -741,6 +741,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             provider,
             language,
             captureSource: sermonSettings?.captureSource,
+            microphoneDeviceId: sermonSettings?.selectedMicrophoneId,
             continuous: true,
             interimResults: true,
             whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',

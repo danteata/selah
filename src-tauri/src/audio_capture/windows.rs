@@ -11,8 +11,8 @@
 
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::thread;
 
 use wasapi::*;
@@ -110,11 +110,9 @@ pub fn start_system_audio_capture(
             buffer_duration_hns: min_period,
         };
 
-        if let Err(e) = audio_client.initialize_client(
-            &mix_format,
-            &Direction::Capture,
-            &stream_mode,
-        ) {
+        if let Err(e) =
+            audio_client.initialize_client(&mix_format, &Direction::Capture, &stream_mode)
+        {
             eprintln!("[WASAPI] Failed to initialize audio client: {}", e);
             is_capturing.store(false, Ordering::SeqCst);
             return;

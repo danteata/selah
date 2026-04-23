@@ -35,19 +35,16 @@ export interface AudioChunk {
 export interface NativeCaptureConfig {
     captureType: CaptureType
     chunkDurationMs?: number
+    deviceName?: string
     onChunk?: (chunk: AudioChunk) => void
     onStatus?: (status: CaptureStatus) => void
     onError?: (error: string) => void
 }
 
-/**
- * Event-driven capture config (preferred for desktop)
- * Uses Tauri events for audio chunks — no polling needed
- */
 export interface NativeCaptureEventConfig {
     captureType: CaptureType
     chunkDurationMs?: number
-    /** Called with base64 WAV data (already encoded Rust-side) */
+    deviceName?: string
     onWavChunk?: (wavBase64: string, durationMs: number) => void
     onStatus?: (status: CaptureStatus) => void
     onError?: (error: string) => void
@@ -152,6 +149,7 @@ class NativeAudioCaptureService {
             // Start the VAD-based capture in Rust
             await invoke('start_capture_with_vad', {
                 captureType: config.captureType,
+                deviceName: config.deviceName,
             })
 
             config.onStatus?.('capturing')
@@ -192,6 +190,7 @@ class NativeAudioCaptureService {
             await invoke('start_capture', {
                 captureType: config.captureType,
                 chunkDurationMs: config.chunkDurationMs || 3000,
+                deviceName: config.deviceName,
             })
 
             config.onStatus?.('capturing')

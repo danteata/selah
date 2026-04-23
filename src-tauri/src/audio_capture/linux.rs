@@ -1,7 +1,7 @@
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 
 use super::types::*;
 
@@ -16,13 +16,15 @@ pub fn start_system_audio_capture(
     // Spawn a thread to handle audio capture
     std::thread::spawn(move || {
         let host = cpal::default_host();
-        
-        // On Linux with PulseAudio/PipeWire, loopback/system audio is usually 
+
+        // On Linux with PulseAudio/PipeWire, loopback/system audio is usually
         // a "monitor" source. cpal doesn't have a direct "loopback" API for Linux,
         // so we search for a device with "monitor" in its name.
         let device = match host.input_devices() {
             Ok(devices) => devices.into_iter().find(|d| {
-                d.name().map(|n| n.to_lowercase().contains("monitor")).unwrap_or(false)
+                d.name()
+                    .map(|n| n.to_lowercase().contains("monitor"))
+                    .unwrap_or(false)
             }),
             Err(_) => None,
         };
@@ -60,7 +62,7 @@ pub fn start_system_audio_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
-                
+
                 device
                     .build_input_stream(
                         &config,
@@ -68,7 +70,8 @@ pub fn start_system_audio_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
-                            let processed = process_audio_samples(data, source_sample_rate, source_channels);
+                            let processed =
+                                process_audio_samples(data, source_sample_rate, source_channels);
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -82,7 +85,7 @@ pub fn start_system_audio_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
-                
+
                 device
                     .build_input_stream(
                         &config,
@@ -90,8 +93,13 @@ pub fn start_system_audio_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
-                            let samples: Vec<f32> = data.iter().map(|s| f32::from(*s) / 32768.0).collect();
-                            let processed = process_audio_samples(&samples, source_sample_rate, source_channels);
+                            let samples: Vec<f32> =
+                                data.iter().map(|s| f32::from(*s) / 32768.0).collect();
+                            let processed = process_audio_samples(
+                                &samples,
+                                source_sample_rate,
+                                source_channels,
+                            );
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);

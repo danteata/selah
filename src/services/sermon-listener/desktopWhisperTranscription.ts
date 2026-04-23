@@ -36,6 +36,7 @@ type MicVADStatic = {
     new: (options: {
         baseAssetPath?: string
         onnxWASMBasePath?: string
+        getStream?: () => Promise<MediaStream>
         onSpeechStart?: () => void
         onSpeechEnd?: (audio: Float32Array) => void
         onVADMisfire?: () => void
@@ -68,9 +69,9 @@ export interface DesktopWhisperTranscriptionConfig extends DesktopWhisperConfig 
     chunkDurationMs?: number;
     onProgress?: (progress: number) => void;
     onStatus?: (status: string) => void;
-    useNativeAudio?: boolean; // Option to use native audio capture (fallback)
-    useVAD?: boolean; // Use VAD-based chunking (default: true)
-    // VAD configuration
+    useNativeAudio?: boolean;
+    useVAD?: boolean;
+    microphoneDeviceId?: string;
     positiveSpeechThreshold?: number;
     negativeSpeechThreshold?: number;
     minSpeechMs?: number;
@@ -320,8 +321,7 @@ class DesktopWhisperTranscriptionService {
         try {
             console.log('[DesktopWhisper] Starting VAD-based capture');
 
-            this.vad = await window.vad.MicVAD.new({
-                // Asset paths - load from CDN
+            const vadOptions: Parameters<MicVADStatic['new']>[0] = {
                 baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
                 onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
                 onSpeechStart: () => {
@@ -334,20 +334,34 @@ class DesktopWhisperTranscriptionService {
                     this.config.onSpeechEnd?.();
                     this.config.onStatus?.('processing');
 
-                    // Process the utterance
                     await this.processVADUtterance(audio, onResult, onError);
                 },
                 onVADMisfire: () => {
                     console.log('[DesktopWhisper] VAD misfire - too short, ignoring');
                     this.config.onStatus?.('listening');
                 },
-                // VAD parameters with defaults
                 positiveSpeechThreshold: this.config.positiveSpeechThreshold ?? 0.65,
                 negativeSpeechThreshold: this.config.negativeSpeechThreshold ?? 0.45,
                 minSpeechMs: this.config.minSpeechMs ?? 500,
                 preSpeechPadMs: this.config.preSpeechPadMs ?? 500,
                 redemptionMs: this.config.redemptionMs ?? 1000,
-            });
+            };
+
+            if (this.config.microphoneDeviceId) {
+                vadOptions.getStream = async () => {
+                    return navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            deviceId: { exact: this.config.microphoneDeviceId! },
+                            channelCount: 1,
+                            noiseSuppression: true,
+                            echoCancellation: true,
+                            autoGainControl: true,
+                        },
+                    });
+                };
+            }
+
+            this.vad = await window.vad.MicVAD.new(vadOptions);
 
             this.vad.start();
             this.isRecording = true;
@@ -424,6 +438,7 @@ class DesktopWhisperTranscriptionService {
             const started = await nativeAudioCaptureManager.startWithEvents({
                 captureType,
                 chunkDurationMs,
+                deviceName: this.config.microphoneDeviceId || undefined,
                 onWavChunk: async (wavBase64: string, durationMs: number) => {
                     await this.processWavChunk(wavBase64, durationMs, onResult, onError);
                 },
@@ -529,14 +544,10 @@ class DesktopWhisperTranscriptionService {
         // Fallback to web audio capture
         // This is the original implementation using AudioWorklet
         try {
-            const mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                    sampleRate: 16000,
-                },
-            });
+            const audioConstraints: boolean | MediaTrackConstraints = this.config.microphoneDeviceId
+                ? { deviceId: { exact: this.config.microphoneDeviceId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
+                : { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
+            const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
 
             const audioContext = new AudioContext({ sampleRate: 16000 });
             const source = audioContext.createMediaStreamSource(mediaStream);

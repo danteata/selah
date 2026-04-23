@@ -229,13 +229,22 @@ function DisplaySettings({
                             const isSelected = selectedMonitorId === monitor.id
                             const isFlashing = flashingId === monitor.id
                             return (
-                                <button
+                                <div
                                     key={monitor.id}
+                                    role="button"
+                                    tabIndex={0}
                                     onClick={() => {
                                         setLocalMonitorId(monitor.id)
                                         setLiveOutputMonitorId(monitor.id)
                                     }}
-                                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-left text-sm transition-all ${
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault()
+                                            setLocalMonitorId(monitor.id)
+                                            setLiveOutputMonitorId(monitor.id)
+                                        }
+                                    }}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-left text-sm transition-all cursor-pointer ${
                                         isSelected
                                             ? ''
                                             : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
@@ -268,7 +277,7 @@ function DisplaySettings({
                                         <Zap className={`w-3.5 h-3.5 ${isFlashing ? 'animate-pulse' : ''}`} style={{ color }} />
                                     </button>
                                     {isSelected && <Check className="w-4 h-4" style={{ color }} />}
-                                </button>
+                                </div>
                             )
                         })}
                     </div>

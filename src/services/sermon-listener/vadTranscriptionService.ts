@@ -21,6 +21,7 @@ type MicVADStatic = {
     new: (options: {
         baseAssetPath?: string
         onnxWASMBasePath?: string
+        getStream?: () => Promise<MediaStream>
         onSpeechStart?: () => void
         onSpeechEnd?: (audio: Float32Array) => void
         onVADMisfire?: () => void
@@ -80,6 +81,8 @@ export type VADTranscriptionConfig = {
   redemptionFrames?: number
   /** Max utterance duration in seconds before forcing a cut */
   maxUtteranceSeconds?: number
+  /** Microphone device ID for specific device selection */
+  microphoneDeviceId?: string
 }
 
 export interface VADUtterance {
@@ -251,8 +254,7 @@ class VADTranscriptionService {
         try {
             console.log('[VAD] Starting VAD capture')
 
-            this.vad = await window.vad.MicVAD.new({
-                // Asset paths - load from CDN since we're using CDN scripts
+            const vadOpts: Parameters<MicVADStatic['new']>[0] = {
                 baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
                 onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
                 onSpeechStart: () => {
@@ -265,20 +267,34 @@ class VADTranscriptionService {
                     this.config.onSpeechEnd?.()
                     this.config.onStatus?.('processing')
 
-                    // Process the utterance
                     await this.processUtterance(audio, onResult, onError)
                 },
                 onVADMisfire: () => {
                     console.log('[VAD] Misfire - too short, ignoring')
                     this.config.onStatus?.('listening')
                 },
-                // VAD parameters with defaults
                 positiveSpeechThreshold: this.config.positiveSpeechThreshold ?? 0.6,
                 negativeSpeechThreshold: this.config.negativeSpeechThreshold ?? 0.4,
-                minSpeechMs: 250, // Minimum speech duration in ms
-                preSpeechPadMs: 500, // Pre-speech padding in ms
-                redemptionMs: 750, // Silence duration before cutting
-            })
+                minSpeechMs: 250,
+                preSpeechPadMs: 500,
+                redemptionMs: 750,
+            }
+
+            if (this.config.microphoneDeviceId) {
+                vadOpts.getStream = async () => {
+                    return navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            deviceId: { exact: this.config.microphoneDeviceId! },
+                            channelCount: 1,
+                            noiseSuppression: true,
+                            echoCancellation: true,
+                            autoGainControl: true,
+                        },
+                    })
+                }
+            }
+
+            this.vad = await window.vad.MicVAD.new(vadOpts)
 
             this.vad.start()
             this.isStreaming = true

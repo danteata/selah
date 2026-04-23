@@ -386,6 +386,8 @@ export interface AppSettings {
         language?: string
         /** Audio capture source: 'microphone' | 'system' */
         captureSource?: 'microphone' | 'system'
+        /** Selected microphone device ID (browser deviceId or native device name) */
+        selectedMicrophoneId?: string
     }
 }
 

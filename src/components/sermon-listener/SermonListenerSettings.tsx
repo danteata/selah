@@ -3,8 +3,9 @@ import { useAppStore } from '../../store/appStore'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useGlobalSermonListenerSettings } from '../../hooks/useGlobalAppSettings'
 import { useNativeAudioCapture } from '../../services/sermon-listener/nativeAudioCapture'
+import { useAudioDevices } from '../../hooks/useAudioDevices'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Info, Check, Shield, Loader2, Settings, Mic, Monitor } from 'lucide-react'
+import { Info, Check, Shield, Loader2, Settings, Mic, Monitor, RefreshCw } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
     onClose?: () => void
@@ -24,6 +25,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const [autoLookup, setAutoLookup] = useState(sermonSettings?.autoLookup ?? true)
     const [language, setLanguage] = useState(sermonSettings?.language || 'en-US')
     const [captureSource, setCaptureSource] = useState<'microphone' | 'system'>(sermonSettings?.captureSource || 'microphone')
+    const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string>(sermonSettings?.selectedMicrophoneId || '')
+
+    const { devices: micDevices, isLoading: isLoadingDevices, refresh: refreshDevices } = useAudioDevices()
 
     const [showSaveSuccess, setShowSaveSuccess] = useState(false)
 
@@ -37,6 +41,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 autoLookup,
                 language,
                 captureSource,
+                selectedMicrophoneId,
             },
         })
         // Show success toast
@@ -195,6 +200,46 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     </p>
                 )}
             </div>
+
+            {/* Microphone Device Selection */}
+            {captureSource === 'microphone' && (
+                <div className="mb-6">
+                    <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Microphone</label>
+                    {micDevices.length === 0 && !isLoadingDevices ? (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            No microphone devices found. Grant microphone permission to see available devices.
+                        </p>
+                    ) : (
+                        <div className="relative">
+                            <select
+                                value={selectedMicrophoneId}
+                                onChange={(e) => setSelectedMicrophoneId(e.target.value)}
+                                disabled={isLoadingDevices}
+                                className="w-full p-2 pr-9 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white appearance-none"
+                            >
+                                <option value="">Default Microphone</option>
+                                {micDevices.map((device) => (
+                                    <option key={device.id} value={device.id}>
+                                        {device.label}{device.isDefault ? ' (Default)' : ''}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={refreshDevices}
+                                disabled={isLoadingDevices}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                title="Refresh devices"
+                            >
+                                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDevices ? 'animate-spin' : ''}`} />
+                            </button>
+                        </div>
+                    )}
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Choose a specific microphone, or leave as default to use the system default.
+                    </p>
+                </div>
+            )}
 
             {/* Language Override */}
             <div className="mb-6">
