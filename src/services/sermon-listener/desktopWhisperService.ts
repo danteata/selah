@@ -51,7 +51,7 @@ export async function isDesktopWhisperAvailable(): Promise<boolean> {
     try {
         const response = await fetch(`${DESKTOP_WHISPER_URL}/health`, {
             method: 'GET',
-            signal: AbortSignal.timeout(2000),
+            signal: AbortSignal.timeout(3000),
         });
         return response.ok;
     } catch {

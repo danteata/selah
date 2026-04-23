@@ -187,22 +187,25 @@ class DesktopWhisperTranscriptionService {
         this.config.onProgress?.(0.5);
         this.config.onStatus?.('Whisper server started, waiting for model to load...');
 
-        // Wait for server to be ready (model loading takes time)
-        const maxAttempts = 30; // 30 seconds max
+        const maxAttempts = 60;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             const available = await isDesktopWhisperAvailable();
             if (available) {
                 this.isInitialized = true;
                 this.config.onProgress?.(1);
                 this.config.onStatus?.('Ready');
+                console.log('[DesktopWhisper] Server is ready after', attempt + 1, 'attempts');
                 return true;
             }
-            // Wait 1 second between attempts
+            if (attempt % 10 === 0 && attempt > 0) {
+                console.log(`[DesktopWhisper] Still waiting for server... attempt ${attempt + 1}/${maxAttempts}`);
+            }
             await new Promise(resolve => setTimeout(resolve, 1000));
             this.config.onProgress?.(0.5 + (attempt / maxAttempts) * 0.5);
         }
 
-        this.config.onStatus?.('Whisper server not responding after 30 seconds');
+        this.config.onStatus?.('Whisper server not responding after 60 seconds');
+        console.error('[DesktopWhisper] Server failed to start within 60 seconds');
         return false;
     }
 

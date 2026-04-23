@@ -140,11 +140,37 @@ async fn start_whisper_server(
             "--model", &model_arg,
         ]);
 
-    let (mut _rx, child) = sidecar_command.spawn()
+    let (rx, child) = sidecar_command.spawn()
         .map_err(|e| format!("Failed to spawn whisper server: {}", e))?;
 
     // Store the child process
     *state.child.lock().unwrap() = Some(child);
+
+    // Log sidecar output for debugging
+    let sidecar_rx = rx;
+    tokio::spawn(async move {
+        use tauri_plugin_shell::process::CommandEvent;
+        let mut rx = sidecar_rx;
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => {
+                    println!("[WhisperServer] {}", String::from_utf8_lossy(&line));
+                }
+                CommandEvent::Stderr(line) => {
+                    eprintln!("[WhisperServer:stderr] {}", String::from_utf8_lossy(&line));
+                }
+                CommandEvent::Terminated(status) => {
+                    println!("[WhisperServer] Process exited with status: {:?}", status);
+                    break;
+                }
+                CommandEvent::Error(err) => {
+                    eprintln!("[WhisperServer:error] {}", err);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
 
     // Wait for server to be ready
     println!("Waiting for whisper server to start on port {}...", WHISPER_SERVER_PORT);
@@ -156,7 +182,7 @@ async fn start_whisper_server(
     let client = reqwest::Client::new();
     let health_url = format!("http://127.0.0.1:{}/health", WHISPER_SERVER_PORT);
     
-    for attempt in 0..10 {
+    for attempt in 0..15 {
         if let Ok(response) = client.get(&health_url).timeout(std::time::Duration::from_secs(1)).send().await {
             if response.status().is_success() {
                 println!("Whisper server is ready!");
@@ -167,7 +193,17 @@ async fn start_whisper_server(
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT))
+    // Check if the sidecar process is still running
+    let child_guard = state.child.lock().unwrap();
+    let still_running = child_guard.is_some();
+    drop(child_guard);
+
+    if still_running {
+        println!("Whisper server process is running but not responding on port {}", WHISPER_SERVER_PORT);
+        Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT))
+    } else {
+        Err(format!("Whisper server process exited - check logs for errors"))
+    }
 }
 
 #[tauri::command]
