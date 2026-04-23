@@ -151,11 +151,22 @@ export function SermonListenerPanel({
 
     // Not supported message
     if (!isSupported) {
-        const unsupportedMessage = provider === 'whisper'
-            ? 'Whisper API provider is not configured. Add a transcription endpoint in settings, or switch to Web Speech API.'
-            : provider === 'whisper-cpp'
-                ? 'Whisper.cpp provider is not configured. Set a local whisper.cpp endpoint in settings, or switch to Web Speech API.'
-                : "Your browser doesn't support the Web Speech API. Please try Chrome, Edge, or Safari."
+        const unsupportedMessage = (() => {
+            switch (provider) {
+                case 'whisper':
+                    return 'Whisper API provider is not configured. Add a transcription endpoint in settings, or switch to Web Speech API.'
+                case 'whisper-cpp':
+                    return 'Whisper.cpp provider is not configured. Set a local whisper.cpp endpoint in settings, or switch to Web Speech API.'
+                case 'faster-whisper':
+                    return 'Faster-Whisper provider is not configured. Set a Faster-Whisper endpoint in settings, or switch to Web Speech API.'
+                case 'elevenlabs':
+                    return 'ElevenLabs provider is not configured. Add an ElevenLabs API key in settings, or switch to Web Speech API.'
+                case 'desktop-whisper':
+                    return 'Desktop Whisper is only available in the desktop app. Please use the desktop version of Selah or switch to another provider.'
+                default:
+                    return "Your browser doesn't support the Web Speech API. Please try Chrome, Edge, or Safari."
+            }
+        })()
 
         return (
             <div className="p-4 rounded-lg bg-gray-100 dark:bg-gray-800">

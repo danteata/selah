@@ -378,14 +378,15 @@ class DesktopWhisperTranscriptionService {
 
             console.log('[DesktopWhisper] Utterance', utteranceId, 'size:', blob.size, 'bytes');
 
-            // Send to desktop whisper server
-            // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
-            const language = (this.config.language || 'en').split('-')[0];
-            const result = await transcribeWithDesktopWhisper(blob, {
-                language,
-                vadFilter: false, // Always disable server-side VAD (model not bundled)
-                hotwords: this.config.hotwords,
-            });
+      // Send to desktop whisper server
+      // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
+      const language = (this.config.language || 'en').split('-')[0];
+      const result = await transcribeWithDesktopWhisper(blob, {
+        language,
+        vadFilter: false, // Always disable server-side VAD (model not bundled)
+        hotwords: this.config.hotwords,
+        initialPrompt: this.config.initialPrompt,
+      });
 
             if (result && result.text.trim()) {
                 const duration = Date.now() - startTime;
@@ -446,54 +447,55 @@ class DesktopWhisperTranscriptionService {
      * Process a WAV chunk received from Rust via Tauri event
      * The WAV data is already base64-encoded Rust-side — just decode to Blob
      */
-    private async processWavChunk(
-        wavBase64: string,
-        durationMs: number,
-        onResult: ResultCallback,
-        onError: ErrorCallback
-    ): Promise<void> {
-        try {
-            if (!wavBase64 || wavBase64.length === 0) {
-                console.log('[DesktopWhisper] Empty WAV chunk, skipping');
-                return;
-            }
+  private async processWavChunk(
+    wavBase64: string,
+    durationMs: number,
+    onResult: ResultCallback,
+    onError: ErrorCallback
+  ): Promise<void> {
+    try {
+      if (!wavBase64 || wavBase64.length === 0) {
+        console.log('[DesktopWhisper] Empty WAV chunk, skipping');
+        return;
+      }
 
-            console.log('[DesktopWhisper] Processing WAV chunk:', {
-                base64Length: wavBase64.length,
-                duration_ms: durationMs,
-            });
+      console.log('[DesktopWhisper] Processing WAV chunk:', {
+        base64Length: wavBase64.length,
+        duration_ms: durationMs,
+      });
 
-            // Convert base64 WAV to Blob (single conversion — no float32 dance)
-            const binaryString = atob(wavBase64);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            const wavBlob = new Blob([bytes], { type: 'audio/wav' });
+      // Convert base64 WAV to Blob (single conversion — no float32 dance)
+      const binaryString = atob(wavBase64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const wavBlob = new Blob([bytes], { type: 'audio/wav' });
 
-            console.log('[DesktopWhisper] WAV blob created:', {
-                size: wavBlob.size,
-                type: wavBlob.type,
-            });
+      console.log('[DesktopWhisper] WAV blob created:', {
+        size: wavBlob.size,
+        type: wavBlob.type,
+      });
 
-            // Send to desktop whisper server
-            // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
-            const language = (this.config.language || 'en').split('-')[0];
-            const result = await transcribeWithDesktopWhisper(wavBlob, {
-                language,
-                vadFilter: false, // Always disable server-side VAD (model not bundled)
-                hotwords: this.config.hotwords,
-            });
+      // Send to desktop whisper server
+      // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
+      const language = (this.config.language || 'en').split('-')[0];
+      const result = await transcribeWithDesktopWhisper(wavBlob, {
+        language,
+        vadFilter: false, // Always disable server-side VAD (model not bundled)
+        hotwords: this.config.hotwords,
+        initialPrompt: this.config.initialPrompt,
+      });
 
-            if (result && result.text.trim()) {
-                console.log('[DesktopWhisper] Transcription result:', result.text);
-                onResult({
-                    text: result.text.trim(),
-                    language: result.language,
-                    segments: result.segments,
-                });
-            }
-        } catch (error) {
+      if (result && result.text.trim()) {
+        console.log('[DesktopWhisper] Transcription result:', result.text);
+        onResult({
+          text: result.text.trim(),
+          language: result.language,
+          segments: result.segments,
+        });
+      }
+    } catch (error) {
             // Don't spam errors for timeouts - they're expected occasionally
             const isTimeout = error instanceof Error && (
                 error.name === 'TimeoutError' ||
@@ -607,36 +609,37 @@ class DesktopWhisperTranscriptionService {
     /**
      * Process a web audio chunk
      */
-    private async processWebChunk(
-        pcmData: Float32Array,
-        onResult: ResultCallback,
-        onError: ErrorCallback
-    ): Promise<void> {
-        try {
-            // Convert Float32 PCM to WAV
-            const wavBlob = this.pcmToWav(pcmData);
+  private async processWebChunk(
+    pcmData: Float32Array,
+    onResult: ResultCallback,
+    onError: ErrorCallback
+  ): Promise<void> {
+    try {
+      // Convert Float32 PCM to WAV
+      const wavBlob = this.pcmToWav(pcmData);
 
-            // Send to desktop whisper server
-            // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
-            const language = (this.config.language || 'en').split('-')[0];
-            const result = await transcribeWithDesktopWhisper(wavBlob, {
-                language,
-                vadFilter: false, // Always disable server-side VAD (model not bundled)
-                hotwords: this.config.hotwords,
-            });
+      // Send to desktop whisper server
+      // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
+      const language = (this.config.language || 'en').split('-')[0];
+      const result = await transcribeWithDesktopWhisper(wavBlob, {
+        language,
+        vadFilter: false, // Always disable server-side VAD (model not bundled)
+        hotwords: this.config.hotwords,
+        initialPrompt: this.config.initialPrompt,
+      });
 
-            if (result && result.text.trim()) {
-                onResult({
-                    text: result.text.trim(),
-                    language: result.language,
-                    segments: result.segments,
-                });
-            }
-        } catch (error) {
-            console.error('Error processing web audio chunk:', error);
-            onError(error instanceof Error ? error.message : 'Transcription error');
-        }
+      if (result && result.text.trim()) {
+        onResult({
+          text: result.text.trim(),
+          language: result.language,
+          segments: result.segments,
+        });
+      }
+    } catch (error) {
+      console.error('Error processing web audio chunk:', error);
+      onError(error instanceof Error ? error.message : 'Transcription error');
     }
+  }
 
     /**
      * Convert Float32 PCM to WAV Blob (for web audio fallback)

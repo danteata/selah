@@ -12,11 +12,12 @@ const DEFAULT_CHUNK_DURATION_MS = 2500 // Reduced from 5000ms for faster feedbac
 const REQUEST_TIMEOUT_MS = 15000 // Timeout for transcription requests
 
 export interface WhisperCppConfig {
-    endpoint?: string
-    language?: string
-    chunkDurationMs?: number
-    onProgress?: (progress: number) => void
-    onStatus?: (status: string) => void
+  endpoint?: string
+  language?: string
+  chunkDurationMs?: number
+  initialPrompt?: string
+  onProgress?: (progress: number) => void
+  onStatus?: (status: string) => void
 }
 
 export interface WhisperCppTranscriptionResult {
@@ -394,11 +395,16 @@ class WhisperCppTranscriptionService {
             type: 'audio/wav',
         })
 
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('language', language)
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('language', language)
 
-        // Create abort controller for timeout
+    // Add initial prompt to bias transcription toward church vocabulary
+    if (this.config.initialPrompt) {
+      formData.append('initial_prompt', this.config.initialPrompt)
+    }
+
+    // Create abort controller for timeout
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
 
@@ -467,13 +473,18 @@ class WhisperCppTranscriptionService {
             type: 'audio/wav',
         })
 
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('language', language)
-        // Request JSON output for easier parsing
-        formData.append('response_format', 'json')
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('language', language)
+    // Request JSON output for easier parsing
+    formData.append('response_format', 'json')
 
-        const response = await fetch(endpoint, {
+    // Add initial prompt to bias transcription toward church vocabulary
+    if (this.config.initialPrompt) {
+      formData.append('initial_prompt', this.config.initialPrompt)
+    }
+
+    const response = await fetch(endpoint, {
             method: 'POST',
             body: formData,
         })

@@ -1,1 +1,23 @@
+# Fly.io config (not needed in container)
 fly.toml
+
+# Desktop-specific (Tauri) - not needed for web deployment
+src-tauri/
+
+# Local Whisper server (desktop feature)
+deploy/
+
+# Development/CI artifacts
+.github/
+docs/
+plan/
+scripts/
+
+# Root-level files not needed for web build
+README.md
+*-screenshot.png
+original_landing.tsx
+app-icon.svg
+
+# Build artifacts (if any exist at root)
+dist/

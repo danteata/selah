@@ -50,34 +50,36 @@ declare global {
 }
 
 export type VADTranscriptionConfig = {
-    /** Language for transcription */
-    language?: string
-    /** Faster-Whisper server endpoint */
-    endpoint?: string
-    /** Model to use for transcription */
-    model?: string
-    /** Called when transcription result is received */
-    onResult?: (text: string, isFinal: boolean) => void
-    /** Called on error */
-    onError?: (error: string) => void
-    /** Called when VAD status changes */
-    onStatus?: (status: string) => void
-    /** Called when speech is detected */
-    onSpeechStart?: () => void
-    /** Called when speech ends */
-    onSpeechEnd?: () => void
-    /** VAD sensitivity - higher = more sensitive */
-    positiveSpeechThreshold?: number
-    /** VAD negative threshold - lower = more aggressive silence detection */
-    negativeSpeechThreshold?: number
-    /** Minimum speech frames to trigger speech detection */
-    minSpeechFrames?: number
-    /** Frames to prepend before speech */
-    preSpeechPadFrames?: number
-    /** Frames of silence before cutting */
-    redemptionFrames?: number
-    /** Max utterance duration in seconds before forcing a cut */
-    maxUtteranceSeconds?: number
+  /** Language for transcription */
+  language?: string
+  /** Faster-Whisper server endpoint */
+  endpoint?: string
+  /** Model to use for transcription */
+  model?: string
+  /** Initial prompt to bias transcription vocabulary */
+  initialPrompt?: string
+  /** Called when transcription result is received */
+  onResult?: (text: string, isFinal: boolean) => void
+  /** Called on error */
+  onError?: (error: string) => void
+  /** Called when VAD status changes */
+  onStatus?: (status: string) => void
+  /** Called when speech is detected */
+  onSpeechStart?: () => void
+  /** Called when speech ends */
+  onSpeechEnd?: () => void
+  /** VAD sensitivity - higher = more sensitive */
+  positiveSpeechThreshold?: number
+  /** VAD negative threshold - lower = more aggressive silence detection */
+  negativeSpeechThreshold?: number
+  /** Minimum speech frames to trigger speech detection */
+  minSpeechFrames?: number
+  /** Frames to prepend before speech */
+  preSpeechPadFrames?: number
+  /** Frames of silence before cutting */
+  redemptionFrames?: number
+  /** Max utterance duration in seconds before forcing a cut */
+  maxUtteranceSeconds?: number
 }
 
 export interface VADUtterance {
@@ -337,13 +339,18 @@ class VADTranscriptionService {
         const language = this.config.language || DEFAULT_LANGUAGE
         const model = resolveModelId(this.config.model || DEFAULT_MODEL)
 
-        const formData = new FormData()
-        formData.append('file', blob, `${utteranceId}.wav`)
-        formData.append('language', language.split('-')[0]) // Convert 'en-US' to 'en'
-        formData.append('response_format', 'json')
-        formData.append('model', model)
+    const formData = new FormData()
+    formData.append('file', blob, `${utteranceId}.wav`)
+    formData.append('language', language.split('-')[0]) // Convert 'en-US' to 'en'
+    formData.append('response_format', 'json')
+    formData.append('model', model)
 
-        const url = `${endpoint}/v1/audio/transcriptions`
+    // Add initial prompt to bias transcription toward church vocabulary
+    if (this.config.initialPrompt) {
+      formData.append('initial_prompt', this.config.initialPrompt)
+    }
+
+    const url = `${endpoint}/v1/audio/transcriptions`
         console.log('[VAD] Sending to:', url)
 
         this.abortController = new AbortController()

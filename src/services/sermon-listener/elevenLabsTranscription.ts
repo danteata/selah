@@ -10,12 +10,13 @@
 const ELEVENLABS_API_URL = 'https://api.elevenlabs.io/v1/speech-to-text'
 
 export interface ElevenLabsConfig {
-    apiKey?: string
-    modelId?: string
-    language?: string
-    chunkDurationMs?: number
-    onProgress?: (progress: number) => void
-    onStatus?: (status: string) => void
+  apiKey?: string
+  modelId?: string
+  language?: string
+  chunkDurationMs?: number
+  initialPrompt?: string
+  onProgress?: (progress: number) => void
+  onStatus?: (status: string) => void
 }
 
 export interface ElevenLabsTranscriptionResult {
@@ -310,12 +311,18 @@ class ElevenLabsTranscriptionService {
         formData.append('audio', audioFile)
         formData.append('model_id', modelId)
 
-        // Add language if specified
-        if (this.config.language) {
-            formData.append('language_code', this.config.language)
-        }
+    // Add language if specified
+    if (this.config.language) {
+      formData.append('language_code', this.config.language)
+    }
 
-        const response = await fetch(ELEVENLABS_API_URL, {
+    // Add initial prompt to bias transcription vocabulary
+    // Note: ElevenLabs uses 'prompt' parameter for context/glossary
+    if (this.config.initialPrompt) {
+      formData.append('prompt', this.config.initialPrompt)
+    }
+
+    const response = await fetch(ELEVENLABS_API_URL, {
             method: 'POST',
             headers: {
                 'xi-api-key': apiKey,

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap, Sparkles, PanelBottom } from 'lucide-react'
+import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap, Sparkles, PanelBottom, Radio } from 'lucide-react'
 import fuzzysort from 'fuzzysort'
 import { useHymn, useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
@@ -69,6 +69,7 @@ export function QuickActionsSidebar() {
     const openModal = useAppStore((state) => state.openModal)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
+    const setLiveSlide = useAppStore((state) => state.setLiveSlide)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
 
     // Initialize actions with hymns
@@ -250,7 +251,7 @@ export function QuickActionsSidebar() {
     }, [searchInput, actions, bibleChapterAndVerse])
 
     // Handle action execution
-    const executeAction = useCallback(async (action: QuickAction | string) => {
+    const executeAction = useCallback(async (action: QuickAction | string, goLive: boolean = false) => {
         const actionStr = typeof action === 'string' ? action : action.action
 
         if (actionStr === appWideActions.newBible || actionStr === appWideActions.newSearchBible) {
@@ -307,6 +308,9 @@ export function QuickActionsSidebar() {
                     const slide = createBibleSlide(scripture)
                     if (slide) {
                         appendActiveSlide(slide)
+                        if (goLive) {
+                            setLiveSlide(slide.id)
+                        }
                     }
                 }
             } catch (e) {
@@ -326,6 +330,9 @@ export function QuickActionsSidebar() {
                     const slide = createBibleSlide(scripture)
                     if (slide) {
                         appendActiveSlide(slide)
+                        if (goLive) {
+                            setLiveSlide(slide.id)
+                        }
                     }
                 }
             } catch (e) {
@@ -343,8 +350,11 @@ export function QuickActionsSidebar() {
                 const hymn = await getHymnByNumber(hymnNumber)
                 if (hymn) {
                     const slides = createHymnSlides(hymn as any)
-                    slides.forEach(slide => {
+                    slides.forEach((slide, idx) => {
                         appendActiveSlide(slide)
+                        if (goLive && idx === 0) {
+                            setLiveSlide(slide.id)
+                        }
                     })
                 }
             } catch (e) {
@@ -395,7 +405,7 @@ export function QuickActionsSidebar() {
             openModal('lowerThirdEditor')
             return
         }
-    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule, clearSemanticResults])
+    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule, clearSemanticResults, setLiveSlide])
 
     // Handle sidebar action click
     const handleSidebarAction = useCallback((actionStr: string) => {
@@ -518,6 +528,18 @@ export function QuickActionsSidebar() {
                                         <span className="text-[11px] text-[var(--text-secondary)] line-clamp-2 pl-6">
                                             {verseText}
                                         </span>
+
+                                        {/* Quick Go Live Button */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                executeAction(action, true)
+                                            }}
+                                            className="absolute right-2 top-1.5 p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100 z-10"
+                                            title="Go Live"
+                                        >
+                                            <Radio className="w-4 h-4" />
+                                        </button>
                                     </button>
                                 )
                             }
@@ -529,7 +551,7 @@ export function QuickActionsSidebar() {
                                     onClick={() => executeAction(action)}
                                     className={`
                                         w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs
-                                        transition-colors
+                                        transition-colors relative group
                                         ${index === focusedIndex
                                             ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                                             : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
@@ -542,6 +564,20 @@ export function QuickActionsSidebar() {
                                     <span className="truncate">{action.name}</span>
                                     {action.type && (
                                         <SlideChip slideType={action.type} />
+                                    )}
+
+                                    {/* Quick Go Live Button for Bible/Hymn */}
+                                    {(action.type === 'bible' || action.type === 'hymn') && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                executeAction(action, true)
+                                            }}
+                                            className="ml-auto p-1 bg-red-500 hover:bg-red-600 text-white rounded opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100 z-10"
+                                            title="Go Live"
+                                        >
+                                            <Radio className="w-3.5 h-3.5" />
+                                        </button>
                                     )}
                                 </button>
                             )
@@ -558,7 +594,7 @@ export function QuickActionsSidebar() {
                                             onClick={() => executeAction(`semantic-verse:${verse.bookNumber}:${verse.chapter}:${verse.verse}`)}
                                             className={`
                                                 w-full flex flex-col gap-0.5 px-2 py-1.5 rounded-lg text-left text-xs
-                                                transition-colors
+                                                transition-colors relative group
                                                 ${globalIndex === focusedIndex
                                                     ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                                                     : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
@@ -578,6 +614,18 @@ export function QuickActionsSidebar() {
                                             <span className="text-[11px] text-[var(--text-secondary)] line-clamp-2 pl-6">
                                                 {verse.text}
                                             </span>
+
+                                            {/* Quick Go Live Button */}
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    executeAction(`semantic-verse:${verse.bookNumber}:${verse.chapter}:${verse.verse}`, true)
+                                                }}
+                                                className="absolute right-2 top-1.5 p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100 z-10"
+                                                title="Go Live"
+                                            >
+                                                <Radio className="w-4 h-4" />
+                                            </button>
                                         </button>
                                     )
                                 })}

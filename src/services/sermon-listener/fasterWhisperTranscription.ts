@@ -22,41 +22,46 @@ const REQUEST_TIMEOUT_MS = 20000 // 20 seconds - base.en processes fast enough
 export type AudioCaptureMode = 'browser-wav' | 'server-decode'
 
 export interface FasterWhisperConfig {
-    endpoint?: string
-    language?: string
-    model?: string // Full model ID like 'Systran/faster-whisper-base.en' or short name like 'base'
-    chunkDurationMs?: number
-    onProgress?: (progress: number) => void
-    onStatus?: (status: string) => void
-    vadFilter?: boolean // Enable Voice Activity Detection to filter silence
-    hotwords?: string // Biblical terms to improve recognition
-    audioCaptureMode?: AudioCaptureMode // Which audio capture method to use
-    disableBrowserAudioProcessing?: boolean // Disable browser noise suppression/AGC for server-decode mode
+  endpoint?: string
+  language?: string
+  model?: string // Full model ID like 'Systran/faster-whisper-base.en' or short name like 'base'
+  chunkDurationMs?: number
+  onProgress?: (progress: number) => void
+  onStatus?: (status: string) => void
+  vadFilter?: boolean // Enable Voice Activity Detection to filter silence
+  hotwords?: string // Biblical terms to improve recognition
+  initialPrompt?: string // Prompt to bias transcription vocabulary (prevents offensive word hallucination)
+  audioCaptureMode?: AudioCaptureMode // Which audio capture method to use
+  disableBrowserAudioProcessing?: boolean // Disable browser noise suppression/AGC for server-decode mode
 }
 
 // Biblical hotwords to improve recognition of religious terms
 const DEFAULT_HOTWORDS = [
-    // Names of God
-    'Yahweh', 'Jehovah', 'Elohim', 'Adonai', 'El Shaddai',
-    // Biblical names
-    'Jesus', 'Christ', 'Messiah', 'Yeshua',
-    'Abraham', 'Isaac', 'Jacob', 'Moses', 'David', 'Solomon',
-    'Peter', 'Paul', 'John', 'James', 'Matthew', 'Luke', 'Mark',
-    'Mary', 'Martha', 'Lazarus', 'Joseph', 'Daniel', 'Elijah', 'Elisha',
-    'Isaiah', 'Jeremiah', 'Ezekiel', 'Noah', 'Adam', 'Eve', 'Sarah', 'Rebekah',
-    // Biblical places
-    'Jerusalem', 'Bethlehem', 'Nazareth', 'Galilee', 'Jordan', 'Sinai',
-    'Canaan', 'Egypt', 'Babylon', 'Bethany', 'Capernaum', 'Samaria',
-    // Biblical terms
-    'Psalm', 'Psalms', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
-    'Gospel', 'Gospels', 'Epistle', 'Epistles', 'Revelation', 'Apocalypse',
-    'Covenant', 'Testament', 'Parable', 'Miracle', 'Resurrection', 'Crucifixion',
-    'Salvation', 'Redemption', 'Righteousness', 'Sanctification', 'Justification',
-    'Amen', 'Hallelujah', 'Hosanna', 'Maranatha',
-    // Church terms
-    'Sermon', 'Homily', 'Congregation', 'Parishioner', 'Sacrament',
-    'Baptism', 'Eucharist', 'Communion', 'Liturgy', 'Doxology',
+// Names of God
+'Yahweh', 'Jehovah', 'Elohim', 'Adonai', 'El Shaddai',
+// Biblical names
+'Jesus', 'Christ', 'Messiah', 'Yeshua',
+'Abraham', 'Isaac', 'Jacob', 'Moses', 'David', 'Solomon',
+'Peter', 'Paul', 'John', 'James', 'Matthew', 'Luke', 'Mark',
+'Mary', 'Martha', 'Lazarus', 'Joseph', 'Daniel', 'Elijah', 'Elisha',
+'Isaiah', 'Jeremiah', 'Ezekiel', 'Noah', 'Adam', 'Eve', 'Sarah', 'Rebekah',
+// Biblical places
+'Jerusalem', 'Bethlehem', 'Nazareth', 'Galilee', 'Jordan', 'Sinai',
+'Canaan', 'Egypt', 'Babylon', 'Bethany', 'Capernaum', 'Samaria',
+// Biblical terms
+'Psalm', 'Psalms', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
+'Gospel', 'Gospels', 'Epistle', 'Epistles', 'Revelation', 'Apocalypse',
+'Covenant', 'Testament', 'Parable', 'Miracle', 'Resurrection', 'Crucifixion',
+'Salvation', 'Redemption', 'Righteousness', 'Sanctification', 'Justification',
+'Amen', 'Hallelujah', 'Hosanna', 'Maranatha',
+// Church terms
+'Sermon', 'Homily', 'Congregation', 'Parishioner', 'Sacrament',
+'Baptism', 'Eucharist', 'Communion', 'Liturgy', 'Doxology',
 ].join(',')
+
+// Default initial prompt to bias transcription toward church vocabulary
+// This helps prevent hallucination of offensive words that sound similar
+const DEFAULT_INITIAL_PROMPT = 'This is a church sermon about Jesus Christ, God, the Bible, and the Christian faith. The speaker is a pastor preaching about Scripture, prayer, salvation, and the Gospel.'
 
 // Model name mapping: short name -> full HuggingFace model ID
 const MODEL_ID_MAP: Record<string, string> = {
@@ -138,18 +143,19 @@ class FasterWhisperTranscriptionService {
         }
 
         this.isInitializing = true
-        this.config = {
-            endpoint: DEFAULT_FASTER_WHISPER_ENDPOINT,
-            language: 'en',
-            model: 'Systran/faster-whisper-base.en', // Default to base.en for faster processing on CPU
-            chunkDurationMs: DEFAULT_CHUNK_DURATION_MS,
-            vadFilter: true, // Enable VAD to filter silence and reduce hallucinations
-            hotwords: DEFAULT_HOTWORDS, // Biblical terms for better recognition
-            audioCaptureMode: 'browser-wav', // Default to current approach
-            disableBrowserAudioProcessing: false,
-            ...this.config,
-            ...config,
-        }
+    this.config = {
+      endpoint: DEFAULT_FASTER_WHISPER_ENDPOINT,
+      language: 'en',
+      model: 'Systran/faster-whisper-base.en', // Default to base.en for faster processing on CPU
+      chunkDurationMs: DEFAULT_CHUNK_DURATION_MS,
+      vadFilter: true, // Enable VAD to filter silence and reduce hallucinations
+      hotwords: DEFAULT_HOTWORDS, // Biblical terms for better recognition
+      initialPrompt: DEFAULT_INITIAL_PROMPT, // Bias toward church vocabulary
+      audioCaptureMode: 'browser-wav', // Default to current approach
+      disableBrowserAudioProcessing: false,
+      ...this.config,
+      ...config,
+    }
 
         try {
             this.config.onStatus?.('Preparing faster-whisper provider...')
@@ -851,12 +857,17 @@ class FasterWhisperTranscriptionService {
             formData.append('vad_filter', 'true')
         }
 
-        // Add hotwords for better biblical term recognition
-        if (this.config.hotwords) {
-            formData.append('hotwords', this.config.hotwords)
-        }
+  // Add hotwords for better biblical term recognition
+  if (this.config.hotwords) {
+    formData.append('hotwords', this.config.hotwords)
+  }
 
-        const controller = new AbortController()
+  // Add initial prompt to bias transcription toward church vocabulary
+  if (this.config.initialPrompt) {
+    formData.append('initial_prompt', this.config.initialPrompt)
+  }
+
+  const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
 
         try {
@@ -950,12 +961,17 @@ class FasterWhisperTranscriptionService {
         // 
         // IMPORTANT: Do NOT append vad_filter at all for server-decode mode
 
-        // Add hotwords for better biblical term recognition
-        if (this.config.hotwords) {
-            formData.append('hotwords', this.config.hotwords)
-        }
+  // Add hotwords for better biblical term recognition
+  if (this.config.hotwords) {
+    formData.append('hotwords', this.config.hotwords)
+  }
 
-        // Increase timeout for server-side decoding (FFmpeg needs time)
+  // Add initial prompt to bias transcription toward church vocabulary
+  if (this.config.initialPrompt) {
+    formData.append('initial_prompt', this.config.initialPrompt)
+  }
+
+  // Increase timeout for server-side decoding (FFmpeg needs time)
         const timeout = 30000 // 30 seconds
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), timeout)

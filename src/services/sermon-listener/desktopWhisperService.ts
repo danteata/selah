@@ -12,10 +12,11 @@ const DESKTOP_WHISPER_PORT = 17493;
 const DESKTOP_WHISPER_URL = `http://127.0.0.1:${DESKTOP_WHISPER_PORT}`;
 
 export interface DesktopWhisperConfig {
-    model?: string;
-    language?: string;
-    vadFilter?: boolean;
-    hotwords?: string;
+  model?: string;
+  language?: string;
+  vadFilter?: boolean;
+  hotwords?: string;
+  initialPrompt?: string;
 }
 
 export interface DesktopWhisperResult {
@@ -137,11 +138,14 @@ export async function transcribeWithDesktopWhisper(
         if (config?.vadFilter !== undefined) {
             formData.append('vad_filter', config.vadFilter.toString());
         }
-        if (config?.hotwords) {
-            formData.append('hotwords', config.hotwords);
-        }
+    if (config?.hotwords) {
+      formData.append('hotwords', config.hotwords);
+    }
+    if (config?.initialPrompt) {
+      formData.append('initial_prompt', config.initialPrompt);
+    }
 
-        // Only log occasionally to reduce noise
+    // Only log occasionally to reduce noise
         if (Math.random() < 0.1) {
             console.log('[DesktopWhisperService] Sending transcription request:', {
                 url: `${DESKTOP_WHISPER_URL}/transcribe`,
