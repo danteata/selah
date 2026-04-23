@@ -6,6 +6,7 @@ import { useFileUrl } from '../hooks/useTemplates'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 
 const STORAGE_KEY = 'selah-live-state'
+const FLASH_DURATION_MS = 2000
 
 interface LiveState {
     slides: Slide[]
@@ -29,6 +30,10 @@ export default function LiveView() {
     const [liveState, setLiveState] = useState<LiveState | null>(null)
     const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
     const [isDesktop, setIsDesktop] = useState(false)
+
+    const [flashColor, setFlashColor] = useState<string | null>(null)
+    const monitorColor = searchParams.get('monitorColor') || null
+    const monitorName = searchParams.get('monitorName') || null
 
     // Countdown timer state
     const [countdownSeconds, setCountdownSeconds] = useState<number>(0)
@@ -66,9 +71,18 @@ export default function LiveView() {
                     setCurrentSlideId('')
                 })
 
+                // Listen for monitor identification flash
+                const unlistenFlash = await nativeMultiMonitorService.onLiveWindowEvent<{
+                    color: string
+                }>('monitor-flash', (payload) => {
+                    setFlashColor(payload.color)
+                    setTimeout(() => setFlashColor(null), FLASH_DURATION_MS)
+                })
+
                 return () => {
                     unlistenSlide()
                     unlistenClear()
+                    unlistenFlash()
                 }
             }
             return () => { }
@@ -94,6 +108,14 @@ export default function LiveView() {
                 }
             } else if (event.data?.type === 'slide-update') {
                 setCurrentSlideId(event.data.slideId)
+            }
+        }
+
+        const flashChannel = new BroadcastChannel('selah-monitor-flash')
+        flashChannel.onmessage = (event) => {
+            if (event.data?.color) {
+                setFlashColor(event.data.color)
+                setTimeout(() => setFlashColor(null), FLASH_DURATION_MS)
             }
         }
 
@@ -127,6 +149,7 @@ export default function LiveView() {
 
         return () => {
             broadcastChannelRef.current?.close()
+            flashChannel.close()
             window.removeEventListener('storage', handleStorageChange)
         }
     }, [currentSlideId])
@@ -284,7 +307,10 @@ export default function LiveView() {
 
     if (!slide) {
         return (
-            <div className="h-screen bg-black flex items-center justify-center text-white">
+            <div
+                className="h-screen bg-black flex items-center justify-center text-white relative"
+                style={monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : undefined}
+            >
                 <div className="text-center">
                     <p className="text-xl mb-2">No slide selected</p>
                     <p className="text-gray-400">Select a slide from the main window to display here</p>
@@ -292,6 +318,27 @@ export default function LiveView() {
                         <p className="text-green-400 text-sm mt-4">Running in native desktop mode</p>
                     )}
                 </div>
+
+                {flashColor && (
+                    <div
+                        className="absolute inset-0 z-50 flex items-center justify-center animate-pulse"
+                        style={{ backgroundColor: flashColor + '33' }}
+                    >
+                        <div
+                            className="w-24 h-24 rounded-full border-4"
+                            style={{ borderColor: flashColor, backgroundColor: flashColor + '22' }}
+                        />
+                    </div>
+                )}
+
+                {monitorColor && monitorName && (
+                    <div
+                        className="absolute top-3 left-3 px-3 py-1.5 rounded-md text-xs font-semibold text-white z-40"
+                        style={{ backgroundColor: monitorColor + 'CC' }}
+                    >
+                        {monitorName}
+                    </div>
+                )}
             </div>
         )
     }
@@ -299,6 +346,7 @@ export default function LiveView() {
     return (
         <div
             className="h-screen w-screen bg-black relative overflow-hidden"
+            style={monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : undefined}
             onDoubleClick={toggleFullscreen}
         >
             {/* Background */}
@@ -520,6 +568,41 @@ export default function LiveView() {
             {!isDesktop && !isFullscreen && (
                 <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white/50 text-sm">
                     Double-click to enter fullscreen • Ctrl+F
+                </div>
+            )}
+
+            {/* Monitor identification flash overlay */}
+            {flashColor && (
+                <div
+                    className="absolute inset-0 z-50 flex items-center justify-center animate-pulse pointer-events-none"
+                    style={{ backgroundColor: flashColor + '33' }}
+                >
+                    <div className="flex flex-col items-center gap-4">
+                        <div
+                            className="w-32 h-32 rounded-full border-4 flex items-center justify-center"
+                            style={{ borderColor: flashColor, backgroundColor: flashColor + '22' }}
+                        >
+                            <span className="text-4xl font-bold" style={{ color: flashColor }}>
+                                {monitorName || 'Display'}
+                            </span>
+                        </div>
+                        <span
+                            className="text-lg font-medium px-4 py-2 rounded-lg"
+                            style={{ color: flashColor, backgroundColor: flashColor + '22' }}
+                        >
+                            This is {monitorName || 'this display'}
+                        </span>
+                    </div>
+                </div>
+            )}
+
+            {/* Monitor name label (always visible, subtle) */}
+            {monitorColor && monitorName && !flashColor && (
+                <div
+                    className="absolute top-3 left-3 px-3 py-1.5 rounded-md text-xs font-semibold text-white z-40 opacity-60 hover:opacity-100 transition-opacity cursor-default"
+                    style={{ backgroundColor: monitorColor + 'CC' }}
+                >
+                    {monitorName}
                 </div>
             )}
         </div>

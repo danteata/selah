@@ -1,50 +1,66 @@
 /**
  * Window Manager for multi-monitor support
- * 
+ *
  * Handles creating, positioning, and managing the live output window
  * across multiple monitors.
  */
-
 use parking_lot::RwLock;
 use std::sync::Arc;
-use tauri::{
-    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, 
-    WebviewWindow, WindowEvent,
-};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
-use super::types::*;
 use super::state::{MultiMonitorState, LIVE_WINDOW_LABEL};
+use super::types::*;
 
 impl MultiMonitorState {
-    /// Get all available monitors
+    /// Get all available monitors with stable IDs
     pub fn get_available_monitors(&self) -> Vec<MonitorInfo> {
         #[cfg(not(target_os = "android"))]
         {
             if let Some(app) = self.get_app() {
                 let available = app.available_monitors().unwrap_or_default();
-                
-                return available.into_iter().enumerate().map(|(idx, monitor)| {
-                    let position = monitor.position();
-                    let size = monitor.size();
-                    let name = monitor.name()
-                        .map(|s| s.to_string())
-                        .unwrap_or(format!("Monitor {}", idx + 1));
-                    
-                    MonitorInfo {
-                        id: format!("monitor-{}", idx),
-                        name,
-                        width: size.width,
-                        height: size.height,
-                        position_x: position.x,
-                        position_y: position.y,
-                        scale_factor: monitor.scale_factor(),
-                        is_primary: false, // Tauri doesn't expose this directly
-                        refresh_rate: None,
-                    }
-                }).collect();
+                let primary = app.primary_monitor().unwrap_or_default();
+
+                return available
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, monitor)| {
+                        let position = monitor.position();
+                        let size = monitor.size();
+                        let name = monitor
+                            .name()
+                            .map(|s| s.to_string())
+                            .unwrap_or(format!("Monitor {}", idx + 1));
+
+                        // Use name + position as a stable ID since enumeration order can change
+                        let stable_id = format!(
+                            "{}-{}x{}",
+                            name.to_lowercase().replace(' ', "-"),
+                            position.x,
+                            position.y
+                        );
+
+                        // Check if this is the primary monitor by comparing position
+                        let is_primary = primary
+                            .as_ref()
+                            .map(|p| p.position() == position)
+                            .unwrap_or(idx == 0);
+
+                        MonitorInfo {
+                            id: stable_id,
+                            name,
+                            width: size.width,
+                            height: size.height,
+                            position_x: position.x,
+                            position_y: position.y,
+                            scale_factor: monitor.scale_factor(),
+                            is_primary,
+                            refresh_rate: None,
+                        }
+                    })
+                    .collect();
             }
         }
-        
+
         #[cfg(target_os = "android")]
         {
             let _ = self; // silence unused warning
@@ -60,25 +76,34 @@ impl MultiMonitorState {
                 refresh_rate: None,
             }];
         }
-        
+
         // Fallback for when app handle is not available
         vec![]
     }
 
     /// Get the primary monitor
     pub fn get_primary_monitor(&self) -> Option<MonitorInfo> {
-        self.get_available_monitors().into_iter().next()
+        self.get_available_monitors()
+            .into_iter()
+            .find(|m| m.is_primary)
     }
 
     /// Get the best monitor for live output (first non-primary, or primary if only one)
     pub fn get_best_monitor_for_live(&self) -> Option<MonitorInfo> {
         let monitors = self.get_available_monitors();
-        monitors.into_iter().next()
+        // Prefer a non-primary monitor for live output
+        monitors
+            .iter()
+            .find(|m| !m.is_primary)
+            .cloned()
+            .or_else(|| monitors.first().cloned())
     }
 
     /// Get monitor by ID
     pub fn get_monitor_by_id(&self, id: &str) -> Option<MonitorInfo> {
-        self.get_available_monitors().into_iter().find(|m| m.id == id)
+        self.get_available_monitors()
+            .into_iter()
+            .find(|m| m.id == id)
     }
 
     /// Create the live output window
@@ -125,30 +150,54 @@ impl MultiMonitorState {
             message: format!("Failed to parse URL: {}", e),
         })?);
 
-        // Build the window
-        let mut builder = WebviewWindowBuilder::new(
-            &app,
-            LIVE_WINDOW_LABEL,
-            webview_url,
-        )
-        .title("Selah - Live Output")
-        .inner_size(monitor.width as f64, monitor.height as f64)
-        .position(monitor.position_x as f64, monitor.position_y as f64)
-        .decorations(config.decorations)
-        .always_on_top(config.always_on_top)
-        .visible(true)
-        .focused(false) // Don't steal focus from main window
-        .skip_taskbar(true); // Don't show in taskbar
+        // Build the window — use visible(false) initially so we can position
+        // it before the first paint (avoids flash on wrong monitor)
+        let mut builder = WebviewWindowBuilder::new(&app, LIVE_WINDOW_LABEL, webview_url)
+            .title("Selah - Live Output")
+            .inner_size(800.0, 600.0)
+            .position(0.0, 0.0)
+            .decorations(config.decorations)
+            .always_on_top(config.always_on_top)
+            .visible(false)
+            .focused(false)
+            .skip_taskbar(true);
 
-        // Set fullscreen if requested
         if config.fullscreen {
             builder = builder.fullscreen(true);
         }
 
-        // Create the window
         let window = builder.build().map_err(|e| MultiMonitorError {
             code: "WINDOW_CREATE_FAILED".to_string(),
             message: format!("Failed to create live window: {}", e),
+        })?;
+
+        // Position and size using Physical coordinates — the Monitor API
+        // returns physical pixel values, so we must use Physical types
+        // (not logical) to land on the correct display on HiDPI setups.
+        window
+            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: monitor.position_x,
+                y: monitor.position_y,
+            }))
+            .map_err(|e| MultiMonitorError {
+                code: "POSITION_FAILED".to_string(),
+                message: format!("Failed to position live window: {}", e),
+            })?;
+
+        window
+            .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: monitor.width,
+                height: monitor.height,
+            }))
+            .map_err(|e| MultiMonitorError {
+                code: "RESIZE_FAILED".to_string(),
+                message: format!("Failed to resize live window: {}", e),
+            })?;
+
+        // Now show the window on the correct monitor
+        window.show().map_err(|e| MultiMonitorError {
+            code: "SHOW_FAILED".to_string(),
+            message: format!("Failed to show live window: {}", e),
         })?;
 
         // Update state
@@ -168,12 +217,12 @@ impl MultiMonitorState {
         // Set up window close handler using a cloned state
         let live_window_state = self.live_window_state.read().clone();
         let current_live_monitor = self.current_live_monitor.read().clone();
-        
+
         let state_for_closure = Arc::new(MultiMonitorStateClone {
             live_window_state: RwLock::new(live_window_state),
             current_live_monitor: RwLock::new(current_live_monitor),
         });
-        
+
         window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { .. } = event {
                 state_for_closure.set_live_window_state(LiveWindowState::Closed);
@@ -211,20 +260,24 @@ impl MultiMonitorState {
             message: "Application handle not initialized".to_string(),
         })?;
 
-        let window = app.get_webview_window(LIVE_WINDOW_LABEL).ok_or_else(|| MultiMonitorError {
-            code: "NO_LIVE_WINDOW".to_string(),
-            message: "Live window is not open".to_string(),
-        })?;
+        let window =
+            app.get_webview_window(LIVE_WINDOW_LABEL)
+                .ok_or_else(|| MultiMonitorError {
+                    code: "NO_LIVE_WINDOW".to_string(),
+                    message: "Live window is not open".to_string(),
+                })?;
 
         let is_fullscreen = window.is_fullscreen().map_err(|e| MultiMonitorError {
             code: "FULLSCREEN_CHECK_FAILED".to_string(),
             message: format!("Failed to check fullscreen state: {}", e),
         })?;
 
-        window.set_fullscreen(!is_fullscreen).map_err(|e| MultiMonitorError {
-            code: "FULLSCREEN_TOGGLE_FAILED".to_string(),
-            message: format!("Failed to toggle fullscreen: {}", e),
-        })?;
+        window
+            .set_fullscreen(!is_fullscreen)
+            .map_err(|e| MultiMonitorError {
+                code: "FULLSCREEN_TOGGLE_FAILED".to_string(),
+                message: format!("Failed to toggle fullscreen: {}", e),
+            })?;
 
         let new_state = if !is_fullscreen {
             LiveWindowState::Fullscreen
@@ -243,39 +296,51 @@ impl MultiMonitorState {
             message: "Application handle not initialized".to_string(),
         })?;
 
-        let monitor = self.get_monitor_by_id(monitor_id).ok_or_else(|| MultiMonitorError {
-            code: "MONITOR_NOT_FOUND".to_string(),
-            message: format!("Monitor {} not found", monitor_id),
-        })?;
+        let monitor = self
+            .get_monitor_by_id(monitor_id)
+            .ok_or_else(|| MultiMonitorError {
+                code: "MONITOR_NOT_FOUND".to_string(),
+                message: format!("Monitor {} not found", monitor_id),
+            })?;
 
-        let window = app.get_webview_window(LIVE_WINDOW_LABEL).ok_or_else(|| MultiMonitorError {
-            code: "NO_LIVE_WINDOW".to_string(),
-            message: "Live window is not open".to_string(),
-        })?;
+        let window =
+            app.get_webview_window(LIVE_WINDOW_LABEL)
+                .ok_or_else(|| MultiMonitorError {
+                    code: "NO_LIVE_WINDOW".to_string(),
+                    message: "Live window is not open".to_string(),
+                })?;
 
         // First exit fullscreen if in it
         let was_fullscreen = window.is_fullscreen().unwrap_or(false);
         if was_fullscreen {
-            window.set_fullscreen(false).map_err(|e| MultiMonitorError {
-                code: "FULLSCREEN_EXIT_FAILED".to_string(),
-                message: format!("Failed to exit fullscreen: {}", e),
-            })?;
+            window
+                .set_fullscreen(false)
+                .map_err(|e| MultiMonitorError {
+                    code: "FULLSCREEN_EXIT_FAILED".to_string(),
+                    message: format!("Failed to exit fullscreen: {}", e),
+                })?;
         }
 
         // Move and resize window
-        window.set_position(tauri::Position::Physical(
-            tauri::PhysicalPosition { x: monitor.position_x, y: monitor.position_y }
-        )).map_err(|e| MultiMonitorError {
-            code: "POSITION_FAILED".to_string(),
-            message: format!("Failed to move window: {}", e),
-        })?;
+        window
+            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: monitor.position_x,
+                y: monitor.position_y,
+            }))
+            .map_err(|e| MultiMonitorError {
+                code: "POSITION_FAILED".to_string(),
+                message: format!("Failed to move window: {}", e),
+            })?;
 
-        window.set_size(tauri::Size::Physical(
-            tauri::PhysicalSize { width: monitor.width, height: monitor.height }
-        )).map_err(|e| MultiMonitorError {
-            code: "RESIZE_FAILED".to_string(),
-            message: format!("Failed to resize window: {}", e),
-        })?;
+        window
+            .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: monitor.width,
+                height: monitor.height,
+            }))
+            .map_err(|e| MultiMonitorError {
+                code: "RESIZE_FAILED".to_string(),
+                message: format!("Failed to resize window: {}", e),
+            })?;
 
         // Re-enter fullscreen if it was
         if was_fullscreen {
@@ -311,16 +376,21 @@ impl MultiMonitorState {
     }
 
     /// Emit an event to the live window
-    pub fn emit_to_live_window<T: serde::Serialize + Clone>(&self, event: &str, payload: T) -> Result<(), MultiMonitorError> {
+    pub fn emit_to_live_window<T: serde::Serialize + Clone>(
+        &self,
+        event: &str,
+        payload: T,
+    ) -> Result<(), MultiMonitorError> {
         let app = self.get_app().ok_or_else(|| MultiMonitorError {
             code: "NO_APP_HANDLE".to_string(),
             message: "Application handle not initialized".to_string(),
         })?;
 
-        app.emit_to(LIVE_WINDOW_LABEL, event, payload).map_err(|e| MultiMonitorError {
-            code: "EMIT_FAILED".to_string(),
-            message: format!("Failed to emit event to live window: {}", e),
-        })?;
+        app.emit_to(LIVE_WINDOW_LABEL, event, payload)
+            .map_err(|e| MultiMonitorError {
+                code: "EMIT_FAILED".to_string(),
+                message: format!("Failed to emit event to live window: {}", e),
+            })?;
 
         Ok(())
     }

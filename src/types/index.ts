@@ -321,6 +321,7 @@ export interface AppSettings {
     footnotes?: boolean
     songAndHymnLabelsVisibility: boolean
     liveWindowFullscreen?: boolean
+    liveOutputMonitorId?: string | null
     motionlessSlides?: boolean
     transitionInterval?: number
     alertLimit?: number

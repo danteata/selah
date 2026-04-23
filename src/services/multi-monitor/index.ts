@@ -5,6 +5,10 @@
  * and manage multiple displays for live output.
  */
 
+import {
+    getMonitorColor,
+} from '../native-multi-monitor'
+
 export interface ScreenInfo {
     id: string
     name: string
@@ -14,6 +18,7 @@ export interface ScreenInfo {
     top: number
     isPrimary: boolean
     isExternal: boolean
+    color?: string
 }
 
 export interface MultiMonitorState {
@@ -58,21 +63,22 @@ class MultiMonitorService {
     async detectScreens(): Promise<ScreenInfo[]> {
         const screens: ScreenInfo[] = []
 
-        // Try Screen Details API (Chrome 100+)
         if ('getScreenDetails' in window) {
             try {
                 const screenDetails = await (window as any).getScreenDetails()
 
-                for (const screen of screenDetails.screens) {
+                for (const [idx, screen] of screenDetails.screens.entries()) {
+                    const name = screen.label || `Screen ${screens.length + 1}`
                     screens.push({
-                        id: screen.label || `screen-${screens.length}`,
-                        name: screen.label || `Screen ${screens.length + 1}`,
+                        id: `${name.toLowerCase().replace(/ /g, '-')}-${screen.left}x${screen.top}`,
+                        name,
                         width: screen.width,
                         height: screen.height,
                         left: screen.left,
                         top: screen.top,
                         isPrimary: screen.isPrimary,
                         isExternal: !screen.isPrimary,
+                        color: getMonitorColor(idx),
                     })
                 }
             } catch (e) {
@@ -80,7 +86,6 @@ class MultiMonitorService {
             }
         }
 
-        // Fallback: Use current screen info
         if (screens.length === 0) {
             screens.push({
                 id: 'primary',
@@ -91,10 +96,9 @@ class MultiMonitorService {
                 top: window.screen.top || 0,
                 isPrimary: true,
                 isExternal: false,
+                color: getMonitorColor(0),
             })
 
-            // Try to detect if there might be external screens
-            // by checking if screen is smaller than available screen
             if (window.screen.availWidth > window.screen.width) {
                 screens.push({
                     id: 'external-right',
@@ -105,6 +109,7 @@ class MultiMonitorService {
                     top: 0,
                     isPrimary: false,
                     isExternal: true,
+                    color: getMonitorColor(1),
                 })
             }
         }
@@ -124,10 +129,11 @@ class MultiMonitorService {
             return null
         }
 
-        // Add slide ID to URL if provided
-        const url = currentSlideId
-            ? `${liveViewUrl}?slide=${currentSlideId}`
-            : liveViewUrl
+        const params = new URLSearchParams()
+        if (currentSlideId) params.set('slide', currentSlideId)
+        if (screen.color) params.set('monitorColor', screen.color)
+        if (screen.name) params.set('monitorName', screen.name)
+        const url = params.toString() ? `${liveViewUrl}?${params.toString()}` : liveViewUrl
 
         // Calculate window position for the target screen
         const windowFeatures = [

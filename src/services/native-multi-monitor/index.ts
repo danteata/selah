@@ -8,6 +8,21 @@
 
 import type { Event, UnlistenFn } from '@tauri-apps/api/event'
 
+export const MONITOR_COLORS = [
+    '#3B82F6',
+    '#EF4444',
+    '#10B981',
+    '#F59E0B',
+    '#8B5CF6',
+    '#EC4899',
+    '#06B6D4',
+    '#F97316',
+] as const
+
+export function getMonitorColor(index: number): string {
+    return MONITOR_COLORS[index % MONITOR_COLORS.length]
+}
+
 // Types that mirror the Rust types
 export interface MonitorInfo {
     id: string
@@ -19,6 +34,7 @@ export interface MonitorInfo {
     scale_factor: number
     is_primary: boolean
     refresh_rate?: number
+    color?: string
 }
 
 export type LiveWindowState = 'Closed' | 'Open' | 'Fullscreen'
@@ -99,12 +115,12 @@ class NativeMultiMonitorService {
      */
     async getMonitors(): Promise<MonitorInfo[]> {
         if (!await this.isDesktop()) {
-            // Fallback to web API
             return this.getMonitorsWeb()
         }
 
         try {
-            return await this.tauriApis!.invoke<MonitorInfo[]>('get_monitors')
+            const monitors = await this.tauriApis!.invoke<MonitorInfo[]>('get_monitors')
+            return monitors.map((m, i) => ({ ...m, color: getMonitorColor(i) }))
         } catch (e) {
             console.error('Failed to get monitors:', e)
             return this.getMonitorsWeb()
@@ -117,20 +133,21 @@ class NativeMultiMonitorService {
     private async getMonitorsWeb(): Promise<MonitorInfo[]> {
         const monitors: MonitorInfo[] = []
 
-        // Try Screen Details API (Chrome 100+)
         if ('getScreenDetails' in window) {
             try {
                 const screenDetails = await (window as any).getScreenDetails()
                 for (const [idx, screen] of screenDetails.screens.entries()) {
+                    const name = screen.label || `Screen ${idx + 1}`
                     monitors.push({
-                        id: `monitor-${idx}`,
-                        name: screen.label || `Screen ${idx + 1}`,
+                        id: `${name.toLowerCase().replace(/ /g, '-')}-${screen.left}x${screen.top}`,
+                        name,
                         width: screen.width,
                         height: screen.height,
                         position_x: screen.left,
                         position_y: screen.top,
                         scale_factor: 1,
                         is_primary: screen.isPrimary,
+                        color: getMonitorColor(idx),
                     })
                 }
             } catch (e) {
@@ -138,7 +155,6 @@ class NativeMultiMonitorService {
             }
         }
 
-        // Fallback to primary screen
         if (monitors.length === 0) {
             monitors.push({
                 id: 'primary',
@@ -149,6 +165,7 @@ class NativeMultiMonitorService {
                 position_y: 0,
                 scale_factor: 1,
                 is_primary: true,
+                color: getMonitorColor(0),
             })
         }
 
@@ -418,6 +435,19 @@ class NativeMultiMonitorService {
         }
         this.listeners.clear()
     }
+
+    /**
+     * Flash a color on the live window to identify which monitor it's on
+     */
+    async flashMonitor(color: string): Promise<void> {
+        if (!await this.isDesktop()) return
+
+        try {
+            await this.tauriApis!.emit('monitor-flash', { color })
+        } catch (e) {
+            console.error('Failed to emit monitor flash:', e)
+        }
+    }
 }
 
 // Export singleton instance
@@ -446,3 +476,4 @@ export const saveWindowState = (state: WindowState) =>
 export const updateMainWindowState = () => nativeMultiMonitorService.updateMainWindowState()
 export const restoreMainWindowState = () => nativeMultiMonitorService.restoreMainWindowState()
 export const isDesktop = () => nativeMultiMonitorService.isDesktop()
+export const flashMonitor = (color: string) => nativeMultiMonitorService.flashMonitor(color)

@@ -13,6 +13,8 @@ import {
     type LiveWindowState,
     type LiveWindowConfig,
     type WindowState,
+    getMonitorColor,
+    flashMonitor as flashMonitorService,
 } from '../services/native-multi-monitor'
 import {
     multiMonitorService,
@@ -37,6 +39,7 @@ export interface UseNativeMultiMonitorReturn {
     moveToMonitor: (monitorId: string) => Promise<void>
     sendSlideToLive: (slideId: string, slideData?: Record<string, unknown>) => Promise<void>
     clearLiveOutput: (mode?: 'clear' | 'black' | 'logo') => Promise<void>
+    flashMonitor: (color: string) => Promise<void>
 
     // Window state persistence
     getWindowState: () => Promise<WindowState>
@@ -141,6 +144,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     position_y: s.top,
                     scale_factor: 1,
                     is_primary: s.isPrimary,
+                    color: getMonitorColor(idx),
                 }))
             }
         } finally {
@@ -207,13 +211,19 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         }
     }, [isDesktop])
 
+    // Flash monitor identification
+    const flashMonitor = useCallback(async (color: string) => {
+        if (isDesktop) {
+            await flashMonitorService(color)
+        }
+    }, [isDesktop])
+
     // Window state persistence
     const getWindowState = useCallback(() => nativeMultiMonitorService.getWindowState(), [])
     const saveWindowState = useCallback((state: WindowState) => nativeMultiMonitorService.saveWindowState(state), [])
     const updateMainWindowState = useCallback(() => nativeMultiMonitorService.updateMainWindowState(), [])
     const restoreMainWindowState = useCallback(() => nativeMultiMonitorService.restoreMainWindowState(), [])
 
-    // Legacy compatibility methods
     const screens = isDesktop
         ? monitors.map(m => ({
             id: m.id,
@@ -224,6 +234,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
             top: m.position_y,
             isPrimary: m.is_primary,
             isExternal: !m.is_primary,
+            color: m.color,
         }))
         : webState.screens
 
@@ -298,6 +309,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         moveToMonitor,
         sendSlideToLive,
         clearLiveOutput,
+        flashMonitor,
 
         // Window state persistence
         getWindowState,

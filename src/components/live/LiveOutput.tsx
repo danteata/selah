@@ -36,7 +36,6 @@ export function LiveOutput() {
 
     const {
         isPresenting,
-        selectedMonitorId,
         isDesktop,
         detectMonitors,
         openLiveWindow,
@@ -182,11 +181,23 @@ export function LiveOutput() {
         }
     }, [setEditingSlide, openModal])
 
+    const liveOutputMonitorId = useAppStore((state) => state.settings.liveOutputMonitorId)
+
     // Handle open live with screen picker
     const handleOpenLive = useCallback(async () => {
-        await detectMonitors()
-        setShowScreenPicker(true)
-    }, [detectMonitors])
+        if (liveOutputMonitorId && isDesktop) {
+            await openLiveWindow({
+                monitor_id: liveOutputMonitorId,
+                fullscreen: true,
+                decorations: false,
+                always_on_top: true,
+                initial_slide_id: liveSlideId || undefined,
+            })
+        } else {
+            await detectMonitors()
+            setShowScreenPicker(true)
+        }
+    }, [liveOutputMonitorId, isDesktop, openLiveWindow, detectMonitors, liveSlideId])
 
     // Handle screen selection
     const handleScreenSelect = useCallback(async (screenId: string) => {
@@ -302,9 +313,10 @@ export function LiveOutput() {
                         <button
                             onClick={handleOpenLive}
                             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            title={liveOutputMonitorId ? 'Go Live on pre-selected display' : 'Choose a display and go live'}
                         >
                             <Eye className="w-4 h-4" />
-                            Open Live
+                            {liveOutputMonitorId ? 'Go Live' : 'Open Live'}
                         </button>
                     )}
                 </div>

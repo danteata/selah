@@ -94,6 +94,7 @@ const defaultSettings: AppSettings = {
     footnotes: true,
     songAndHymnLabelsVisibility: false,
     liveWindowFullscreen: true,
+    liveOutputMonitorId: null,
     transitionInterval: 0.7,
     alertLimit: 5,
 }
@@ -191,6 +192,7 @@ interface AppStore extends AppState {
     setMainDisplayLabel: (label: string) => void
     setMainDisplayScreen: (screen: Screen | null) => void
     setLiveWindowFullscreen: (fullscreen: boolean) => void
+    setLiveOutputMonitorId: (monitorId: string | null) => void
     setLinesPerSlide: (lines: number) => void
     setAnimations: (animations: boolean) => void
     setFootnotes: (footnotes: boolean) => void
@@ -489,6 +491,15 @@ export const useAppStore = create<AppStore>()(
                     settings: {
                         ...state.settings,
                         liveWindowFullscreen: fullscreen
+                    }
+                }))
+            },
+
+            setLiveOutputMonitorId: (monitorId) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        liveOutputMonitorId: monitorId
                     }
                 }))
             },

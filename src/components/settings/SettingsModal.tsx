@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users, Upload } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users, Upload, Zap, RefreshCw } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
+import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { BibleVersionSettings } from './BibleVersionSettings'
 import { SermonListenerSettings } from '../sermon-listener'
 import { TeamManagementPanel } from '../team/TeamManagementPanel'
@@ -159,6 +160,30 @@ function DisplaySettings({
         setTransitionInterval: any
     }
 }) {
+    const setLiveOutputMonitorId = useAppStore((state) => state.setLiveOutputMonitorId)
+    const savedMonitorId = useAppStore((state) => state.settings.liveOutputMonitorId)
+    const {
+        monitors,
+        isLoading: monitorsLoading,
+        isDesktop,
+        detectMonitors,
+        flashMonitor,
+    } = useNativeMultiMonitor()
+    const [localMonitorId, setLocalMonitorId] = useState<string | null>(null)
+    const [flashingId, setFlashingId] = useState<string | null>(null)
+
+    const selectedMonitorId = localMonitorId ?? savedMonitorId
+
+    const handleIdentify = useCallback(async (monitorId: string, color: string) => {
+        if (flashingId) return
+        setFlashingId(monitorId)
+        await flashMonitor(color)
+        const channel = new BroadcastChannel('selah-monitor-flash')
+        channel.postMessage({ monitorId, color })
+        channel.close()
+        setTimeout(() => setFlashingId(null), 2500)
+    }, [flashMonitor, flashingId])
+
     const fonts = [
         'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat',
         'Source Sans Pro', 'Poppins', 'Nunito', 'Raleway', 'Ubuntu',
@@ -166,6 +191,98 @@ function DisplaySettings({
 
     return (
         <div className="space-y-6">
+            {/* Default Output Display */}
+            <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Default Output Display
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    Pre-select a display for quick Go Live. Shows the Screen Picker only if not set.
+                </p>
+                {monitors.length > 0 ? (
+                    <div className="space-y-1">
+                        <button
+                            onClick={() => { setLocalMonitorId(null); setLiveOutputMonitorId(null) }}
+                            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-left text-sm transition-all ${
+                                !selectedMonitorId
+                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                            }`}
+                        >
+                            <div className="w-4 h-4 rounded-sm bg-gray-300 dark:bg-gray-600 flex items-center justify-center flex-shrink-0">
+                                <Monitor className="w-3 h-3 text-gray-500" />
+                            </div>
+                            <span className="flex-1 text-gray-700 dark:text-gray-300">Auto (ask each time)</span>
+                            {!selectedMonitorId && <Check className="w-4 h-4 text-blue-600" />}
+                        </button>
+                        {monitors.map((monitor) => {
+                            const color = monitor.color || '#6B7280'
+                            const isSelected = selectedMonitorId === monitor.id
+                            const isFlashing = flashingId === monitor.id
+                            return (
+                                <button
+                                    key={monitor.id}
+                                    onClick={() => {
+                                        setLocalMonitorId(monitor.id)
+                                        setLiveOutputMonitorId(monitor.id)
+                                    }}
+                                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-left text-sm transition-all ${
+                                        isSelected
+                                            ? ''
+                                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                    }`}
+                                    style={isSelected ? { borderColor: color, backgroundColor: color + '10' } : undefined}
+                                >
+                                    <div
+                                        className="w-4 h-4 rounded-sm flex items-center justify-center flex-shrink-0"
+                                        style={{ backgroundColor: color + '30', border: `1.5px solid ${color}` }}
+                                    >
+                                        <Monitor className="w-3 h-3" style={{ color }} />
+                                    </div>
+                                    <span className="flex-1 font-medium" style={isSelected ? { color } : undefined}>
+                                        {monitor.name}
+                                    </span>
+                                    <span className="text-xs text-gray-400">
+                                        {monitor.width}×{monitor.height}
+                                    </span>
+                                    {monitor.is_primary && (
+                                        <span className="px-1.5 py-0.5 text-[10px] bg-gray-200 dark:bg-gray-700 rounded">
+                                            Primary
+                                        </span>
+                                    )}
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleIdentify(monitor.id, color) }}
+                                        disabled={isFlashing}
+                                        className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                                        title={`Identify ${monitor.name}`}
+                                    >
+                                        <Zap className={`w-3.5 h-3.5 ${isFlashing ? 'animate-pulse' : ''}`} style={{ color }} />
+                                    </button>
+                                    {isSelected && <Check className="w-4 h-4" style={{ color }} />}
+                                </button>
+                            )
+                        })}
+                    </div>
+                ) : (
+                    <div className="text-center py-3 text-gray-500">
+                        <Monitor className="w-6 h-6 mx-auto mb-1 opacity-50" />
+                        <p className="text-xs">
+                            {isDesktop ? 'No displays detected' : 'Display detection requires desktop app'}
+                        </p>
+                        {isDesktop && (
+                            <button
+                                onClick={detectMonitors}
+                                disabled={monitorsLoading}
+                                className="mt-1 text-xs text-blue-600 hover:text-blue-700"
+                            >
+                                <RefreshCw className={`w-3 h-3 inline mr-1 ${monitorsLoading ? 'animate-spin' : ''}`} />
+                                Detect displays
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
+
             {/* Font Selection */}
             <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
