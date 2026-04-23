@@ -307,13 +307,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const available = await unifiedTranscriptionService.isProviderAvailable(targetProvider)
             console.log('[useSermonListener] Provider available:', targetProvider, available)
 
-            if (!available && (targetProvider === 'whisper' || targetProvider === 'whisper-cpp')) {
+            if (!available && (targetProvider === 'whisper' || targetProvider === 'whisper-cpp' || targetProvider === 'desktop-whisper')) {
                 const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
                 if (webSpeechAvailable) {
                     setProvider('web-speech')
                     setIsSupported(true)
-                    const sourceProvider = targetProvider === 'whisper-cpp' ? 'Whisper.cpp' : 'Whisper'
-                    setError(`${sourceProvider} is not configured. Falling back to Web Speech API.`)
+                    const sourceProvider = targetProvider === 'whisper-cpp' ? 'Whisper.cpp' : targetProvider === 'desktop-whisper' ? 'Desktop Whisper' : 'Whisper'
+                    setError(`${sourceProvider} is not available. Falling back to Web Speech API.`)
                     console.warn('[useSermonListener] Falling back to Web Speech API')
                     return
                 }

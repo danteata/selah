@@ -123,10 +123,14 @@ class DesktopWhisperTranscriptionService {
 
     /**
      * Check if the service is configured and available
+     * 
+     * In the desktop app, the whisper server is bundled as a sidecar
+     * and will be started by init(). We don't require it to already
+     * be running for the provider to be considered available.
      */
     async isConfigured(): Promise<boolean> {
         if (!this.checkDesktop()) return false;
-        return isDesktopWhisperAvailable();
+        return true;
     }
 
     /**
