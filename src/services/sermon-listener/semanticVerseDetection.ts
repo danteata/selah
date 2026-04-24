@@ -393,42 +393,32 @@ export class SemanticVerseDetector {
         console.log('[SemanticDetector] Split into sentences:', sentences.length, sentences);
 
         // Deduplicate sentences to avoid redundant searches
-        const uniqueSentences = Array.from(new Set(sentences));
+        const uniqueSentences = Array.from(new Set(sentences))
 
-        for (const sentence of uniqueSentences) {
-            if (sentence.length < MIN_SENTENCE_LENGTH) {
-                continue
-            };
+        const searchPromises = uniqueSentences
+            .filter(sentence => sentence.length >= MIN_SENTENCE_LENGTH && !containsExplicitVerseReference(sentence))
+            .map(sentence => this.performSearch(sentence))
 
-            // Skip sentences that contain explicit verse references
-            // These should be caught by regex, not semantic detection
-            if (containsExplicitVerseReference(sentence)) {
-                continue
-            }
+        const searchResults = await Promise.allSettled(searchPromises)
 
-            const matches = await this.performSearch(sentence);
-
-            // Add unique matches
+        for (const result of searchResults) {
+            if (result.status !== 'fulfilled') continue
+            const matches = result.value
             for (const match of matches) {
                 if (!matchedReferences.has(match.reference)) {
-                    matchedReferences.add(match.reference);
-                    allMatches.push(match);
+                    matchedReferences.add(match.reference)
+                    allMatches.push(match)
                 }
-            }
-
-            // If we found good matches, stop searching more sentences
-            if (matches.some(m => m.score >= 0.75)) {
-                break;
             }
         }
 
-        // Strategy 2: If no good matches from sentences, try sliding windows
-        if (allMatches.length === 0 || !allMatches.some(m => m.score >= 0.65)) {
+        // Early termination: if we found high-confidence matches, skip sliding windows
+        const hasGoodMatch = allMatches.some(m => m.score >= 0.75)
+        if (!hasGoodMatch) {
             console.log('[SemanticDetector] Trying sliding window fallback...');
             const windows = generateSlidingWindows(textWithoutReferences);
 
             for (const window of windows) {
-                // Skip windows that contain explicit verse references
                 if (containsExplicitVerseReference(window)) {
                     continue
                 }
@@ -442,10 +432,6 @@ export class SemanticVerseDetector {
                     }
                 }
             }
-        }
-
-        if (allMatches.length > 0) {
-            console.log('[SemanticDetector] Found matches:', allMatches.map(m => ({ reference: m.reference, score: m.score })))
         }
 
         // Sort by score and return top matches

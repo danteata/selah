@@ -218,8 +218,15 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const recentChunksRef = useRef<string[]>([])
     const MAX_RECENT_CHUNKS = 5
 
-    // Track detected verse references to prevent duplicates (sync across regex and semantic)
+    // Track detected verse references to prevent duplicates in the list
     const detectedRefsRef = useRef<Set<string>>(new Set())
+
+    // Debounce timer for interim transcript processing
+    const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const INTERIM_DEBOUNCE_MS = 300
+
+    // Processing counter to prevent stale semantic results from overwriting newer regex results
+    const processingCounterRef = useRef(0)
 
     /**
      * Check if text is a duplicate or near-duplicate of recent chunks
@@ -230,29 +237,23 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         const normalizedNew = newText.toLowerCase().trim()
 
-        // Check against recent chunks
         for (const recent of recentChunksRef.current) {
             const normalizedRecent = recent.toLowerCase().trim()
 
             // Exact match
-            if (normalizedNew === normalizedRecent) {
-                return true
-            }
+            if (normalizedNew === normalizedRecent) return true
 
-            // Check if new text is contained in recent or vice versa
-            if (normalizedNew.includes(normalizedRecent) || normalizedRecent.includes(normalizedNew)) {
-                // If one is significantly longer, it might be an extension
-                const lengthRatio = Math.min(normalizedNew.length, normalizedRecent.length) /
-                    Math.max(normalizedNew.length, normalizedRecent.length)
-                if (lengthRatio > 0.7) {
-                    return true
-                }
+            // Check containment: only block if the new text is mostly contained in recent
+            // (indicating it's a subset, not new content extending it)
+            if (normalizedRecent.includes(normalizedNew)) {
+                // New text is entirely contained in a recent chunk — skip
+                const lengthRatio = normalizedNew.length / normalizedRecent.length
+                if (lengthRatio > 0.85) return true
             }
 
             // Check for repeated patterns (e.g., "Okay. Okay. Okay.")
             const words = normalizedNew.split(/\s+/)
             if (words.length >= 3) {
-                // Check if the same phrase is repeated
                 const phrase = words.slice(0, 3).join(' ')
                 const repeatedPattern = new RegExp(`(${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*){2,}`, 'i')
                 if (repeatedPattern.test(normalizedNew)) {
@@ -423,39 +424,24 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const processTranscript = useCallback((text: string) => {
         if (!text) return
 
-        console.log('[useSermonListener] ========== PROCESSING TRANSCRIPT ==========')
-        console.log('[useSermonListener] Text:', text.substring(0, 150))
-        console.log('[useSermonListener] Current detectedRefsRef:', Array.from(detectedRefsRef.current))
+        const currentProcessingId = ++processingCounterRef.current
 
-        // Regex-based verse detection
         const verses = detectVerses(text)
-        console.log('[useSermonListener] Regex detected verses:', verses.length, verses.map(v => ({
-            reference: v.reference,
-            raw: v.raw,
-            startIndex: v.startIndex,
-            endIndex: v.endIndex,
-            confidence: v.confidence
-        })))
 
-        // Note: We don't need extractVerseFromContext here because detectVerses
-        // already processes the full text. Using both would create duplicates.
-
-        // Filter by confidence
         const confidenceOrder = { high: 3, medium: 2, low: 1 }
         const minConfidenceLevel = confidenceOrder[minConfidence]
 
-        // Collect all valid verses from this query, filtering duplicates via ref
+        // Collect all valid verses from this query, filtering duplicates from the list
         const queryVerses: DetectedVerse[] = []
+        const reActivatedRefs: string[] = []
         for (const verse of verses) {
             const verseConfidence = confidenceOrder[verse.confidence]
             if (verseConfidence < minConfidenceLevel) {
-                console.log('[useSermonListener] Skipping verse (low confidence):', verse.reference, verse.confidence)
                 continue
             }
 
-            // Check if already detected (using ref for sync check)
             if (detectedRefsRef.current.has(verse.reference)) {
-                console.log('[useSermonListener] Skipping verse (already in ref):', verse.reference)
+                reActivatedRefs.push(verse.reference)
                 continue
             }
 
@@ -472,29 +458,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // Mark ALL regex-detected verses as best matches (they are explicit references)
         for (const verse of limitedQueryVerses) {
             verse.isBestMatch = true
-            // Add to ref to prevent semantic from adding duplicates
             detectedRefsRef.current.add(verse.reference)
-            console.log('[useSermonListener] Added to detectedRefsRef:', verse.reference)
         }
 
-        console.log('[useSermonListener] Regex verses to add:', limitedQueryVerses.map(v => ({
-            reference: v.reference,
-            detectionType: v.detectionType,
-            startIndex: v.startIndex,
-            endIndex: v.endIndex
-        })))
-
-        // Track if we found regex verses (to prevent semantic from overwriting current)
         const hasRegexVerses = limitedQueryVerses.length > 0
+        const hasReActivated = reActivatedRefs.length > 0
 
-        // If we found verses from regex, update state
+        // If we found new regex verses, also re-activate any previously detected verses
+        // that were mentioned again — the most recently mentioned verse becomes current
         if (hasRegexVerses) {
-            console.log('[useSermonListener] Adding regex verses to state:', limitedQueryVerses.map(v => v.reference))
-
             setDetectedVerses(prev => [...prev, ...limitedQueryVerses])
-
-            // Set the LATEST verse (highest startIndex) as current
-            const latestVerse = limitedQueryVerses[0] // Already sorted by position
+            const latestVerse = limitedQueryVerses[0]
             setCurrentVerse(latestVerse)
 
             // Auto-lookup if enabled
@@ -515,6 +489,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             } else {
                 optionsRef.current.onVerseDetected?.(latestVerse, null)
             }
+        } else if (hasReActivated) {
+            // No new verses, but a previously detected verse was mentioned again — re-activate it
+            const reActivatedRef = reActivatedRefs[0]
+            setCurrentVerse(prev => {
+                const existing = detectedVerses.find(v => v.reference === reActivatedRef)
+                if (existing) {
+                    if (autoLookup) {
+                        lookupVerse(existing).then(scripture => {
+                            optionsRef.current.onVerseDetected?.(existing, scripture)
+                            if (autoDisplay && scripture) {
+                                const slide = createBibleSlide(scripture)
+                                appendActiveSlide(slide)
+                                setLiveSlide(slide.id)
+                            }
+                        })
+                    }
+                    return existing
+                }
+                return prev
+            })
         }
 
         // Semantic verse detection (for paraphrases)
@@ -527,55 +521,41 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 startIndex: v.startIndex,
                 endIndex: v.endIndex,
             }))
-            console.log('[useSermonListener] Excluded ranges for semantic:', excludedRanges)
 
             // Use addText which handles throttling internally
             semanticDetectorRef.current.addText(text, excludedRanges).then((semanticMatches) => {
-                if (!semanticMatches) {
-                    console.log('[useSermonListener] Semantic returned null (throttled or buffer too short)')
-                    return // Throttled or buffer too short
-                }
+                // Discard stale results from a previous processing cycle
+                if (currentProcessingId !== processingCounterRef.current) return
 
-                console.log('[useSermonListener] Semantic matches returned:', semanticMatches.length, semanticMatches.map(m => ({
-                    reference: m.reference,
-                    book: m.book,
-                    chapter: m.chapter,
-                    verse: m.verse,
-                    score: m.score
-                })))
+                if (!semanticMatches) {
+                    return
+                }
 
                 // Convert semantic matches to DetectedVerse format
                 const semanticVerses: DetectedVerse[] = []
+                const semanticReActivatedRefs: string[] = []
                 for (const match of semanticMatches) {
-                    // Convert book number to book name if needed
                     let bookName = match.book
                     const bookNum = parseInt(match.book, 10)
                     if (!isNaN(bookNum) && bookNum >= 1 && bookNum <= 66) {
                         bookName = NUMBER_TO_BOOK[bookNum] || match.book
                     }
 
-                    // Build proper reference with book name
                     const properReference = `${bookName} ${match.chapter}:${match.verse}`
 
-                    // Calculate confidence
                     const confidence = match.score >= 0.85 ? 'high' : match.score >= 0.75 ? 'medium' : 'low'
                     const matchConfidenceLevel = confidenceOrder[confidence]
 
-                    // Filter by minConfidence setting
                     if (matchConfidenceLevel < minConfidenceLevel) {
-                        console.log('[useSermonListener] Skipping semantic verse (low confidence):', properReference, confidence, match.score)
                         continue
                     }
 
-                    console.log('[useSermonListener] Checking semantic match:', properReference, 'already detected?', detectedRefsRef.current.has(properReference))
-
-                    // Skip if already detected (check ref for sync)
+                    // Re-activate if already detected, don't add duplicate to list
                     if (detectedRefsRef.current.has(properReference)) {
-                        console.log('[useSermonListener] Skipping semantic verse (already in ref):', properReference)
+                        semanticReActivatedRefs.push(properReference)
                         continue
                     }
 
-                    // Convert to DetectedVerse format
                     const detectedVerse: DetectedVerse = {
                         raw: match.reference,
                         reference: properReference,
@@ -602,38 +582,22 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     limitedSemanticVerses[0].isBestMatch = true
                     for (const v of limitedSemanticVerses) {
                         detectedRefsRef.current.add(v.reference)
-                        console.log('[useSermonListener] Added semantic verse to detectedRefsRef:', v.reference)
                     }
                 }
 
-                console.log('[useSermonListener] Semantic verses to add:', limitedSemanticVerses.map(v => ({
-                    reference: v.reference,
-                    detectionType: v.detectionType,
-                    confidence: v.confidence
-                })))
-
                 if (limitedSemanticVerses.length > 0) {
-                    console.log('[useSermonListener] Adding semantic verses to state:', limitedSemanticVerses.map(v => v.reference))
-
                     setDetectedVerses(prev => [...prev, ...limitedSemanticVerses])
 
                     // Only update current verse if we didn't have regex verses
-                    // (regex verses are explicit references and take priority)
                     if (!hasRegexVerses) {
                         const bestSemanticVerse = limitedSemanticVerses[0]
                         setCurrentVerse(bestSemanticVerse)
 
-                        // Auto-lookup if enabled
                         if (autoLookup) {
                             lookupVerse(bestSemanticVerse).then(scripture => {
                                 optionsRef.current.onVerseDetected?.(bestSemanticVerse, scripture)
-
-                                // Auto-display if enabled
                                 if (autoDisplay && scripture) {
-                                    // Create a slide using the proper function to apply template
                                     const slide = createBibleSlide(scripture)
-
-                                    // Add slide to active slides and set as live
                                     appendActiveSlide(slide)
                                     setLiveSlide(slide.id)
                                 }
@@ -642,6 +606,28 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             optionsRef.current.onVerseDetected?.(bestSemanticVerse, null)
                         }
                     }
+                }
+
+                // Re-activate previously detected semantic verses as current
+                if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0) {
+                    const reActivatedRef = semanticReActivatedRefs[0]
+                    setCurrentVerse(prev => {
+                        const existing = detectedVerses.find(v => v.reference === reActivatedRef)
+                        if (existing) {
+                            if (autoLookup) {
+                                lookupVerse(existing).then(scripture => {
+                                    optionsRef.current.onVerseDetected?.(existing, scripture)
+                                    if (autoDisplay && scripture) {
+                                        const slide = createBibleSlide(scripture)
+                                        appendActiveSlide(slide)
+                                        setLiveSlide(slide.id)
+                                    }
+                                })
+                            }
+                            return existing
+                        }
+                        return prev
+                    })
                 }
             }).catch((error: Error) => {
                 console.error('[SemanticDetector] Search error:', error)
@@ -785,17 +771,29 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         recentChunksRef.current.shift()
                     }
 
+                    // Cancel any pending interim debounce
+                    if (interimDebounceRef.current) {
+                        clearTimeout(interimDebounceRef.current)
+                        interimDebounceRef.current = null
+                    }
+
                     setInterimTranscript('')
                     const newFullTranscript = `${transcriptBufferRef.current} ${cleanedText}`.trim()
                     transcriptBufferRef.current = newFullTranscript
                     setTranscript(newFullTranscript)
 
-                    console.log('[useSermonListener] Updated transcript:', newFullTranscript.substring(0, 100))
                     processTranscript(newFullTranscript)
                 } else {
                     setInterimTranscript(cleanedText)
                     const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
-                    processTranscript(rollingContext)
+                    // Debounce interim verse detection to reduce processing load
+                    if (interimDebounceRef.current) {
+                        clearTimeout(interimDebounceRef.current)
+                    }
+                    interimDebounceRef.current = setTimeout(() => {
+                        processTranscript(rollingContext)
+                        interimDebounceRef.current = null
+                    }, INTERIM_DEBOUNCE_MS)
                 }
                 onTranscriptUpdate?.(cleanedText, !isFinal)
             },
@@ -865,7 +863,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setIsSpeechDetected(false)
         transcriptBufferRef.current = ''
         recentChunksRef.current = []
-        detectedRefsRef.current = new Set() // Clear detected refs
+        detectedRefsRef.current = new Set()
+        if (interimDebounceRef.current) {
+            clearTimeout(interimDebounceRef.current)
+            interimDebounceRef.current = null
+        }
         unifiedTranscriptionService.clearTranscript()
     }, [])
 
