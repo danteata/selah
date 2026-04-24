@@ -272,7 +272,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                     {(['upload', 'preview', 'importing', 'complete'] as WizardStep[]).map((s, i) => (
                         <div key={s} className="flex items-center">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${step === s
-                                ? 'bg-blue-600 text-white'
+                                ? 'bg-[var(--accent-teal)] text-white'
                                 : i < ['upload', 'preview', 'importing', 'complete'].indexOf(step)
                                     ? 'bg-green-500 text-white'
                                     : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
@@ -350,7 +350,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                 {/* Songs.db */}
                                 <div className="border border-gray-300 dark:border-gray-700 rounded-lg p-4">
                                     <div className="flex items-center gap-2 mb-2">
-                                        <Database className="w-5 h-5 text-blue-600" />
+                                        <Database className="w-5 h-5 text-[var(--accent-teal)]" />
                                         <span className="font-medium text-gray-700 dark:text-gray-300">
                                             Songs.db
                                         </span>
@@ -405,7 +405,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                 <button
                                     onClick={processMultipleFiles}
                                     disabled={isParsing}
-                                    className="mt-4 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                                    className="mt-4 w-full px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2 transition-all shadow-sm"
                                 >
                                     {isParsing ? (
                                         <>
@@ -424,7 +424,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
 
                         {/* Parsing indicator */}
                         {isParsing && (
-                            <div className="flex items-center justify-center gap-2 text-blue-600">
+                            <div className="flex items-center justify-center gap-2 text-[var(--accent-teal)]">
                                 <Loader2 className="w-5 h-5 animate-spin" />
                                 <span>Parsing files...</span>
                             </div>
@@ -476,7 +476,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                         {/* Stats */}
                         <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                             <div className="flex items-center gap-2">
-                                <Music className="w-5 h-5 text-blue-600" />
+                                <Music className="w-5 h-5 text-[var(--accent-teal)]" />
                                 <span className="font-medium">{stats.total} songs found</span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -570,7 +570,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                 {step === 'importing' && (
                     <div className="space-y-6 py-8">
                         <div className="text-center">
-                            <Loader2 className="w-12 h-12 mx-auto text-blue-600 animate-spin" />
+                            <Loader2 className="w-12 h-12 mx-auto text-[var(--accent-teal)] animate-spin" />
                             <p className="mt-4 text-lg font-medium text-gray-900 dark:text-white">
                                 Importing Songs...
                             </p>
@@ -580,7 +580,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                         </div>
                         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
                             <div
-                                className="bg-blue-600 h-3 rounded-full transition-all"
+                                className="bg-[var(--accent-teal)] h-3 rounded-full transition-all"
                                 style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
                             />
                         </div>
@@ -641,7 +641,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             {onClose && (
                                 <button
                                     onClick={onClose}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                    className="px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
                                 >
                                     Done
                                 </button>
@@ -664,7 +664,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                     <button
                         onClick={handleImport}
                         disabled={selectedSongs.size === 0}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                     >
                         Import {selectedSongs.size} Songs
                         <ChevronRight className="w-4 h-4" />

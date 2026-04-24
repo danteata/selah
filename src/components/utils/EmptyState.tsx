@@ -50,7 +50,7 @@ export function EmptyState({
             {action && actionText && (
                 <button
                     onClick={action}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
                 >
                     {actionIcon && <IconWrapper name={actionIcon} size="4" />}
                     {actionText}

@@ -5,9 +5,10 @@ import type { Alert, Slide } from '../../types'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 
 interface AddAlertModalProps {
-    isOpen: boolean
-    onClose: () => void
+    isOpen?: boolean
+    onClose?: () => void
     editingSlide?: Slide | null
+    isInline?: boolean
 }
 
 const DEFAULT_BG: BackgroundSelection = {
@@ -20,18 +21,18 @@ const ALERT_STYLES = [
     {
         id: 'fullscreen',
         label: 'Full Screen',
-        desc: 'Full slide in the schedule',
+        desc: 'Slide',
         icon: '⬛',
     },
     {
         id: 'banner',
         label: 'Banner',
-        desc: 'Lower-third overlay',
+        desc: 'Overlay',
         icon: '▬',
     },
 ]
 
-export function AddAlertModal({ isOpen, onClose, editingSlide }: AddAlertModalProps) {
+export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline = false }: AddAlertModalProps) {
     const [content, setContent] = useState('')
     const [title, setTitle] = useState('')
     const [duration, setDuration] = useState(5)
@@ -80,7 +81,7 @@ export function AddAlertModal({ isOpen, onClose, editingSlide }: AddAlertModalPr
             setAlertStyle('fullscreen')
             setSelectedBg(DEFAULT_BG)
         }
-    }, [editingSlide, isOpen])
+    }, [editingSlide, isOpen, isInline])
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
@@ -132,28 +133,27 @@ export function AddAlertModal({ isOpen, onClose, editingSlide }: AddAlertModalPr
             appendActiveSlide(slide)
         }
 
-        // Reset
-        setContent('')
-        setTitle('')
-        setDuration(5)
-        setPriority('medium')
-        setAlertStyle('fullscreen')
-        setSelectedBg(DEFAULT_BG)
-        onClose()
+        if (!isInline) {
+            // Reset
+            setContent('')
+            setTitle('')
+            setDuration(5)
+            setPriority('medium')
+            setAlertStyle('fullscreen')
+            setSelectedBg(DEFAULT_BG)
+            onClose?.()
+        }
     }
 
-    if (!isOpen) return null
+    if (!isOpen && !isInline) return null
 
-    return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
-        >
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-                {/* Header */}
+    const contentArea = (
+        <div className={`${isInline ? 'h-full bg-transparent' : 'w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-h-[90vh]'} flex flex-col overflow-hidden`}>
+            {/* Header */}
+            {!isInline && (
                 <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
-                    <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
-                        <Bell className="w-5 h-5 text-orange-600" />
+                    <div className="p-2 bg-[var(--accent-teal)]/10 rounded-lg">
+                        <AlertCircle className="w-5 h-5 text-[var(--accent-teal)]" />
                     </div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">
                         {editingSlide ? 'Edit Alert' : 'Create Alert'}
@@ -165,9 +165,10 @@ export function AddAlertModal({ isOpen, onClose, editingSlide }: AddAlertModalPr
                         <X className="w-5 h-5" />
                     </button>
                 </div>
+            )}
 
-                {/* Form */}
-                <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto flex-1">
+            {/* Form */}
+            <form onSubmit={handleSubmit} className={`${isInline ? 'p-3' : 'p-4'} space-y-4 overflow-y-auto flex-1 custom-scrollbar`}>
 
                     {/* Alert Style */}
                     <div>
@@ -203,7 +204,7 @@ export function AddAlertModal({ isOpen, onClose, editingSlide }: AddAlertModalPr
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
                             placeholder="Announcement"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                         />
                     </div>
 
@@ -292,23 +293,35 @@ export function AddAlertModal({ isOpen, onClose, editingSlide }: AddAlertModalPr
 
                     {/* Actions */}
                     <div className="flex justify-end gap-3 pt-2">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                        >
-                            Cancel
-                        </button>
+                        {!isInline && (
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        )}
                         <button
                             type="submit"
-                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                            className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg transition-all shadow-sm w-full"
                         >
                             <Plus className="w-4 h-4" />
-                            {editingSlide ? 'Update Alert' : 'Create Alert'}
+                            {editingSlide ? 'UPDATE ALERT' : 'ADD ALERT'}
                         </button>
                     </div>
                 </form>
             </div>
+    )
+
+    if (isInline) return contentArea
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && onClose?.()}
+        >
+            {contentArea}
         </div>
     )
 }

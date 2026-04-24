@@ -175,7 +175,7 @@ export function LibraryPanel({ isOpen, onClose }: LibraryPanelProps) {
                                     <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button
                                             onClick={() => handleUseSlide(slide)}
-                                            className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                            className="p-1.5 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
                                             title="Use this slide"
                                         >
                                             <Plus className="w-4 h-4" />

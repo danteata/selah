@@ -290,68 +290,43 @@ export function PreviewContent() {
     }, [scriptureRef, activeSlide, fetchScripture, activeSlides, setActiveSlides, setActiveSlide])
 
     return (
-        <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-lg p-4">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    Preview and Edit Content
+        <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
+            {/* Header - Compact */}
+            <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-800">
+                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Slide Queue
                 </h2>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                     <button
                         onClick={toggleBulkSelectMode}
-                        className={`
-              flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors
-              ${bulkSelectMode
-                                ? 'bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300'
-                                : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 hover:bg-gray-200'
-                            }
-            `}
+                        className={`p-1.5 rounded transition-colors ${bulkSelectMode ? 'bg-amber-500/20 text-amber-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+                        title="Bulk Select"
                     >
                         <LayoutGrid className="w-4 h-4" />
-                        {bulkSelectMode ? 'Cancel' : 'Select'}
                     </button>
-
-                    {bulkSelectMode && slides.length > 0 && (
-                        <button
-                            onClick={handleSelectAll}
-                            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded-lg hover:bg-gray-200 transition-colors"
-                            title={allSelected ? 'Deselect all' : 'Select all'}
-                        >
-                            <CheckSquare className={`w-4 h-4 ${someSelected ? 'text-primary-500' : ''}`} />
-                            {allSelected ? 'Deselect All' : 'Select All'}
-                        </button>
-                    )}
-
-                    {bulkSelectMode && selectedSlideIds.length > 0 && (
+                    {bulkSelectMode && (
                         <button
                             onClick={handleDeleteSelected}
-                            className="flex items-center gap-2 px-3 py-1.5 text-sm bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 rounded-lg hover:bg-red-200"
+                            disabled={selectedSlideIds.length === 0}
+                            className="p-1.5 text-red-500 hover:bg-red-500/10 rounded disabled:opacity-30"
                         >
                             <Trash2 className="w-4 h-4" />
-                            Delete ({selectedSlideIds.length})
                         </button>
                     )}
-
-                    <button
-                        onClick={handleGoLive}
-                        disabled={!activeSlide}
-                        className="flex items-center gap-2 px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Go Live
-                    </button>
                 </div>
             </div>
 
-            {/* Slides Grid */}
+            {/* Slides List - High Density Vertical */}
             <div
                 ref={slidesGridRef}
-                className="flex-1 overflow-y-auto grid grid-cols-2 gap-3 mb-4"
+                className="flex-1 overflow-y-auto p-2 space-y-2"
             >
                 {slides.length > 0 ? (
-                    slides.map((slide) => (
+                    slides.map((slide, index) => (
                         <SlideCard
                             key={slide.id}
                             slide={slide}
+                            index={index + 1}
                             isActive={activeSlide?.id === slide.id}
                             isLive={liveSlideId === slide.id}
                             isSelected={selectedSlideIds.includes(slide.id)}
@@ -363,194 +338,31 @@ export function PreviewContent() {
                             onSaveToLibrary={() => handleSaveToLibrary(slide)}
                             isSaved={isInLibrary(slide.id)}
                             onGoLive={() => setLiveSlide(slide.id)}
+                            variant="compact"
                         />
                     ))
                 ) : (
-                    <div className="col-span-2">
+                    <div className="py-20">
                         <EmptyState
                             icon="i-bx-slideshow"
-                            sub="No slides yet"
-                            desc="Create a new slide to get started"
-                            actionText="Create new slide"
+                            sub="Queue Empty"
+                            desc="Add slides to get started"
+                            actionText="Create Slide"
                             action={handleCreateNewSlide}
                         />
                     </div>
                 )}
             </div>
 
-            {/* Slide Editor (simplified) */}
-            {activeSlide && (
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <h3 className="font-medium text-gray-900 dark:text-white">
-                            {activeSlide.name}
-                        </h3>
-                        <div className="flex items-center gap-2">
-                            {activeSlide.type !== 'bible' && (
-                                <button
-                                    onClick={() => handleEditSlide(activeSlide)}
-                                    className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                                    title="Edit"
-                                >
-                                    <BookOpen className="w-4 h-4" />
-                                </button>
-                            )}
-                            <button
-                                onClick={() => handleDuplicateSlide(activeSlide)}
-                                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                                title="Duplicate"
-                            >
-                                <Copy className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => handleDeleteSlide(activeSlide.id)}
-                                className="p-2 text-red-500 hover:text-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
-                                title="Delete"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Bible Verse Content - Show related verses */}
-                    {activeSlide.type === 'bible' && scriptureRef ? (
-                        <div className="space-y-3">
-                            {/* Navigation Controls */}
-                            <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-lg p-2">
-                                <button
-                                    onClick={() => navigateVerse('prev')}
-                                    disabled={scriptureRef.startVerse <= 1}
-                                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-30"
-                                    title="Previous verse"
-                                >
-                                    <ChevronLeft className="w-5 h-5" />
-                                </button>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium">
-                                        {scriptureRef.bookName} {scriptureRef.chapter}:{scriptureRef.startVerse}
-                                        {scriptureRef.endVerse !== scriptureRef.startVerse && `-${scriptureRef.endVerse}`}
-                                    </span>
-                                    <BibleVersionSelect
-                                        selectedVersion={scriptureRef.version}
-                                        onChange={handleVersionChange}
-                                    />
-                                </div>
-                                <button
-                                    onClick={() => navigateVerse('next')}
-                                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-                                    title="Next verse"
-                                >
-                                    <ChevronRight className="w-5 h-5" />
-                                </button>
-                            </div>
-
-                            {/* Loading State */}
-                            {loadingVerses && (
-                                <div className="flex items-center justify-center py-4">
-                                    <RefreshCw className="w-5 h-5 animate-spin text-gray-400" />
-                                </div>
-                            )}
-
-                            {/* Related Verses Display */}
-                            {!loadingVerses && (
-                                <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                                    {/* Previous verses */}
-                                    {relatedVerses.prev.map((v) => (
-                                        <button
-                                            key={v.verse}
-                                            onClick={() => handleVerseSelect(parseInt(v.verse))}
-                                            className="w-full text-left px-3 py-2 text-sm rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
-                                        >
-                                            <sup className="text-primary-500 font-medium">{v.verse}</sup>
-                                            <span className="text-gray-700 dark:text-gray-300 ml-1">{v.scripture}</span>
-                                        </button>
-                                    ))}
-
-                                    {/* Current verses (highlighted) */}
-                                    {currentVerses.map((v) => (
-                                        <div
-                                            key={v.verse}
-                                            className="px-3 py-2 text-sm rounded-lg bg-primary-50 dark:bg-primary-900/30 border border-primary-200 dark:border-primary-700"
-                                        >
-                                            <sup className="text-primary-600 dark:text-primary-400 font-bold">{v.verse}</sup>
-                                            <span className="text-gray-900 dark:text-white ml-1 font-medium">{v.scripture}</span>
-                                        </div>
-                                    ))}
-
-                                    {/* Next verses */}
-                                    {relatedVerses.next.map((v) => (
-                                        <button
-                                            key={v.verse}
-                                            onClick={() => handleVerseSelect(parseInt(v.verse))}
-                                            className="w-full text-left px-3 py-2 text-sm rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
-                                        >
-                                            <sup className="text-primary-500 font-medium">{v.verse}</sup>
-                                            <span className="text-gray-700 dark:text-gray-300 ml-1">{v.scripture}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Verse Quick Selector */}
-                            {!loadingVerses && currentVerses.length > 0 && (
-                                <div className="flex flex-wrap gap-1 pt-2 border-t border-gray-200 dark:border-gray-700">
-                                    {relatedVerses.prev.map((v) => (
-                                        <button
-                                            key={v.verse}
-                                            onClick={() => handleVerseSelect(parseInt(v.verse))}
-                                            className="w-7 h-7 flex items-center justify-center text-xs rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
-                                        >
-                                            {v.verse}
-                                        </button>
-                                    ))}
-                                    {currentVerses.map((v) => (
-                                        <span
-                                            key={v.verse}
-                                            className="w-7 h-7 flex items-center justify-center text-xs rounded bg-primary-500 text-white font-medium"
-                                        >
-                                            {v.verse}
-                                        </span>
-                                    ))}
-                                    {relatedVerses.next.map((v) => (
-                                        <button
-                                            key={v.verse}
-                                            onClick={() => handleVerseSelect(parseInt(v.verse))}
-                                            className="w-7 h-7 flex items-center justify-center text-xs rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
-                                        >
-                                            {v.verse}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        /* Non-bible slides - show content editor */
-                        <div className="space-y-2">
-                            {activeSlide.contents.map((content, index) => (
-                                <div
-                                    key={index}
-                                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg dark:bg-gray-800 dark:text-white min-h-[80px] cursor-pointer hover:border-primary-500 transition-colors"
-                                    onClick={() => handleEditSlide(activeSlide)}
-                                >
-                                    <div
-                                        className="tiptap-preview"
-                                        dangerouslySetInnerHTML={{ __html: content || '<p class="text-gray-400">Click to edit...</p>' }}
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    <div className="flex justify-end mt-3">
-                        <button
-                            onClick={handleGoLive}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                        >
-                            Take Live
-                        </button>
-                    </div>
-                </div>
-            )}
+            {/* Quick Add Footer */}
+            <div className="p-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+                <button
+                    onClick={handleCreateNewSlide}
+                    className="w-full py-2 px-4 bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium transition-colors border border-gray-300 dark:border-gray-700"
+                >
+                    + Add New Slide
+                </button>
+            </div>
         </div>
     )
 }

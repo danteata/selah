@@ -61,9 +61,10 @@ const chapterCounts: Record<string, number> = {
 interface BibleListProps {
     initialQuery?: string
     onClose: () => void
+    isInline?: boolean
 }
 
-export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
+export function BibleList({ initialQuery = '', onClose, isInline = false }: BibleListProps) {
     const [query, setQuery] = useState(initialQuery)
     const [scripture, setScripture] = useState<Scripture | null>(null)
     const [verses, setVerses] = useState<BibleVerse[]>([])
@@ -295,18 +296,20 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
 
     return (
         <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
-            {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={onClose}
-                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                    >
-                        <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    <h2 className="text-lg font-semibold">Display Bible</h2>
+            {/* Header - Hidden when inline in Studio sidebar */}
+            {!isInline && (
+                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={onClose}
+                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+                        <h2 className="text-lg font-semibold">Display Bible</h2>
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* Smart Search */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-800">
@@ -324,7 +327,7 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
                         onKeyDown={handleKeyDown}
                         onFocus={() => setShowSuggestions(true)}
                         placeholder="e.g., John 3:16 or Jn 3:16-18"
-                        className="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
+                        className="w-full pl-10 pr-4 py-2.5 border border-[var(--border-default)] rounded-lg focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none bg-[var(--bg-tertiary)] dark:text-white transition-all"
                     />
 
                     {/* Book Suggestions Dropdown */}
@@ -364,7 +367,7 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
                     <button
                         onClick={handleSearch}
                         disabled={loading}
-                        className="px-5 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                        className="px-5 py-1.5 bg-[var(--accent-teal)] text-white text-sm font-medium rounded-lg hover:brightness-110 disabled:opacity-50 transition-all shadow-sm"
                     >
                         {loading ? 'Searching...' : 'Search'}
                     </button>
@@ -486,7 +489,7 @@ export function BibleList({ initialQuery = '', onClose }: BibleListProps) {
                             <div className="flex gap-2">
                                 <button
                                     onClick={() => handleCreateSlide(selectedTemplate)}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                    className="px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm font-medium"
                                 >
                                     Create Slide
                                 </button>

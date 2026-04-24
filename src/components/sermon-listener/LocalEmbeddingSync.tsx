@@ -546,7 +546,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                         <button
                             onClick={loadModel}
                             disabled={isModelLoading}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                            className="px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center gap-2 transition-all shadow-sm"
                         >
                             {isModelLoading ? (
                                 <>
@@ -575,7 +575,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                 if (kjv) seedVersion(kjv.versionId)
                             }}
                             disabled={!modelLoaded || activeSeeding !== null}
-                            className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                            className="mt-4 w-full px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2 transition-all shadow-sm"
                         >
                             <Download className="w-4 h-4" />
                             Cache KJV Now
@@ -617,7 +617,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                     <button
                                         onClick={() => seedVersion(status.versionId)}
                                         disabled={!modelLoaded || activeSeeding !== null}
-                                        className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                                        className="px-3 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center gap-1 transition-all shadow-sm"
                                     >
                                         <Download className="w-4 h-4" />
                                         Cache
@@ -628,7 +628,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                         <button
                                             onClick={() => seedVersion(status.versionId)}
                                             disabled={!modelLoaded || activeSeeding !== null}
-                                            className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 flex items-center gap-1"
+                                            className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 flex items-center gap-1 transition-all shadow-sm"
                                         >
                                             <RefreshCw className="w-4 h-4" />
                                             Refresh
@@ -636,7 +636,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                         <button
                                             onClick={() => clearLocalCache(status.versionId)}
                                             disabled={activeSeeding !== null}
-                                            className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50 flex items-center gap-1"
+                                            className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 disabled:opacity-50 flex items-center gap-1 transition-all shadow-sm"
                                         >
                                             <Trash2 className="w-4 h-4" />
                                             Clear
@@ -658,7 +658,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                 </div>
                                 <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                                     <div
-                                        className="bg-blue-600 h-2 rounded-full transition-all"
+                                        className="bg-[var(--accent-teal)] h-2 rounded-full transition-all"
                                         style={{ width: `${Math.min((status.progress / status.total) * 100, 100)}%` }}
                                     />
                                 </div>

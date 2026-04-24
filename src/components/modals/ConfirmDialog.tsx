@@ -52,7 +52,7 @@ export function ConfirmDialog({
             icon: Info,
             iconColor: 'text-blue-500',
             bgColor: 'bg-blue-50 dark:bg-blue-900/20',
-            confirmButton: 'bg-blue-600 hover:bg-blue-700',
+            confirmButton: 'bg-[var(--accent-teal)] hover:brightness-110 transition-all shadow-sm',
         },
         warning: {
             icon: AlertTriangle,

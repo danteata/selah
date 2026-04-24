@@ -16,6 +16,7 @@ import type {
 } from '../types'
 import { bibleVersionObjects } from '../types'
 import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
+import type { NavSection } from '../types/studio'
 
 // UI State types
 export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
@@ -64,6 +65,12 @@ export interface AppState {
     isDarkMode: boolean
     bulkSelectMode: boolean
     selectedSlideIds: string[]
+
+    // Studio Mode layout state
+    activeNavSection: NavSection | null
+    contextPanelOpen: boolean
+    contextPanelWidth: number
+    commandBarOpen: boolean
 
     // Undo/Redo stacks
     pastStates: Array<Partial<AppState>>
@@ -141,6 +148,11 @@ const initialState: AppState = {
     isDarkMode: false,
     bulkSelectMode: false,
     selectedSlideIds: [],
+    // Studio Mode layout state
+    activeNavSection: null,
+    contextPanelOpen: true,
+    contextPanelWidth: 320,
+    commandBarOpen: false,
     // Undo/Redo
     pastStates: [],
     futureStates: [],
@@ -226,6 +238,14 @@ interface AppStore extends AppState {
     toggleSlideSelection: (slideId: string) => void
     setSelectedSlideIds: (ids: string[]) => void
     clearSelectedSlides: () => void
+
+    // Studio Mode layout actions
+    setActiveNavSection: (section: NavSection | null) => void
+    toggleContextPanel: () => void
+    setContextPanelOpen: (open: boolean) => void
+    setContextPanelWidth: (width: number) => void
+    setCommandBarOpen: (open: boolean) => void
+    toggleCommandBar: () => void
 }
 
 export const useAppStore = create<AppStore>()(
@@ -798,6 +818,35 @@ export const useAppStore = create<AppStore>()(
             clearSelectedSlides: () => {
                 set({ selectedSlideIds: [], bulkSelectMode: false })
             },
+
+            // Studio Mode layout actions
+            setActiveNavSection: (section) => {
+                set((state) => ({
+                    activeNavSection: section,
+                    // Auto-open context panel when selecting a section
+                    contextPanelOpen: section !== null ? true : state.contextPanelOpen,
+                }))
+            },
+
+            toggleContextPanel: () => {
+                set((state) => ({ contextPanelOpen: !state.contextPanelOpen }))
+            },
+
+            setContextPanelOpen: (open) => {
+                set({ contextPanelOpen: open })
+            },
+
+            setContextPanelWidth: (width) => {
+                set({ contextPanelWidth: Math.max(260, Math.min(460, width)) })
+            },
+
+            setCommandBarOpen: (open) => {
+                set({ commandBarOpen: open })
+            },
+
+            toggleCommandBar: () => {
+                set((state) => ({ commandBarOpen: !state.commandBarOpen }))
+            },
         }),
         {
             name: 'app-storage',
@@ -809,6 +858,10 @@ export const useAppStore = create<AppStore>()(
                 recentBibleSearches: state.recentBibleSearches,
                 bannerVisible: state.bannerVisible,
                 bibleVersions: state.bibleVersions,
+                // Persist studio layout preferences
+                contextPanelOpen: state.contextPanelOpen,
+                contextPanelWidth: state.contextPanelWidth,
+                activeNavSection: state.activeNavSection,
             }),
         }
     )

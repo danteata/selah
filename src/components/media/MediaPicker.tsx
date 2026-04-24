@@ -12,19 +12,21 @@ interface MediaItem {
 }
 
 interface MediaPickerProps {
-    isOpen: boolean
-    onClose: () => void
-    onSelect: (media: MediaItem) => void
+    isOpen?: boolean
+    onClose?: () => void
+    onSelect?: (media: MediaItem) => void
     allowUpload?: boolean
     mediaType?: 'image' | 'video' | 'all'
+    isInline?: boolean
 }
 
 export function MediaPicker({
-    isOpen,
+    isOpen = true,
     onClose,
     onSelect,
     allowUpload = true,
     mediaType = 'all',
+    isInline = false
 }: MediaPickerProps) {
     const [activeTab, setActiveTab] = useState<'library' | 'upload'>('library')
     const [searchQuery, setSearchQuery] = useState('')
@@ -34,14 +36,16 @@ export function MediaPicker({
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
 
     useEffect(() => {
-        if (isOpen) {
+        if (isOpen || isInline) {
             loadMedia()
         }
-    }, [isOpen])
+    }, [isOpen, isInline])
 
     useEffect(() => {
+        if (isInline) return
+
         const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose()
+            if (e.key === 'Escape') onClose?.()
         }
         if (isOpen) {
             document.addEventListener('keydown', handleEscape)
@@ -51,7 +55,7 @@ export function MediaPicker({
             document.removeEventListener('keydown', handleEscape)
             document.body.style.overflow = ''
         }
-    }, [isOpen, onClose])
+    }, [isOpen, onClose, isInline])
 
     const loadMedia = async () => {
         setIsLoading(true)
@@ -109,20 +113,17 @@ export function MediaPicker({
 
     const handleSelect = () => {
         if (selectedMedia) {
-            onSelect(selectedMedia)
-            onClose()
+            onSelect?.(selectedMedia)
+            onClose?.()
         }
     }
 
-    if (!isOpen) return null
+    if (!isOpen && !isInline) return null
 
-    return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
-        >
-            <div className="w-full max-w-4xl h-[80vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-                {/* Header */}
+    const content = (
+        <div className={`${isInline ? 'h-full' : 'w-full max-w-4xl h-[80vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl'} flex flex-col overflow-hidden`}>
+            {/* Header - Only show if not inline (ContextPanel has its own header) */}
+            {!isInline && (
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800">
                     <div className="flex items-center gap-4">
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -158,23 +159,25 @@ export function MediaPicker({
                         <X className="w-5 h-5" />
                     </button>
                 </div>
+            )}
 
-                {/* Content */}
-                <div className="flex-1 overflow-hidden">
-                    {activeTab === 'library' ? (
-                        <div className="h-full flex flex-col">
-                            {/* Search & View Toggle */}
-                            <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
-                                <div className="relative flex-1">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                    <input
-                                        type="text"
-                                        value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                        placeholder="Search media..."
-                                        className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                                    />
-                                </div>
+            {/* Content */}
+            <div className="flex-1 overflow-hidden flex flex-col">
+                {activeTab === 'library' ? (
+                    <div className="h-full flex flex-col">
+                        {/* Search & View Toggle */}
+                        <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Search media..."
+                                    className="w-full pl-10 pr-4 py-2 text-sm border border-[var(--border-default)] rounded-lg bg-[var(--bg-tertiary)] text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                />
+                            </div>
+                            {!isInline && (
                                 <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
                                     <button
                                         onClick={() => setViewMode('grid')}
@@ -195,123 +198,144 @@ export function MediaPicker({
                                         <List className="w-4 h-4" />
                                     </button>
                                 </div>
-                            </div>
+                            )}
+                        </div>
 
-                            {/* Media Grid/List */}
-                            <div className="flex-1 overflow-y-auto p-4">
-                                {isLoading ? (
-                                    <div className="flex items-center justify-center h-full">
-                                        <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
-                                    </div>
-                                ) : filteredMedia.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 dark:text-gray-400">
-                                        <Image className="w-16 h-16 mb-4 opacity-50" />
-                                        <p className="font-medium">No media found</p>
-                                        <p className="text-sm mt-1">
-                                            {searchQuery ? 'Try a different search' : 'Upload some media to get started'}
-                                        </p>
-                                    </div>
-                                ) : viewMode === 'grid' ? (
-                                    <div className="grid grid-cols-4 gap-4">
-                                        {filteredMedia.map((item) => (
-                                            <button
-                                                key={item.id}
-                                                onClick={() => setSelectedMedia(item)}
-                                                className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${selectedMedia?.id === item.id
-                                                    ? 'border-primary-500 ring-2 ring-primary-500/30'
-                                                    : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'
-                                                    }`}
-                                            >
-                                                <img
-                                                    src={item.thumbnail || item.url}
-                                                    alt={item.name}
-                                                    className="w-full h-full object-cover"
-                                                />
-                                                {item.type === 'video' && (
-                                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                                        <Film className="w-8 h-8 text-white" />
-                                                    </div>
-                                                )}
-                                                {selectedMedia?.id === item.id && (
-                                                    <div className="absolute top-2 right-2 w-6 h-6 bg-primary-500 rounded-full flex items-center justify-center">
-                                                        <Check className="w-4 h-4 text-white" />
-                                                    </div>
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {filteredMedia.map((item) => (
-                                            <button
-                                                key={item.id}
-                                                onClick={() => setSelectedMedia(item)}
-                                                className={`w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-all text-left ${selectedMedia?.id === item.id
-                                                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                                                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                                                    }`}
-                                            >
-                                                <img
-                                                    src={item.thumbnail || item.url}
-                                                    alt={item.name}
-                                                    className="w-16 h-12 object-cover rounded"
-                                                />
-                                                <div className="flex-1">
-                                                    <p className="font-medium text-gray-900 dark:text-white">
-                                                        {item.name}
-                                                    </p>
-                                                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                                                        {item.type} • {item.createdAt}
-                                                    </p>
+                        {/* Media Grid/List */}
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                            {isLoading ? (
+                                <div className="flex items-center justify-center h-full">
+                                    <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
+                                </div>
+                            ) : filteredMedia.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 dark:text-gray-400">
+                                    <Image className="w-12 h-12 mb-4 opacity-50" />
+                                    <p className="text-sm font-medium">No media found</p>
+                                </div>
+                            ) : viewMode === 'grid' ? (
+                                <div className={`grid ${isInline ? 'grid-cols-2' : 'grid-cols-4'} gap-4`}>
+                                    {filteredMedia.map((item) => (
+                                        <button
+                                            key={item.id}
+                                            onClick={() => setSelectedMedia(item)}
+                                            className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${selectedMedia?.id === item.id
+                                                ? 'border-primary-500 ring-2 ring-primary-500/30'
+                                                : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'
+                                                }`}
+                                        >
+                                            <img
+                                                src={item.thumbnail || item.url}
+                                                alt={item.name}
+                                                className="w-full h-full object-cover"
+                                            />
+                                            {item.type === 'video' && (
+                                                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                                    <Film className="w-6 h-6 text-white" />
                                                 </div>
-                                                {selectedMedia?.id === item.id && (
-                                                    <Check className="w-5 h-5 text-primary-500" />
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                                            )}
+                                            {selectedMedia?.id === item.id && (
+                                                <div className="absolute top-2 right-2 w-5 h-5 bg-primary-500 rounded-full flex items-center justify-center">
+                                                    <Check className="w-3 h-3 text-white" />
+                                                </div>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {filteredMedia.map((item) => (
+                                        <button
+                                            key={item.id}
+                                            onClick={() => setSelectedMedia(item)}
+                                            className={`w-full flex items-center gap-3 p-2 rounded-lg border-2 transition-all text-left ${selectedMedia?.id === item.id
+                                                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                                }`}
+                                        >
+                                            <img
+                                                src={item.thumbnail || item.url}
+                                                alt={item.name}
+                                                className="w-12 h-10 object-cover rounded"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                                                    {item.name}
+                                                </p>
+                                            </div>
+                                            {selectedMedia?.id === item.id && (
+                                                <Check className="w-4 h-4 text-primary-500" />
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
-                    ) : (
-                        <div className="p-6">
-                            <MediaUpload
-                                onUpload={handleUpload}
-                                onCancel={() => setActiveTab('library')}
-                                accept={
-                                    mediaType === 'image' ? 'image/*' :
-                                        mediaType === 'video' ? 'video/*' :
-                                            'image/*,video/*'
-                                }
-                            />
-                        </div>
-                    )}
-                </div>
-
-                {/* Footer */}
-                {activeTab === 'library' && (
-                    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {selectedMedia ? `Selected: ${selectedMedia.name}` : 'Select a media item'}
-                        </p>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={onClose}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleSelect}
-                                disabled={!selectedMedia}
-                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                Use Selected
-                            </button>
-                        </div>
+                    </div>
+                ) : (
+                    <div className="p-4">
+                        <MediaUpload
+                            onUpload={handleUpload}
+                            onCancel={() => setActiveTab('library')}
+                            accept={
+                                mediaType === 'image' ? 'image/*' :
+                                    mediaType === 'video' ? 'video/*' :
+                                        'image/*,video/*'
+                            }
+                        />
                     </div>
                 )}
             </div>
+
+            {/* Footer */}
+            {activeTab === 'library' && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+                    <div className="flex-1 min-w-0 mr-4">
+                        {selectedMedia && (
+                            <p className="text-xs font-medium text-primary-500 truncate">
+                                Selected: {selectedMedia.name}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex gap-2">
+                        {isInline ? (
+                            <button
+                                onClick={handleSelect}
+                                disabled={!selectedMedia}
+                                className="px-4 py-2 text-xs font-bold bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 transition-all shadow-sm"
+                            >
+                                USE MEDIA
+                            </button>
+                        ) : (
+                            <>
+                                <button
+                                    onClick={onClose}
+                                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSelect}
+                                    disabled={!selectedMedia}
+                                    className="px-4 py-2 text-sm font-medium text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg disabled:opacity-50 transition-all shadow-sm"
+                                >
+                                    Use Selected
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    )
+
+    if (isInline) return content
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && onClose?.()}
+        >
+            {content}
         </div>
     )
 }

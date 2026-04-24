@@ -13,7 +13,9 @@ import { AddAlertModal } from '../components/alerts/AddAlertModal'
 import { AddCountdownModal, type CountdownData } from '../components/countdown/AddCountdownModal'
 import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
-import { DashboardLayout, DashboardHeader } from '../components/dashboard'
+import { AppShell } from '../components/layout/AppShell'
+import { StudioWorkspace } from '../components/layout/StudioWorkspace'
+import { CommandBar } from '../components/layout/CommandBar'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
@@ -58,8 +60,6 @@ export default function Dashboard() {
         return document.documentElement.classList.contains('dark')
     })
 
-    // Sermon listener panel state - enabled by default
-    const [showSermonListener, setShowSermonListener] = useState(true)
 
     // Save as template modal state
     const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false)
@@ -334,43 +334,18 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="min-h-screen bg-[var(--bg-primary)] overflow-hidden">
-            {/* Subtle Background Elements - refined, not garish */}
-            <div className="fixed inset-0 overflow-hidden pointer-events-none">
-                {/* Primary accent glow - teal */}
-                <div className="absolute -top-40 -right-40 w-96 h-96 bg-[var(--accent-teal)]/8 dark:bg-[var(--accent-teal)]/5 rounded-full blur-3xl animate-pulse-soft" />
-                {/* Secondary accent glow - amber */}
-                <div className="absolute top-1/3 -left-40 w-80 h-80 bg-[var(--accent-amber)]/6 dark:bg-[var(--accent-amber)]/4 rounded-full blur-3xl animate-pulse-soft" style={{ animationDelay: '2s' }} />
-                {/* Tertiary accent glow - rose */}
-                <div className="absolute -bottom-40 right-1/4 w-72 h-72 bg-[var(--accent-rose)]/5 dark:bg-[var(--accent-rose)]/3 rounded-full blur-3xl animate-pulse-soft" style={{ animationDelay: '4s' }} />
-            </div>
+        <AppShell
+            isDark={isDark}
+            onToggleTheme={toggleTheme}
+            activeSchedule={activeSchedule}
+            user={{
+                name: clerkUser?.firstName || clerkUser?.username || 'User',
+                onSignOut: () => signOut()
+            }}
+        >
+            <StudioWorkspace />
 
-            {/* Grain texture overlay */}
-            <div className="grain-overlay" />
-
-            {/* Header */}
-            <DashboardHeader
-                isDark={isDark}
-                onToggleTheme={toggleTheme}
-                activeSchedule={activeSchedule}
-                showSermonListener={showSermonListener}
-                onToggleSermonListener={() => setShowSermonListener(!showSermonListener)}
-                showAdminPanel={showAdminPanel}
-                onToggleAdminPanel={() => setShowAdminPanel(!showAdminPanel)}
-                canAccessAdmin={canAccessAdmin}
-                user={{
-                    name: clerkUser?.firstName || clerkUser?.username || 'User',
-                    onSignOut: () => signOut()
-                }}
-            />
-
-            {/* Main Content with Draggable Layout */}
-            <main className="pt-16 h-screen">
-                <DashboardLayout
-                    showSermonListener={showSermonListener}
-                    onSermonListenerToggle={() => setShowSermonListener(!showSermonListener)}
-                />
-            </main>
+            <CommandBar />
 
             {/* Modals */}
             {modals.settings && (
@@ -544,6 +519,6 @@ export default function Dashboard() {
                     </div>
                 </div>
             )}
-        </div>
+        </AppShell>
     )
 }

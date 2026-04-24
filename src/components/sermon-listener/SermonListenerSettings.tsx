@@ -87,13 +87,13 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             {/* Global Settings Info */}
             <div className="mb-6 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700">
                 <div className="flex items-start gap-3">
-                    <Shield className="w-5 h-5 text-blue-500 mt-0.5" />
+                    <Shield className="w-5 h-5 text-[var(--accent-teal)] mt-0.5" />
                     <div>
-                        <h3 className="font-medium text-blue-800 dark:text-blue-300">Global Configuration</h3>
+                        <h3 className="font-medium text-[var(--accent-teal)] dark:text-blue-300">Global Configuration</h3>
                         {isGlobalLoading ? (
                             <div className="flex items-center gap-2 mt-1">
-                                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                                <span className="text-sm text-blue-600 dark:text-blue-400">Loading configuration...</span>
+                                <Loader2 className="w-4 h-4 animate-spin text-[var(--accent-teal)]" />
+                                <span className="text-sm text-[var(--accent-teal)]">Loading configuration...</span>
                             </div>
                         ) : (
                             <>
@@ -101,16 +101,16 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                                     Transcription provider is configured globally by your super admin.
                                 </p>
                                 <div className="mt-2 flex items-center gap-2">
-                                    <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                                    <span className="text-sm font-medium text-[var(--accent-teal)] dark:text-blue-300">
                                         Current Provider:
                                     </span>
-                                    <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 text-sm">
+                                    <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-800 text-[var(--accent-teal)] dark:text-blue-300 text-sm">
                                         {getProviderDisplayName(globalSettings?.sermonListener_transcriptionProvider)}
                                     </span>
                                 </div>
                                 {globalSettings?.sermonListener_defaultLanguage && (
                                     <div className="mt-1 flex items-center gap-2">
-                                        <span className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                                        <span className="text-sm font-medium text-[var(--accent-teal)] dark:text-blue-300">
                                             Default Language:
                                         </span>
                                         <span className="text-sm text-blue-700 dark:text-blue-400">
@@ -166,7 +166,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     <button
                         onClick={() => setCaptureSource('microphone')}
                         className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${captureSource === 'microphone'
-                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                ? 'border-[var(--accent-teal)] bg-blue-50 dark:bg-blue-900/20 text-[var(--accent-teal)] dark:text-blue-300'
                                 : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-600 dark:text-gray-400'
                             }`}
                     >
@@ -182,7 +182,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${!systemAudioSupported
                                 ? 'opacity-50 grayscale cursor-not-allowed border-gray-200 dark:border-gray-700'
                                 : captureSource === 'system'
-                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                    ? 'border-[var(--accent-teal)] bg-blue-50 dark:bg-blue-900/20 text-[var(--accent-teal)] dark:text-blue-300'
                                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-600 dark:text-gray-400'
                             }`}
                     >
@@ -290,7 +290,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 )}
                 <button
                     onClick={saveSettings}
-                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
+                    className="px-4 py-2 bg-[var(--accent-teal)] hover:brightness-110 text-white rounded-lg transition-all shadow-sm"
                 >
                     Save Settings
                 </button>

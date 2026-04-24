@@ -7,9 +7,10 @@ import type { Song } from '../../types'
 
 interface SongListProps {
     onClose: () => void
+    isInline?: boolean
 }
 
-export function SongList({ onClose }: SongListProps) {
+export function SongList({ onClose, isInline = false }: SongListProps) {
     const [query, setQuery] = useState('')
     const [selectedSong, setSelectedSong] = useState<Song | null>(null)
     const [songToEdit, setSongToEdit] = useState<Song | null>(null)
@@ -85,28 +86,30 @@ export function SongList({ onClose }: SongListProps) {
     return (
         <>
             <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
-                    <div className="flex items-center gap-3">
+                {/* Header - Hidden when inline */}
+                {!isInline && (
+                    <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={onClose}
+                                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                                <ChevronLeft className="w-5 h-5" />
+                            </button>
+                            <h2 className="text-lg font-semibold">Songs Library</h2>
+                            {songsLoading && (
+                                <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                            )}
+                        </div>
                         <button
-                            onClick={onClose}
-                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            onClick={() => setIsAddModalOpen(true)}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
                         >
-                            <ChevronLeft className="w-5 h-5" />
+                            <Plus className="w-4 h-4" />
+                            Add Song
                         </button>
-                        <h2 className="text-lg font-semibold">Songs Library</h2>
-                        {songsLoading && (
-                            <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-                        )}
                     </div>
-                    <button
-                        onClick={() => setIsAddModalOpen(true)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Add Song
-                    </button>
-                </div>
+                )}
 
                 {/* Search */}
                 <div className="p-4 border-b border-gray-200 dark:border-gray-800">
@@ -117,7 +120,7 @@ export function SongList({ onClose }: SongListProps) {
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             placeholder="Search songs..."
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
+                        className="w-full pl-10 pr-4 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                         />
                     </div>
                 </div>
@@ -139,7 +142,7 @@ export function SongList({ onClose }: SongListProps) {
                                 {!query && (
                                     <button
                                         onClick={() => setIsAddModalOpen(true)}
-                                        className="mt-4 flex items-center gap-2 px-4 py-2 mx-auto bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                                        className="mt-4 flex items-center gap-2 px-4 py-2 mx-auto bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
                                     >
                                         <Plus className="w-4 h-4" />
                                         Add Song
@@ -227,7 +230,7 @@ export function SongList({ onClose }: SongListProps) {
                             </button>
                             <button
                                 onClick={handleCreateSlides}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                className="px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm font-medium"
                             >
                                 Create Slides
                             </button>

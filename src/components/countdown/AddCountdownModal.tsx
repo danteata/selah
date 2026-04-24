@@ -4,10 +4,11 @@ import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundP
 import type { Slide } from '../../types'
 
 interface AddCountdownModalProps {
-    isOpen: boolean
-    onClose: () => void
+    isOpen?: boolean
+    onClose?: () => void
     onAdd: (countdown: CountdownData) => void
     editingSlide?: Slide | null
+    isInline?: boolean
 }
 
 export interface CountdownData {
@@ -27,7 +28,7 @@ const DEFAULT_BG: BackgroundSelection = {
     backgroundType: 'gradient',
 }
 
-export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddCountdownModalProps) {
+export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide, isInline = false }: AddCountdownModalProps) {
     const [hours, setHours] = useState(0)
     const [minutes, setMinutes] = useState(5)
     const [seconds, setSeconds] = useState(0)
@@ -69,15 +70,15 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
             setTitle('')
             setSelectedBg(DEFAULT_BG)
         }
-    }, [editingSlide, isOpen])
+    }, [editingSlide, isOpen, isInline])
 
     const presets = [
-        { label: '1 min', h: 0, m: 1, s: 0 },
-        { label: '5 min', h: 0, m: 5, s: 0 },
-        { label: '10 min', h: 0, m: 10, s: 0 },
-        { label: '15 min', h: 0, m: 15, s: 0 },
-        { label: '30 min', h: 0, m: 30, s: 0 },
-        { label: '1 hour', h: 1, m: 0, s: 0 },
+        { label: '1m', h: 0, m: 1, s: 0 },
+        { label: '5m', h: 0, m: 5, s: 0 },
+        { label: '10m', h: 0, m: 10, s: 0 },
+        { label: '15m', h: 0, m: 15, s: 0 },
+        { label: '30m', h: 0, m: 30, s: 0 },
+        { label: '1h', h: 1, m: 0, s: 0 },
     ]
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -94,13 +95,15 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
             backgroundStorageId: selectedBg.backgroundStorageId ?? null,
         })
 
-        // Reset form
-        setHours(0)
-        setMinutes(5)
-        setSeconds(0)
-        setTitle('')
-        setSelectedBg(DEFAULT_BG)
-        onClose()
+        if (!isInline) {
+            // Reset form
+            setHours(0)
+            setMinutes(5)
+            setSeconds(0)
+            setTitle('')
+            setSelectedBg(DEFAULT_BG)
+            onClose?.()
+        }
     }
 
     const applyPreset = (preset: { h: number; m: number; s: number }) => {
@@ -109,23 +112,20 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
         setSeconds(preset.s)
     }
 
-    if (!isOpen) return null
+    if (!isOpen && !isInline) return null
 
     const pad = (n: number) => String(n).padStart(2, '0')
     const previewTime = hours > 0
         ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
         : `${pad(minutes)}:${pad(seconds)}`
 
-    return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
-        >
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-                {/* Header */}
+    const content = (
+        <div className={`${isInline ? 'h-full bg-transparent' : 'w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-h-[90vh]'} flex flex-col overflow-hidden`}>
+            {/* Header */}
+            {!isInline && (
                 <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
-                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                        <Clock className="w-5 h-5 text-blue-600" />
+                    <div className="p-2 bg-[var(--accent-teal)]/10 rounded-lg">
+                        <Clock className="w-5 h-5 text-[var(--accent-teal)]" />
                     </div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">
                         {editingSlide ? 'Edit Countdown' : 'Add Countdown'}
@@ -137,9 +137,10 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
                         <X className="w-5 h-5" />
                     </button>
                 </div>
+            )}
 
-                {/* Form */}
-                <form onSubmit={handleSubmit} className="p-4 space-y-4 overflow-y-auto flex-1">
+            {/* Form */}
+            <form onSubmit={handleSubmit} className={`${isInline ? 'p-3' : 'p-4'} space-y-4 overflow-y-auto flex-1 custom-scrollbar`}>
                     {/* Title */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -150,7 +151,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
                             placeholder="Service starts in..."
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                         />
                     </div>
 
@@ -167,7 +168,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
                                     onChange={(e) => setHours(Math.max(0, Math.min(23, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="23"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Hours</p>
                             </div>
@@ -179,7 +180,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
                                     onChange={(e) => setMinutes(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="59"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Minutes</p>
                             </div>
@@ -191,7 +192,7 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
                                     onChange={(e) => setSeconds(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="59"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Seconds</p>
                             </div>
@@ -235,23 +236,35 @@ export function AddCountdownModal({ isOpen, onClose, onAdd, editingSlide }: AddC
 
                     {/* Actions */}
                     <div className="flex justify-end gap-3 pt-2">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                        >
-                            Cancel
-                        </button>
+                        {!isInline && (
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                        )}
                         <button
                             type="submit"
-                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                            className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg transition-all shadow-sm w-full"
                         >
                             <Plus className="w-4 h-4" />
-                            {editingSlide ? 'Update Countdown' : 'Add Countdown'}
+                            {editingSlide ? 'UPDATE' : 'ADD COUNTDOWN'}
                         </button>
                     </div>
                 </form>
             </div>
+    )
+
+    if (isInline) return content
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && onClose?.()}
+        >
+            {content}
         </div>
     )
 }

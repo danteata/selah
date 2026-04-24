@@ -249,9 +249,9 @@ export function SermonListenerPanel({
                 {/* Start/Stop button */}
                 <button
                     onClick={isListening ? stop : start}
-                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors flex-shrink-0 ${isListening
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all shadow-sm flex-shrink-0 ${isListening
                         ? 'bg-red-500 hover:bg-red-600 text-white'
-                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                        : 'bg-[var(--accent-teal)] hover:brightness-110 text-white'
                         }`}
                 >
                     {isListening ? 'Stop' : 'Start'}
@@ -267,14 +267,14 @@ export function SermonListenerPanel({
 
             {/* Current verse display - compact */}
             {currentVerse && currentScripture && (
-                <div className="p-2 rounded-lg border bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-500/50">
+                <div className="p-2 rounded-lg border bg-[var(--accent-teal)]/5 border-[var(--accent-teal)]/30">
                     <div className="flex items-center justify-between mb-1">
-                        <h4 className="font-semibold text-sm text-blue-500">
+                        <h4 className="font-semibold text-sm text-[var(--accent-teal)]">
                             {formatVerseForDisplay(currentVerse)}
                         </h4>
                         <button
                             onClick={displayCurrentVerse}
-                            className="flex items-center gap-1 px-2 py-0.5 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition-colors"
+                            className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal)] text-white rounded text-xs hover:brightness-110 transition-all shadow-sm"
                         >
                             <Send className="w-3 h-3" />
                             Send
@@ -309,7 +309,7 @@ export function SermonListenerPanel({
                             <button
                                 onClick={() => setShowOnlyBestMatches(!showOnlyBestMatches)}
                                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${showOnlyBestMatches
-                                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
+                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                                     : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                                     }`}
                                 title={showOnlyBestMatches ? 'Showing only confirmed verses' : 'Showing all detected verses'}
@@ -333,7 +333,7 @@ export function SermonListenerPanel({
                             <div
                                 key={`${verse.reference}-${idx}`}
                                 className={`group flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors ${currentVerse?.reference === verse.reference
-                                    ? 'bg-blue-500 text-white'
+                                    ? 'bg-[var(--accent-teal)] text-white'
                                     : verse.isBestMatch
                                         ? 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
                                         : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
@@ -383,7 +383,7 @@ export function SermonListenerPanel({
                             {transcript && (
                                 <button
                                     onClick={() => setShowSaveDialog(true)}
-                                    className="flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-600"
+                                    className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110"
                                     title="Save transcript"
                                 >
                                     <Save className="w-3 h-3" />
@@ -451,7 +451,7 @@ export function SermonListenerPanel({
                         </div>
 
                         {activeSchedule && (
-                            <div className="mb-3 p-2 rounded bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-600 dark:text-blue-400">
+                            <div className="mb-3 p-2 rounded bg-[var(--accent-teal)]/5 text-[var(--accent-teal)]">
                                 <Calendar className="w-3 h-3 inline mr-1" />
                                 Will be associated with: {activeSchedule.name}
                             </div>
@@ -473,7 +473,7 @@ export function SermonListenerPanel({
                             <button
                                 onClick={handleSaveTranscript}
                                 disabled={isSaving || !transcript.trim()}
-                                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-[var(--accent-teal)] text-white hover:brightness-110 disabled:opacity-50 transition-all shadow-sm"
                             >
                                 {isSaving ? (
                                     <Loader2 className="w-3 h-3 animate-spin" />
@@ -521,7 +521,7 @@ export function SermonListenerPanel({
                                     key={t._id}
                                     onClick={() => setSelectedTranscript(selectedTranscript?._id === t._id ? null : t)}
                                     className={`p-2 rounded cursor-pointer transition-colors ${selectedTranscript?._id === t._id
-                                        ? 'bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700'
+                                        ? 'bg-[var(--accent-teal)]/5 border border-[var(--accent-teal)]/20'
                                         : 'bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800'
                                         }`}
                                 >
@@ -535,8 +535,8 @@ export function SermonListenerPanel({
                                             </p>
                                             {t.detectedVerses && t.detectedVerses.length > 0 && (
                                                 <div className="flex items-center gap-1 mt-1">
-                                                    <Book className="w-2.5 h-2.5 text-blue-500" />
-                                                    <span className="text-[10px] text-blue-500">
+                                                    <Book className="w-2.5 h-2.5 text-[var(--accent-teal)]" />
+                                                    <span className="text-[10px] text-[var(--accent-teal)]">
                                                         {t.detectedVerses.length} verse{t.detectedVerses.length !== 1 ? 's' : ''}
                                                     </span>
                                                 </div>
@@ -562,7 +562,7 @@ export function SermonListenerPanel({
                                                     {t.detectedVerses.map((v, idx) => (
                                                         <span
                                                             key={idx}
-                                                            className="px-1.5 py-0.5 text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded"
+                                                            className="px-1.5 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded"
                                                         >
                                                             {v.reference}
                                                         </span>

@@ -6,9 +6,10 @@ import type { Hymn } from '../../types'
 
 interface HymnListProps {
     onClose: () => void
+    isInline?: boolean
 }
 
-export function HymnList({ onClose }: HymnListProps) {
+export function HymnList({ onClose, isInline = false }: HymnListProps) {
     const [query, setQuery] = useState('')
     const [hymns, setHymns] = useState<Hymn[]>([])
     const [filteredHymns, setFilteredHymns] = useState<Hymn[]>([])
@@ -64,18 +65,20 @@ export function HymnList({ onClose }: HymnListProps) {
 
     return (
         <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
-            {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={onClose}
-                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                    >
-                        <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    <h2 className="text-lg font-semibold">Display Hymns</h2>
+            {/* Header - Hidden when inline */}
+            {!isInline && (
+                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={onClose}
+                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+                        <h2 className="text-lg font-semibold">Display Hymns</h2>
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* Search */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-800">
@@ -86,7 +89,7 @@ export function HymnList({ onClose }: HymnListProps) {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Search hymns by number or title..."
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white"
+                        className="w-full pl-10 pr-4 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                     />
                 </div>
             </div>
@@ -177,7 +180,7 @@ export function HymnList({ onClose }: HymnListProps) {
                         </button>
                         <button
                             onClick={handleCreateSlides}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            className="px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm font-medium"
                         >
                             Create Slides ({selectedHymn.verses.length + (selectedHymn.chorus && selectedHymn.chorus !== 'false' ? 1 : 0)} verses)
                         </button>

@@ -225,7 +225,7 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
                         <p>No screens detected</p>
                         <button
                             onClick={detectMonitors}
-                            className="mt-2 text-sm text-blue-600 hover:text-blue-700"
+                            className="mt-2 text-sm text-[var(--accent-teal)] hover:underline"
                         >
                             Click to detect screens
                         </button>
@@ -341,7 +341,7 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
                         <button
                             onClick={handleGoLive}
                             disabled={!localSelectedId && !selectedMonitorId}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                         >
                             <Monitor className="w-4 h-4" />
                             Go Live

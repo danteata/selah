@@ -374,7 +374,7 @@ export function QuickActions() {
             {page && (
                 <button
                     onClick={handleClosePage}
-                    className="mb-2 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                    className="mb-2 text-xs text-[var(--accent-teal)] hover:underline font-medium"
                 >
                     ← Back to actions
                 </button>

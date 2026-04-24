@@ -128,7 +128,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                         </button>
                         <button
                             onClick={handleSave}
-                            className="flex items-center gap-2 px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+                            className="flex items-center gap-2 px-4 py-1.5 text-sm font-medium text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg transition-all shadow-sm"
                         >
                             <Save className="w-4 h-4" />
                             Save Changes

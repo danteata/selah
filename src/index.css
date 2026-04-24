@@ -575,3 +575,217 @@ h6 {
     mask-composite: exclude;
     pointer-events: none;
 }
+
+/* =====================================================
+   STUDIO MODE LAYOUT
+   ===================================================== */
+
+/* Shell grid — fixed chrome with fluid workspace */
+.studio-shell {
+    display: grid;
+    grid-template-rows: 40px 1fr 32px;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--bg-primary);
+}
+
+/* Top Bar */
+.studio-top-bar {
+    grid-row: 1;
+    z-index: 40;
+    height: 40px;
+}
+
+/* Middle row — NavRail + Workspace + ContextPanel */
+.studio-middle {
+    grid-row: 2;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Navigation Rail */
+.studio-nav-rail {
+    width: 52px;
+    flex-shrink: 0;
+    z-index: 30;
+    overflow: hidden;
+}
+
+.nav-rail-btn {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: all 150ms ease-out;
+    cursor: pointer;
+    border: none;
+    background: none;
+    position: relative;
+}
+
+.nav-rail-scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.nav-rail-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+/* Main Workspace */
+.studio-workspace {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Context Panel */
+.studio-context-panel {
+    flex-shrink: 0;
+    width: var(--panel-width, 320px);
+    background-color: var(--bg-secondary);
+    border-left: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 20;
+    transition: width 0.3s ease;
+}
+
+/* Status Bar */
+.studio-status-bar {
+    grid-row: 3;
+    height: 32px;
+    z-index: 40;
+}
+
+/* Workspace content areas */
+.studio-workspace-split {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Slide queue (left side of workspace) */
+.studio-slide-queue {
+    width: 280px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Live preview area (right side of workspace) */
+.studio-live-area {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 12px;
+}
+
+/* Live preview monitor — maintains 16:9 aspect ratio */
+.studio-live-monitor {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: 60vh;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    background-color: #1f2937;
+    box-shadow: var(--shadow-lg);
+}
+
+/* Tabular numbers for countdown timers and verse references */
+.tabular-nums {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+    .studio-slide-queue {
+        width: 240px;
+    }
+}
+
+@media (max-width: 996px) {
+    .studio-nav-rail {
+        width: 44px;
+    }
+
+    .nav-rail-btn {
+        width: 32px;
+        height: 32px;
+    }
+
+    .studio-slide-queue {
+        width: 200px;
+    }
+
+    .studio-context-panel {
+        position: fixed;
+        right: 0;
+        top: 40px;
+        bottom: 32px;
+        z-index: 50;
+        box-shadow: var(--shadow-xl);
+    }
+}
+
+@media (max-width: 768px) {
+    .studio-shell {
+        grid-template-rows: 40px 1fr 48px;
+    }
+
+    .studio-nav-rail {
+        display: none;
+    }
+
+    .studio-slide-queue {
+        width: 100%;
+    }
+
+    .studio-workspace-split {
+        flex-direction: column;
+    }
+}
+
+/* Custom Scrollbar for Studio Mode */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--border-default);
+    border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--border-emphasis);
+}
+
+.studio-panel-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+
+.studio-panel-scroll::-webkit-scrollbar-thumb {
+    background: var(--border-subtle);
+    border-radius: 10px;
+}
