@@ -254,7 +254,7 @@ function buildBookPattern(): string {
     return bookPatterns.sort((a, b) => b.length - a.length).join('|')
 }
 
-const BOOK_PATTERN = buildBookPattern()
+export const BOOK_PATTERN = buildBookPattern()
 
 // Pattern for chapter and verse (supports colon, period, or hyphen as separator)
 const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*[:\\.\\-]\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'

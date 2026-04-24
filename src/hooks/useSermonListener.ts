@@ -225,8 +225,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const INTERIM_DEBOUNCE_MS = 300
 
-    // Processing counter to prevent stale semantic results from overwriting newer regex results
-    const processingCounterRef = useRef(0)
+    // Counter that increments only when regex detects NEW verses — used to determine
+    // if semantic results should become the "current" verse. Semantic results that
+    // arrive after a newer regex detection should not overwrite the current verse.
+    const regexVerseDetectionRef = useRef(0)
 
     /**
      * Check if text is a duplicate or near-duplicate of recent chunks
@@ -285,6 +287,29 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
 
         return cleaned
+    }, [])
+
+    /**
+     * Remove overlap between a new chunk and recent context
+     * E.g., recent="For God so", new="God so loved" -> "loved"
+     */
+    const stripOverlap = useCallback((newText: string, recentText: string): string => {
+        if (!newText || !recentText) return newText
+
+        const newWords = newText.split(/\s+/)
+        const recentWords = recentText.split(/\s+/)
+
+        for (let len = Math.min(newWords.length, recentWords.length, 10); len >= 3; len--) {
+            const suffix = recentWords.slice(-len).join(' ').toLowerCase().replace(/[^\w\s]/g, '')
+            const prefix = newWords.slice(0, len).join(' ').toLowerCase().replace(/[^\w\s]/g, '')
+
+            if (suffix === prefix) {
+                const remaining = newWords.slice(len).join(' ')
+                return remaining || newText
+            }
+        }
+
+        return newText
     }, [])
 
     // Semantic detector ref
@@ -424,7 +449,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const processTranscript = useCallback((text: string) => {
         if (!text) return
 
-        const currentProcessingId = ++processingCounterRef.current
+        const regexDetectionIdAtStart = regexVerseDetectionRef.current
 
         const verses = detectVerses(text)
 
@@ -463,6 +488,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         const hasRegexVerses = limitedQueryVerses.length > 0
         const hasReActivated = reActivatedRefs.length > 0
+
+        // Increment the regex detection counter so semantic results know a regex
+        // verse was found more recently than when they started searching
+        if (hasRegexVerses) {
+            regexVerseDetectionRef.current++
+        }
 
         // If we found new regex verses, also re-activate any previously detected verses
         // that were mentioned again — the most recently mentioned verse becomes current
@@ -524,8 +555,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
             // Use addText which handles throttling internally
             semanticDetectorRef.current.addText(text, excludedRanges).then((semanticMatches) => {
-                // Discard stale results from a previous processing cycle
-                if (currentProcessingId !== processingCounterRef.current) return
+                // Stale means a regex verse was found AFTER this semantic search started.
+                // In that case, skip updating currentVerse (regex takes priority) but still
+                // add new verses to the detected list.
+                const isStale = regexDetectionIdAtStart !== regexVerseDetectionRef.current
 
                 if (!semanticMatches) {
                     return
@@ -537,7 +570,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 for (const match of semanticMatches) {
                     let bookName = match.book
                     const bookNum = parseInt(match.book, 10)
-                    if (!isNaN(bookNum) && bookNum >= 1 && bookNum <= 66) {
+                    if (!isNaN(bookNum) && bookNum >= 1 && bookNum <= 66 && /^\d+$/.test(match.book)) {
                         bookName = NUMBER_TO_BOOK[bookNum] || match.book
                     }
 
@@ -578,18 +611,23 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 const limitedSemanticVerses = semanticVerses.slice(0, MAX_DETECTED_VERSES_PER_QUERY)
 
                 // Mark the best semantic match as isBestMatch and add to ref
+                // Only add to detectedRefsRef if NOT stale — stale results should not
+                // block future detections of the same verse by a fresher semantic search
                 if (limitedSemanticVerses.length > 0) {
                     limitedSemanticVerses[0].isBestMatch = true
-                    for (const v of limitedSemanticVerses) {
-                        detectedRefsRef.current.add(v.reference)
+                    if (!isStale) {
+                        for (const v of limitedSemanticVerses) {
+                            detectedRefsRef.current.add(v.reference)
+                        }
                     }
                 }
 
                 if (limitedSemanticVerses.length > 0) {
                     setDetectedVerses(prev => [...prev, ...limitedSemanticVerses])
 
-                    // Only update current verse if we didn't have regex verses
-                    if (!hasRegexVerses) {
+                    // Only update current verse if no regex verses were found AND
+                    // no newer regex detection has happened since this search started
+                    if (!hasRegexVerses && !isStale) {
                         const bestSemanticVerse = limitedSemanticVerses[0]
                         setCurrentVerse(bestSemanticVerse)
 
@@ -609,7 +647,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 }
 
                 // Re-activate previously detected semantic verses as current
-                if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0) {
+                if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0 && !isStale) {
                     const reActivatedRef = semanticReActivatedRefs[0]
                     setCurrentVerse(prev => {
                         const existing = detectedVerses.find(v => v.reference === reActivatedRef)
@@ -756,7 +794,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal })
 
                 // Clean up repeated phrases in the incoming text
-                const cleanedText = cleanRepeatedPhrases(text)
+                let cleanedText = cleanRepeatedPhrases(text)
+
+                // Strip overlap with the very last chunk to avoid stuttering/repetitions (common in ASR)
+                if (isFinal && recentChunksRef.current.length > 0) {
+                    cleanedText = stripOverlap(cleanedText, recentChunksRef.current[recentChunksRef.current.length - 1])
+                }
 
                 // Skip if this is a duplicate of recent content
                 if (isDuplicateText(cleanedText)) {

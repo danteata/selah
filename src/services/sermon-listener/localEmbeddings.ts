@@ -181,8 +181,6 @@ export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
 
         const batchResults = await Promise.all(
             batch.map(async (text) => {
-                // Use type assertion for Transformers.js options
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const result = await model(text, {
                     pooling: 'mean',
                     normalize: true,

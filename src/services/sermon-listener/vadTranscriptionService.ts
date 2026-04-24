@@ -278,20 +278,19 @@ class VADTranscriptionService {
                 minSpeechMs: 250,
                 preSpeechPadMs: 500,
                 redemptionMs: 750,
-            }
-
-            if (this.config.microphoneDeviceId) {
-                vadOpts.getStream = async () => {
-                    return navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            deviceId: { exact: this.config.microphoneDeviceId! },
-                            channelCount: 1,
-                            noiseSuppression: true,
-                            echoCancellation: true,
-                            autoGainControl: true,
-                        },
-                    })
-                }
+                ...(this.config.microphoneDeviceId ? {
+                    getStream: async () => {
+                        return navigator.mediaDevices.getUserMedia({
+                            audio: {
+                                deviceId: { exact: this.config.microphoneDeviceId! },
+                                channelCount: 1,
+                                noiseSuppression: true,
+                                echoCancellation: true,
+                                autoGainControl: true,
+                            },
+                        });
+                    },
+                } : {}),
             }
 
             this.vad = await window.vad.MicVAD.new(vadOpts)

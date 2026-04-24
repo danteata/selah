@@ -348,21 +348,20 @@ class DesktopWhisperTranscriptionService {
                 minSpeechMs: this.config.minSpeechMs ?? 500,
                 preSpeechPadMs: this.config.preSpeechPadMs ?? 500,
                 redemptionMs: this.config.redemptionMs ?? 1000,
+                ...(this.config.microphoneDeviceId ? {
+                    getStream: async () => {
+                        return navigator.mediaDevices.getUserMedia({
+                            audio: {
+                                deviceId: { exact: this.config.microphoneDeviceId! },
+                                channelCount: 1,
+                                noiseSuppression: true,
+                                echoCancellation: true,
+                                autoGainControl: true,
+                            },
+                        });
+                    },
+                } : {}),
             };
-
-            if (this.config.microphoneDeviceId) {
-                vadOptions.getStream = async () => {
-                    return navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            deviceId: { exact: this.config.microphoneDeviceId! },
-                            channelCount: 1,
-                            noiseSuppression: true,
-                            echoCancellation: true,
-                            autoGainControl: true,
-                        },
-                    });
-                };
-            }
 
             this.vad = await window.vad.MicVAD.new(vadOptions);
 

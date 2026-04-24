@@ -16,6 +16,7 @@ import { api } from '../../../convex/_generated/api';
 import {
     initializeEmbedder,
     embedText,
+    embedBatch,
     isEmbedderReady,
     getCachedVerseEmbeddings,
     cacheVerseEmbeddings,
@@ -23,6 +24,7 @@ import {
     findSimilarLocally,
     type CachedVerseEmbedding,
 } from './localEmbeddings';
+import { BOOK_PATTERN } from './verseDetection';
 
 // Configuration
 const SEMANTIC_DETECTION_THRESHOLD = 0.55; // Minimum similarity score (lowered for better detection)
@@ -80,14 +82,14 @@ const DEFAULT_CONFIG: SemanticDetectionConfig = {
  * - "chapter 3 verse 16"
  */
 function containsExplicitVerseReference(text: string): boolean {
-    // Pattern for book name followed by numbers (e.g., "John 3 16", "Matthew 7:7")
-    const bookVersePattern = /\b(?:Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|1?\s?Samuel|2?\s?Samuel|1?\s?Kings|2?\s?Kings|1?\s?Chronicles|2?\s?Chronicles|Ezra|Nehemiah|Esther|Job|Psalms?|Psalm|Proverbs|Ecclesiastes|Song\s?of\s?Solomon|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|1?\s?Corinthians|2?\s?Corinthians|Galatians|Ephesians|Philippians|Colossians|1?\s?Thessalonians|2?\s?Thessalonians|1?\s?Timothy|2?\s?Timothy|Titus|Philemon|Hebrews|James|1?\s?Peter|2?\s?Peter|1?\s?John|2?\s?John|3?\s?John|Jude|Revelation)\s+\d{1,3}[:\s]\d{1,3}/i;
+    // Re-use the robust book pattern from verseDetection
+    const bookVersePattern = new RegExp(`\\b(${BOOK_PATTERN})\\s+\\d{1,3}[:\\s]\\d{1,3}`, 'i');
 
     // Pattern for "chapter X verse Y" (with or without book name)
     const chapterVersePattern = /\bchapter\s+\d{1,3}\s+(?:verse\s+)?\d{1,3}/i;
 
     // Pattern for "X chapter Y" or "X verse Y" with book names
-    const bookChapterPattern = /\b(?:Genesis|Exodus|Leviticus|Numbers|Deuteronomy|Joshua|Judges|Ruth|Samuel|Kings|Chronicles|Ezra|Nehemiah|Esther|Job|Psalms?|Psalm|Proverbs|Ecclesiastes|Song|Isaiah|Jeremiah|Lamentations|Ezekiel|Daniel|Hosea|Joel|Amos|Obadiah|Jonah|Micah|Nahum|Habakkuk|Zephaniah|Haggai|Zechariah|Malachi|Matthew|Mark|Luke|John|Acts|Romans|Corinthians|Thessalonians|Timothy|Titus|Philemon|Hebrews|James|Peter|Jude|Revelation)\s+(?:chapter\s+)?\d{1,3}/i;
+    const bookChapterPattern = new RegExp(`\\b(${BOOK_PATTERN})\\s+(?:chapter\\s+)?\\d{1,3}`, 'i');
 
     return bookVersePattern.test(text) || chapterVersePattern.test(text) || bookChapterPattern.test(text);
 }
@@ -104,41 +106,38 @@ function splitIntoSentences(text: string): string[] {
     const doubleSpaceParts = text.split(/\s{2,}/);
 
     // Common abbreviations that shouldn't trigger sentence splits
-    // Titles: St., Dr., Mr., Mrs., Ms., Rev., Prof., Sr., Jr.
-    // Biblical: Gen., Exod., Lev., Num., Deut., Ps., Prov., Eccl., Isa., Jer., Ezek., Matt., Mark., Luke., John., Acts., Rom., Cor., Gal., Eph., Phil., Col., Thess., Tim., Tit., Phlm., Heb., Jas., Pet., Jude., Rev.
-    // Other: vs., etc., e.g., i.e., cf., v., vv., ch., chs.
     const abbreviations = [
         // Titles
-        'St', 'Dr', 'Mr', 'Mrs', 'Ms', 'Rev', 'Prof', 'Sr', 'Jr',
+        'St', 'Dr', 'Mr', 'Mrs', 'Ms', 'Rev', 'Prof', 'Sr', 'Jr', 'Mister', 'Madam', 'Miss',
         // Old Testament books
         'Gen', 'Exod', 'Lev', 'Num', 'Deut', 'Josh', 'Judg', 'Ruth', 'Sam', 'Kgs', 'Chron', 'Ezra', 'Neh', 'Esth', 'Job', 'Ps', 'Pss', 'Prov', 'Eccl', 'Song', 'Isa', 'Jer', 'Lam', 'Ezek', 'Dan', 'Hos', 'Joel', 'Amos', 'Obad', 'Jonah', 'Mic', 'Nah', 'Hab', 'Zeph', 'Hag', 'Zech', 'Mal',
         // New Testament books
         'Matt', 'Mark', 'Luke', 'John', 'Acts', 'Rom', 'Cor', 'Gal', 'Eph', 'Phil', 'Col', 'Thess', 'Tim', 'Tit', 'Phlm', 'Heb', 'Jas', 'Pet', 'Jude', 'Rev',
         // Other common abbreviations
-        'vs', 'etc', 'e', 'i', 'cf', 'v', 'vv', 'ch', 'chs', 'chap', 'chaps'
+        'vs', 'etc', 'e', 'i', 'cf', 'v', 'vv', 'ch', 'chs', 'chap', 'chaps', 'Ref', 'Vol', 'Pg', 'p', 'pp'
     ];
 
     // Build regex pattern that avoids splitting on abbreviations
-    // Pattern: split on . ! ? only when NOT preceded by an abbreviation
-    // and NOT preceded by a digit (like 3:16)
     const abbrevPattern = abbreviations.join('|');
 
     for (const part of doubleSpaceParts) {
         // Split on sentence boundaries with negative lookbehind for:
         // 1. Abbreviations (St., Dr., etc.)
-        // 2. Digits (to avoid splitting 3:16)
+        // 2. Digits (to avoid splitting 3:16 or "verse 1.")
         // 3. Single capital letters (to avoid splitting "A. " or "B. ")
+        // 4. Common verse reference patterns
         const sentencePattern = new RegExp(
             `(?<!\\b(?:${abbrevPattern}))` + // Not after abbreviation
             `(?<!\\d)` +                      // Not after digit
             `(?<!\\s[A-Z])` +                 // Not after single capital letter
             `[.!?]` +                         // Sentence-ending punctuation
-            `(?=\\s+[A-Z]|\\s*$)`             // Followed by space + capital or end
+            `(?=\\s+(?:[A-Z]|["'\\(])|\\s*$)` // Followed by space + capital/quote/bracket or end (non-capturing)
         );
 
         const sentenceParts = part.split(sentencePattern);
 
         for (const sentence of sentenceParts) {
+            if (typeof sentence !== 'string') continue;
             const trimmed = sentence.trim();
             if (trimmed.length >= MIN_SENTENCE_LENGTH) {
                 sentences.push(trimmed);
@@ -191,7 +190,7 @@ export class SemanticVerseDetector {
     private initialized = false;
     private useLocalFallback = false;
     private inMemoryEmbeddings = new Map<string, CachedVerseEmbedding[]>();
-    private emptyVersions = new Set<string>();
+    private emptyVersions = new Map<string, number>();
     private lastProcessedLength = 0;
     private initializingPromise: Promise<any> | null = null;
 
@@ -351,11 +350,6 @@ export class SemanticVerseDetector {
             return [];
         }
 
-        // Check if we even have any embeddings to search through
-        if (this.useLocalFallback && this.emptyVersions.has(this.config.version || 'ANY')) {
-            return [];
-        }
-
         this.lastSearchTime = Date.now();
         const searchText = this.textBuffer.slice(-MAX_TEXT_LENGTH);
 
@@ -392,23 +386,42 @@ export class SemanticVerseDetector {
         const sentences = splitIntoSentences(textWithoutReferences);
         console.log('[SemanticDetector] Split into sentences:', sentences.length, sentences);
 
-        // Deduplicate sentences to avoid redundant searches
-        const uniqueSentences = Array.from(new Set(sentences))
+        // Deduplicate and filter sentences to avoid redundant searches
+        const filteredSentences = Array.from(new Set(sentences))
+            .filter(sentence => sentence.length >= MIN_SENTENCE_LENGTH && !containsExplicitVerseReference(sentence));
 
-        const searchPromises = uniqueSentences
-            .filter(sentence => sentence.length >= MIN_SENTENCE_LENGTH && !containsExplicitVerseReference(sentence))
-            .map(sentence => this.performSearch(sentence))
+        if (filteredSentences.length > 0) {
+            try {
+                // Early exit if we know there are no local embeddings for this version
+                if (this.useLocalFallback && this.isVersionEmpty(this.config.version || 'ANY')) {
+                    // Skip sentence search, only try sliding windows later
+                } else {
+                    // Generate embeddings for ALL sentences in a single batch
+                    const embeddingResults = await embedBatch(filteredSentences);
 
-        const searchResults = await Promise.allSettled(searchPromises)
+                    // Perform search for each embedding
+                    const searchMethod = this.useLocalFallback
+                        ? (emb: number[]) => this.searchLocally(emb)
+                        : this.convexClient
+                            ? (emb: number[]) => this.searchWithConvex(emb)
+                            : () => Promise.resolve([]);
 
-        for (const result of searchResults) {
-            if (result.status !== 'fulfilled') continue
-            const matches = result.value
-            for (const match of matches) {
-                if (!matchedReferences.has(match.reference)) {
-                    matchedReferences.add(match.reference)
-                    allMatches.push(match)
+                    const searchPromises = embeddingResults.map(res => searchMethod(res.embedding));
+                    const searchResults = await Promise.allSettled(searchPromises);
+
+                    for (const result of searchResults) {
+                        if (result.status !== 'fulfilled') continue;
+                        const matches = result.value;
+                        for (const match of matches) {
+                            if (!matchedReferences.has(match.reference)) {
+                                matchedReferences.add(match.reference);
+                                allMatches.push(match);
+                            }
+                        }
+                    }
                 }
+            } catch (error) {
+                console.error('[SemanticDetector] Batch search failed:', error);
             }
         }
 
@@ -416,20 +429,33 @@ export class SemanticVerseDetector {
         const hasGoodMatch = allMatches.some(m => m.score >= 0.75)
         if (!hasGoodMatch) {
             console.log('[SemanticDetector] Trying sliding window fallback...');
-            const windows = generateSlidingWindows(textWithoutReferences);
+            const windows = generateSlidingWindows(textWithoutReferences)
+                .filter(window => !containsExplicitVerseReference(window));
 
-            for (const window of windows) {
-                if (containsExplicitVerseReference(window)) {
-                    continue
-                }
+            if (windows.length > 0) {
+                try {
+                    const windowEmbeddings = await embedBatch(windows);
+                    const searchMethod = this.useLocalFallback
+                        ? (emb: number[]) => this.searchLocally(emb)
+                        : this.convexClient
+                            ? (emb: number[]) => this.searchWithConvex(emb)
+                            : () => Promise.resolve([]);
 
-                const matches = await this.performSearch(window);
+                    const windowSearchPromises = windowEmbeddings.map(res => searchMethod(res.embedding));
+                    const windowSearchResults = await Promise.allSettled(windowSearchPromises);
 
-                for (const match of matches) {
-                    if (!matchedReferences.has(match.reference) && match.score >= 0.55) {
-                        matchedReferences.add(match.reference);
-                        allMatches.push(match);
+                    for (const result of windowSearchResults) {
+                        if (result.status !== 'fulfilled') continue;
+                        const matches = result.value;
+                        for (const match of matches) {
+                            if (!matchedReferences.has(match.reference) && match.score >= 0.55) {
+                                matchedReferences.add(match.reference);
+                                allMatches.push(match);
+                            }
+                        }
                     }
+                } catch (error) {
+                    console.error('[SemanticDetector] Sliding window batch search failed:', error);
                 }
             }
         }
@@ -443,34 +469,6 @@ export class SemanticVerseDetector {
     /**
      * Perform the actual semantic search on a single text segment.
      */
-    private async performSearch(text: string): Promise<SemanticVerseMatch[]> {
-        try {
-            // Generate embedding locally
-            const { embedding } = await embedText(text);
-
-            let matches: SemanticVerseMatch[] = [];
-
-            if (this.useLocalFallback) {
-                // Check if we already know this version is empty
-                if (this.emptyVersions.has(this.config.version || 'ANY')) {
-                    return [];
-                }
-                // Use local similarity search with cached embeddings
-                matches = await this.searchLocally(embedding);
-            } else if (this.convexClient) {
-                // Use Convex vector search
-                matches = await this.searchWithConvex(embedding);
-            }
-
-            return matches;
-        } catch (error) {
-            // Only log search errors occasionally to avoid spam
-            if (Math.random() < 0.1) {
-                console.error('[SemanticDetector] Search failed:', error);
-            }
-            return [];
-        }
-    }
 
     /**
      * Exclude text ranges from the text, replacing them with spaces.
@@ -547,7 +545,7 @@ export class SemanticVerseDetector {
         // 2. Load from IndexedDB if not in memory
         if (!cached) {
             // Check if we already tried this version and it was empty
-            if (this.emptyVersions.has(version)) {
+            if (this.isVersionEmpty(version)) {
                 return [];
             }
 
@@ -566,7 +564,7 @@ export class SemanticVerseDetector {
 
                 if (cached.length === 0) {
                     console.warn('[SemanticDetector] No cached embeddings found in IndexedDB at all');
-                    this.emptyVersions.add(version);
+                    this.emptyVersions.set(version, Date.now());
                     return [];
                 }
             }
@@ -594,6 +592,21 @@ export class SemanticVerseDetector {
      */
     updateConfig(config: Partial<SemanticDetectionConfig>): void {
         this.config = { ...this.config, ...config };
+    }
+
+    /**
+     * Check if a version was marked as empty. Allows retry after 30 seconds
+     * so that embeddings loaded after initialization can still be found.
+     */
+    private isVersionEmpty(version: string): boolean {
+        const timestamp = this.emptyVersions.get(version);
+        if (timestamp === undefined) return false;
+        // Allow retry after 30 seconds — embeddings may be seeded after init
+        if (Date.now() - timestamp > 30_000) {
+            this.emptyVersions.delete(version);
+            return false;
+        }
+        return true;
     }
 
     /**
