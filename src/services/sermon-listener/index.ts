@@ -46,3 +46,10 @@ export {
     SemanticVerseDetector,
 } from './semanticVerseDetection'
 export type { SemanticVerseMatch, SemanticDetectionConfig, ExcludedRange } from './semanticVerseDetection'
+
+export {
+    detectVoiceCommands,
+    stripCommandsFromTranscript,
+    getVersionDisplayName,
+} from './voiceCommandDetection'
+export type { VoiceCommand } from './voiceCommandDetection'

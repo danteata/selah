@@ -56,12 +56,16 @@ export function SermonListenerPanel({
         isLoading,
         provider,
         isSpeechDetected,
+        activeBibleVersion,
+        lastVoiceCommand,
         start,
         stop,
         reset,
         lookupVerse,
         displayCurrentVerse,
         removeVerse,
+        nextVerse,
+        previousVerse,
     } = useSermonListener({
         language,
         autoLookup,
@@ -291,6 +295,51 @@ export function SermonListenerPanel({
                             <p className="text-[10px] text-gray-400">+{currentScripture.content.length - 3} more verses</p>
                         )}
                     </div>
+                </div>
+            )}
+
+            {/* Voice command feedback and active Bible version */}
+            {(lastVoiceCommand || currentVerse) && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    {activeBibleVersion && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                            {activeBibleVersion}
+                        </span>
+                    )}
+                    {lastVoiceCommand && (
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                            lastVoiceCommand.type === 'change_version'
+                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                                : lastVoiceCommand.type === 'next_verse' || lastVoiceCommand.type === 'previous_verse'
+                                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                    : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                        }`}>
+                            {lastVoiceCommand.type === 'change_version' && `Switched to ${lastVoiceCommand.versionId}`}
+                            {lastVoiceCommand.type === 'next_verse' && 'Next verse'}
+                            {lastVoiceCommand.type === 'previous_verse' && 'Previous verse'}
+                            {lastVoiceCommand.type === 'display' && 'Sent to live'}
+                            {lastVoiceCommand.type === 'stop_listening' && 'Stopped listening'}
+                            {lastVoiceCommand.type === 'start_listening' && 'Started listening'}
+                        </span>
+                    )}
+                    {currentVerse && (
+                        <div className="flex items-center gap-0.5">
+                            <button
+                                onClick={previousVerse}
+                                className="px-1 py-0.5 rounded text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                                title="Previous verse"
+                            >
+                                &#x25C0;
+                            </button>
+                            <button
+                                onClick={nextVerse}
+                                className="px-1 py-0.5 rounded text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
+                                title="Next verse"
+                            >
+                                &#x25B6;
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 
