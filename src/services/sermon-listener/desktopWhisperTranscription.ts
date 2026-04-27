@@ -324,9 +324,42 @@ class DesktopWhisperTranscriptionService {
         try {
             console.log('[DesktopWhisper] Starting VAD-based capture');
 
+            const requestedDeviceId = this.config.microphoneDeviceId;
+
+            const getStreamWithFallback = async (): Promise<MediaStream> => {
+                if (requestedDeviceId) {
+                    try {
+                        return await navigator.mediaDevices.getUserMedia({
+                            audio: {
+                                deviceId: { exact: requestedDeviceId },
+                                channelCount: 1,
+                                noiseSuppression: { ideal: true },
+                                echoCancellation: { ideal: true },
+                                autoGainControl: { ideal: true },
+                            },
+                        });
+                    } catch (err) {
+                        if (err instanceof OverconstrainedError) {
+                            console.warn('[DesktopWhisper] Microphone device not available, falling back to default:', err.message);
+                        } else {
+                            console.warn('[DesktopWhisper] Failed to get specified microphone, falling back to default:', err);
+                        }
+                    }
+                }
+                return navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        noiseSuppression: { ideal: true },
+                        echoCancellation: { ideal: true },
+                        autoGainControl: { ideal: true },
+                    },
+                });
+            };
+
             const vadOptions: Parameters<MicVADStatic['new']>[0] = {
                 baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
                 onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
+                getStream: getStreamWithFallback,
                 onSpeechStart: () => {
                     console.log('[DesktopWhisper] Speech started');
                     this.config.onSpeechStart?.();
@@ -348,19 +381,6 @@ class DesktopWhisperTranscriptionService {
                 minSpeechMs: this.config.minSpeechMs ?? 500,
                 preSpeechPadMs: this.config.preSpeechPadMs ?? 500,
                 redemptionMs: this.config.redemptionMs ?? 1000,
-                ...(this.config.microphoneDeviceId ? {
-                    getStream: async () => {
-                        return navigator.mediaDevices.getUserMedia({
-                            audio: {
-                                deviceId: { exact: this.config.microphoneDeviceId! },
-                                channelCount: 1,
-                                noiseSuppression: true,
-                                echoCancellation: true,
-                                autoGainControl: true,
-                            },
-                        });
-                    },
-                } : {}),
             };
 
             this.vad = await window.vad.MicVAD.new(vadOptions);
@@ -546,10 +566,22 @@ class DesktopWhisperTranscriptionService {
         // Fallback to web audio capture
         // This is the original implementation using AudioWorklet
         try {
-            const audioConstraints: boolean | MediaTrackConstraints = this.config.microphoneDeviceId
-                ? { deviceId: { exact: this.config.microphoneDeviceId }, echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
-                : { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
-            const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+            let mediaStream: MediaStream;
+            try {
+                const audioConstraints: boolean | MediaTrackConstraints = this.config.microphoneDeviceId
+                    ? { deviceId: { exact: this.config.microphoneDeviceId }, echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true }, sampleRate: 16000 }
+                    : { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true }, sampleRate: 16000 }
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+            } catch (err) {
+                if (err instanceof OverconstrainedError && this.config.microphoneDeviceId) {
+                    console.warn('[DesktopWhisper] Microphone device not available for web capture, falling back to default:', err.message);
+                    mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true }, sampleRate: 16000 }
+                    })
+                } else {
+                    throw err;
+                }
+            }
 
             const audioContext = new AudioContext({ sampleRate: 16000 });
             const source = audioContext.createMediaStreamSource(mediaStream);
