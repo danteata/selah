@@ -92,6 +92,10 @@ export interface SermonListenerState {
     isModelLoading: boolean
     /** Model loading progress (0-100) */
     modelLoadingProgress: number
+    /** Provider is currently being eagerly initialized in the background */
+    isInitializingProvider: boolean
+    /** Whether the provider has been eagerly initialized and is ready */
+    providerReady: boolean
     /** Saved transcripts */
     savedTranscripts: SavedSermonTranscript[]
     /** Whether semantic detection is enabled */
@@ -209,7 +213,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // State
     const [isListening, setIsListening] = useState(false)
-    const [isSupported, setIsSupported] = useState(false)
+    const [isSupported, setIsSupported] = useState<boolean | null>(null)
     const [transcript, setTranscript] = useState('')
     const [interimTranscript, setInterimTranscript] = useState('')
     const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>([])
@@ -221,6 +225,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [isModelLoading, setIsModelLoading] = useState(false)
     const [modelLoadingProgress, setModelLoadingProgress] = useState(0)
     const [savedTranscripts, setSavedTranscripts] = useState<SavedSermonTranscript[]>(() => readSavedTranscripts())
+
+    // Provider initialization state
+    const [isInitializingProvider, setIsInitializingProvider] = useState(false)
+    const [providerReady, setProviderReady] = useState(false)
 
     // Semantic detection state
     const [semanticDetectorReady, setSemanticDetectorReady] = useState(false)
@@ -348,7 +356,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Semantic detector ref
     const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
-    // Check support on mount and when settings change
+    // Check support on mount and when settings change, and eagerly init provider
     useEffect(() => {
         const checkSupport = async () => {
             // Skip if global settings are still loading
@@ -371,6 +379,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 if (webSpeechAvailable) {
                     setProvider('web-speech')
                     setIsSupported(true)
+                    setProviderReady(true)
                     const sourceProvider = targetProvider === 'whisper-cpp' ? 'Whisper.cpp' : targetProvider === 'desktop-whisper' ? 'Desktop Whisper' : 'Whisper'
                     setError(`${sourceProvider} is not available. Falling back to Web Speech API.`)
                     console.warn('[useSermonListener] Falling back to Web Speech API')
@@ -380,9 +389,52 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
             setProvider(targetProvider)
             setIsSupported(available)
+
+            // Eagerly initialize the provider so it's ready when the user clicks Start
+            if (available && (targetProvider !== 'web-speech')) {
+                setIsInitializingProvider(true)
+                try {
+                    console.log('[useSermonListener] Eagerly initializing provider:', targetProvider)
+                    const success = await unifiedTranscriptionService.setProvider(targetProvider, {
+                        language: language.split('-')[0],
+                        whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
+                        whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
+                        whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
+                        whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
+                        whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
+                        whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
+                        fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
+                        fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as any,
+                        fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+                        fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as any,
+                        fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+                        useVAD: globalSettings?.sermonListener_useVAD,
+                        elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
+                        elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
+                        elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
+                        onProgress: (progress: number) => {
+                            setModelLoadingProgress(progress)
+                        },
+                        onStatusChange: (status: TranscriptionStatus) => {
+                            const statusText = typeof status?.error === 'string' ? status.error : status?.provider || ''
+                            console.log('[useSermonListener] Provider init status:', statusText)
+                        },
+                    })
+                    setProviderReady(success)
+                    if (!success) {
+                        console.warn('[useSermonListener] Eager provider initialization failed')
+                    }
+                } catch (err) {
+                    console.error('[useSermonListener] Eager provider init error:', err)
+                } finally {
+                    setIsInitializingProvider(false)
+                }
+            } else if (available) {
+                setProviderReady(true)
+            }
         }
         checkSupport()
-    }, [targetProvider, globalProvider, providerOverride, isGlobalSettingsLoading])
+    }, [targetProvider, globalProvider, providerOverride, isGlobalSettingsLoading, language])
 
     // Initialize semantic detector
     useEffect(() => {
@@ -1184,6 +1236,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         provider,
         isModelLoading,
         modelLoadingProgress,
+        isInitializingProvider,
+        providerReady,
         savedTranscripts,
         semanticDetectionEnabled: enableSemanticDetection,
         semanticDetectorReady,

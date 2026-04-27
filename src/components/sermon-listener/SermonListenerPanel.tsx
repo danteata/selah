@@ -56,6 +56,8 @@ export function SermonListenerPanel({
         isLoading,
         provider,
         isSpeechDetected,
+        isInitializingProvider,
+        providerReady,
         activeBibleVersion,
         lastVoiceCommand,
         start,
@@ -153,8 +155,24 @@ export function SermonListenerPanel({
     // Get the transcripts to display based on active schedule
     const displayTranscripts = activeSchedule?._id ? scheduleTranscripts : transcripts
 
+    // Show loading UI while we're still checking/initializing the provider
+    // This prevents the "Not Supported" flicker when opening the panel
+    if (isInitializingProvider || isSupported === null || (!providerReady && isSupported)) {
+        return (
+            <div className={`flex flex-col h-full items-center justify-center gap-2 ${compact ? 'p-3' : 'p-6'} text-center text-gray-500 dark:text-gray-400`}>
+                <Loader2 className="w-5 h-5 animate-spin text-[var(--accent-teal)]" />
+                <p className="text-xs font-medium">
+                    Preparing Sermon Listener...
+                </p>
+                <p className="text-[10px] opacity-75 max-w-[200px]">
+                    One moment while the transcription engine loads.
+                </p>
+            </div>
+        )
+    }
+
     // Not supported message
-    if (!isSupported) {
+    if (isSupported === false) {
         const unsupportedMessage = (() => {
             switch (provider) {
                 case 'whisper':
@@ -307,13 +325,12 @@ export function SermonListenerPanel({
                         </span>
                     )}
                     {lastVoiceCommand && (
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                            lastVoiceCommand.type === 'change_version'
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${lastVoiceCommand.type === 'change_version'
                                 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
                                 : lastVoiceCommand.type === 'next_verse' || lastVoiceCommand.type === 'previous_verse'
                                     ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                                     : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                        }`}>
+                            }`}>
                             {lastVoiceCommand.type === 'change_version' && `Switched to ${lastVoiceCommand.versionId}`}
                             {lastVoiceCommand.type === 'next_verse' && 'Next verse'}
                             {lastVoiceCommand.type === 'previous_verse' && 'Previous verse'}
