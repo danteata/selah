@@ -36,6 +36,7 @@ export {
     cacheVerseEmbeddings,
     clearCachedVerseEmbeddings,
     hasCachedEmbeddings,
+    getLocalCachedVersions,
 } from './localEmbeddings'
 export type { EmbeddingResult, VerseMatch, CachedVerseEmbedding } from './localEmbeddings'
 

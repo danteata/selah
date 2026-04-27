@@ -424,6 +424,38 @@ export async function clearCachedEmbeddingsForVersion(version: string): Promise<
     }
 }
 
+/**
+ * Get all Bible versions that have locally cached embeddings.
+ */
+export async function getLocalCachedVersions(): Promise<string[]> {
+    try {
+        const db = await openVerseCache();
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly');
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
+        const index = store.index('by_version');
+
+        const request = index.openKeyCursor(null, 'nextunique');
+        const versions: string[] = [];
+
+        return new Promise((resolve, reject) => {
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (cursor) {
+                    const v = cursor.key as string;
+                    versions.push(v);
+                    cursor.continue();
+                } else {
+                    resolve(versions);
+                }
+            };
+            request.onerror = () => reject(request.error);
+        });
+    } catch (error) {
+        console.error('[Embeddings] Failed to get cached versions:', error);
+        return [];
+    }
+}
+
 export default {
     initializeEmbedder,
     isEmbedderReady,
@@ -436,4 +468,5 @@ export default {
     clearCachedVerseEmbeddings,
     clearCachedEmbeddingsForVersion,
     hasCachedEmbeddings,
+    getLocalCachedVersions,
 };

@@ -23,6 +23,7 @@ import {
     getCachedVerseEmbeddings,
     hasCachedEmbeddings,
     findSimilarLocally,
+    getLocalCachedVersions,
 } from '../services/sermon-listener/localEmbeddings'
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
 
@@ -123,6 +124,9 @@ export function useSemanticVerseSearch(
     const [isLoadingEmbedder, setIsLoadingEmbedder] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
+    // Track which version we will actually search against (may differ from requested version if fallback is needed)
+    const effectiveVersionRef = useRef<string | undefined>(version)
+
     const debounceRef = useRef<NodeJS.Timeout | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     const localEmbeddingsCache = useRef<Awaited<ReturnType<typeof getCachedVerseEmbeddings>>>(null)
@@ -130,24 +134,41 @@ export function useSemanticVerseSearch(
     // Check if embeddings are available (both local and remote)
     useEffect(() => {
         const checkEmbeddings = async () => {
-            // First check local IndexedDB
-            const localVersion = version || 'KJV'
-            const hasLocal = await hasCachedEmbeddings(localVersion)
-            setHasLocalEmbeddings(hasLocal)
+            // First check local IndexedDB for requested version
+            const requestedVersion = version || 'KJV'
+            let hasLocal = await hasCachedEmbeddings(requestedVersion)
+            let workingVersion = requestedVersion
+
+            if (!hasLocal) {
+                // Fallback: find another locally cached version
+                const cachedVersions = await getLocalCachedVersions()
+                if (cachedVersions.length > 0) {
+                    workingVersion = cachedVersions[0]
+                    hasLocal = true
+                    console.log(`[useSemanticVerseSearch] Version ${requestedVersion} not cached. Falling back to ${workingVersion}`)
+                }
+            }
+
+            effectiveVersionRef.current = workingVersion
 
             if (hasLocal) {
                 // Load local embeddings into memory for faster search
-                const localEmbeddings = await getCachedVerseEmbeddings(localVersion)
+                const localEmbeddings = await getCachedVerseEmbeddings(workingVersion)
                 localEmbeddingsCache.current = localEmbeddings
+                setHasLocalEmbeddings(true)
                 setHasEmbeddings(true)
-                console.log(`[useSemanticVerseSearch] Found ${localEmbeddings?.length || 0} local embeddings`)
+                console.log(`[useSemanticVerseSearch] Found ${localEmbeddings?.length || 0} local embeddings for ${workingVersion}`)
             } else {
+                setHasLocalEmbeddings(false)
                 // Fall back to checking Convex
                 try {
                     const result = await convex.query(api.verseEmbeddings.hasEmbeddings, {
                         version,
                     })
                     setHasEmbeddings(result)
+                    if (result) {
+                        effectiveVersionRef.current = version
+                    }
                 } catch (err) {
                     console.error('[useSemanticVerseSearch] Failed to check remote embeddings:', err)
                     setHasEmbeddings(false)
@@ -284,7 +305,7 @@ export function useSemanticVerseSearch(
                         queryEmbedding: embeddingResult.embedding,
                         threshold: dynamicThreshold,
                         limit,
-                        version,
+                        version: effectiveVersionRef.current || version,
                     })
                     // Also format Convex results
                     searchResults = (convexResults as SemanticVerseResult[]).map(r => {
