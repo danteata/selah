@@ -9,7 +9,7 @@ import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter } from 'lucide-react'
+import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter, NotebookPen } from 'lucide-react'
 import type { Scripture, BibleVerse } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 
@@ -40,6 +40,8 @@ export function SermonListenerPanel({
     const [isSaving, setIsSaving] = useState(false)
     const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null)
     const [showOnlyBestMatches, setShowOnlyBestMatches] = useState(true) // Default to showing only best matches
+    const [autoSaveTranscriptId, setAutoSaveTranscriptId] = useState<string | null>(null)
+    const [sermonNotes, setSermonNotes] = useState('')
     const transcriptRef = useRef<HTMLDivElement>(null)
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
@@ -63,9 +65,9 @@ export function SermonListenerPanel({
         start,
         stop,
         reset,
-        lookupVerse,
         displayCurrentVerse,
         removeVerse,
+        setCurrentDetectedVerse,
         nextVerse,
         previousVerse,
     } = useSermonListener({
@@ -74,6 +76,7 @@ export function SermonListenerPanel({
         autoDisplay: autoDisplayEnabled,
         onVerseDetected,
     })
+    const uniqueDetectedVerses = detectedVerses.filter((verse, index, arr) => arr.findIndex(v => v.reference === verse.reference) === index)
 
     // Use the transcripts hook with the active schedule
     const {
@@ -81,8 +84,48 @@ export function SermonListenerPanel({
         scheduleTranscripts,
         isLoading: transcriptsLoading,
         createTranscript,
+        updateTranscript,
         deleteTranscript,
     } = useTranscripts(activeSchedule?._id)
+
+    useEffect(() => {
+        if (!isListening || !transcript.trim()) return
+        const timer = setInterval(async () => {
+            const title = transcriptTitle.trim() || `Sermon Transcript ${new Date().toLocaleDateString()}`
+            if (!autoSaveTranscriptId) {
+                const id = await createTranscript({ title, transcript, detectedVerses, provider, language, scheduleId: activeSchedule?._id })
+                if (id) setAutoSaveTranscriptId(id)
+                return
+            }
+            await updateTranscript(autoSaveTranscriptId, { title, transcript, detectedVerses, scheduleId: activeSchedule?._id })
+        }, 15000)
+        return () => clearInterval(timer)
+    }, [isListening, transcript, transcriptTitle, autoSaveTranscriptId, createTranscript, updateTranscript, detectedVerses, provider, language, activeSchedule?._id])
+
+    const generateSermonNotes = () => {
+        const body = transcript.trim()
+        if (!body) return
+        const lines = body.split(/[.!?]\s+/).filter(Boolean)
+        const keyPoints = lines.filter(l => l.split(' ').length >= 8).slice(0, 8)
+        const verses = detectedVerses.map(v => formatVerseForDisplay(v))
+        setSermonNotes([
+            'Title: Sermon Notes',
+            '',
+            'Summary:',
+            keyPoints.slice(0, 3).map((p) => `- ${p.trim()}.`).join('\n'),
+            '',
+            'Key Points:',
+            keyPoints.map((p) => `- ${p.trim()}.`).join('\n'),
+            '',
+            'Scripture References:',
+            verses.length ? verses.map((v) => `- ${v}`).join('\n') : '- None detected yet',
+            '',
+            'Application:',
+            '- Personal reflection:',
+            '- Practical action this week:',
+            '- Prayer focus:',
+        ].join('\n'))
+    }
 
     // Auto-scroll transcript
     useEffect(() => {
@@ -98,9 +141,7 @@ export function SermonListenerPanel({
 
     // Handle verse click - set as current and lookup
     const handleVerseClick = (verse: DetectedVerse) => {
-        // Just lookup the verse content, don't change currentVerse
-        // The current verse should always be the latest detected
-        lookupVerse(verse)
+        void setCurrentDetectedVerse(verse)
     }
 
     // Handle save transcript
@@ -226,18 +267,18 @@ export function SermonListenerPanel({
 
                 {/* Audio waveform visualization when speech is detected */}
                 {isListening && (
-                    <div className={`flex items-center justify-center gap-[2px] h-5 ${isSpeechDetected ? 'opacity-100' : 'opacity-30'} transition-opacity duration-200`}>
-                        {[...Array(5)].map((_, i) => (
+                    <div className={`flex items-end justify-center gap-[2px] h-6 min-w-[48px] ${isSpeechDetected ? 'opacity-100' : 'opacity-35'} transition-opacity duration-200`}>
+                        {[...Array(9)].map((_, i) => (
                             <div
                                 key={i}
-                                className={`w-1 rounded-full ${isSpeechDetected ? 'bg-green-500' : 'bg-gray-400 dark:bg-gray-500'}`}
+                                className={`w-[3px] rounded-full ${isSpeechDetected ? 'bg-gradient-to-t from-emerald-600 via-emerald-400 to-cyan-300 shadow-[0_0_6px_rgba(16,185,129,0.6)]' : 'bg-gray-400 dark:bg-gray-500'}`}
                                 style={{
                                     animationName: isSpeechDetected ? 'waveform-bar' : 'none',
-                                    animationDuration: `${0.4 + i * 0.1}s`,
+                                    animationDuration: `${0.35 + i * 0.06}s`,
                                     animationTimingFunction: 'ease-in-out',
                                     animationIterationCount: 'infinite',
-                                    animationDelay: `${i * 0.08}s`,
-                                    height: '4px'
+                                    animationDelay: `${i * 0.05}s`,
+                                    height: isSpeechDetected ? `${8 + (i % 5) * 3}px` : '5px'
                                 }}
                             />
                         ))}
@@ -252,6 +293,9 @@ export function SermonListenerPanel({
                         <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
                             Schedule: {activeSchedule.name}
                         </p>
+                    )}
+                    {autoSaveTranscriptId && (
+                        <p className="text-[10px] text-[var(--accent-teal)] truncate">Auto-saving</p>
                     )}
                 </div>
 
@@ -361,15 +405,15 @@ export function SermonListenerPanel({
             )}
 
             {/* Detected verses list - compact inline chips */}
-            {detectedVerses.length > 0 && (
+            {uniqueDetectedVerses.length > 0 && (
                 <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
                     <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2">
                             <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                                 {showOnlyBestMatches
-                                    ? `${detectedVerses.filter(v => v.isBestMatch).length} confirmed`
-                                    : `${detectedVerses.length} total`
-                                } verse{detectedVerses.length !== 1 ? 's' : ''}
+                                    ? `${uniqueDetectedVerses.filter(v => v.isBestMatch).length} confirmed`
+                                    : `${uniqueDetectedVerses.length} total`
+                                } verse{uniqueDetectedVerses.length !== 1 ? 's' : ''}
                             </span>
                             {/* Filter toggle */}
                             <button
@@ -393,8 +437,8 @@ export function SermonListenerPanel({
                     </div>
                     <div className="flex flex-wrap gap-1">
                         {(showOnlyBestMatches
-                            ? detectedVerses.filter(v => v.isBestMatch)
-                            : detectedVerses
+                            ? uniqueDetectedVerses.filter(v => v.isBestMatch)
+                            : uniqueDetectedVerses
                         ).map((verse, idx) => (
                             <div
                                 key={`${verse.reference}-${idx}`}
@@ -448,6 +492,16 @@ export function SermonListenerPanel({
                         <div className="flex items-center gap-1">
                             {transcript && (
                                 <button
+                                    onClick={generateSermonNotes}
+                                    className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110"
+                                    title="Generate sermon notes"
+                                >
+                                    <NotebookPen className="w-3 h-3" />
+                                    Notes
+                                </button>
+                            )}
+                            {transcript && (
+                                <button
                                     onClick={() => setShowSaveDialog(true)}
                                     className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110"
                                     title="Save transcript"
@@ -484,6 +538,13 @@ export function SermonListenerPanel({
                             </p>
                         )}
                     </div>
+                </div>
+            )}
+
+            {sermonNotes && (
+                <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
+                    <p className="text-xs font-medium mb-1">Sermon Notes</p>
+                    <pre className="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-200 font-sans">{sermonNotes}</pre>
                 </div>
             )}
 
