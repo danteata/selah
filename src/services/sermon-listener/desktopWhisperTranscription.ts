@@ -110,6 +110,7 @@ class DesktopWhisperTranscriptionService {
     private vadLoaded = false;
     private utteranceCount = 0;
     private abortController: AbortController | null = null;
+    private pendingVADTranscription: Promise<void> = Promise.resolve();
 
     /**
      * Check if running in desktop mode
@@ -369,8 +370,12 @@ class DesktopWhisperTranscriptionService {
                     console.log('[DesktopWhisper] Speech ended, audio length:', audio.length);
                     this.config.onSpeechEnd?.();
                     this.config.onStatus?.('processing');
-
-                    await this.processVADUtterance(audio, onResult, onError);
+                    this.pendingVADTranscription = this.pendingVADTranscription
+                        .then(() => this.processVADUtterance(audio, onResult, onError))
+                        .catch((error) => {
+                            console.error('[DesktopWhisper] Queued VAD processing error:', error);
+                        });
+                    await this.pendingVADTranscription;
                 },
                 onVADMisfire: () => {
                     console.log('[DesktopWhisper] VAD misfire - too short, ignoring');
@@ -418,15 +423,7 @@ class DesktopWhisperTranscriptionService {
 
             console.log('[DesktopWhisper] Utterance', utteranceId, 'size:', blob.size, 'bytes');
 
-      // Send to desktop whisper server
-      // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
-      const language = (this.config.language || 'en').split('-')[0];
-      const result = await transcribeWithDesktopWhisper(blob, {
-        language,
-        vadFilter: false, // Always disable server-side VAD (model not bundled)
-        hotwords: this.config.hotwords,
-        initialPrompt: this.config.initialPrompt,
-      });
+            const result = await this.transcribeBlobWithRetry(blob, utteranceId);
 
             if (result && result.text.trim()) {
                 const duration = Date.now() - startTime;
@@ -444,6 +441,33 @@ class DesktopWhisperTranscriptionService {
             onError(error instanceof Error ? error.message : String(error));
             this.config.onStatus?.('error');
         }
+    }
+
+    private async transcribeBlobWithRetry(audioBlob: Blob, traceId: string): Promise<DesktopWhisperResult | null> {
+        const language = (this.config.language || 'en').split('-')[0];
+        const maxAttempts = 3;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return await transcribeWithDesktopWhisper(audioBlob, {
+                    language,
+                    vadFilter: false,
+                    hotwords: this.config.hotwords,
+                    initialPrompt: this.config.initialPrompt,
+                });
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const retriable = /failed to fetch|could not connect|networkerror|timed out|aborted|fetch/i.test(message);
+                if (!retriable || attempt === maxAttempts) {
+                    throw error;
+                }
+                const backoffMs = 250 * attempt;
+                console.warn(`[DesktopWhisper] Transcribe retry ${attempt}/${maxAttempts} for ${traceId}: ${message}`);
+                await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -518,15 +542,7 @@ class DesktopWhisperTranscriptionService {
         type: wavBlob.type,
       });
 
-      // Send to desktop whisper server
-      // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
-      const language = (this.config.language || 'en').split('-')[0];
-      const result = await transcribeWithDesktopWhisper(wavBlob, {
-        language,
-        vadFilter: false, // Always disable server-side VAD (model not bundled)
-        hotwords: this.config.hotwords,
-        initialPrompt: this.config.initialPrompt,
-      });
+      const result = await this.transcribeBlobWithRetry(wavBlob, `native-${Date.now()}`);
 
       if (result && result.text.trim()) {
         console.log('[DesktopWhisper] Transcription result:', result.text);
@@ -667,15 +683,7 @@ class DesktopWhisperTranscriptionService {
       // Convert Float32 PCM to WAV
       const wavBlob = this.pcmToWav(pcmData);
 
-      // Send to desktop whisper server
-      // Convert 'en-US' to 'en' - faster-whisper only accepts 2-letter codes
-      const language = (this.config.language || 'en').split('-')[0];
-      const result = await transcribeWithDesktopWhisper(wavBlob, {
-        language,
-        vadFilter: false, // Always disable server-side VAD (model not bundled)
-        hotwords: this.config.hotwords,
-        initialPrompt: this.config.initialPrompt,
-      });
+      const result = await this.transcribeBlobWithRetry(wavBlob, `web-${Date.now()}`);
 
       if (result && result.text.trim()) {
         onResult({
