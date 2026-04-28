@@ -245,23 +245,39 @@ export function findSimilarLocally(
     threshold = 0.75,
     limit = 5
 ): VerseMatch[] {
-    const scores = verseEmbeddings.map((v) => ({
-        ...v,
-        score: cosineSimilarity(queryEmbedding, v.embedding),
-    }));
+    const scores = verseEmbeddings.map((v) => {
+        const baseRef = v.reference.includes('__') ? v.reference.split('__')[0] : v.reference
+        return {
+            ...v,
+            reference: baseRef,
+            score: cosineSimilarity(queryEmbedding, v.embedding),
+        }
+    });
 
-    // Sort by score descending
     scores.sort((a, b) => b.score - a.score);
 
-    // Log top scores for debugging
-    const topScores = scores.slice(0, 3);
-    // Only log occasionally to reduce noise
-    if (Math.random() < 0.05) {
-        console.log('[findSimilarLocally] Top scores:', topScores.map(s => ({ reference: s.reference, score: s.score.toFixed(3) })));
+    // Deduplicate by reference, keeping best score per verse
+    const bestPerRef = new Map<string, VerseMatch>()
+    for (const s of scores) {
+        if (s.score < threshold) continue
+        const existing = bestPerRef.get(s.reference)
+        if (!existing || s.score > existing.score) {
+            bestPerRef.set(s.reference, {
+                reference: s.reference,
+                book: s.book,
+                bookNumber: s.bookNumber,
+                chapter: s.chapter,
+                verse: s.verse,
+                text: s.text,
+                score: s.score,
+            })
+        }
     }
 
-    return scores
-        .filter((s) => s.score >= threshold)
+    const topScores = [...bestPerRef.values()].slice(0, 3);
+    console.log('[findSimilarLocally] Top scores:', topScores.map(s => ({ reference: s.reference, score: s.score.toFixed(3) })));
+
+    return [...bestPerRef.values()]
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
 }
@@ -284,6 +300,9 @@ export interface CachedVerseEmbedding {
     embedding: number[];
     version: string;
     cachedAt: number;
+    fragmentType?: string;
+    fragmentIndex?: number;
+    embeddingVersion?: string;
 }
 
 /**
@@ -434,18 +453,17 @@ export async function getLocalCachedVersions(): Promise<string[]> {
         const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
         const index = store.index('by_version');
 
-        const request = index.openKeyCursor(null, 'nextunique');
-        const versions: string[] = [];
+        const versions = new Set<string>();
 
         return new Promise((resolve, reject) => {
+            const request = index.openKeyCursor();
             request.onsuccess = () => {
                 const cursor = request.result;
                 if (cursor) {
-                    const v = cursor.key as string;
-                    versions.push(v);
+                    versions.add(cursor.key as string);
                     cursor.continue();
                 } else {
-                    resolve(versions);
+                    resolve(Array.from(versions));
                 }
             };
             request.onerror = () => reject(request.error);
@@ -453,6 +471,42 @@ export async function getLocalCachedVersions(): Promise<string[]> {
     } catch (error) {
         console.error('[Embeddings] Failed to get cached versions:', error);
         return [];
+    }
+}
+
+export async function hasFragmentEmbeddings(version: string): Promise<boolean> {
+    try {
+        const db = await openVerseCache();
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly');
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
+        const index = store.index('by_version');
+
+        return new Promise((resolve, reject) => {
+            const request = index.openCursor(IDBKeyRange.only(version));
+            let checked = 0;
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (cursor) {
+                    checked++;
+                    const row = cursor.value as CachedVerseEmbedding;
+                    if (row.fragmentType || row.reference.includes('__')) {
+                        resolve(true);
+                        return;
+                    }
+                    if (checked < 20) {
+                        cursor.continue();
+                    } else {
+                        resolve(false);
+                    }
+                } else {
+                    resolve(false);
+                }
+            };
+            request.onerror = () => reject(request.error);
+        });
+    } catch (error) {
+        console.error('[Embeddings] Failed to check fragment embeddings:', error);
+        return false;
     }
 }
 
@@ -468,5 +522,6 @@ export default {
     clearCachedVerseEmbeddings,
     clearCachedEmbeddingsForVersion,
     hasCachedEmbeddings,
+    hasFragmentEmbeddings,
     getLocalCachedVersions,
 };

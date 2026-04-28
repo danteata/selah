@@ -26,6 +26,7 @@ import {
     getLocalCachedVersions,
 } from '../services/sermon-listener/localEmbeddings'
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
+import { getDynamicThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
 
 export interface SemanticVerseResult {
     _id: string
@@ -76,33 +77,6 @@ interface UseSemanticVerseSearchReturn {
     initEmbedder: () => Promise<void>
 }
 
-/**
- * Calculate dynamic threshold based on query length.
- * Shorter queries need lower thresholds to find matches.
- */
-function calculateDynamicThreshold(query: string, baseThreshold: number): number {
-    const wordCount = query.trim().split(/\s+/).length
-
-    // For very short queries (2-3 words), use much lower threshold
-    if (wordCount <= 3) {
-        return Math.max(0.45, baseThreshold - 0.20)
-    }
-    // For short queries (4-5 words), use moderately lower threshold
-    if (wordCount <= 5) {
-        return Math.max(0.50, baseThreshold - 0.15)
-    }
-    // For medium queries (6-8 words), slightly lower threshold
-    if (wordCount <= 8) {
-        return Math.max(0.55, baseThreshold - 0.10)
-    }
-    // For longer queries, use base threshold
-    return baseThreshold
-}
-
-/**
- * Hook for semantic verse search using vector embeddings.
- * Supports both local (IndexedDB) and remote (Convex) embeddings.
- */
 export function useSemanticVerseSearch(
     options: UseSemanticVerseSearchOptions = {}
 ): UseSemanticVerseSearchReturn {
@@ -227,9 +201,9 @@ export function useSemanticVerseSearch(
             return
         }
 
-        // Calculate dynamic threshold based on query length
-        const dynamicThreshold = calculateDynamicThreshold(query, threshold)
-        console.log('[useSemanticVerseSearch] Query:', query, 'Word count:', query.trim().split(/\s+/).length, 'Dynamic threshold:', dynamicThreshold)
+        const wordCount = query.trim().split(/\s+/).length
+        const dynamicThreshold = getDynamicThreshold(wordCount)
+        console.log('[useSemanticVerseSearch] Query:', query, 'Word count:', wordCount, 'Dynamic threshold:', dynamicThreshold)
 
         // Debounce the search
         debounceRef.current = setTimeout(async () => {
@@ -320,7 +294,11 @@ export function useSemanticVerseSearch(
 
                 if (abortController.signal.aborted) return
 
-                setResults(searchResults)
+                const validatedResults = searchResults.filter(r =>
+                    validateSemanticMatch(query, r.text, wordCount)
+                )
+
+                setResults(validatedResults.length > 0 ? validatedResults : searchResults)
             } catch (err) {
                 if (!abortController.signal.aborted) {
                     console.error('[useSemanticVerseSearch] Search failed:', err)

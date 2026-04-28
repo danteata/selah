@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
@@ -8,9 +8,10 @@ import { BibleVersionSettings } from './BibleVersionSettings'
 import { SermonListenerSettings } from '../sermon-listener'
 import { TeamManagementPanel } from '../team/TeamManagementPanel'
 import { SongMigrationWizard } from '../admin/SongMigrationWizard'
+import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 
-type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration'
+type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -69,6 +70,14 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         { id: 'shortcuts' as const, label: 'Shortcuts', icon: Keyboard },
     ]
 
+    const adminTabs = isSuperadmin
+        ? [
+            { id: 'admin-bible' as const, label: 'Bible Versions', icon: Book },
+            { id: 'admin-embeddings' as const, label: 'Verse Embeddings', icon: Database },
+            { id: 'admin-sermon' as const, label: 'Sermon Settings', icon: Mic },
+        ]
+        : []
+
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
@@ -95,6 +104,29 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 {tab.label}
                             </button>
                         ))}
+
+                        {adminTabs.length > 0 && (
+                            <>
+                                <div className="my-3 border-t border-gray-200 dark:border-gray-700" />
+                                <div className="flex items-center gap-1.5 px-3 py-1.5 mb-1">
+                                    <Shield className="w-3.5 h-3.5 text-amber-500" />
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">Admin</span>
+                                </div>
+                                {adminTabs.map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
+                                            ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'
+                                            : 'text-gray-600 dark:text-gray-400 hover:bg-amber-50 dark:hover:bg-amber-900/10'
+                                            }`}
+                                    >
+                                        <tab.icon className="w-4 h-4" />
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </>
+                        )}
                     </nav>
                 </div>
 
@@ -102,7 +134,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                 <div className="flex-1 flex flex-col">
                     <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                            {tabs.find((t) => t.id === activeTab)?.label} Settings
+                            {activeTab.startsWith('admin-') ? 'Admin — ' : ''}{tabs.find((t) => t.id === activeTab)?.label || adminTabs.find((t) => t.id === activeTab)?.label || ''} Settings
                         </h3>
                         <button
                             onClick={onClose}
@@ -140,6 +172,9 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                         {activeTab === 'profile' && <ProfileSettings />}
                         {activeTab === 'storage' && <StorageSettings />}
                         {activeTab === 'shortcuts' && <ShortcutsSettings />}
+                        {activeTab === 'admin-bible' && isSuperadmin && <BibleVersionUploader onClose={onClose} />}
+                        {activeTab === 'admin-embeddings' && isSuperadmin && <VerseEmbeddingUploader onClose={onClose} />}
+                        {activeTab === 'admin-sermon' && isSuperadmin && <GlobalSermonListenerSettingsPanel onClose={onClose} />}
                     </div>
                 </div>
             </div>

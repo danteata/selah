@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Download, Check, Loader2, Cloud, CloudOff, Database, HardDrive, Search, RefreshCw, Trash2 } from 'lucide-react'
+import { Download, Check, Loader2, Database, Search, RefreshCw, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useScripture, type BibleVersionStatus } from '../../hooks/useScripture'
+import { useScripture } from '../../hooks/useScripture'
 import type { BibleVersion } from '../../types'
 import {
     initializeEmbedder,
@@ -9,11 +9,12 @@ import {
     isEmbedderReady,
     cacheVerseEmbeddings,
     hasCachedEmbeddings,
-    getCachedVerseEmbeddings,
     clearCachedEmbeddingsForVersion,
+    hasFragmentEmbeddings,
 } from '../../services/sermon-listener/localEmbeddings'
 import { useConvex, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
+import { extractVerseFragments } from '../../lib/extractVerseFragments'
 
 // Book name to number mapping (needed for local cache)
 const BOOK_TO_NUMBER: Record<string, number> = {
@@ -55,6 +56,7 @@ interface EmbeddingSyncStatus {
     versionId: string
     hasEmbeddings: boolean
     embeddingCount: number
+    hasFragments: boolean
     isSyncing: boolean
     progress: number
     total: number
@@ -68,7 +70,6 @@ type SyncStage = 'idle' | 'loading-model' | 'importing' | 'generating' | 'cachin
 export function BibleVersionSettings() {
     const convex = useConvex()
     const [bibleVersionOptions, setBibleVersionOptions] = useState<BibleVersion[]>([])
-    const [versionStatuses, setVersionStatuses] = useState<Record<string, BibleVersionStatus>>({})
     const [downloadingVersion, setDownloadingVersion] = useState<string | null>(null)
     const [downloadProgress, setDownloadProgress] = useState(0)
 
@@ -77,7 +78,8 @@ export function BibleVersionSettings() {
     const [syncingVersion, setSyncingVersion] = useState<string | null>(null)
     const [isModelLoading, setIsModelLoading] = useState(false)
     const [modelLoaded, setModelLoaded] = useState(false)
-    const [autoSyncEnabled, setAutoSyncEnabled] = useState(true) // Auto-sync embeddings when caching Bible
+
+    // Embedding sync state
 
     const startTimeRef = useRef<number | null>(null)
     const progressRef = useRef<{ progress: number; time: number }[]>([])
@@ -96,63 +98,50 @@ export function BibleVersionSettings() {
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
 
-    const { downloadBibleVersion, isVersionDownloaded, getVersionStatus } = useScripture()
+    const { downloadBibleVersion, isVersionDownloaded } = useScripture()
 
-    // Check embedding status for all versions
+    const [statusesLoading, setStatusesLoading] = useState(true)
+
+    // Initialize bibleVersionOptions immediately when bibleVersions loads
+    useEffect(() => {
+        if (bibleVersions && bibleVersions.length > 0) {
+            setBibleVersionOptions(bibleVersions.map(v => ({ ...v, isDownloaded: false })))
+        }
+    }, [bibleVersions])
+
+    // Check embedding status for all versions (parallel)
     const checkEmbeddingStatuses = useCallback(async () => {
         if (!bibleVersions || bibleVersions.length === 0) return
 
-        const statuses: Record<string, EmbeddingSyncStatus> = {}
-
-        for (const version of bibleVersions) {
-            const hasEmbeddings = await hasCachedEmbeddings(version.id)
-            const embeddings = hasEmbeddings ? await getCachedVerseEmbeddings(version.id) : []
-
-            statuses[version.id] = {
+        const entries = await Promise.all(bibleVersions.map(async (version) => {
+            const hasEmb = await hasCachedEmbeddings(version.id)
+            const hasFrags = hasEmb ? await hasFragmentEmbeddings(version.id) : false
+            return [version.id, {
                 versionId: version.id,
-                hasEmbeddings,
-                embeddingCount: embeddings.length,
+                hasEmbeddings: hasEmb,
+                embeddingCount: 0,
+                hasFragments: hasFrags,
                 isSyncing: false,
                 progress: 0,
-                total: version.verseCount || 31102, // Default to KJV verse count
-                stage: 'idle',
-            }
-        }
+                total: version.verseCount || 31102,
+                stage: 'idle' as const,
+            }] as const
+        }))
 
-        setEmbeddingStatuses(statuses)
+        setEmbeddingStatuses(Object.fromEntries(entries))
     }, [bibleVersions])
 
-    // Check status of all versions
-    const checkAllVersionStatuses = useCallback(async () => {
+    const refreshDownloadStatuses = useCallback(async () => {
         if (!bibleVersions || bibleVersions.length === 0) return
 
-        const statuses: Record<string, BibleVersionStatus> = {}
-
-        for (const version of bibleVersions) {
-            try {
-                const status = await getVersionStatus(version.id)
-                statuses[version.id] = status
-            } catch (error) {
-                console.error(`Error checking status for ${version.id}:`, error)
-                statuses[version.id] = {
-                    id: version.id,
-                    downloaded: false,
-                    source: null,
-                    availableOnConvex: false,
-                    availableOnCdn: false,
-                }
-            }
-        }
-
-        setVersionStatuses(statuses)
-
-        // Update bibleVersionOptions with download status
-        const updatedVersions = bibleVersions.map(v => ({
+        setStatusesLoading(true)
+        const results = await Promise.all(bibleVersions.map(async (v) => ({
             ...v,
-            isDownloaded: statuses[v.id]?.downloaded || false,
-        }))
-        setBibleVersionOptions(updatedVersions)
-    }, [bibleVersions, getVersionStatus])
+            isDownloaded: await isVersionDownloaded(v.id),
+        })))
+        setBibleVersionOptions(results)
+        setStatusesLoading(false)
+    }, [bibleVersions, isVersionDownloaded])
 
     // Calculate ETA based on progress
     const calculateEta = useCallback((progress: number, total: number): string => {
@@ -233,6 +222,9 @@ export function BibleVersionSettings() {
                 throw new Error('Bible version file not found')
             }
 
+            // Clear old embeddings before re-seeding (ensures v1 entries are replaced with v2)
+            await clearCachedEmbeddingsForVersion(versionId)
+
             const response = await fetch(fileInfo.url)
             if (!response.ok) {
                 throw new Error(`Failed to fetch Bible file: ${response.status}`)
@@ -267,13 +259,25 @@ export function BibleVersionSettings() {
             for (let i = 0; i < verses.length; i += BATCH_SIZE) {
                 const batch = verses.slice(i, i + BATCH_SIZE)
 
-                // Generate embeddings for batch
-                const texts = batch.map((v) => v.scripture)
-                const embeddings = await embedBatch(texts)
+                // Generate fragment texts alongside full verse texts
+                const allTexts: string[] = []
+                const fragmentMeta: Array<{ verseIdx: number; type: string; fragmentIndex: number }> = []
 
-                // Add to all embeddings
                 for (let j = 0; j < batch.length; j++) {
                     const verse = batch[j]
+                    const fragments = extractVerseFragments(verse.scripture)
+                    for (const frag of fragments) {
+                        allTexts.push(frag.text)
+                        fragmentMeta.push({ verseIdx: j, type: frag.type, fragmentIndex: frag.fragmentIndex })
+                    }
+                }
+
+                const embeddings = await embedBatch(allTexts)
+
+                // Add to all embeddings
+                for (let metaIdx = 0; metaIdx < fragmentMeta.length; metaIdx++) {
+                    const meta = fragmentMeta[metaIdx]
+                    const verse = batch[meta.verseIdx]
 
                     let bookNumber: number
                     let bookName: string
@@ -288,13 +292,15 @@ export function BibleVersionSettings() {
                     }
 
                     allEmbeddings.push({
-                        reference: `${bookName} ${verse.chapter}:${verse.verse}`,
+                        reference: meta.type === 'full'
+                            ? `${bookName} ${verse.chapter}:${verse.verse}`
+                            : `${bookName} ${verse.chapter}:${verse.verse}__${meta.type}_${meta.fragmentIndex}`,
                         book: bookName,
                         bookNumber,
                         chapter: parseInt(verse.chapter, 10),
                         verse: parseInt(verse.verse, 10),
-                        text: verse.scripture,
-                        embedding: embeddings[j].embedding,
+                        text: allTexts[metaIdx],
+                        embedding: embeddings[metaIdx]?.embedding || [],
                     })
                 }
 
@@ -339,7 +345,8 @@ export function BibleVersionSettings() {
                     isSyncing: false,
                     stage: 'completed',
                     hasEmbeddings: true,
-                    embeddingCount: verses.length,
+                    embeddingCount: allEmbeddings.length,
+                    hasFragments: true,
                     eta: undefined,
                 }
             }))
@@ -394,7 +401,7 @@ export function BibleVersionSettings() {
 
             if (result) {
                 // Refresh statuses
-                await checkAllVersionStatuses()
+                await refreshDownloadStatuses()
 
                 // Auto-sync embeddings if enabled
                 if (autoSyncEnabled) {
@@ -413,45 +420,12 @@ export function BibleVersionSettings() {
     }
 
     useEffect(() => {
-        checkAllVersionStatuses()
-        checkEmbeddingStatuses()
-    }, [checkAllVersionStatuses, checkEmbeddingStatuses])
-
-    // Get status icon and label
-    const getStatusDisplay = (versionId: string) => {
-        const status = versionStatuses[versionId]
-        if (!status) return { icon: null, label: 'Checking...', color: 'text-gray-400' }
-
-        if (status.downloaded) {
-            return {
-                icon: <HardDrive className="w-4 h-4" />,
-                label: 'Cached locally',
-                color: 'text-green-600 dark:text-green-400',
-            }
+        if (bibleVersions && bibleVersions.length > 0) {
+            Promise.all([refreshDownloadStatuses(), checkEmbeddingStatuses()]).finally(() => {
+                setStatusesLoading(false)
+            })
         }
-
-        if (status.availableOnConvex) {
-            return {
-                icon: <Database className="w-4 h-4" />,
-                label: 'Available on Convex',
-                color: 'text-blue-600 dark:text-blue-400',
-            }
-        }
-
-        if (status.availableOnCdn) {
-            return {
-                icon: <Cloud className="w-4 h-4" />,
-                label: 'Available on CDN',
-                color: 'text-yellow-600 dark:text-yellow-400',
-            }
-        }
-
-        return {
-            icon: <CloudOff className="w-4 h-4" />,
-            label: 'Unavailable',
-            color: 'text-red-600 dark:text-red-400',
-        }
-    }
+    }, [refreshDownloadStatuses, checkEmbeddingStatuses])
 
     // Get stage label
     const getStageLabel = (stage: SyncStage): string => {
@@ -466,52 +440,17 @@ export function BibleVersionSettings() {
         }
     }
 
+    const isLoading = !convexBibleVersions && !staticBibleVersions?.length
+
     return (
         <div className="space-y-6">
             <div>
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
                     Bible Versions
                 </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Download Bible versions for offline use and enable semantic search capabilities.
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Download Bible versions for offline use. Enable search to find verses by meaning.
                 </p>
-            </div>
-
-            {/* Data Source Legend */}
-            <div className="flex flex-wrap gap-4 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                <div className="flex items-center gap-1.5">
-                    <HardDrive className="w-3.5 h-3.5 text-green-600" />
-                    <span>Cached locally</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                    <Database className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Convex (primary)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                    <Cloud className="w-3.5 h-3.5 text-yellow-600" />
-                    <span>CDN (fallback)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                    <Search className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Search enabled</span>
-                </div>
-            </div>
-
-            {/* Auto-sync option */}
-            <div className="flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-                <input
-                    type="checkbox"
-                    id="autoSyncEmbeddings"
-                    checked={autoSyncEnabled}
-                    onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-                    className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                />
-                <label htmlFor="autoSyncEmbeddings" className="text-sm text-purple-800 dark:text-purple-200">
-                    <span className="font-medium">Auto-enable semantic search</span>
-                    <span className="text-purple-600 dark:text-purple-400 block text-xs">
-                        Automatically generate search embeddings when caching a Bible version
-                    </span>
-                </label>
             </div>
 
             {/* Default Version Selector */}
@@ -519,22 +458,26 @@ export function BibleVersionSettings() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Default Bible Version
                 </label>
-                <select
-                    value={defaultBibleVersion || 'KJV'}
-                    onChange={(e) => setDefaultBibleVersion(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
-                >
-                    {bibleVersionOptions
-                        .filter(v => v.isDownloaded)
-                        .map((version) => (
-                            <option key={version.id} value={version.id}>
-                                {version.name} ({version.id})
-                            </option>
-                        ))}
-                </select>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Only cached versions are available for selection
-                </p>
+                {isLoading ? (
+                    <div className="flex items-center gap-2 text-gray-400 text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading versions...
+                    </div>
+                ) : (
+                    <select
+                        value={defaultBibleVersion || 'KJV'}
+                        onChange={(e) => setDefaultBibleVersion(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500"
+                    >
+                        {bibleVersionOptions
+                            .filter(v => v.isDownloaded)
+                            .map((version) => (
+                                <option key={version.id} value={version.id}>
+                                    {version.name} ({version.id})
+                                </option>
+                            ))}
+                    </select>
+                )}
             </div>
 
             {/* Version List */}
@@ -542,10 +485,21 @@ export function BibleVersionSettings() {
                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     Available Versions
                 </h4>
+                {bibleVersionOptions.length === 0 ? (
+                    <div className="space-y-3">
+                        {[1, 2, 3].map((i) => (
+                            <div key={i} className="animate-pulse flex items-center justify-between py-3">
+                                <div className="space-y-2">
+                                    <div className="h-4 w-20 bg-gray-200 dark:bg-gray-700 rounded" />
+                                    <div className="h-3 w-32 bg-gray-200 dark:bg-gray-700 rounded" />
+                                </div>
+                                <div className="h-8 w-20 bg-gray-200 dark:bg-gray-700 rounded" />
+                            </div>
+                        ))}
+                    </div>
+                ) : (
                 <div className="divide-y divide-gray-200 dark:divide-gray-700">
                     {bibleVersionOptions.map((version) => {
-                        const status = getStatusDisplay(version.id)
-                        const versionStatus = versionStatuses[version.id]
                         const embeddingStatus = embeddingStatuses[version.id]
 
                         return (
@@ -560,35 +514,29 @@ export function BibleVersionSettings() {
                                             <span className="text-sm font-medium text-gray-900 dark:text-white">
                                                 {version.id}
                                             </span>
-                                            {/* Status badge */}
-                                            <span className={`flex items-center gap-1 text-xs ${status.color}`}>
-                                                {status.icon}
-                                                <span>{status.label}</span>
-                                            </span>
-                                            {/* Embedding badge */}
                                             {embeddingStatus?.hasEmbeddings && (
                                                 <span className="flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400">
                                                     <Search className="w-3 h-3" />
-                                                    <span>Search enabled</span>
+                                                    {embeddingStatus.hasFragments ? (
+                                                        <span className="text-[10px] px-1 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded font-medium">v2</span>
+                                                    ) : (
+                                                        <span className="text-[10px] px-1 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded font-medium">v1</span>
+                                                    )}
                                                 </span>
                                             )}
                                         </div>
                                         <div className="text-xs text-gray-500 dark:text-gray-400">
                                             {version.name}
+                                            {version.isPublicDomain && ' · Public Domain'}
                                         </div>
-                                        {version.isDownloaded && (
-                                            <div className="text-xs text-green-600 dark:text-green-400 mt-1">
-                                                {version.copyrightContent}
-                                            </div>
-                                        )}
-                                        {version.isPublicDomain && (
-                                            <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
-                                                Public Domain
-                                            </div>
-                                        )}
                                     </div>
 
                                     <div className="flex items-center gap-2">
+                                        {/* Status loading spinner */}
+                                        {statusesLoading ? (
+                                            <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                        ) : (
+                                        <>
                                         {/* Download/Cache button */}
                                         {version.isDownloaded ? (
                                             <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
@@ -603,7 +551,6 @@ export function BibleVersionSettings() {
                                         ) : (
                                             <button
                                                 onClick={() => handleDownload(version.id)}
-                                                disabled={!versionStatus?.availableOnConvex && !versionStatus?.availableOnCdn}
                                                 className="flex items-center gap-2 px-3 py-1.5 text-sm border border-primary-500 text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 <Download className="w-4 h-4" />
@@ -620,6 +567,17 @@ export function BibleVersionSettings() {
                                                 </div>
                                             ) : embeddingStatus?.hasEmbeddings ? (
                                                 <div className="flex items-center gap-1">
+                                                    {!embeddingStatus.hasFragments && (
+                                                        <button
+                                                            onClick={() => syncEmbeddings(version.id)}
+                                                            disabled={syncingVersion !== null}
+                                                            className="flex items-center gap-1 px-2 py-1 text-xs border border-amber-400 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/30 disabled:opacity-50 font-medium"
+                                                            title="Re-seed with fragment embeddings for improved short-verse detection"
+                                                        >
+                                                            <RefreshCw className="w-3 h-3" />
+                                                            Upgrade
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={() => syncEmbeddings(version.id)}
                                                         disabled={syncingVersion !== null}
@@ -647,6 +605,8 @@ export function BibleVersionSettings() {
                                                     Enable Search
                                                 </button>
                                             )
+                                        )}
+                                        </>
                                         )}
                                     </div>
                                 </div>
@@ -676,33 +636,26 @@ export function BibleVersionSettings() {
                                         {embeddingStatus.error}
                                     </p>
                                 )}
+
+                                {/* v1 upgrade notice */}
+                                {embeddingStatus?.hasEmbeddings && !embeddingStatus.hasFragments && !embeddingStatus.isSyncing && (
+                                    <div className="mt-2 flex items-start gap-2 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                                        <Database className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                                        <div>
+                                            <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                                                Fragment embeddings available
+                                            </p>
+                                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                                                Click <strong>Upgrade</strong> to re-seed with fragment-level embeddings for improved short-verse detection.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )
                     })}
                 </div>
-            </div>
-
-            {/* Info */}
-            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
-                    How Bible data is fetched:
-                </h4>
-                <ol className="text-xs text-blue-700 dark:text-blue-300 list-decimal list-inside space-y-1">
-                    <li>First, check local IndexedDB cache</li>
-                    <li>If not cached, fetch from Convex database</li>
-                    <li>If Convex unavailable, fallback to CDN</li>
-                    <li>Cache downloaded data for offline use</li>
-                </ol>
-                <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-800">
-                    <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
-                        Semantic Search:
-                    </h4>
-                    <p className="text-xs text-blue-700 dark:text-blue-300">
-                        Enable semantic search to find verses by meaning, not just exact words.
-                        Uses AI embeddings (all-MiniLM-L6-v2) processed locally in your browser.
-                        Works offline after initial setup.
-                    </p>
-                </div>
+                )}
             </div>
         </div>
     )

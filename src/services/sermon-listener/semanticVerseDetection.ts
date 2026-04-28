@@ -25,14 +25,14 @@ import {
     type CachedVerseEmbedding,
 } from './localEmbeddings';
 import { BOOK_PATTERN } from './verseDetection';
+import { getDynamicThreshold, validateSemanticMatch } from '../../lib/semanticRetrievalPolicy';
 
 // Configuration
-const SEMANTIC_DETECTION_THRESHOLD = 0.55; // Minimum similarity score (lowered for better detection)
 const SEMANTIC_DETECTION_LIMIT = 3; // Max results per search (per query)
 const MIN_TEXT_LENGTH = 50; // Minimum characters before attempting detection
-const MIN_SENTENCE_LENGTH = 20; // Minimum characters for a sentence to search
+const MIN_SENTENCE_LENGTH = 15; // Minimum characters for a sentence to search
 const MAX_TEXT_LENGTH = 500; // Maximum characters to embed (truncated)
-const THROTTLE_MS = 3000; // Throttle semantic searches to 5 seconds (lowered for testing)
+const THROTTLE_MS = 3000; // Throttle semantic searches to 3 seconds
 const SLIDING_WINDOW_SIZE = 60; // Size of sliding window for edge cases
 const SLIDING_WINDOW_STRIDE = 20; // Stride for sliding window
 
@@ -48,25 +48,14 @@ export interface SemanticVerseMatch {
 
 export interface SemanticDetectionConfig {
     enabled: boolean;
-    threshold: number;
     limit: number;
     minTextLength: number;
     throttleMs: number;
-    version?: string; // Bible version to search
-}
-
-/**
- * Represents a text range to exclude from semantic detection.
- * Used to skip explicit verse references that regex already detected.
- */
-export interface ExcludedRange {
-    startIndex: number;
-    endIndex: number;
+    version?: string;
 }
 
 const DEFAULT_CONFIG: SemanticDetectionConfig = {
     enabled: true,
-    threshold: SEMANTIC_DETECTION_THRESHOLD,
     limit: SEMANTIC_DETECTION_LIMIT,
     minTextLength: MIN_TEXT_LENGTH,
     throttleMs: THROTTLE_MS,
@@ -181,6 +170,71 @@ function generateSlidingWindows(text: string): string[] {
  * - Throttled searches
  * - Result caching
  */
+/**
+ * Calculate simple character-level similarity between two strings.
+ * Returns a value between 0 and 1.
+ */
+function charSimilarity(a: string, b: string): number {
+    const la = a.toLowerCase()
+    const lb = b.toLowerCase()
+    if (la === lb) return 1
+
+    const shorter = la.length < lb.length ? la : lb
+    const longer = la.length < lb.length ? lb : la
+    if (shorter.length === 0) return 0
+
+    let matches = 0
+    let j = 0
+    for (let i = 0; i < longer.length && j < shorter.length; i++) {
+        if (longer[i] === shorter[j]) {
+            matches++
+            j++
+        }
+    }
+    return (2 * matches) / (la.length + lb.length)
+}
+
+/**
+ * Deduplicate near-identical ASR sentences.
+ * ASR often produces multiple variants of the same utterance
+ * (e.g. "The system has built a house" vs "Wisdom has built her house").
+ * When sentences are char-similar above a threshold, keep the longest
+ * (most likely the corrected/re-final version).
+ */
+function dedupeASRSentences(sentences: string[], similarityThreshold = 0.55): string[] {
+    if (sentences.length <= 1) return sentences
+
+    const kept: string[] = []
+    const discarded = new Set<number>()
+
+    for (let i = 0; i < sentences.length; i++) {
+        if (discarded.has(i)) continue
+        for (let j = i + 1; j < sentences.length; j++) {
+            if (discarded.has(j)) continue
+            const sim = charSimilarity(sentences[i], sentences[j])
+            if (sim >= similarityThreshold) {
+                const shorterIdx = sentences[i].length <= sentences[j].length ? i : j
+                discarded.add(shorterIdx)
+            }
+        }
+    }
+
+    for (let i = 0; i < sentences.length; i++) {
+        if (!discarded.has(i)) kept.push(sentences[i])
+    }
+
+    return kept
+}
+
+/**
+ * Enrich short sentence fragments with surrounding context.
+ * Short fragments like "Wisdom has built her house" (26 chars) embed poorly
+ * against full verse text. Prepending the previous sentence gives the
+ * model more semantic signal.
+ */
+const MAX_PROGRESSIVE_RETRIES = 2
+const SHORT_SENTENCE_WORD_LIMIT = 8
+
 export class SemanticVerseDetector {
     private convexClient: ConvexHttpClient | null = null;
     private config: SemanticDetectionConfig;
@@ -227,10 +281,9 @@ export class SemanticVerseDetector {
                 // Check if embeddings exist in Convex
                 let hasEmbeddings = false;
                 try {
-                    const stats = await this.convexClient.query(api.verseEmbeddings.getEmbeddingStats, {
+                    hasEmbeddings = await this.convexClient.query(api.verseEmbeddings.hasEmbeddings, {
                         version: this.config.version,
                     });
-                    hasEmbeddings = stats.hasEmbeddings;
                 } catch (error) {
                     console.warn('[SemanticDetector] Could not check embedding stats, using local fallback');
                     hasEmbeddings = false;
@@ -338,13 +391,6 @@ export class SemanticVerseDetector {
         }
         return this.triggerSearch([]);
     }
-
-    /**
-     * Internal method to trigger a semantic search.
-     * Uses sentence-based segmentation for better accuracy.
-     * 
-     * @param excludedRanges - Ranges to exclude from semantic detection (explicit verse references)
-     */
     private async triggerSearch(excludedRanges: ExcludedRange[] = []): Promise<SemanticVerseMatch[]> {
         if (!this.initialized || this.pendingSearch) {
             return [];
@@ -378,45 +424,95 @@ export class SemanticVerseDetector {
         const allMatches: SemanticVerseMatch[] = [];
         const matchedReferences = new Set<string>();
 
-        // Filter out text segments that contain explicit verse references
         const textWithoutReferences = this.excludeRangesFromText(text, excludedRanges);
         console.log('[SemanticDetector] Text after excluding explicit references:', textWithoutReferences.substring(0, 150));
 
-        // Strategy 1: Split into sentences and search each
         const sentences = splitIntoSentences(textWithoutReferences);
         console.log('[SemanticDetector] Split into sentences:', sentences.length, sentences);
 
-        // Deduplicate and filter sentences to avoid redundant searches
-        const filteredSentences = Array.from(new Set(sentences))
-            .filter(sentence => sentence.length >= MIN_SENTENCE_LENGTH && !containsExplicitVerseReference(sentence));
+        const dedupedSentences = dedupeASRSentences(
+            Array.from(new Set(sentences))
+                .filter(sentence => sentence.length >= MIN_SENTENCE_LENGTH && !containsExplicitVerseReference(sentence))
+        );
 
-        if (filteredSentences.length > 0) {
+        console.log('[SemanticDetector] After dedup:', dedupedSentences.length, dedupedSentences);
+
+        if (dedupedSentences.length > 0) {
             try {
-                // Early exit if we know there are no local embeddings for this version
                 if (this.useLocalFallback && this.isVersionEmpty(this.config.version || 'ANY')) {
-                    // Skip sentence search, only try sliding windows later
+                    // Skip — no embeddings
                 } else {
-                    // Generate embeddings for ALL sentences in a single batch
-                    const embeddingResults = await embedBatch(filteredSentences);
+                    // Build progressive enrichment attempts per sentence
+                    const searchItems: Array<{ text: string; sentenceIdx: number; attempt: number; wordCount: number }> = []
 
-                    // Perform search for each embedding
+                    for (let i = 0; i < dedupedSentences.length; i++) {
+                        const sentence = dedupedSentences[i]
+                        const wordCount = sentence.split(/\s+/).length
+
+                        // Attempt A: sentence alone (always)
+                        searchItems.push({ text: sentence, sentenceIdx: i, attempt: 0, wordCount })
+
+                        // For short sentences, prepare enrichment fallbacks (B: prev+sentence, C: sentence+next)
+                        if (wordCount <= SHORT_SENTENCE_WORD_LIMIT && MAX_PROGRESSIVE_RETRIES >= 1) {
+                            const prev = i > 0 ? dedupedSentences[i - 1] : ''
+                            if (prev) {
+                                searchItems.push({ text: `${prev} ${sentence}`, sentenceIdx: i, attempt: 1, wordCount: wordCount + prev.split(/\s+/).length })
+                            }
+                            const next = i < dedupedSentences.length - 1 ? dedupedSentences[i + 1] : ''
+                            if (next && MAX_PROGRESSIVE_RETRIES >= 2) {
+                                searchItems.push({ text: `${sentence} ${next}`, sentenceIdx: i, attempt: 2, wordCount: wordCount + next.split(/\s+/).length })
+                            }
+                        }
+                    }
+
+                    const textsToEmbed = searchItems.map(item => item.text)
+                    const embeddingResults = await embedBatch(textsToEmbed)
+
+                    const thresholds = searchItems.map(item => getDynamicThreshold(item.wordCount))
+
                     const searchMethod = this.useLocalFallback
-                        ? (emb: number[]) => this.searchLocally(emb)
+                        ? (emb: number[], t: number) => this.searchLocally(emb, t)
                         : this.convexClient
-                            ? (emb: number[]) => this.searchWithConvex(emb)
+                            ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
                             : () => Promise.resolve([]);
 
-                    const searchPromises = embeddingResults.map(res => searchMethod(res.embedding));
+                    const searchPromises = embeddingResults.map((res, idx) => searchMethod(res.embedding, thresholds[idx]));
                     const searchResults = await Promise.allSettled(searchPromises);
 
-                    for (const result of searchResults) {
-                        if (result.status !== 'fulfilled') continue;
-                        const matches = result.value;
-                        for (const match of matches) {
-                            if (!matchedReferences.has(match.reference)) {
-                                matchedReferences.add(match.reference);
-                                allMatches.push(match);
+                    // Process results with progressive enrichment: for each sentence,
+                    // accept the first validated hit (attempt A > B > C)
+                    const bestPerSentence = new Map<number, SemanticVerseMatch | null>()
+
+                    for (let idx = 0; idx < searchResults.length; idx++) {
+                        const result = searchResults[idx]
+                        if (result.status !== 'fulfilled') continue
+                        const item = searchItems[idx]
+                        const sentenceIdx = item.sentenceIdx
+                        const wordCount = item.wordCount
+                        const dynamicThreshold = getDynamicThreshold(wordCount)
+                        const matches = result.value as SemanticVerseMatch[]
+
+                        const currentBest = bestPerSentence.get(sentenceIdx)
+                        if (currentBest !== undefined && currentBest !== null && item.attempt > 0) {
+                            continue // Already have a validated hit for this sentence from an earlier attempt
+                        }
+
+                        const validatedMatch = matches.find(m =>
+                            m.score >= dynamicThreshold &&
+                            validateSemanticMatch(item.text, m.text, wordCount)
+                        )
+
+                        if (validatedMatch) {
+                            if (!bestPerSentence.has(sentenceIdx) || bestPerSentence.get(sentenceIdx) === null) {
+                                bestPerSentence.set(sentenceIdx, validatedMatch)
                             }
+                        }
+                    }
+
+                    for (const match of bestPerSentence.values()) {
+                        if (match && !matchedReferences.has(match.reference)) {
+                            matchedReferences.add(match.reference)
+                            allMatches.push(match)
                         }
                     }
                 }
@@ -425,8 +521,8 @@ export class SemanticVerseDetector {
             }
         }
 
-        // Early termination: if we found high-confidence matches, skip sliding windows
-        const hasGoodMatch = allMatches.some(m => m.score >= 0.75)
+        // Fallback: sliding window if no good matches
+        const hasGoodMatch = allMatches.some(m => m.score >= 0.65)
         if (!hasGoodMatch) {
             console.log('[SemanticDetector] Trying sliding window fallback...');
             const windows = generateSlidingWindows(textWithoutReferences)
@@ -435,22 +531,25 @@ export class SemanticVerseDetector {
             if (windows.length > 0) {
                 try {
                     const windowEmbeddings = await embedBatch(windows);
+                    const windowThresholds = windows.map(w => getDynamicThreshold(w.split(/\s+/).length))
                     const searchMethod = this.useLocalFallback
-                        ? (emb: number[]) => this.searchLocally(emb)
+                        ? (emb: number[], t: number) => this.searchLocally(emb, t)
                         : this.convexClient
-                            ? (emb: number[]) => this.searchWithConvex(emb)
+                            ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
                             : () => Promise.resolve([]);
 
-                    const windowSearchPromises = windowEmbeddings.map(res => searchMethod(res.embedding));
+                    const windowSearchPromises = windowEmbeddings.map((res, idx) => searchMethod(res.embedding, windowThresholds[idx]));
                     const windowSearchResults = await Promise.allSettled(windowSearchPromises);
 
-                    for (const result of windowSearchResults) {
-                        if (result.status !== 'fulfilled') continue;
-                        const matches = result.value;
+                    for (let idx = 0; idx < windowSearchResults.length; idx++) {
+                        const result = windowSearchResults[idx]
+                        if (result.status !== 'fulfilled') continue
+                        const windowThreshold = windowThresholds[idx]
+                        const matches = result.value as SemanticVerseMatch[]
                         for (const match of matches) {
-                            if (!matchedReferences.has(match.reference) && match.score >= 0.55) {
-                                matchedReferences.add(match.reference);
-                                allMatches.push(match);
+                            if (!matchedReferences.has(match.reference) && match.score >= windowThreshold) {
+                                matchedReferences.add(match.reference)
+                                allMatches.push(match)
                             }
                         }
                     }
@@ -460,7 +559,6 @@ export class SemanticVerseDetector {
             }
         }
 
-        // Sort by score and return top matches
         return allMatches
             .sort((a, b) => b.score - a.score)
             .slice(0, this.config.limit);
@@ -503,7 +601,7 @@ export class SemanticVerseDetector {
     /**
      * Search using Convex vector search.
      */
-    private async searchWithConvex(embedding: number[]): Promise<SemanticVerseMatch[]> {
+    private async searchWithConvex(embedding: number[], threshold?: number): Promise<SemanticVerseMatch[]> {
         if (!this.convexClient) {
             return [];
         }
@@ -511,7 +609,7 @@ export class SemanticVerseDetector {
         try {
             const results = await this.convexClient.action(api.verseEmbeddings.findSimilarVerses, {
                 queryEmbedding: embedding,
-                threshold: this.config.threshold,
+                threshold: threshold ?? 0.38,
                 limit: this.config.limit,
                 version: this.config.version,
             });
@@ -528,7 +626,7 @@ export class SemanticVerseDetector {
         } catch (error) {
             console.error('[SemanticDetector] Convex search failed:', error);
             // Fall back to local search
-            return this.searchLocally(embedding);
+            return this.searchLocally(embedding, threshold);
         }
     }
 
@@ -536,7 +634,7 @@ export class SemanticVerseDetector {
      * Search using local similarity calculation.
      * Falls back to any available embeddings if the specific version has none.
      */
-    private async searchLocally(embedding: number[]): Promise<SemanticVerseMatch[]> {
+    private async searchLocally(embedding: number[], threshold?: number): Promise<SemanticVerseMatch[]> {
         const version = this.config.version || 'ANY';
 
         // 1. Try In-Memory Cache first
@@ -574,7 +672,7 @@ export class SemanticVerseDetector {
         }
 
         // Perform similarity matching using the cached list
-        const matches = findSimilarLocally(embedding, cached, this.config.threshold, this.config.limit);
+        const matches = findSimilarLocally(embedding, cached, threshold ?? 0.38, this.config.limit);
 
         return matches.map((m) => ({
             reference: m.reference,

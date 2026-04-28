@@ -20,6 +20,7 @@ import {
     embedBatch,
     isEmbedderReady,
 } from '../../services/sermon-listener/localEmbeddings'
+import { extractVerseFragments } from '../../lib/extractVerseFragments'
 
 interface UploadStatus {
     versionId: string
@@ -132,10 +133,9 @@ export function VerseEmbeddingUploader({ onClose }: VerseEmbeddingUploaderProps)
                     // Check Convex sync status
                     let hasConvexSync = false
                     try {
-                        const stats = await convex.query(api.verseEmbeddings.getEmbeddingStats, {
+                        hasConvexSync = await convex.query(api.verseEmbeddings.hasEmbeddings, {
                             version: version.id,
                         })
-                        hasConvexSync = stats.hasEmbeddings
                     } catch {
                         // Convex check failed, assume no sync
                     }
@@ -310,13 +310,26 @@ export function VerseEmbeddingUploader({ onClose }: VerseEmbeddingUploaderProps)
             for (let i = 0; i < verses.length; i += BATCH_SIZE) {
                 const batch = verses.slice(i, i + BATCH_SIZE)
 
-                // Generate embeddings for batch
-                const texts = batch.map((v) => v.scripture)
-                const embeddings = await embedBatch(texts)
+                // Generate embeddings for batch (full verses + fragments)
+                const allTexts: string[] = []
+                const fragmentMeta: Array<{ verseIdx: number; type: string; fragmentIndex: number }> = []
 
-                // Add to all embeddings
                 for (let j = 0; j < batch.length; j++) {
                     const verse = batch[j]
+                    const fragments = extractVerseFragments(verse.scripture)
+                    for (const frag of fragments) {
+                        allTexts.push(frag.text)
+                        fragmentMeta.push({ verseIdx: j, type: frag.type, fragmentIndex: frag.fragmentIndex })
+                    }
+                }
+
+                const embeddings = await embedBatch(allTexts)
+
+                // Add to all embeddings
+                let embIdx = 0
+                for (let metaIdx = 0; metaIdx < fragmentMeta.length; metaIdx++) {
+                    const meta = fragmentMeta[metaIdx]
+                    const verse = batch[meta.verseIdx]
 
                     let bookNumber: number
                     let bookName: string
@@ -331,14 +344,20 @@ export function VerseEmbeddingUploader({ onClose }: VerseEmbeddingUploaderProps)
                     }
 
                     allEmbeddings.push({
-                        reference: `${bookName} ${verse.chapter}:${verse.verse}`,
+                        reference: meta.type === 'full'
+                            ? `${bookName} ${verse.chapter}:${verse.verse}`
+                            : `${bookName} ${verse.chapter}:${verse.verse}__${meta.type}_${meta.fragmentIndex}`,
                         book: bookName,
                         bookNumber,
                         chapter: parseInt(verse.chapter, 10),
                         verse: parseInt(verse.verse, 10),
-                        text: verse.scripture,
-                        embedding: embeddings[j].embedding,
+                        text: allTexts[metaIdx],
+                        embedding: embeddings[embIdx]?.embedding || [],
+                        fragmentType: meta.type,
+                        fragmentIndex: meta.fragmentIndex,
+                        embeddingVersion: 'v2_fragments',
                     })
+                    embIdx++
                 }
 
                 const processedCount = Math.min(i + BATCH_SIZE, totalVerses)

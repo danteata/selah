@@ -54,45 +54,36 @@ export interface VerseSearchResult {
  */
 export const findSimilarVerses = action({
     args: {
-        // Pre-computed embedding from the client (384 dimensions)
         queryEmbedding: v.array(v.float64()),
-        // Minimum similarity score (0-1, default 0.75)
         threshold: v.optional(v.number()),
-        // Maximum results to return (default 5)
         limit: v.optional(v.number()),
-        // Optional: filter by specific Bible version
         version: v.optional(v.string()),
+        embeddingVersion: v.optional(v.string()),
     },
     handler: async (ctx, args): Promise<VerseSearchResult[]> => {
         const threshold = args.threshold ?? 0.75;
         const limit = args.limit ?? 5;
 
-        // Perform vector search using Convex's built-in vector index
-        // This is FREE and runs efficiently on the server
-        // Note: vectorSearch returns { _id, _score } objects, not full documents
         const vectorResults = await ctx.vectorSearch(
             "verseEmbeddings",
             "by_embedding",
             {
                 vector: args.queryEmbedding,
-                limit: limit * 2, // Fetch extra to allow for threshold filtering
+                limit: limit * 4,
                 filter: args.version ? (q) => q.eq("version", args.version as string) : undefined,
             }
         );
 
-        // Filter by threshold first
         const filteredResults = vectorResults
-            .filter((r) => r._score >= threshold)
-            .slice(0, limit);
+            .filter((r) => r._score >= threshold);
 
-        // Fetch the actual documents for each matching ID
-        const matches: VerseSearchResult[] = [];
+        const rawMatches: Array<VerseSearchResult & { _score: number }> = [];
         for (const result of filteredResults) {
             const doc = await ctx.runQuery(api.verseEmbeddings.getVerseById, {
                 id: result._id
             });
             if (doc) {
-                matches.push({
+                rawMatches.push({
                     _id: doc._id,
                     reference: doc.reference,
                     book: doc.book,
@@ -101,28 +92,51 @@ export const findSimilarVerses = action({
                     verse: doc.verse,
                     text: doc.text,
                     score: result._score,
+                    _score: result._score,
                 });
             }
         }
 
-        return matches;
+        const bestPerReference = new Map<string, VerseSearchResult>();
+        for (const match of rawMatches) {
+            const existing = bestPerReference.get(match.reference);
+            if (!existing || match._score > existing.score) {
+                bestPerReference.set(match.reference, {
+                    _id: match._id,
+                    reference: match.reference,
+                    book: match.book,
+                    bookNumber: match.bookNumber,
+                    chapter: match.chapter,
+                    verse: match.verse,
+                    text: match.text,
+                    score: match.score,
+                });
+            }
+        }
+
+        return Array.from(bestPerReference.values())
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
     },
 });
 
 /**
- * Get a verse by its ID (internal helper for vector search results).
+ * Get a verse by its ID (returns metadata only, no embedding vector).
  */
 export const getVerseById = query({
     args: {
         id: v.id("verseEmbeddings"),
     },
     handler: async (ctx, args) => {
-        return await ctx.db.get(args.id);
+        const doc = await ctx.db.get(args.id);
+        if (!doc) return null;
+        const { embedding, ...rest } = doc;
+        return rest;
     },
 });
 
 /**
- * Get a specific verse by reference.
+ * Get a specific verse by reference (returns metadata only, no embedding vector).
  */
 export const getVerseByReference = query({
     args: {
@@ -138,12 +152,16 @@ export const getVerseByReference = query({
             query = query.filter((q) => q.eq(q.field("version"), args.version));
         }
 
-        return await query.first();
+        const doc = await query.first();
+        if (!doc) return null;
+        const { embedding, ...rest } = doc;
+        return rest;
     },
 });
 
 /**
  * Get all verses for a specific book and chapter.
+ * Returns verse metadata only (no embedding vectors) to reduce bandwidth.
  */
 export const getVersesByChapter = query({
     args: {
@@ -162,7 +180,9 @@ export const getVersesByChapter = query({
             query = query.filter((q) => q.eq(q.field("version"), args.version));
         }
 
-        return await query.collect();
+        const verses = await query.collect();
+
+        return verses.map(({ embedding, ...rest }) => rest);
     },
 });
 
@@ -188,28 +208,33 @@ export const hasEmbeddings = query({
 });
 
 /**
- * Get count of embedded verses.
+ * Get embedding stats without downloading embedding vectors.
+ * Uses pagination to count only, discarding document data.
  */
 export const getEmbeddingStats = query({
     args: {
         version: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        let verses;
-
         if (args.version) {
-            verses = await ctx.db
+            const first = await ctx.db
                 .query("verseEmbeddings")
                 .withIndex("by_version", (q) => q.eq("version", args.version as string))
-                .collect();
-        } else {
-            verses = await ctx.db.query("verseEmbeddings").collect();
+                .first();
+
+            return {
+                count: first ? -1 : 0,
+                version: args.version,
+                hasEmbeddings: first !== null,
+            };
         }
 
+        const first = await ctx.db.query("verseEmbeddings").first();
+
         return {
-            count: verses.length,
-            version: args.version ?? 'all',
-            hasEmbeddings: verses.length > 0,
+            count: first ? -1 : 0,
+            version: 'all',
+            hasEmbeddings: first !== null,
         };
     },
 });
@@ -232,12 +257,20 @@ export const insertEmbedding = internalMutation({
         text: v.string(),
         version: v.string(),
         embedding: v.array(v.float64()),
+        fragmentType: v.optional(v.string()),
+        fragmentIndex: v.optional(v.number()),
+        embeddingVersion: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        // Check if this verse already exists
+        // For fragment embeddings, use a unique reference to avoid collisions
+        const lookupRef = args.fragmentType && args.fragmentType !== 'full'
+            ? `${args.reference}__${args.fragmentType}_${args.fragmentIndex}`
+            : args.reference;
+
+        // Check if this entry already exists
         const existing = await ctx.db
             .query("verseEmbeddings")
-            .withIndex("by_reference", (q) => q.eq("reference", args.reference))
+            .withIndex("by_reference", (q) => q.eq("reference", lookupRef))
             .filter((q) => q.eq(q.field("version"), args.version))
             .first();
 
@@ -246,13 +279,16 @@ export const insertEmbedding = internalMutation({
             await ctx.db.patch(existing._id, {
                 text: args.text,
                 embedding: args.embedding,
+                fragmentType: args.fragmentType,
+                fragmentIndex: args.fragmentIndex,
+                embeddingVersion: args.embeddingVersion,
             });
             return { updated: true, id: existing._id };
         }
 
         // Insert new embedding
         const id = await ctx.db.insert("verseEmbeddings", {
-            reference: args.reference,
+            reference: lookupRef,
             book: args.book,
             bookNumber: args.bookNumber,
             chapter: args.chapter,
@@ -260,6 +296,9 @@ export const insertEmbedding = internalMutation({
             text: args.text,
             version: args.version,
             embedding: args.embedding,
+            fragmentType: args.fragmentType,
+            fragmentIndex: args.fragmentIndex,
+            embeddingVersion: args.embeddingVersion,
         });
 
         return { updated: false, id };
@@ -339,10 +378,42 @@ export const seedEmbeddingsFromVersion = action({
         // Process in batches
         for (let i = 0; i < verses.length; i += batchSize) {
             const batch = verses.slice(i, i + batchSize);
-            const texts = batch.map((v) => v.scripture);
+
+            // Generate fragment texts alongside full verse texts
+            const allTexts: string[] = [];
+            const fragmentMeta: Array<{ verseIdx: number; type: string; fragmentIndex: number }> = [];
+
+            for (let j = 0; j < batch.length; j++) {
+                const verse = batch[j];
+                // Full verse
+                allTexts.push(verse.scripture);
+                fragmentMeta.push({ verseIdx: j, type: "full", fragmentIndex: 0 });
+
+                // Clause fragments: split on punctuation, keep 4-14 word clauses
+                const clauseParts = verse.scripture.split(/[,;:().!?]/)
+                    .map((p: string) => p.trim())
+                    .filter((p: string) => {
+                        const wc = p.split(/\s+/).filter(Boolean).length;
+                        return wc >= 4 && wc <= 14;
+                    });
+                let fIdx = 1;
+                for (const clause of clauseParts.slice(0, 2)) {
+                    allTexts.push(clause);
+                    fragmentMeta.push({ verseIdx: j, type: "clause", fragmentIndex: fIdx++ });
+                }
+
+                // Window fragments: 6-word sliding windows over first 20 words
+                const words = verse.scripture.split(/\s+/).filter(Boolean);
+                const sourceWords = words.slice(0, 20);
+                for (let wi = 0; wi <= sourceWords.length - 6; wi += 3) {
+                    const window = sourceWords.slice(wi, wi + 6).join(" ");
+                    allTexts.push(window);
+                    fragmentMeta.push({ verseIdx: j, type: "window", fragmentIndex: fIdx++ });
+                    if (fIdx > 6) break; // cap fragments per verse
+                }
+            }
 
             // Generate embeddings via OpenAI
-            // Using text-embedding-3-small for cost efficiency
             const embeddingResponse = await fetch("https://api.openai.com/v1/embeddings", {
                 method: "POST",
                 headers: {
@@ -351,8 +422,8 @@ export const seedEmbeddingsFromVersion = action({
                 },
                 body: JSON.stringify({
                     model: "text-embedding-3-small",
-                    input: texts,
-                    dimensions: 384, // Request smaller dimension for efficiency
+                    input: allTexts,
+                    dimensions: 384,
                 }),
             });
 
@@ -368,17 +439,20 @@ export const seedEmbeddingsFromVersion = action({
             embeddings.sort((a, b) => a.index - b.index);
 
             // Insert embeddings using the internal mutation
-            for (let j = 0; j < batch.length; j++) {
-                const verse = batch[j];
-                const embedding = embeddings[j]?.embedding;
+            for (let metaIdx = 0; metaIdx < fragmentMeta.length; metaIdx++) {
+                const meta = fragmentMeta[metaIdx];
+                const verse = batch[meta.verseIdx];
+                const embedding = embeddings[metaIdx]?.embedding;
 
                 if (!embedding || embedding.length !== 384) {
-                    console.warn(`Skipping verse ${verse.book} ${verse.chapter}:${verse.verse} - invalid embedding`);
+                    console.warn(`Skipping fragment ${meta.type}_${meta.fragmentIndex} for ${verse.book} ${verse.chapter}:${verse.verse} - invalid embedding`);
                     continue;
                 }
 
                 const bookNumber = BOOK_TO_NUMBER[verse.book] ?? 0;
-                const reference = `${verse.book} ${verse.chapter}:${verse.verse}`;
+                const reference = meta.type === 'full'
+                    ? `${verse.book} ${verse.chapter}:${verse.verse}`
+                    : `${verse.book} ${verse.chapter}:${verse.verse}__${meta.type}_${meta.fragmentIndex}`;
 
                 await ctx.runMutation(internal.verseEmbeddings.insertEmbedding, {
                     reference,
@@ -386,9 +460,12 @@ export const seedEmbeddingsFromVersion = action({
                     bookNumber,
                     chapter: parseInt(verse.chapter, 10),
                     verse: parseInt(verse.verse, 10),
-                    text: verse.scripture,
+                    text: allTexts[metaIdx],
                     version: args.versionId,
                     embedding,
+                    fragmentType: meta.type,
+                    fragmentIndex: meta.fragmentIndex,
+                    embeddingVersion: "v2_fragments",
                 });
 
                 count++;
@@ -417,6 +494,9 @@ export const seedEmbeddingsFromClient = action({
             verse: v.number(),
             text: v.string(),
             embedding: v.array(v.float64()),
+            fragmentType: v.optional(v.string()),
+            fragmentIndex: v.optional(v.number()),
+            embeddingVersion: v.optional(v.string()),
         })),
     },
     handler: async (ctx, args): Promise<{ success: boolean; count: number }> => {
@@ -434,6 +514,9 @@ export const seedEmbeddingsFromClient = action({
                 text: item.text,
                 version: args.versionId,
                 embedding: item.embedding,
+                fragmentType: item.fragmentType,
+                fragmentIndex: item.fragmentIndex,
+                embeddingVersion: item.embeddingVersion,
             });
 
             count++;
