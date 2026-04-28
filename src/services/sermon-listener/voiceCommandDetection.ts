@@ -145,62 +145,68 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
     return commands
 }
 
+function scanAllMatches(text: string, patterns: RegExp[]): { match: RegExpExecArray; pattern: RegExp } | null {
+    let lastMatch: { match: RegExpExecArray; pattern: RegExp } | null = null
+    for (const pattern of patterns) {
+        const regex = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+        let m: RegExpExecArray | null
+        while ((m = regex.exec(text)) !== null) {
+            lastMatch = { match: m, pattern }
+        }
+    }
+    return lastMatch
+}
+
 function detectNavigationCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
     const lower = text.toLowerCase()
 
     const nextPatterns = [
-        /(?:next|go to next|move to next|advance|forward) (?:verse|verses|chapter)?/i,
         /(?:go |move )?(?:to the |on to the )?next (?:verse|verses|chapter)/i,
         /next verse/i,
+        /(?:next|go to next|move to next|advance|forward) (?:verse|verses|chapter)/i,
     ]
 
-    for (const pattern of nextPatterns) {
-        if (pattern.test(lower)) {
+    const nextResult = scanAllMatches(lower, nextPatterns)
+    if (nextResult) {
+        commands.push({
+            type: 'next_verse',
+            raw: nextResult.match[0],
+            confidence: 'high',
+            offset: 1,
+        })
+    }
+
+    if (commands.length === 0) {
+        const prevPatterns = [
+            /(?:go |move )?(?:to the |back to the )?(?:previous|prior|last) (?:verse|verses|chapter)/i,
+            /(?:previous|prev|go back|back|prior|last) (?:verse|verses|chapter)/i,
+        ]
+
+        const prevResult = scanAllMatches(lower, prevPatterns)
+        if (prevResult) {
             commands.push({
-                type: 'next_verse',
-                raw: pattern.exec(lower)![0],
+                type: 'previous_verse',
+                raw: prevResult.match[0],
                 confidence: 'high',
-                offset: 1,
+                offset: -1,
             })
-            break
         }
     }
 
-    const prevPatterns = [
-        /(?:previous|prev|go back|back|prior|last) (?:verse|verses|chapter)?/i,
-        /(?:go |move )?(?:to the |back to the )?(?:previous|prior|last) (?:verse|verses|chapter)/i,
-    ]
-
     if (commands.length === 0) {
-        for (const pattern of prevPatterns) {
-            if (pattern.test(lower)) {
-                commands.push({
-                    type: 'previous_verse',
-                    raw: pattern.exec(lower)![0],
-                    confidence: 'high',
-                    offset: -1,
-                })
-                break
-            }
-        }
-    }
+        const displayPatterns = [
+            /(?:display|show|put|send|put up|bring up|go live|go live with|present|project) (?:this |that |the )?(?:verse|scripture|passage|text)/i,
+            /(?:display|show|put|send|put up|bring up|go live|present|project) (?:it|that|this)/i,
+        ]
 
-    const displayPatterns = [
-        /(?:display|show|put|send|put up|bring up|go live|go live with|present|project) (?:this |that |the )?(?:verse|scripture|passage|text)/i,
-        /(?:display|show|put|send|put up|bring up|go live|present|project) (?:it|that|this)/i,
-    ]
-
-    if (commands.length === 0) {
-        for (const pattern of displayPatterns) {
-            if (pattern.test(lower)) {
-                commands.push({
-                    type: 'display',
-                    raw: pattern.exec(lower)![0],
-                    confidence: 'medium',
-                })
-                break
-            }
+        const displayResult = scanAllMatches(lower, displayPatterns)
+        if (displayResult) {
+            commands.push({
+                type: 'display',
+                raw: displayResult.match[0],
+                confidence: 'medium',
+            })
         }
     }
 

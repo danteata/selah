@@ -265,6 +265,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [activeBibleVersion, setActiveBibleVersion] = useState(() => readLiveState()?.activeBibleVersion || defaultBibleVersion)
     const activeBibleVersionRef = useRef(activeBibleVersion)
     const currentVerseRef = useRef<DetectedVerse | null>(currentVerse)
+    const currentScriptureRef = useRef<Scripture | null>(null)
     const [lastVoiceCommand, setLastVoiceCommand] = useState<VoiceCommand | null>(null)
     const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
 
@@ -314,6 +315,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const versionChangeRequestIdRef = useRef(0)
     const verseLookupRequestIdRef = useRef(0)
     const versionSwitchCooldownUntilRef = useRef(0)
+    const navigationCooldownUntilRef = useRef(0)
 
     /**
      * Check if text is a duplicate or near-duplicate of recent chunks
@@ -416,6 +418,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     useEffect(() => {
         currentVerseRef.current = currentVerse
     }, [currentVerse])
+
+    useEffect(() => {
+        currentScriptureRef.current = currentScripture
+    }, [currentScripture])
 
     // Check support on mount and when settings change, and eagerly init provider
     useEffect(() => {
@@ -742,6 +748,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (commandSource.length > 0) {
             const commands = detectVoiceCommands(commandSource)
             let handledVersionSwitch = false
+            let handledNavigationCommand = false
             for (const cmd of commands) {
                 const commandKey = `${cmd.type}:${cmd.versionId || ''}:${cmd.offset || ''}`
                 const now = Date.now()
@@ -762,44 +769,68 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             handledVersionSwitch = true
                         }
                         break
-                    case 'next_verse':
-                        if (currentVerse) {
+                    case 'next_verse': {
+                        const cur = currentVerseRef.current
+                        if (cur) {
                             const next: DetectedVerse = {
-                                ...currentVerse,
-                                verseStart: (currentVerse.verseEnd ?? currentVerse.verseStart) + 1,
+                                ...cur,
+                                verseStart: (cur.verseEnd ?? cur.verseStart) + 1,
                                 verseEnd: undefined,
-                                raw: `${currentVerse.book} ${currentVerse.chapter}:${(currentVerse.verseEnd ?? currentVerse.verseStart) + 1}`,
-                                reference: `${currentVerse.book} ${currentVerse.chapter}:${(currentVerse.verseEnd ?? currentVerse.verseStart) + 1}`,
+                                raw: `${cur.book} ${cur.chapter}:${(cur.verseEnd ?? cur.verseStart) + 1}`,
+                                reference: `${cur.book} ${cur.chapter}:${(cur.verseEnd ?? cur.verseStart) + 1}`,
                                 startIndex: 0,
                                 endIndex: 0,
                             }
                             setCurrentVerse(next)
-                            lookupVerse(next)
+                            navigationCooldownUntilRef.current = Date.now() + 3000
+                            lookupVerse(next).then(scripture => {
+                                if (scripture) {
+                                    setCurrentScripture(scripture)
+                                    const slide = createBibleSlide(scripture)
+                                    appendActiveSlide(slide)
+                                    setLiveSlide(slide.id)
+                                }
+                            })
+                            handledNavigationCommand = true
                         }
                         break
-                    case 'previous_verse':
-                        if (currentVerse) {
-                            const prevVerse = Math.max(1, currentVerse.verseStart - 1)
+                    }
+                    case 'previous_verse': {
+                        const cur = currentVerseRef.current
+                        if (cur) {
+                            const prevVerse = Math.max(1, cur.verseStart - 1)
                             const prev: DetectedVerse = {
-                                ...currentVerse,
+                                ...cur,
                                 verseStart: prevVerse,
                                 verseEnd: undefined,
-                                raw: `${currentVerse.book} ${currentVerse.chapter}:${prevVerse}`,
-                                reference: `${currentVerse.book} ${currentVerse.chapter}:${prevVerse}`,
+                                raw: `${cur.book} ${cur.chapter}:${prevVerse}`,
+                                reference: `${cur.book} ${cur.chapter}:${prevVerse}`,
                                 startIndex: 0,
                                 endIndex: 0,
                             }
                             setCurrentVerse(prev)
-                            lookupVerse(prev)
+                            navigationCooldownUntilRef.current = Date.now() + 3000
+                            lookupVerse(prev).then(scripture => {
+                                if (scripture) {
+                                    setCurrentScripture(scripture)
+                                    const slide = createBibleSlide(scripture)
+                                    appendActiveSlide(slide)
+                                    setLiveSlide(slide.id)
+                                }
+                            })
+                            handledNavigationCommand = true
                         }
                         break
-                    case 'display':
-                        if (currentScripture) {
-                            const slide = createBibleSlide(currentScripture)
+                    }
+                    case 'display': {
+                        const scripture = currentScriptureRef.current
+                        if (scripture) {
+                            const slide = createBibleSlide(scripture)
                             appendActiveSlide(slide)
                             setLiveSlide(slide.id)
                         }
                         break
+                    }
                     case 'stop_listening':
                         unifiedTranscriptionService.stop()
                         setIsListening(false)
@@ -816,8 +847,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 onVoiceCommand?.(cmd)
             }
 
-            // Prevent same-chunk verse detection/redisplay from overwriting a just-requested switch.
-            if (handledVersionSwitch) {
+            // Prevent same-chunk verse detection/redisplay from overwriting a just-requested command.
+            if (handledVersionSwitch || handledNavigationCommand) {
                 return
             }
             }
@@ -831,6 +862,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         const regexDetectionIdAtStart = regexVerseDetectionRef.current
         const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
+        const inNavigationCooldown = Date.now() < navigationCooldownUntilRef.current
 
         const verses = detectVerses(cleanText)
 
@@ -884,7 +916,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             setCurrentVerse(latestVerse)
 
             // Auto-lookup if enabled
-            if (autoLookup && !inVersionSwitchCooldown) {
+            if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                 lookupVerse(latestVerse).then(scripture => {
                     optionsRef.current.onVerseDetected?.(latestVerse, scripture)
 
@@ -907,7 +939,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const existing = detectedVerses.find(v => v.reference === reActivatedRef)
             if (existing) {
                 setCurrentVerse(existing)
-                if (autoLookup && !inVersionSwitchCooldown) {
+                if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                     lookupVerse(existing).then(scripture => {
                         optionsRef.current.onVerseDetected?.(existing, scripture)
                         if (autoDisplay && scripture) {
@@ -1009,7 +1041,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         const bestSemanticVerse = limitedSemanticVerses[0]
                         setCurrentVerse(bestSemanticVerse)
 
-                        if (autoLookup && !inVersionSwitchCooldown) {
+                        if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                             lookupVerse(bestSemanticVerse).then(scripture => {
                                 optionsRef.current.onVerseDetected?.(bestSemanticVerse, scripture)
                                 if (autoDisplay && scripture) {
@@ -1030,7 +1062,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     const existing = detectedVerses.find(v => v.reference === reActivatedRef)
                     if (existing) {
                         setCurrentVerse(existing)
-                        if (autoLookup && !inVersionSwitchCooldown) {
+                        if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                             lookupVerse(existing).then(scripture => {
                                 optionsRef.current.onVerseDetected?.(existing, scripture)
                                 if (autoDisplay && scripture) {
