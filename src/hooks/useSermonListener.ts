@@ -32,6 +32,7 @@ import type { DetectedVerse } from '../services/sermon-listener'
 import type { Scripture, BibleVersion } from '../types'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
+const SERMON_LIVE_STATE_STORAGE_KEY = 'sermon-listener:live-state'
 const MAX_DETECTED_VERSES_PER_QUERY = 3 // Max verses per semantic search query
 
 export interface SavedSermonTranscript {
@@ -122,7 +123,7 @@ export interface SermonListenerActions {
     /** Clear the transcript and detected verses */
     reset: () => void
     /** Manually look up a specific verse */
-    lookupVerse: (verse: DetectedVerse) => Promise<Scripture | null>
+    lookupVerse: (verse: DetectedVerse, versionOverride?: string) => Promise<Scripture | null>
     /** Display the current verse on live view */
     displayCurrentVerse: () => void
     /** Remove a detected verse from the list */
@@ -143,6 +144,8 @@ export interface SermonListenerActions {
     previousVerse: () => void
     /** Change the active Bible version */
     changeBibleVersion: (versionId: string) => void
+    /** Manually set one detected verse as current */
+    setCurrentDetectedVerse: (verse: DetectedVerse) => Promise<void>
 }
 
 export type UseSermonListenerReturn = SermonListenerState & SermonListenerActions
@@ -163,6 +166,28 @@ function readSavedTranscripts(): SavedSermonTranscript[] {
 function writeSavedTranscripts(items: SavedSermonTranscript[]): void {
     if (typeof window === 'undefined') return
     localStorage.setItem(SERMON_TRANSCRIPT_STORAGE_KEY, JSON.stringify(items))
+}
+
+interface PersistedLiveState {
+    transcript: string
+    detectedVerses: DetectedVerse[]
+    currentVerse: DetectedVerse | null
+    activeBibleVersion: string
+}
+
+function readLiveState(): PersistedLiveState | null {
+    if (typeof window === 'undefined') return null
+    try {
+        const raw = localStorage.getItem(SERMON_LIVE_STATE_STORAGE_KEY)
+        return raw ? (JSON.parse(raw) as PersistedLiveState) : null
+    } catch {
+        return null
+    }
+}
+
+function writeLiveState(state: PersistedLiveState): void {
+    if (typeof window === 'undefined') return
+    localStorage.setItem(SERMON_LIVE_STATE_STORAGE_KEY, JSON.stringify(state))
 }
 
 /**
@@ -186,7 +211,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const bibleVersions = useAppStore((state) => state.bibleVersions)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
-    const activeSchedule = useAppStore((state) => state.activeSchedule)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
 
@@ -214,10 +238,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // State
     const [isListening, setIsListening] = useState(false)
     const [isSupported, setIsSupported] = useState<boolean | null>(null)
-    const [transcript, setTranscript] = useState('')
+    const [transcript, setTranscript] = useState(() => readLiveState()?.transcript || '')
     const [interimTranscript, setInterimTranscript] = useState('')
-    const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>([])
-    const [currentVerse, setCurrentVerse] = useState<DetectedVerse | null>(null)
+    const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>(() => readLiveState()?.detectedVerses || [])
+    const [currentVerse, setCurrentVerse] = useState<DetectedVerse | null>(() => readLiveState()?.currentVerse || null)
     const [currentScripture, setCurrentScripture] = useState<Scripture | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
@@ -238,7 +262,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [isSpeechDetected, setIsSpeechDetected] = useState(false)
 
     // Voice command state
-    const [activeBibleVersion, setActiveBibleVersion] = useState(defaultBibleVersion)
+    const [activeBibleVersion, setActiveBibleVersion] = useState(() => readLiveState()?.activeBibleVersion || defaultBibleVersion)
+    const activeBibleVersionRef = useRef(activeBibleVersion)
+    const currentVerseRef = useRef<DetectedVerse | null>(currentVerse)
     const [lastVoiceCommand, setLastVoiceCommand] = useState<VoiceCommand | null>(null)
     const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
 
@@ -247,7 +273,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     optionsRef.current = options
 
     // Track transcript buffer for context
-    const transcriptBufferRef = useRef('')
+    const transcriptBufferRef = useRef(readLiveState()?.transcript || '')
 
     // Track recent chunks for deduplication
     const recentChunksRef = useRef<string[]>([])
@@ -259,17 +285,35 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Debounce timer for interim transcript processing
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const INTERIM_DEBOUNCE_MS = 300
+    const dedupeVerses = useCallback((items: DetectedVerse[]): DetectedVerse[] => {
+        const map = new Map<string, DetectedVerse>()
+        for (const verse of items) {
+            const existing = map.get(verse.reference)
+            if (!existing) {
+                map.set(verse.reference, verse)
+                continue
+            }
+            if ((verse.isBestMatch && !existing.isBestMatch) || verse.startIndex > existing.startIndex) {
+                map.set(verse.reference, { ...existing, ...verse, isBestMatch: existing.isBestMatch || verse.isBestMatch })
+            }
+        }
+        return Array.from(map.values())
+    }, [])
 
     // Counter that increments only when regex detects NEW verses — used to determine
     // if semantic results should become the "current" verse. Semantic results that
     // arrive after a newer regex detection should not overwrite the current verse.
     const regexVerseDetectionRef = useRef(0)
 
-    // Track processed voice commands to avoid duplicate execution
-    const processedCommandHashesRef = useRef<Set<string>>(new Set())
+    // Track recent command execution timestamps to avoid instant repeats while still
+    // allowing the same command later in the sermon.
+    const processedCommandTimesRef = useRef<Map<string, number>>(new Map())
 
     // Ref for start function to avoid TDZ issues (start is defined after processTranscript)
     const startRef = useRef<() => Promise<boolean>>(async () => false)
+    const versionChangeRequestIdRef = useRef(0)
+    const verseLookupRequestIdRef = useRef(0)
+    const versionSwitchCooldownUntilRef = useRef(0)
 
     /**
      * Check if text is a duplicate or near-duplicate of recent chunks
@@ -356,6 +400,23 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Semantic detector ref
     const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
+    useEffect(() => {
+        writeLiveState({
+            transcript,
+            detectedVerses,
+            currentVerse,
+            activeBibleVersion,
+        })
+    }, [transcript, detectedVerses, currentVerse, activeBibleVersion])
+
+    useEffect(() => {
+        activeBibleVersionRef.current = activeBibleVersion
+    }, [activeBibleVersion])
+
+    useEffect(() => {
+        currentVerseRef.current = currentVerse
+    }, [currentVerse])
+
     // Check support on mount and when settings change, and eagerly init provider
     useEffect(() => {
         const checkSupport = async () => {
@@ -404,9 +465,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
                         whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
                         fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
-                        fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as any,
+                        fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
                         fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-                        fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as any,
+                        fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
                         fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
                         useVAD: globalSettings?.sermonListener_useVAD,
                         elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
@@ -434,7 +495,28 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }
         }
         checkSupport()
-    }, [targetProvider, globalProvider, providerOverride, isGlobalSettingsLoading, language])
+    }, [
+        targetProvider,
+        globalProvider,
+        providerOverride,
+        isGlobalSettingsLoading,
+        language,
+        globalSettings?.sermonListener_whisperModel,
+        globalSettings?.sermonListener_whisperEndpoint,
+        globalSettings?.sermonListener_whisperApiKey,
+        globalSettings?.sermonListener_whisperChunkDurationMs,
+        globalSettings?.sermonListener_whisperCppEndpoint,
+        globalSettings?.sermonListener_whisperCppChunkDurationMs,
+        globalSettings?.sermonListener_fasterWhisperEndpoint,
+        globalSettings?.sermonListener_fasterWhisperModel,
+        globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+        globalSettings?.sermonListener_fasterWhisperAudioCaptureMode,
+        globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+        globalSettings?.sermonListener_useVAD,
+        globalSettings?.sermonListener_elevenLabsApiKey,
+        globalSettings?.sermonListener_elevenLabsModelId,
+        globalSettings?.sermonListener_elevenLabsChunkDurationMs,
+    ])
 
     // Initialize semantic detector
     useEffect(() => {
@@ -491,17 +573,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      * Look up a verse and get its content
      * Does NOT change currentVerse - just fetches scripture for display
      */
-    const lookupVerse = useCallback(async (verse: DetectedVerse): Promise<Scripture | null> => {
+    const lookupVerse = useCallback(async (verse: DetectedVerse, versionOverride?: string): Promise<Scripture | null> => {
         const label = verseToLabel(verse)
         if (!label) {
             console.warn('Could not convert verse to label:', verse)
             return null
         }
+        const versionToUse = versionOverride || activeBibleVersionRef.current
+        const requestId = ++verseLookupRequestIdRef.current
 
         setIsLoading(true)
         try {
-            const scripture = await fetchScripture(label, activeBibleVersion)
-            if (scripture) {
+            const scripture = await fetchScripture(label, versionToUse)
+            // Ignore stale completions so older lookups can't overwrite a newer version switch.
+            if (scripture && requestId === verseLookupRequestIdRef.current) {
                 setCurrentScripture(scripture)
             }
             return scripture
@@ -511,7 +596,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } finally {
             setIsLoading(false)
         }
-    }, [fetchScripture, activeBibleVersion])
+    }, [fetchScripture])
 
     /**
      * Display the current verse on live view
@@ -576,38 +661,105 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
     }, [currentVerse, lookupVerse])
 
+    const setCurrentDetectedVerse = useCallback(async (verse: DetectedVerse): Promise<void> => {
+        setCurrentVerse(verse)
+        await lookupVerse(verse)
+    }, [lookupVerse])
+
+    const resolveBibleVersionId = useCallback((requested: string): string | null => {
+        const normalized = requested.trim().toLowerCase()
+        const versions = bibleVersions as BibleVersion[]
+        const exact = versions.find(v => v.id.toLowerCase() === normalized || v.name.toLowerCase() === normalized)
+        if (exact) return exact.id
+        const partial = versions.find(v => v.id.toLowerCase().includes(normalized) || v.name.toLowerCase().includes(normalized))
+        return partial?.id || null
+    }, [bibleVersions])
+
+    const applyBibleVersionChange = useCallback(async (requestedVersionId: string): Promise<boolean> => {
+        const resolvedVersionId = resolveBibleVersionId(requestedVersionId) || requestedVersionId
+        const requestId = ++versionChangeRequestIdRef.current
+        const verseToSwitch = currentVerseRef.current
+
+        setError(null)
+        activeBibleVersionRef.current = resolvedVersionId
+        setActiveBibleVersion(resolvedVersionId)
+
+        if (!verseToSwitch) {
+            return true
+        }
+
+        if (!verseToLabel(verseToSwitch)) {
+            setError('Could not resolve current verse label for version switch.')
+            return false
+        }
+
+        const scripture = await lookupVerse(verseToSwitch, resolvedVersionId)
+        if (requestId !== versionChangeRequestIdRef.current) {
+            return false
+        }
+
+        if (!scripture) {
+            setError(`Could not load ${resolvedVersionId} for ${verseToSwitch.reference}.`)
+            return false
+        }
+
+        setCurrentScripture(scripture)
+
+        // Reflect version switch immediately on output and current selected verse UI.
+        // Always refresh the currently selected verse text by updating currentVerse
+        // with a fresh object so consumers keyed by object identity re-render.
+        setCurrentVerse({
+            ...verseToSwitch,
+            raw: scripture.label,
+            reference: scripture.label,
+        })
+
+        // Force deterministic refresh by publishing a fresh Bible slide from the switched scripture.
+        const slide = createBibleSlide(scripture)
+        appendActiveSlide(slide)
+        setLiveSlide(slide.id)
+
+        console.log('[SermonListener] Version switch applied:', {
+            requestedVersionId,
+            resolvedVersionId,
+            verse: verseToSwitch.reference,
+            scriptureVersion: scripture.version,
+        })
+        return true
+    }, [resolveBibleVersionId, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide])
+
     /**
      * Process transcript for verse detection
      */
-    const processTranscript = useCallback((text: string) => {
+    const processTranscript = useCallback((text: string, latestChunkForCommands?: string) => {
         if (!text) return
 
         // Detect and handle voice commands
         if (enableVoiceCommands) {
-            const commands = detectVoiceCommands(text)
+            // Commands must come from the latest utterance chunk only.
+            // Never fall back to full transcript history, which can replay stale commands.
+            const commandSource = latestChunkForCommands?.trim() || ''
+            if (commandSource.length > 0) {
+            const commands = detectVoiceCommands(commandSource)
+            let handledVersionSwitch = false
             for (const cmd of commands) {
-                const hash = `${cmd.type}:${cmd.versionId || ''}:${cmd.offset || ''}:${cmd.raw}`
-                if (processedCommandHashesRef.current.has(hash)) continue
-                processedCommandHashesRef.current.add(hash)
-
-                if (processedCommandHashesRef.current.size > 100) {
-                    const arr = Array.from(processedCommandHashesRef.current)
-                    processedCommandHashesRef.current = new Set(arr.slice(-50))
-                }
-
-                setLastVoiceCommand(cmd)
-                setVoiceCommands(prev => [...prev, cmd])
+                const commandKey = `${cmd.type}:${cmd.versionId || ''}:${cmd.offset || ''}`
+                const now = Date.now()
+                const lastRunAt = processedCommandTimesRef.current.get(commandKey) || 0
+                if (now - lastRunAt < 1800) continue
+                processedCommandTimesRef.current.set(commandKey, now)
 
                 switch (cmd.type) {
                     case 'change_version':
                         if (cmd.versionId) {
-                            setActiveBibleVersion(cmd.versionId)
-                            if (currentVerse) {
-                                const verse = currentVerse
-                                fetchScripture(verseToLabel(verse) || '', cmd.versionId).then(scripture => {
-                                    if (scripture) setCurrentScripture(scripture)
-                                })
-                            }
+                            void applyBibleVersionChange(cmd.versionId).then((ok) => {
+                                if (ok) {
+                                    versionSwitchCooldownUntilRef.current = Date.now() + 3000
+                                    setLastVoiceCommand(cmd)
+                                    setVoiceCommands(prev => [...prev, cmd])
+                                }
+                            })
+                            handledVersionSwitch = true
                         }
                         break
                     case 'next_verse':
@@ -657,7 +809,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         break
                 }
 
+                if (cmd.type !== 'change_version') {
+                    setLastVoiceCommand(cmd)
+                    setVoiceCommands(prev => [...prev, cmd])
+                }
                 onVoiceCommand?.(cmd)
+            }
+
+            // Prevent same-chunk verse detection/redisplay from overwriting a just-requested switch.
+            if (handledVersionSwitch) {
+                return
+            }
             }
         }
 
@@ -668,6 +830,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             : text
 
         const regexDetectionIdAtStart = regexVerseDetectionRef.current
+        const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
 
         const verses = detectVerses(cleanText)
 
@@ -716,12 +879,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // If we found new regex verses, also re-activate any previously detected verses
         // that were mentioned again — the most recently mentioned verse becomes current
         if (hasRegexVerses) {
-            setDetectedVerses(prev => [...prev, ...limitedQueryVerses])
+            setDetectedVerses(prev => dedupeVerses([...prev, ...limitedQueryVerses]))
             const latestVerse = limitedQueryVerses[0]
             setCurrentVerse(latestVerse)
 
             // Auto-lookup if enabled
-            if (autoLookup) {
+            if (autoLookup && !inVersionSwitchCooldown) {
                 lookupVerse(latestVerse).then(scripture => {
                     optionsRef.current.onVerseDetected?.(latestVerse, scripture)
 
@@ -741,23 +904,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } else if (hasReActivated) {
             // No new verses, but a previously detected verse was mentioned again — re-activate it
             const reActivatedRef = reActivatedRefs[0]
-            setCurrentVerse(prev => {
-                const existing = detectedVerses.find(v => v.reference === reActivatedRef)
-                if (existing) {
-                    if (autoLookup) {
-                        lookupVerse(existing).then(scripture => {
-                            optionsRef.current.onVerseDetected?.(existing, scripture)
-                            if (autoDisplay && scripture) {
-                                const slide = createBibleSlide(scripture)
-                                appendActiveSlide(slide)
-                                setLiveSlide(slide.id)
-                            }
-                        })
-                    }
-                    return existing
+            const existing = detectedVerses.find(v => v.reference === reActivatedRef)
+            if (existing) {
+                setCurrentVerse(existing)
+                if (autoLookup && !inVersionSwitchCooldown) {
+                    lookupVerse(existing).then(scripture => {
+                        optionsRef.current.onVerseDetected?.(existing, scripture)
+                        if (autoDisplay && scripture) {
+                            const slide = createBibleSlide(scripture)
+                            appendActiveSlide(slide)
+                            setLiveSlide(slide.id)
+                        }
+                    })
                 }
-                return prev
-            })
+            }
         }
 
         // Semantic verse detection (for paraphrases)
@@ -841,7 +1001,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 }
 
                 if (limitedSemanticVerses.length > 0) {
-                    setDetectedVerses(prev => [...prev, ...limitedSemanticVerses])
+                    setDetectedVerses(prev => dedupeVerses([...prev, ...limitedSemanticVerses]))
 
                     // Only update current verse if no regex verses were found AND
                     // no newer regex detection has happened since this search started
@@ -849,7 +1009,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         const bestSemanticVerse = limitedSemanticVerses[0]
                         setCurrentVerse(bestSemanticVerse)
 
-                        if (autoLookup) {
+                        if (autoLookup && !inVersionSwitchCooldown) {
                             lookupVerse(bestSemanticVerse).then(scripture => {
                                 optionsRef.current.onVerseDetected?.(bestSemanticVerse, scripture)
                                 if (autoDisplay && scripture) {
@@ -867,23 +1027,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 // Re-activate previously detected semantic verses as current
                 if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0 && !isStale) {
                     const reActivatedRef = semanticReActivatedRefs[0]
-                    setCurrentVerse(prev => {
-                        const existing = detectedVerses.find(v => v.reference === reActivatedRef)
-                        if (existing) {
-                            if (autoLookup) {
-                                lookupVerse(existing).then(scripture => {
-                                    optionsRef.current.onVerseDetected?.(existing, scripture)
-                                    if (autoDisplay && scripture) {
-                                        const slide = createBibleSlide(scripture)
-                                        appendActiveSlide(slide)
-                                        setLiveSlide(slide.id)
-                                    }
-                                })
-                            }
-                            return existing
+                    const existing = detectedVerses.find(v => v.reference === reActivatedRef)
+                    if (existing) {
+                        setCurrentVerse(existing)
+                        if (autoLookup && !inVersionSwitchCooldown) {
+                            lookupVerse(existing).then(scripture => {
+                                optionsRef.current.onVerseDetected?.(existing, scripture)
+                                if (autoDisplay && scripture) {
+                                    const slide = createBibleSlide(scripture)
+                                    appendActiveSlide(slide)
+                                    setLiveSlide(slide.id)
+                                }
+                            })
                         }
-                        return prev
-                    })
+                    }
                 }
             }).catch((error: Error) => {
                 console.error('[SemanticDetector] Search error:', error)
@@ -891,7 +1048,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setIsSemanticSearching(false)
             })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, activeSchedule, appendActiveSlide, setLiveSlide, semanticDetectorReady, enableVoiceCommands, currentVerse, currentScripture, activeBibleVersion, fetchScripture, onVoiceCommand])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, semanticDetectorReady, enableVoiceCommands, currentVerse, currentScripture, onVoiceCommand, dedupeVerses, detectedVerses, applyBibleVersionChange])
 
     /**
      * Set transcription provider
@@ -1019,9 +1176,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     cleanedText = stripOverlap(cleanedText, recentChunksRef.current[recentChunksRef.current.length - 1])
                 }
 
-                // Skip if this is a duplicate of recent content
+                // Skip transcript append for duplicates, but still process commands in the chunk.
                 if (isDuplicateText(cleanedText)) {
                     console.log('[useSermonListener] Skipping duplicate text:', cleanedText.substring(0, 50))
+                    processTranscript(transcriptBufferRef.current, cleanedText)
                     return
                 }
 
@@ -1043,7 +1201,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     transcriptBufferRef.current = newFullTranscript
                     setTranscript(newFullTranscript)
 
-                    processTranscript(newFullTranscript)
+                    processTranscript(newFullTranscript, cleanedText)
                 } else {
                     setInterimTranscript(cleanedText)
                     const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
@@ -1052,7 +1210,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         clearTimeout(interimDebounceRef.current)
                     }
                     interimDebounceRef.current = setTimeout(() => {
-                        processTranscript(rollingContext)
+                        processTranscript(rollingContext, cleanedText)
                         interimDebounceRef.current = null
                     }, INTERIM_DEBOUNCE_MS)
                 }
@@ -1083,9 +1241,15 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         onError,
         onTranscriptUpdate,
         processTranscript,
+        cleanRepeatedPhrases,
+        isDuplicateText,
+        stripOverlap,
         provider,
-        sermonSettings?.whisperApiKey,
-        sermonSettings?.whisperChunkDurationMs,
+        sermonSettings?.captureSource,
+        sermonSettings?.selectedMicrophoneId,
+        globalSettings?.sermonListener_transcriptionProvider,
+        globalSettings?.sermonListener_whisperApiKey,
+        globalSettings?.sermonListener_whisperChunkDurationMs,
         globalSettings?.sermonListener_whisperCppChunkDurationMs,
         globalSettings?.sermonListener_whisperCppEndpoint,
         globalSettings?.sermonListener_whisperEndpoint,
@@ -1130,7 +1294,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setLastVoiceCommand(null)
         setVoiceCommands([])
         setActiveBibleVersion(defaultBibleVersion)
-        processedCommandHashesRef.current = new Set()
+        processedCommandTimesRef.current = new Map()
         transcriptBufferRef.current = ''
         recentChunksRef.current = []
         detectedRefsRef.current = new Set()
@@ -1213,14 +1377,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
     }, [transcript])
 
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => {
-            if (isListening) {
-                unifiedTranscriptionService.stop()
-            }
-        }
-    }, [isListening])
+    // No auto-stop on unmount: panel hide/show should not reset active listener session.
 
     return {
         // State
@@ -1261,6 +1418,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         nextVerse,
         previousVerse,
         changeBibleVersion,
+        setCurrentDetectedVerse,
     }
 }
 
