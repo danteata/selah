@@ -8,11 +8,13 @@ import LiveView from './pages/LiveView'
 import ChurchSetup from './pages/ChurchSetup'
 import JoinChurch from './pages/JoinChurch'
 import Landing from './pages/Landing'
+import DesktopWelcome from './pages/DesktopWelcome'
 import LoginPage from './pages/auth/Login'
 import SignupPage from './pages/auth/Signup'
 import TestPage from './pages/TestPage'
 import { useQuery } from 'convex/react'
 import { api } from '../convex/_generated/api'
+import { isDesktop } from './platform'
 
 const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL!)
 const queryClient = new QueryClient()
@@ -74,7 +76,7 @@ function App() {
                       <AuthenticatedApp />
                     </SignedIn>
                     <SignedOut>
-                      <Navigate to="/landing" replace />
+                      {isDesktop() ? <DesktopWelcome /> : <Navigate to="/landing" replace />}
                     </SignedOut>
                   </>
                 }
