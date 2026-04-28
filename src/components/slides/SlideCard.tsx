@@ -40,6 +40,9 @@ export function SlideCard({
 
     // Check if this is a video background
     const isVideoBackground = slide.backgroundType === 'video' && backgroundUrl
+    const previewHtml = slide.type === 'bible' && slide.contents[1]
+        ? `${slide.contents[0] || ''}${slide.contents[1] || ''}`
+        : (slide.contents[0] || '')
 
     return (
         <div
@@ -121,9 +124,9 @@ export function SlideCard({
                         </div>
                     ) : (
                         <div className="absolute inset-0 flex items-center justify-center p-4">
-                            <div
-                                className="text-white text-xs text-center line-clamp-3 drop-shadow-lg tiptap-preview"
-                                dangerouslySetInnerHTML={{ __html: slide.contents[0] }}
+                                <div
+                                    className="text-white text-xs text-center line-clamp-3 drop-shadow-lg tiptap-preview"
+                                dangerouslySetInnerHTML={{ __html: previewHtml }}
                             />
                         </div>
                     )

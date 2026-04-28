@@ -232,7 +232,10 @@ export function PreviewContent() {
                     version: scriptureRef.version,
                     content: result.content,
                 } as Scripture,
-                contents: [`<p><sup>${verseNum}</sup> ${verse.scripture}</p>`],
+                contents: [
+                    `<p class="scripture-content"><sup>${verseNum}</sup> ${verse.scripture}</p>`,
+                    `<p class="scripture-label"><b>${scriptureRef.bookName} ${scriptureRef.chapter}:${verseNum}</b> · ${scriptureRef.version}</p>`,
+                ],
             }
             // Update the slide in activeSlides array
             const updatedSlides = activeSlides.map(s =>
@@ -278,7 +281,10 @@ export function PreviewContent() {
                     version: newVersion,
                     content: result.content,
                 } as Scripture,
-                contents,
+                contents: [
+                    `<p class="scripture-content">${contents.join(' ')}</p>`,
+                    `<p class="scripture-label"><b>${bookName} ${chapter}:${startVerse}${endVerse !== startVerse ? `-${endVerse}` : ''}</b> · ${newVersion}</p>`,
+                ],
             }
 
             const updatedSlides = activeSlides.map(s =>

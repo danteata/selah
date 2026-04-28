@@ -98,6 +98,16 @@ export function LiveOutput() {
 
     const nextSlide = liveOutputSlides[currentIndex + 1]
     const prevSlide = liveOutputSlides[currentIndex - 1]
+    const liveHtml = liveSlide
+        ? (liveSlide.type === 'bible' && liveSlide.contents[1]
+            ? `${liveSlide.contents[0] || ''}${liveSlide.contents[1] || ''}`
+            : (liveSlide.contents[0] || ''))
+        : ''
+    const nextUpHtml = nextSlide
+        ? (nextSlide.type === 'bible' && nextSlide.contents[1]
+            ? `${nextSlide.contents[0] || ''}${nextSlide.contents[1] || ''}`
+            : (nextSlide.contents[0] || ''))
+        : ''
 
     // Keyboard shortcuts for navigation
     useEffect(() => {
@@ -376,7 +386,7 @@ export function LiveOutput() {
                                             <div
                                                 className="text-white text-center drop-shadow-2xl tiptap-preview w-full"
                                                 style={{ fontSize: '2.5vw' }}
-                                                dangerouslySetInnerHTML={{ __html: liveSlide.contents[0] || '' }}
+                                                dangerouslySetInnerHTML={{ __html: liveHtml }}
                                             />
                                         )}
                                     </div>
@@ -400,7 +410,7 @@ export function LiveOutput() {
                                     <div className="w-full h-full p-4 flex items-center justify-center">
                                         <div
                                             className="text-white/60 text-center text-[0.8vw] line-clamp-3"
-                                            dangerouslySetInnerHTML={{ __html: nextSlide.contents[0] || '' }}
+                                            dangerouslySetInnerHTML={{ __html: nextUpHtml }}
                                         />
                                     </div>
                                 ) : (
