@@ -100,7 +100,7 @@ const BOOK_MAPPINGS: Record<string, string> = {
     // ASR (Automatic Speech Recognition) common errors and phonetic variations
     // John -> Join, Joan, Jean (common ASR misrecognitions)
     // Note: 'jon' is already mapped to 'Jonah' above
-    'join': 'John', 'joan': 'John', 'jean': 'John',
+    'join': 'John', 'joan': 'John', 'jean': 'John', 'june': 'John', 'johnny': 'John', 'channel': 'John',
     // Psalms -> sanct, som, sum, psalm (phonetic variations)
     'sanct': 'Psalms', 'some': 'Psalms', 'sum': 'Psalms', 'salm': 'Psalms',
     'sans': 'Psalms', 'saint': 'Psalms',
@@ -257,7 +257,7 @@ function buildBookPattern(): string {
 export const BOOK_PATTERN = buildBookPattern()
 
 // Pattern for chapter and verse (supports colon, period, or hyphen as separator)
-const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*[:\\.\\-]\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
+const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*(?:[:\\.\\-]|x|vs\\.?|verse)\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
 
 // Full verse detection pattern
 const VERSE_PATTERN = new RegExp(
@@ -430,10 +430,11 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
             pointer += 1
         }
 
-        // Parse chapter - use single token if no "chapter" keyword to avoid consuming verse
+        // Parse chapter - spoken forms like "John three sixteen" are supported
+        const chapterStartPointer = pointer
         const chapter = hasChapterKeyword
             ? parseNumberFromTokens(tokens, pointer, 4)  // Allow multi-word like "twenty three"
-            : parseNumberFromTokens(tokens, pointer, 1)  // Single token only
+            : parseNumberFromTokens(tokens, pointer, 2)
         if (!chapter) continue
         pointer = chapter.nextIndex
 
@@ -443,11 +444,35 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
             pointer += 1
         }
 
-        // Parse verse - use single token if no "verse" keyword
-        const verseStart = hasVerseKeyword
+        // Parse verse - allow spoken style "John three sixteen" or "John 3 vs 16"
+        let verseStart = hasVerseKeyword
             ? parseNumberFromTokens(tokens, pointer, 4)
-            : parseNumberFromTokens(tokens, pointer, 1)
-        if (!verseStart) continue
+            : parseNumberFromTokens(tokens, pointer, 2)
+
+        // Handle compact spoken refs like "John 316" => John 3:16
+        // but only when verse token is missing and the chapter token was a single compact number.
+        if (!verseStart) {
+            const rawChapterToken = tokens[chapterStartPointer] || ''
+            if (/^\d{3}$/.test(rawChapterToken)) {
+                const compact = parseInt(rawChapterToken, 10)
+                const inferredChapter = Math.floor(compact / 100)
+                const inferredVerse = compact % 100
+                if (inferredChapter > 0 && inferredVerse > 0) {
+                    detected.push({
+                        raw: tokens.slice(tokenIndex, pointer).join(' '),
+                        reference: `${alias.book} ${inferredChapter}:${inferredVerse}`,
+                        book: alias.book,
+                        chapter: inferredChapter,
+                        verseStart: inferredVerse,
+                        startIndex: 0,
+                        endIndex: 0,
+                        confidence: hasChapterKeyword ? 'high' : 'medium',
+                    })
+                    continue
+                }
+            }
+            continue
+        }
         pointer = verseStart.nextIndex
 
         let verseEnd: number | undefined
@@ -538,6 +563,29 @@ export function detectVerses(text: string): DetectedVerse[] {
         if (seen.has(spokenVerse.reference)) continue
         seen.add(spokenVerse.reference)
         detected.push(spokenVerse)
+    }
+
+    // Heuristic fallback for common quoted verse fragments that ASR can mangle.
+    // Example: "the name of the Lord is a strong tell/tower..." => Proverbs 18:10
+    const normalized = text.toLowerCase()
+    const hasProv1810Already = detected.some(v => v.reference === 'Proverbs 18:10')
+    const looksLikeProv1810 =
+        normalized.includes('name of the lord') &&
+        (normalized.includes('strong tower') || normalized.includes('strong tell') || normalized.includes('strong fort'))
+
+    if (!hasProv1810Already && looksLikeProv1810) {
+        const idx = Math.max(0, normalized.indexOf('name of the lord'))
+        detected.push({
+            raw: 'name of the Lord is a strong tower',
+            reference: 'Proverbs 18:10',
+            book: 'Proverbs',
+            chapter: 18,
+            verseStart: 10,
+            startIndex: idx,
+            endIndex: idx + 'name of the lord is a strong tower'.length,
+            confidence: 'medium',
+            detectionType: 'regex',
+        })
     }
 
     return detected
