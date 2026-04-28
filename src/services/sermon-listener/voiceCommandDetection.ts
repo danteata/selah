@@ -68,23 +68,26 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
         /(?:bible )?version (?:to |to:?)?(.+)/i,
     ]
 
+    // Collect all explicit matches and keep the LAST valid one in this utterance.
+    // This prevents stale earlier mentions from overriding the user's latest command.
+    let lastExplicit: VoiceCommand | null = null
     for (const pattern of versionPatterns) {
-        const match = pattern.exec(text)
-        if (match) {
-            const versionText = match[1].trim().replace(/[.,;!?]+$/, '')
+        const regex = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+        let match: RegExpExecArray | null
+        while ((match = regex.exec(text)) !== null) {
+            const versionText = (match[1] || '').trim().replace(/[.,;!?]+$/, '')
             const versionMatch = findVersionMatch(versionText)
-            if (versionMatch) {
-                commands.push({
-                    type: 'change_version',
-                    raw: match[0].trim(),
-                    confidence: 'high',
-                    versionId: versionMatch.id,
-                    versionName: versionMatch.name,
-                })
-                break
+            if (!versionMatch) continue
+            lastExplicit = {
+                type: 'change_version',
+                raw: match[0].trim(),
+                confidence: 'high',
+                versionId: versionMatch.id,
+                versionName: versionMatch.name,
             }
         }
     }
+    if (lastExplicit) commands.push(lastExplicit)
 
     if (commands.length === 0) {
         const standalonePatterns = [
