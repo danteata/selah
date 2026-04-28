@@ -1,18 +1,12 @@
-/**
- * Hook for accessing global app settings
- *
- * These settings are managed by system super admins and apply to ALL users across ALL churches.
- * The hook provides both read and write access (for super admins).
- */
-
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useUserRole } from './useUserRole'
+import { useConvexConnection } from '../providers/ConvexConnectionProvider'
+import { cacheAppSetting, getCachedAppSetting } from './useIndexedDB'
+import { useState, useEffect } from 'react'
 
-// Types for global settings - using the prefixed field names from schema
 export interface GlobalAppSettings {
     _id?: string
-    // Sermon Listener settings (prefixed)
     sermonListener_transcriptionProvider?: string
     sermonListener_whisperModel?: string
     sermonListener_whisperEndpoint?: string
@@ -49,26 +43,60 @@ export interface UseGlobalAppSettingsReturn {
     transcriptionConfig: TranscriptionConfig | null
     isLoading: boolean
     canEdit: boolean
+    isOfflineMode: boolean
     updateSettings: (settings: Partial<GlobalAppSettings>) => Promise<{ success: boolean; action?: string; error?: string }>
 }
 
-/**
- * Hook to access global app settings (system-wide)
- * No churchId needed - settings apply to all users across all churches
- */
 export function useGlobalAppSettings(): UseGlobalAppSettingsReturn {
     const { isSuperadmin, isLoading: isRoleLoading } = useUserRole()
+    const { isOffline } = useConvexConnection()
 
-    // Query global settings (no churchId needed)
     const settings = useQuery(api.globalAppSettings.getGlobalSettings, {})
-
-    // Query transcription config (simplified version for the transcription service)
     const transcriptionConfig = useQuery(api.globalAppSettings.getTranscriptionConfig, {})
 
-    // Mutation to update settings
+    const [cachedSettings, setCachedSettings] = useState<GlobalAppSettings | null>(null)
+    const [cachedConfig, setCachedConfig] = useState<TranscriptionConfig | null>(null)
+
+    const [cacheChecked, setCacheChecked] = useState(false)
+
+    useEffect(() => {
+        if (!isOffline) return
+
+        const loadCached = async () => {
+            try {
+                const cachedSetting = await getCachedAppSetting('globalSettings')
+                if (cachedSetting) setCachedSettings(cachedSetting.data)
+                const cachedConf = await getCachedAppSetting('transcriptionConfig')
+                if (cachedConf) setCachedConfig(cachedConf.data)
+            } catch (err) {
+                console.warn('[useGlobalAppSettings] Failed to load cached settings:', err)
+            } finally {
+                setCacheChecked(true)
+            }
+        }
+        loadCached()
+    }, [isOffline])
+
+    useEffect(() => {
+        if (settings) {
+            cacheAppSetting('globalSettings', settings).catch(() => {})
+        }
+    }, [settings])
+
+    useEffect(() => {
+        if (transcriptionConfig) {
+            cacheAppSetting('transcriptionConfig', transcriptionConfig).catch(() => {})
+        }
+    }, [transcriptionConfig])
+
     const updateSettingsMutation = useMutation(api.globalAppSettings.updateGlobalSettings)
 
-    const isLoading = isRoleLoading || settings === undefined || transcriptionConfig === undefined
+    const effectiveSettings = settings ?? cachedSettings
+    const effectiveConfig = transcriptionConfig ?? cachedConfig
+
+    const isLoading = isOffline
+        ? isRoleLoading || !cacheChecked
+        : isRoleLoading || (settings === undefined && !cachedSettings) || (transcriptionConfig === undefined && !cachedConfig)
     const canEdit = isSuperadmin
 
     const updateSettings = async (newSettings: Partial<GlobalAppSettings>) => {
@@ -78,6 +106,7 @@ export function useGlobalAppSettings(): UseGlobalAppSettingsReturn {
 
         try {
             const result = await updateSettingsMutation(newSettings)
+            await cacheAppSetting('globalSettings', { ...effectiveSettings, ...newSettings })
             return result
         } catch (error) {
             console.error('Failed to update global app settings:', error)
@@ -86,27 +115,43 @@ export function useGlobalAppSettings(): UseGlobalAppSettingsReturn {
     }
 
     return {
-        settings: settings || null,
-        transcriptionConfig: transcriptionConfig || null,
+        settings: effectiveSettings || null,
+        transcriptionConfig: effectiveConfig || null,
         isLoading,
         canEdit,
+        isOfflineMode: isOffline,
         updateSettings,
     }
 }
 
-/**
- * Hook to get just the transcription config for the transcription service
- * This is a lighter-weight hook for components that only need the config
- */
 export function useTranscriptionConfig() {
     const transcriptionConfig = useQuery(api.globalAppSettings.getTranscriptionConfig, {})
+    const { isOffline } = useConvexConnection()
+    const [cachedConfig, setCachedConfig] = useState<TranscriptionConfig | null>(null)
+
+    useEffect(() => {
+        if (transcriptionConfig) {
+            cacheAppSetting('transcriptionConfig', transcriptionConfig).catch(() => {})
+        }
+    }, [transcriptionConfig])
+
+    useEffect(() => {
+        if (!isOffline) return
+
+        const loadCached = async () => {
+            try {
+                const cached = await getCachedAppSetting('transcriptionConfig')
+                if (cached) setCachedConfig(cached.data)
+            } catch {}
+        }
+        loadCached()
+    }, [isOffline])
 
     return {
-        config: transcriptionConfig || null,
-        isLoading: transcriptionConfig === undefined,
+        config: transcriptionConfig ?? cachedConfig ?? null,
+        isLoading: transcriptionConfig === undefined && !cachedConfig,
     }
 }
 
-// Legacy export for backwards compatibility
 export const useGlobalSermonListenerSettings = useGlobalAppSettings
 export type { GlobalAppSettings as GlobalSermonListenerSettings, UseGlobalAppSettingsReturn as UseGlobalSermonListenerSettingsReturn }

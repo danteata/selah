@@ -104,6 +104,7 @@ export function useSemanticVerseSearch(
     const debounceRef = useRef<NodeJS.Timeout | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     const localEmbeddingsCache = useRef<Awaited<ReturnType<typeof getCachedVerseEmbeddings>>>(null)
+    const embeddingCache = useRef<Map<string, number[]>>(new Map())
 
     // Check if embeddings are available (both local and remote)
     useEffect(() => {
@@ -113,15 +114,13 @@ export function useSemanticVerseSearch(
             let hasLocal = await hasCachedEmbeddings(requestedVersion)
             let workingVersion = requestedVersion
 
-            if (!hasLocal) {
-                // Fallback: find another locally cached version
-                const cachedVersions = await getLocalCachedVersions()
-                if (cachedVersions.length > 0) {
-                    workingVersion = cachedVersions[0]
-                    hasLocal = true
-                    console.log(`[useSemanticVerseSearch] Version ${requestedVersion} not cached. Falling back to ${workingVersion}`)
+                if (!hasLocal) {
+                    const cachedVersions = await getLocalCachedVersions()
+                    if (cachedVersions.length > 0) {
+                        workingVersion = cachedVersions[0]
+                        hasLocal = true
+                    }
                 }
-            }
 
             effectiveVersionRef.current = workingVersion
 
@@ -131,7 +130,6 @@ export function useSemanticVerseSearch(
                 localEmbeddingsCache.current = localEmbeddings
                 setHasLocalEmbeddings(true)
                 setHasEmbeddings(true)
-                console.log(`[useSemanticVerseSearch] Found ${localEmbeddings?.length || 0} local embeddings for ${workingVersion}`)
             } else {
                 setHasLocalEmbeddings(false)
                 // Fall back to checking Convex
@@ -203,7 +201,6 @@ export function useSemanticVerseSearch(
 
         const wordCount = query.trim().split(/\s+/).length
         const dynamicThreshold = getDynamicThreshold(wordCount)
-        console.log('[useSemanticVerseSearch] Query:', query, 'Word count:', wordCount, 'Dynamic threshold:', dynamicThreshold)
 
         // Debounce the search
         debounceRef.current = setTimeout(async () => {
@@ -222,8 +219,18 @@ export function useSemanticVerseSearch(
 
                 if (abortController.signal.aborted) return
 
-                // Generate embedding for the query
-                const embeddingResult = await embedText(query)
+                // Generate embedding for the query (with cache)
+                const cacheKey = query.trim().toLowerCase()
+                let queryEmbedding = embeddingCache.current.get(cacheKey)
+                if (!queryEmbedding) {
+                    const embeddingResult = await embedText(query)
+                    queryEmbedding = embeddingResult.embedding
+                    if (embeddingCache.current.size > 50) {
+                        const firstKey = embeddingCache.current.keys().next().value
+                        if (firstKey) embeddingCache.current.delete(firstKey)
+                    }
+                    embeddingCache.current.set(cacheKey, queryEmbedding)
+                }
 
                 if (abortController.signal.aborted) return
 
@@ -231,9 +238,8 @@ export function useSemanticVerseSearch(
 
                 // Prefer local search if available
                 if (preferLocal && hasLocalEmbeddings && localEmbeddingsCache.current) {
-                    console.log('[useSemanticVerseSearch] Using local embeddings search with threshold:', dynamicThreshold)
                     const localResults = findSimilarLocally(
-                        embeddingResult.embedding,
+                        queryEmbedding,
                         localEmbeddingsCache.current,
                         dynamicThreshold,
                         limit
@@ -256,13 +262,6 @@ export function useSemanticVerseSearch(
                             // If book field is already a name (not a number), use it
                             (isNaN(parseInt(r.book)) ? r.book : 'Unknown')
 
-                        console.log('[useSemanticVerseSearch] Local result:', {
-                            originalRef: r.reference,
-                            book: r.book,
-                            bookNumber: r.bookNumber,
-                            resolvedBookNum: bookNum,
-                            resolvedBookName: bookName
-                        })
                         return {
                             _id: r.reference,
                             ...r,
@@ -273,10 +272,8 @@ export function useSemanticVerseSearch(
                         }
                     })
                 } else {
-                    // Fall back to Convex vector search
-                    console.log('[useSemanticVerseSearch] Using Convex vector search with threshold:', dynamicThreshold)
                     const convexResults = await convex.action(api.verseEmbeddings.findSimilarVerses, {
-                        queryEmbedding: embeddingResult.embedding,
+                        queryEmbedding,
                         threshold: dynamicThreshold,
                         limit,
                         version: effectiveVersionRef.current || version,

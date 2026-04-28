@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Radio, Mic, PanelRight, Keyboard, Monitor } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { SlideChip } from '../slides/SlideChip'
+import { OfflineIndicator } from '../offline/OfflineIndicator'
 
 export function StatusBar() {
     const activeSlides = useAppStore((s) => s.activeSlides)
@@ -76,6 +77,7 @@ export function StatusBar() {
 
             {/* Right — Controls */}
             <div className="flex items-center gap-2">
+                <OfflineIndicator />
                 {/* Keyboard shortcut hints */}
                 <div className="hidden lg:flex items-center gap-2 text-[var(--text-muted)]">
                     <span className="flex items-center gap-0.5">

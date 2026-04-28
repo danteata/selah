@@ -227,7 +227,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const language = languageOverride || sermonSettings?.language || globalSettings?.sermonListener_defaultLanguage || 'en-US'
 
     // Provider from global settings (managed by super admin)
-    const globalProvider = (globalSettings?.sermonListener_transcriptionProvider as TranscriptionProvider) || 'web-speech'
+    // Default to desktop-whisper on Tauri, web-speech on browser
+    const defaultProvider: TranscriptionProvider = typeof window !== 'undefined' && '__TAURI__' in window ? 'desktop-whisper' : 'web-speech'
+    const globalProvider = (globalSettings?.sermonListener_transcriptionProvider as TranscriptionProvider) || defaultProvider
     const targetProvider = providerOverride || globalProvider
 
     // Determine provider from settings or override

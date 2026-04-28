@@ -1,9 +1,10 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useAppStore } from '../store/appStore'
 import type { Song } from '../types'
 import { getIndexedDB } from './useIndexedDB'
+import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 
 export interface UseSongsReturn {
     songs: Song[]
@@ -15,58 +16,84 @@ export interface UseSongsReturn {
     updateSong: (songId: string, updateData: Partial<Song>) => Promise<Song | null>
     deleteSong: (songId: string) => Promise<boolean>
     parseSongLyrics: (lyrics: string, linesPerVerse?: number) => string[]
+    isOfflineData: boolean
 }
 
 export function useSongs(): UseSongsReturn {
     const [loading, setLoading] = useState(false)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const churchId = activeSchedule?.churchId || ''
+    const { isOffline } = useConvexConnection()
+    const [localSongs, setLocalSongs] = useState<Song[]>([])
 
-    // Convex mutations
     const createSongMutation = useMutation(api.songs.createSong)
     const updateSongMutation = useMutation(api.songs.updateSong)
     const deleteSongMutation = useMutation(api.songs.deleteSong)
 
-    // Get all songs query - uses the user's churchId from auth if not provided
     const allSongsQuery = useQuery(
         api.songs.searchSongs,
         { churchId: churchId || undefined, query: '', limit: 1000 }
     )
 
-    /**
-     * Search songs by query (client-side filtering from loaded songs)
-     */
+    useEffect(() => {
+        if (allSongsQuery && allSongsQuery.length > 0) {
+            const db = getIndexedDB()
+            for (const song of allSongsQuery) {
+                db.library.put({
+                    id: song._id || song.id,
+                    type: 'song',
+                    content: song,
+                    createdAt: song.createdAt || new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                }).catch(() => {})
+            }
+        }
+    }, [allSongsQuery])
+
+    useEffect(() => {
+        if (!isOffline) return
+
+        const loadLocalSongs = async () => {
+            try {
+                const db = getIndexedDB()
+                const localItems = await db.library
+                    .where('type')
+                    .equals('song')
+                    .toArray()
+                setLocalSongs(localItems.map(item => item.content as Song))
+            } catch (err) {
+                console.warn('[useSongs] Failed to load local songs:', err)
+            }
+        }
+        loadLocalSongs()
+    }, [isOffline])
+
+    const isOfflineData = isOffline && (allSongsQuery === undefined || allSongsQuery === null)
+
+    const effectiveSongs = isOfflineData ? localSongs : (allSongsQuery || [])
+
     const searchSongs = useCallback((query: string = '', limit: number = 20): Song[] => {
         if (!query.trim()) {
-            return (allSongsQuery || []).slice(0, limit) as Song[]
+            return effectiveSongs.slice(0, limit) as Song[]
         }
 
-        const filtered = (allSongsQuery || []).filter((song: Song) =>
+        const filtered = effectiveSongs.filter((song: Song) =>
             song.title.toLowerCase().includes(query.toLowerCase()) ||
             song.artist.toLowerCase().includes(query.toLowerCase())
         )
 
         return filtered.slice(0, limit) as Song[]
-    }, [allSongsQuery])
+    }, [effectiveSongs])
 
-    /**
-     * Get all songs for the church
-     */
     const getAllSongs = useCallback((): Song[] => {
-        return (allSongsQuery || []) as Song[]
-    }, [allSongsQuery])
+        return effectiveSongs as Song[]
+    }, [effectiveSongs])
 
-    /**
-     * Get a single song by ID
-     */
     const getSongById = useCallback((songId: string): Song | null => {
-        const song = (allSongsQuery || []).find((s: Song) => s._id === songId || s.id === songId)
+        const song = effectiveSongs.find((s: Song) => s._id === songId || s.id === songId)
         return song || null
-    }, [allSongsQuery])
+    }, [effectiveSongs])
 
-    /**
-     * Create a new song
-     */
     const createSong = useCallback(async (
         songData: Partial<Song>,
         isPublic: boolean = false
@@ -78,23 +105,10 @@ export function useSongs(): UseSongsReturn {
                 throw new Error('Title, artist, and lyrics are required')
             }
 
-            const songId = await createSongMutation({
-                title: songData.title,
-                artist: songData.artist,
-                lyrics: songData.lyrics,
-                album: songData.album,
-                cover: songData.cover,
-                author: songData.author,
-                verses: songData.verses,
-                isPublic,
-                churchId,
-            })
-
-            // Also save to local IndexedDB for offline access
-            const db = getIndexedDB()
+            const localId = `local_song_${Date.now()}_${Math.random().toString(36).slice(2)}`
             const localSong: Song = {
-                id: songId,
-                _id: songId,
+                id: localId,
+                _id: localId,
                 title: songData.title,
                 artist: songData.artist,
                 lyrics: songData.lyrics,
@@ -108,13 +122,41 @@ export function useSongs(): UseSongsReturn {
                 updatedAt: new Date().toISOString(),
             }
 
+            const db = getIndexedDB()
             await db.library.put({
-                id: songId,
+                id: localId,
                 type: 'song',
                 content: localSong,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
             })
+
+            if (!isOffline) {
+                try {
+                    const serverId = await createSongMutation({
+                        title: songData.title,
+                        artist: songData.artist,
+                        lyrics: songData.lyrics,
+                        album: songData.album,
+                        cover: songData.cover,
+                        author: songData.author,
+                        verses: songData.verses,
+                        isPublic,
+                        churchId,
+                    })
+
+                    await db.library.delete(localId)
+                    await db.library.put({
+                        id: serverId,
+                        type: 'song',
+                        content: { ...localSong, _id: serverId, id: serverId },
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                    })
+                } catch (err) {
+                    console.warn('[useSongs] Server create failed, keeping local:', err)
+                }
+            }
 
             return localSong
         } catch (error) {
@@ -123,11 +165,8 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [createSongMutation, churchId])
+    }, [createSongMutation, churchId, isOffline])
 
-    /**
-     * Update an existing song
-     */
     const updateSong = useCallback(async (
         songId: string,
         updateData: Partial<Song>
@@ -135,63 +174,65 @@ export function useSongs(): UseSongsReturn {
         try {
             setLoading(true)
 
-            await updateSongMutation({
-                songId,
-                updates: {
-                    title: updateData.title,
-                    artist: updateData.artist,
-                    lyrics: updateData.lyrics,
-                    album: updateData.album,
-                    cover: updateData.cover,
-                    author: updateData.author,
-                    verses: updateData.verses,
-                    isPublic: updateData.isPublic,
-                },
-            })
-
-            // Update local IndexedDB
             const db = getIndexedDB()
             const existing = await db.library.get(songId)
-            if (existing?.content) {
-                await db.library.put({
-                    ...existing,
-                    content: {
-                        ...existing.content,
-                        ...updateData,
-                        updatedAt: new Date().toISOString(),
-                    },
-                    updatedAt: new Date().toISOString(),
-                })
-            }
-
-            // Return updated song
-            const updatedSong: Song = {
+            const updatedLocal: Song = {
                 ...(existing?.content as Song || {}),
                 ...updateData,
                 updatedAt: new Date().toISOString(),
             }
 
-            return updatedSong
+            await db.library.put({
+                ...existing,
+                id: songId,
+                type: 'song',
+                content: updatedLocal,
+                updatedAt: new Date().toISOString(),
+            })
+
+            if (!isOffline) {
+                try {
+                    await updateSongMutation({
+                        songId,
+                        updates: {
+                            title: updateData.title,
+                            artist: updateData.artist,
+                            lyrics: updateData.lyrics,
+                            album: updateData.album,
+                            cover: updateData.cover,
+                            author: updateData.author,
+                            verses: updateData.verses,
+                            isPublic: updateData.isPublic,
+                        },
+                    })
+                } catch (err) {
+                    console.warn('[useSongs] Server update failed, local update kept:', err)
+                }
+            }
+
+            return updatedLocal
         } catch (error) {
             console.error('Error updating song:', error)
             return null
         } finally {
             setLoading(false)
         }
-    }, [updateSongMutation])
+    }, [updateSongMutation, isOffline])
 
-    /**
-     * Delete a song
-     */
     const deleteSong = useCallback(async (songId: string): Promise<boolean> => {
         try {
             setLoading(true)
 
-            await deleteSongMutation({ songId })
-
-            // Delete from local IndexedDB
             const db = getIndexedDB()
             await db.library.delete(songId)
+
+            if (!isOffline) {
+                try {
+                    await deleteSongMutation({ songId })
+                } catch (err) {
+                    console.warn('[useSongs] Server delete failed, local delete kept:', err)
+                }
+            }
 
             return true
         } catch (error) {
@@ -200,11 +241,8 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [deleteSongMutation])
+    }, [deleteSongMutation, isOffline])
 
-    /**
-     * Parse song lyrics into verses
-     */
     const parseSongLyrics = useCallback((
         lyrics: string,
         linesPerVerse: number = 4
@@ -218,15 +256,13 @@ export function useSongs(): UseSongsReturn {
         for (let i = 0; i < lyricLines.length; i++) {
             let line = lyricLines[i]
 
-            // Clean up line
             line = line
-                .replaceAll("â", "'")
+                .replaceAll("\u00e2", "'")
                 .replaceAll('solo: ', '')
                 .replaceAll(' ??? ', '')
                 .replaceAll(' ?? ', '')
                 .replaceAll('[force-verse-break]', '')
 
-            // If line is empty, start new verse
             if (line.trim() === '') {
                 if (tempVerse) {
                     verses.push(tempVerse.replace('\n\n', '').trim())
@@ -239,7 +275,6 @@ export function useSongs(): UseSongsReturn {
             tempVerse += `${line}\n`
             lineCount += 1
 
-            // Force verse break on double newline
             if (tempVerse.includes('\n\n')) {
                 verses.push(tempVerse.replace('\n\n', '').trim())
                 lineCount = 0
@@ -247,14 +282,12 @@ export function useSongs(): UseSongsReturn {
                 continue
             }
 
-            // Start new verse when line count is reached
             if (lineCount === linesPerVerse) {
                 verses.push(tempVerse.replace('\n\n', '').trim())
                 lineCount = 0
                 tempVerse = ''
             }
 
-            // Add remaining lines as last verse
             if (lyricLines.length - i === 1 && tempVerse) {
                 verses.push(tempVerse.replace('\n\n', '').trim())
             }
@@ -263,7 +296,7 @@ export function useSongs(): UseSongsReturn {
         return verses.filter((verse) => verse !== '')
     }, [])
 
-    const songs = useMemo(() => (allSongsQuery || []) as Song[], [allSongsQuery])
+    const songs = useMemo(() => effectiveSongs as Song[], [effectiveSongs])
 
     return {
         songs,
@@ -275,5 +308,6 @@ export function useSongs(): UseSongsReturn {
         updateSong,
         deleteSong,
         parseSongLyrics,
+        isOfflineData,
     }
 }

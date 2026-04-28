@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Church, ArrowRight } from 'lucide-react'
+import { Church, ArrowRight, WifiOff } from 'lucide-react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../convex/_generated/api'
+import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 
 type ChurchSetupStep = 'create' | 'join'
 
 export default function ChurchSetup() {
     const navigate = useNavigate()
+    const { isOffline } = useConvexConnection()
 
-    // Convex mutations
     const createChurch = useMutation(api.churches.createChurch)
     const joinChurch = useMutation(api.churches.joinChurch)
 
@@ -17,9 +18,32 @@ export default function ChurchSetup() {
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState('')
 
-    // Church info
     const [churchName, setChurchName] = useState('')
     const [churchCode, setChurchCode] = useState('')
+
+    if (isOffline) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-primary-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4">
+                <div className="w-full max-w-md text-center">
+                    <div className="inline-flex items-center justify-center w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-2xl mb-6">
+                        <WifiOff className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                        You're offline
+                    </h1>
+                    <p className="text-gray-600 dark:text-gray-400 mb-6">
+                        Setting up a church requires an internet connection. Please check your connection and try again.
+                    </p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="px-6 py-3 bg-primary-600 text-white rounded-xl font-medium hover:bg-primary-700 transition-colors"
+                    >
+                        Retry Connection
+                    </button>
+                </div>
+            </div>
+        )
+    }
 
     const handleChurchSubmit = async (e: React.FormEvent) => {
         e.preventDefault()

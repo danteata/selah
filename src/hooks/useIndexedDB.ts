@@ -1,6 +1,44 @@
 import Dexie, { type Table } from 'dexie'
 import type { Song, Media, LibraryItem, Scripture, Hymn } from '../types'
 
+export interface CachedAuthSession {
+    id: string
+    clerkId: string
+    email: string
+    fullname: string
+    role: string
+    avatar: string
+    churchId: string
+    churchName: string
+    cachedAt: string
+}
+
+export interface CachedChurch {
+    id: string
+    serverId: string
+    name: string
+    type: string
+    address: string
+    pastor: string
+    cachedAt: string
+}
+
+export interface CachedSetting {
+    id: string
+    data: any
+    cachedAt: string
+}
+
+export interface PendingMutation {
+    id?: number
+    mutationName: string
+    args: Record<string, unknown>
+    status: 'pending' | 'completed' | 'failed'
+    createdAt: string
+    retryCount: number
+    localId?: string
+}
+
 class WorshipCloudDatabase extends Dexie {
     songs!: Table<Song>
     media!: Table<Media>
@@ -12,6 +50,10 @@ class WorshipCloudDatabase extends Dexie {
         createdAt: string
         updatedAt: string
     }>
+    authSessions!: Table<CachedAuthSession, string>
+    churches!: Table<CachedChurch, string>
+    appSettings!: Table<CachedSetting, string>
+    pendingMutations!: Table<PendingMutation, number>
 
     constructor() {
         super('WorshipCloudDatabase')
@@ -21,6 +63,17 @@ class WorshipCloudDatabase extends Dexie {
             library: 'id,type,content,createdAt,updatedAt',
             cached: 'id,content,data,createdAt,updatedAt',
             bibleAndHymns: 'id,data,createdAt,updatedAt'
+        })
+        this.version(3).stores({
+            songs: 'id,lyrics,title,album,cover,artist,verses,createdAt,updatedAt',
+            media: 'id,content,data,createdAt,updatedAt',
+            library: 'id,type,content,createdAt,updatedAt',
+            cached: 'id,content,data,createdAt,updatedAt',
+            bibleAndHymns: 'id,data,createdAt,updatedAt',
+            authSessions: 'id,clerkId,email,cachedAt',
+            churches: 'id,serverId,name,cachedAt',
+            appSettings: 'id,cachedAt',
+            pendingMutations: '++id,status,createdAt,mutationName'
         })
     }
 }
@@ -124,4 +177,95 @@ export async function saveBibleAndHymns(
             updatedAt: now
         })
     }
+}
+
+// Auth session caching
+export async function cacheAuthSession(session: Omit<CachedAuthSession, 'cachedAt'>): Promise<void> {
+    const db = getIndexedDB()
+    await db.authSessions.put({
+        ...session,
+        cachedAt: new Date().toISOString(),
+    })
+}
+
+export async function getCachedAuthSession(): Promise<CachedAuthSession | undefined> {
+    const db = getIndexedDB()
+    const all = await db.authSessions.toArray()
+    return all.sort((a, b) => new Date(b.cachedAt).getTime() - new Date(a.cachedAt).getTime())[0]
+}
+
+export async function clearCachedAuthSession(): Promise<void> {
+    const db = getIndexedDB()
+    await db.authSessions.clear()
+}
+
+// Church caching
+export async function cacheChurch(church: { _id: string; name: string; type: string; address: string; pastor: string }): Promise<void> {
+    const db = getIndexedDB()
+    await db.churches.put({
+        id: church._id,
+        serverId: church._id,
+        name: church.name,
+        type: church.type,
+        address: church.address,
+        pastor: church.pastor,
+        cachedAt: new Date().toISOString(),
+    })
+}
+
+export async function getCachedChurch(churchId: string): Promise<CachedChurch | undefined> {
+    const db = getIndexedDB()
+    return await db.churches.get(churchId)
+}
+
+export async function getAllCachedChurches(): Promise<CachedChurch[]> {
+    const db = getIndexedDB()
+    return await db.churches.toArray()
+}
+
+// App settings caching
+export async function cacheAppSetting(id: string, data: any): Promise<void> {
+    const db = getIndexedDB()
+    await db.appSettings.put({
+        id,
+        data,
+        cachedAt: new Date().toISOString(),
+    })
+}
+
+export async function getCachedAppSetting(id: string): Promise<CachedSetting | undefined> {
+    const db = getIndexedDB()
+    return await db.appSettings.get(id)
+}
+
+// Pending mutations
+export async function addPendingMutation(mutation: Omit<PendingMutation, 'id'>): Promise<number> {
+    const db = getIndexedDB()
+    return await db.pendingMutations.add(mutation as PendingMutation)
+}
+
+export async function getPendingMutations(): Promise<PendingMutation[]> {
+    const db = getIndexedDB()
+    return await db.pendingMutations
+        .where('status')
+        .equals('pending')
+        .sortBy('createdAt')
+}
+
+export async function updatePendingMutation(id: number, updates: Partial<PendingMutation>): Promise<void> {
+    const db = getIndexedDB()
+    await db.pendingMutations.update(id, updates)
+}
+
+export async function clearCompletedMutations(): Promise<void> {
+    const db = getIndexedDB()
+    await db.pendingMutations
+        .where('status')
+        .equals('completed')
+        .delete()
+}
+
+export async function clearAllPendingMutations(): Promise<void> {
+    const db = getIndexedDB()
+    await db.pendingMutations.clear()
 }

@@ -275,7 +275,6 @@ export function findSimilarLocally(
     }
 
     const topScores = [...bestPerRef.values()].slice(0, 3);
-    console.log('[findSimilarLocally] Top scores:', topScores.map(s => ({ reference: s.reference, score: s.score.toFixed(3) })));
 
     return [...bestPerRef.values()]
         .sort((a, b) => b.score - a.score)
