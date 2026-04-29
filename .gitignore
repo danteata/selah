@@ -25,7 +25,10 @@ dist-ssr
 
 # Tauri
 src-tauri/target
+src-tauri/binaries
 src-tauri/binaries/dist
 src-tauri/binaries/.venv-build
 src-tauri/binaries/.build
 *.spec
+
+src-tauri/assets/whisper-models

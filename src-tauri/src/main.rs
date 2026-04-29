@@ -10,12 +10,9 @@ use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandChild;
 
-// Import audio capture state and commands
 use audio_capture::{
     AudioCaptureState,
-    // Device listing
     list_audio_devices,
-    // Unified capture API
     is_system_audio_supported,
     start_capture,
     start_capture_with_vad,
@@ -32,10 +29,8 @@ use audio_capture::{
     flush_buffer_as_wav,
 };
 
-// Import multi-monitor state and commands
 use multi_monitor::{
     MultiMonitorState,
-    // Commands
     get_monitors,
     get_primary_monitor,
     get_best_live_monitor,
@@ -69,22 +64,34 @@ use ndi_output::{
 const WHISPER_SERVER_PORT: u16 = 17493;
 
 struct WhisperServerState {
-    child: Mutex<Option<CommandChild>>,
-    server_pid: Mutex<Option<u32>>,
+    child: Arc<Mutex<Option<CommandChild>>>,
+    server_pid: Arc<Mutex<Option<u32>>>,
 }
 
-#[tauri::command]
-async fn start_whisper_server(
+unsafe impl Send for WhisperServerState {}
+unsafe impl Sync for WhisperServerState {}
+
+fn resolve_bundled_model_path(app: &tauri::AppHandle) -> Option<String> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    let bundled_path = resource_dir.join("assets").join("whisper-models").join("base.en");
+    if bundled_path.exists() {
+        println!("Found bundled whisper model at: {}", bundled_path.display());
+        Some(bundled_path.to_string_lossy().to_string())
+    } else {
+        println!("No bundled whisper model found at: {}", bundled_path.display());
+        None
+    }
+}
+
+async fn run_whisper_server(
     app: tauri::AppHandle,
-    state: tauri::State<'_, WhisperServerState>,
+    state: &WhisperServerState,
     model: Option<String>,
 ) -> Result<String, String> {
-    // Check if server is already running
     if state.child.lock().unwrap().is_some() {
         return Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT));
     }
 
-    // Check if a whisper server is already running from a previous session
     #[cfg(unix)]
     {
         use std::process::Command;
@@ -129,24 +136,31 @@ async fn start_whisper_server(
         }
     }
 
-    // Start the whisper server sidecar
     let model_arg = model.unwrap_or_else(|| "base.en".to_string());
-    
+
+    let mut sidecar_args = vec![
+        "--port".to_string(),
+        WHISPER_SERVER_PORT.to_string(),
+        "--model".to_string(),
+        model_arg.clone(),
+    ];
+
+    if let Some(bundled_path) = resolve_bundled_model_path(&app) {
+        println!("Using bundled model path: {}", bundled_path);
+        sidecar_args.push("--model-path".to_string());
+        sidecar_args.push(bundled_path);
+    }
+
     let shell = app.shell();
     let sidecar_command = shell.sidecar("selah-whisper-server")
         .map_err(|e| format!("Failed to create sidecar command: {}", e))?
-        .args([
-            "--port", &WHISPER_SERVER_PORT.to_string(),
-            "--model", &model_arg,
-        ]);
+        .args(&sidecar_args);
 
     let (rx, child) = sidecar_command.spawn()
         .map_err(|e| format!("Failed to spawn whisper server: {}", e))?;
 
-    // Store the child process
     *state.child.lock().unwrap() = Some(child);
 
-    // Log sidecar output for debugging
     let sidecar_rx = rx;
     tokio::spawn(async move {
         use tauri_plugin_shell::process::CommandEvent;
@@ -172,16 +186,12 @@ async fn start_whisper_server(
         }
     });
 
-    // Wait for server to be ready
     println!("Waiting for whisper server to start on port {}...", WHISPER_SERVER_PORT);
-    
-    // Give it some time to start
     std::thread::sleep(std::time::Duration::from_secs(2));
-    
-    // Check if server is responding
+
     let client = reqwest::Client::new();
     let health_url = format!("http://127.0.0.1:{}/health", WHISPER_SERVER_PORT);
-    
+
     for attempt in 0..15 {
         if let Ok(response) = client.get(&health_url).timeout(std::time::Duration::from_secs(1)).send().await {
             if response.status().is_success() {
@@ -193,7 +203,6 @@ async fn start_whisper_server(
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    // Check if the sidecar process is still running
     let child_guard = state.child.lock().unwrap();
     let still_running = child_guard.is_some();
     drop(child_guard);
@@ -204,6 +213,14 @@ async fn start_whisper_server(
     } else {
         Err(format!("Whisper server process exited - check logs for errors"))
     }
+}
+
+#[tauri::command]
+async fn start_whisper_server(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, WhisperServerState>,
+) -> Result<String, String> {
+    run_whisper_server(app, &state, None).await
 }
 
 #[tauri::command]
@@ -227,7 +244,6 @@ async fn get_whisper_server_status(
     let is_running = state.child.lock().unwrap().is_some() || 
         state.server_pid.lock().unwrap().is_some();
     
-    // Try to check health endpoint
     let client = reqwest::Client::new();
     let health_url = format!("http://127.0.0.1:{}/health", WHISPER_SERVER_PORT);
     
@@ -249,19 +265,37 @@ async fn get_whisper_server_status(
     }))
 }
 
+fn prewarm_whisper_server(app: tauri::AppHandle, child: Arc<Mutex<Option<CommandChild>>>, server_pid: Arc<Mutex<Option<u32>>>) {
+    println!("[PreWarm] Starting whisper server pre-warm on app launch...");
+    let state = WhisperServerState { child, server_pid };
+    tauri::async_runtime::spawn(async move {
+        match run_whisper_server(app, &state, None).await {
+            Ok(endpoint) => {
+                println!("[PreWarm] Whisper server pre-warmed successfully: {}", endpoint);
+            }
+            Err(e) => {
+                eprintln!("[PreWarm] Whisper server pre-warm failed: {}", e);
+            }
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Create multi-monitor state
-    let multi_monitor_state = Arc::new(MultiMonitorState::new());
-    let ndi_manager = Arc::new(NdiManager::new());
+    let multi_monitor_state: Arc<MultiMonitorState> = Arc::new(MultiMonitorState::new());
+    let ndi_manager: Arc<NdiManager> = Arc::new(NdiManager::new());
+    let whisper_child: Arc<Mutex<Option<CommandChild>>> = Arc::new(Mutex::new(None));
+    let whisper_pid: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
+    let whisper_child_for_prewarm = whisper_child.clone();
+    let whisper_pid_for_prewarm = whisper_pid.clone();
     
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .manage(WhisperServerState {
-            child: Mutex::new(None),
-            server_pid: Mutex::new(None),
+            child: whisper_child,
+            server_pid: whisper_pid,
         })
         .manage(AudioCaptureState::new())
         .manage(multi_monitor_state.clone())
@@ -270,7 +304,6 @@ pub fn run() {
             start_whisper_server,
             stop_whisper_server,
             get_whisper_server_status,
-            // Audio capture commands
             list_audio_devices,
             is_system_audio_supported,
             start_capture,
@@ -286,7 +319,6 @@ pub fn run() {
             get_capture_type,
             get_audio_chunk_as_wav,
             flush_buffer_as_wav,
-            // Multi-monitor commands
             get_monitors,
             get_primary_monitor,
             get_best_live_monitor,
@@ -304,7 +336,6 @@ pub fn run() {
             update_main_window_state,
             restore_main_window_state,
             is_desktop,
-            // NDI commands
             ndi_is_available,
             ndi_get_state,
             ndi_start_output,
@@ -314,11 +345,11 @@ pub fn run() {
             ndi_discover_sources,
         ])
         .setup(move |app| {
-            // Initialize multi-monitor state with app handle
             multi_monitor_state.init(app.handle().clone());
-
-            // Initialize NDI manager with app handle
             ndi_manager.init(app.handle().clone());
+
+            let app_handle = app.handle().clone();
+            prewarm_whisper_server(app_handle, whisper_child_for_prewarm.clone(), whisper_pid_for_prewarm.clone());
             
             #[cfg(debug_assertions)]
             {

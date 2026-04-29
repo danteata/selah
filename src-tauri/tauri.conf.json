@@ -17,7 +17,8 @@
             "binaries/selah-whisper-server"
         ],
         "resources": [
-            "assets/*"
+            "assets/*",
+            "assets/whisper-models/**/*"
         ],
         "icon": [
             "icons/32x32.png",

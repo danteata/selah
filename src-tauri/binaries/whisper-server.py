@@ -99,37 +99,43 @@ def check_vad_available() -> bool:
         return False
 
 
-def load_model(model_id: str, device: str = 'auto', compute_type: str = 'auto'):
-    """Load the Whisper model."""
+def load_model(model_id: str, device: str = 'auto', compute_type: str = 'auto', model_path: Optional[str] = None):
+    """Load the Whisper model.
+    
+    If model_path is provided, load from that local directory instead of downloading.
+    Otherwise, resolve model_id to a HuggingFace repo ID.
+    """
     global model, model_name
     
     if model is not None and model_name == model_id:
         return model
     
     logger.info(f"Loading model: {model_id}")
+    if model_path:
+        logger.info(f"Using local model path: {model_path}")
     logger.info(f"Device: {device}, Compute type: {compute_type}")
     
-    # Map short names to full model IDs
-    model_map = {
-        'tiny': 'Systran/faster-whisper-tiny',
-        'tiny.en': 'Systran/faster-whisper-tiny.en',
-        'base': 'Systran/faster-whisper-base',
-        'base.en': 'Systran/faster-whisper-base.en',
-        'small': 'Systran/faster-whisper-small',
-        'small.en': 'Systran/faster-whisper-small.en',
-        'medium': 'Systran/faster-whisper-medium',
-        'medium.en': 'Systran/faster-whisper-medium.en',
-        'large-v1': 'Systran/faster-whisper-large-v1',
-        'large-v2': 'Systran/faster-whisper-large-v2',
-        'large-v3': 'Systran/faster-whisper-large-v3',
-        'distil-large-v3': 'Systran/faster-distil-whisper-large-v3',
-    }
-    
-    full_model_id = model_map.get(model_id, model_id)
+    model_source = model_path
+    if not model_source:
+        model_map = {
+            'tiny': 'Systran/faster-whisper-tiny',
+            'tiny.en': 'Systran/faster-whisper-tiny.en',
+            'base': 'Systran/faster-whisper-base',
+            'base.en': 'Systran/faster-whisper-base.en',
+            'small': 'Systran/faster-whisper-small',
+            'small.en': 'Systran/faster-whisper-small.en',
+            'medium': 'Systran/faster-whisper-medium',
+            'medium.en': 'Systran/faster-whisper-medium.en',
+            'large-v1': 'Systran/faster-whisper-large-v1',
+            'large-v2': 'Systran/faster-whisper-large-v2',
+            'large-v3': 'Systran/faster-whisper-large-v3',
+            'distil-large-v3': 'Systran/faster-distil-whisper-large-v3',
+        }
+        model_source = model_map.get(model_id, model_id)
     
     try:
         model = WhisperModel(
-            full_model_id,
+            model_source,
             device=device,
             compute_type=compute_type,
         )
@@ -340,18 +346,22 @@ def main():
     parser = argparse.ArgumentParser(description='Faster-Whisper Server for Selah')
     parser.add_argument('--port', type=int, default=17493, help='Server port')
     parser.add_argument('--model', type=str, default='base.en', help='Whisper model to use')
+    parser.add_argument('--model-path', type=str, default=None,
+                        help='Local path to a pre-downloaded CTranslate2 model directory. '
+                             'If provided, --model is used as a label only and the local path is loaded directly.')
     parser.add_argument('--device', type=str, default='auto', help='Device for inference')
     parser.add_argument('--compute-type', type=str, default='auto', help='Compute type')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='Host to bind to')
     
     args = parser.parse_args()
     
-    # Load initial model
     logger.info(f"Starting Faster-Whisper Server on port {args.port}")
     logger.info(f"Initial model: {args.model}")
+    if args.model_path:
+        logger.info(f"Model path: {args.model_path}")
     
     try:
-        load_model(args.model, args.device, args.compute_type)
+        load_model(args.model, args.device, args.compute_type, model_path=args.model_path)
     except Exception as e:
         logger.warning(f"Could not load initial model: {e}")
         logger.warning("Model will be loaded on first transcription request")
