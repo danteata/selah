@@ -737,6 +737,28 @@ class UnifiedTranscriptionService {
     }
 
     /**
+     * Get the active media stream from the current provider (for audio visualization)
+     * Returns null for web-speech and VAD (they manage streams internally)
+     */
+    getMediaStream(): MediaStream | null {
+        switch (this.currentProvider) {
+            case 'whisper':
+                return whisperTranscriptionService.getMediaStream()
+            case 'whisper-cpp':
+                return whisperCppTranscriptionService.getMediaStream()
+            case 'faster-whisper':
+                if (this.options.useVAD) return null
+                return fasterWhisperTranscriptionService.getMediaStream()
+            case 'elevenlabs':
+                return elevenLabsTranscriptionService.getMediaStream()
+            case 'desktop-whisper':
+                return desktopWhisperTranscriptionService.getMediaStream()
+            default:
+                return null
+        }
+    }
+
+    /**
      * Check if currently listening
      */
     getIsListening(): boolean {

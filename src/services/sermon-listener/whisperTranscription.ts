@@ -305,6 +305,10 @@ class WhisperTranscriptionService {
         this.mediaRecorder = null
         this.mediaStream = null
     }
+
+    getMediaStream(): MediaStream | null {
+        return this.mediaStream
+    }
 }
 
 export const whisperTranscriptionService = new WhisperTranscriptionService()

@@ -1103,6 +1103,10 @@ class FasterWhisperTranscriptionService {
 
         this.audioBuffer = []
     }
+
+    getMediaStream(): MediaStream | null {
+        return this.mediaStream
+    }
 }
 
 export const fasterWhisperTranscriptionService = new FasterWhisperTranscriptionService()

@@ -392,6 +392,10 @@ class ElevenLabsTranscriptionService {
         this.mediaRecorder = null
         this.mediaStream = null
     }
+
+    getMediaStream(): MediaStream | null {
+        return this.mediaStream
+    }
 }
 
 export const elevenLabsTranscriptionService = new ElevenLabsTranscriptionService()

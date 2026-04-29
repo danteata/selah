@@ -170,8 +170,6 @@ export function useScripture() {
         // Use provided version or default
         const selectedVersion = version || defaultBibleVersion
 
-        const db = getIndexedDB()
-
         try {
             const shortLabelSplitted = label.split(':')
             const book = Number(shortLabelSplitted?.[0] || '1')
@@ -192,21 +190,8 @@ export function useScripture() {
                 verses.push(Number(verseStr))
             }
 
-            // Check if version is downloaded
-            const isDownloaded = await isVersionDownloaded(selectedVersion)
-
-            if (!isDownloaded) {
-                console.log(`Bible version ${selectedVersion} not downloaded, downloading now...`)
-                const downloaded = await downloadBibleVersion(selectedVersion)
-                if (!downloaded) {
-                    console.error(`Failed to download Bible version ${selectedVersion}`)
-                    return null
-                }
-            }
-
-            // Fetch bible data from IndexedDB
-            const bibleDataRaw = await db.bibleAndHymns.get(selectedVersion)
-            const bibleData = bibleDataRaw?.data as unknown as BibleVerse[]
+            // Fetch bible data - downloadBibleVersion checks IndexedDB cache first, then Convex/CDN
+            let bibleData = await downloadBibleVersion(selectedVersion)
 
             if (!bibleData) {
                 console.error(`Bible data not found for version ${selectedVersion}`)

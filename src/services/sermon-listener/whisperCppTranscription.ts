@@ -757,6 +757,10 @@ class WhisperCppTranscriptionService {
         this.mediaStream = null
         this.audioBuffer = []
     }
+
+    getMediaStream(): MediaStream | null {
+        return this.mediaStream
+    }
 }
 
 export const whisperCppTranscriptionService = new WhisperCppTranscriptionService()

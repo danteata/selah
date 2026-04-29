@@ -58,6 +58,7 @@ export function SermonListenerPanel({
         isLoading,
         provider,
         isSpeechDetected,
+        audioLevel,
         isInitializingProvider,
         providerReady,
         activeBibleVersion,
@@ -265,23 +266,22 @@ export function SermonListenerPanel({
                     )}
                 </div>
 
-                {/* Audio waveform visualization when speech is detected */}
+                {/* Audio waveform visualization - driven by real audio level */}
                 {isListening && (
-                    <div className={`flex items-end justify-center gap-[2px] h-6 min-w-[48px] ${isSpeechDetected ? 'opacity-100' : 'opacity-35'} transition-opacity duration-200`}>
-                        {[...Array(9)].map((_, i) => (
-                            <div
-                                key={i}
-                                className={`w-[3px] rounded-full ${isSpeechDetected ? 'bg-gradient-to-t from-emerald-600 via-emerald-400 to-cyan-300 shadow-[0_0_6px_rgba(16,185,129,0.6)]' : 'bg-gray-400 dark:bg-gray-500'}`}
-                                style={{
-                                    animationName: isSpeechDetected ? 'waveform-bar' : 'none',
-                                    animationDuration: `${0.35 + i * 0.06}s`,
-                                    animationTimingFunction: 'ease-in-out',
-                                    animationIterationCount: 'infinite',
-                                    animationDelay: `${i * 0.05}s`,
-                                    height: isSpeechDetected ? `${8 + (i % 5) * 3}px` : '5px'
-                                }}
-                            />
-                        ))}
+                    <div className={`flex items-end justify-center gap-[2px] h-6 min-w-[48px] ${(isSpeechDetected || audioLevel > 0.02) ? 'opacity-100' : 'opacity-35'} transition-opacity duration-200`}>
+                        {[4, 7, 5, 9, 6, 8, 5, 7].map((weight, i) => {
+                            const minH = 3
+                            const maxH = 22
+                            const scaled = Math.min(audioLevel * weight * 0.7, 1)
+                            const h = minH + scaled * (maxH - minH)
+                            return (
+                                <div
+                                    key={i}
+                                    className={`w-[3px] rounded-full transition-[height] duration-75 ${(isSpeechDetected || audioLevel > 0.02) ? 'bg-gradient-to-t from-emerald-600 via-emerald-400 to-cyan-300 shadow-[0_0_6px_rgba(16,185,129,0.6)]' : 'bg-gray-400 dark:bg-gray-500'}`}
+                                    style={{ height: `${h}px` }}
+                                />
+                            )
+                        })}
                     </div>
                 )}
 

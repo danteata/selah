@@ -801,6 +801,10 @@ class DesktopWhisperTranscriptionService {
     isUsingNativeCapture(): boolean {
         return this.useNativeCapture;
     }
+
+    getMediaStream(): MediaStream | null {
+        return this._webMediaStream
+    }
 }
 
 export const desktopWhisperTranscriptionService = new DesktopWhisperTranscriptionService();

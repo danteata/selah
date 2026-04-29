@@ -107,6 +107,8 @@ export interface SermonListenerState {
     isSemanticSearching: boolean
     /** Whether speech is currently being detected (audio activity) */
     isSpeechDetected: boolean
+    /** Real-time audio level (0-1) for waveform visualization */
+    audioLevel: number
     /** Active Bible version for lookups (tracks voice command changes) */
     activeBibleVersion: string
     /** Last detected voice command */
@@ -263,6 +265,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Speech detection state (for visual feedback)
     const [isSpeechDetected, setIsSpeechDetected] = useState(false)
 
+    // Real-time audio level (0-1) for waveform visualization
+    const [audioLevel, setAudioLevel] = useState(0)
+    const audioAnalyserRef = useRef<AnalyserNode | null>(null)
+    const audioContextRef = useRef<AudioContext | null>(null)
+    const audioStreamRef = useRef<MediaStream | null>(null)
+    const audioLevelRafRef = useRef<number | null>(null)
+
     // Voice command state
     const [activeBibleVersion, setActiveBibleVersion] = useState(() => readLiveState()?.activeBibleVersion || defaultBibleVersion)
     const activeBibleVersionRef = useRef(activeBibleVersion)
@@ -316,8 +325,77 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const startRef = useRef<() => Promise<boolean>>(async () => false)
     const versionChangeRequestIdRef = useRef(0)
     const verseLookupRequestIdRef = useRef(0)
+    const activeLookupCountRef = useRef(0)
     const versionSwitchCooldownUntilRef = useRef(0)
     const navigationCooldownUntilRef = useRef(0)
+
+    // Real-time audio level analysis via Web Audio API AnalyserNode
+    // Reuses the transcription service's media stream to avoid duplicate getUserMedia calls
+    const startAudioAnalyser = useCallback(async () => {
+        try {
+            let stream = unifiedTranscriptionService.getMediaStream()
+
+            if (!stream) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                    audioStreamRef.current = stream
+                } catch {
+                    console.warn('[useSermonListener] Could not acquire audio stream for analyser')
+                    return
+                }
+            }
+
+            const ctx = new AudioContext()
+            audioContextRef.current = ctx
+            const source = ctx.createMediaStreamSource(stream)
+            const analyser = ctx.createAnalyser()
+            analyser.fftSize = 256
+            analyser.smoothingTimeConstant = 0.8
+            source.connect(analyser)
+            audioAnalyserRef.current = analyser
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+            const poll = () => {
+                if (!audioAnalyserRef.current) return
+                analyser.getByteFrequencyData(dataArray)
+                const sum = dataArray.reduce((a, b) => a + b, 0)
+                const avg = sum / dataArray.length
+                const level = Math.min(avg / 128, 1)
+                setAudioLevel(level)
+                audioLevelRafRef.current = requestAnimationFrame(poll)
+            }
+            poll()
+        } catch (e) {
+            console.warn('[useSermonListener] Could not start audio analyser:', e)
+        }
+    }, [])
+
+    const stopAudioAnalyser = useCallback(() => {
+        if (audioLevelRafRef.current != null) {
+            cancelAnimationFrame(audioLevelRafRef.current)
+            audioLevelRafRef.current = null
+        }
+        audioAnalyserRef.current = null
+        if (audioContextRef.current) {
+            audioContextRef.current.close().catch(() => {})
+            audioContextRef.current = null
+        }
+        if (audioStreamRef.current) {
+            audioStreamRef.current.getTracks().forEach(t => t.stop())
+            audioStreamRef.current = null
+        }
+        setAudioLevel(0)
+    }, [])
+
+    useEffect(() => {
+        if (isListening) {
+            const timer = setTimeout(startAudioAnalyser, 300)
+            return () => clearTimeout(timer)
+        } else {
+            stopAudioAnalyser()
+        }
+    }, [isListening, startAudioAnalyser, stopAudioAnalyser])
 
     /**
      * Check if text is a duplicate or near-duplicate of recent chunks
@@ -589,11 +667,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
         const versionToUse = versionOverride || activeBibleVersionRef.current
         const requestId = ++verseLookupRequestIdRef.current
+        const count = ++activeLookupCountRef.current
 
         setIsLoading(true)
         try {
             const scripture = await fetchScripture(label, versionToUse)
-            // Ignore stale completions so older lookups can't overwrite a newer version switch.
             if (scripture && requestId === verseLookupRequestIdRef.current) {
                 setCurrentScripture(scripture)
             }
@@ -602,7 +680,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             console.error('Failed to look up verse:', err)
             return null
         } finally {
-            setIsLoading(false)
+            if (--activeLookupCountRef.current === 0) {
+                setIsLoading(false)
+            }
         }
     }, [fetchScripture])
 
@@ -1325,6 +1405,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setCurrentScripture(null)
         setError(null)
         setIsSpeechDetected(false)
+        setIsLoading(false)
         setLastVoiceCommand(null)
         setVoiceCommands([])
         setActiveBibleVersion(defaultBibleVersion)
@@ -1434,6 +1515,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         semanticDetectorReady,
         isSemanticSearching,
         isSpeechDetected,
+        audioLevel,
         activeBibleVersion,
         lastVoiceCommand,
         voiceCommands,
