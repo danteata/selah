@@ -15,6 +15,8 @@ export type NavSection =
     | 'sermon'
     | 'settings'
 
+export type SplitPanelMode = 'sermon-bible' | null
+
 export interface StudioLayoutState {
     activeNavSection: NavSection | null
     contextPanelOpen: boolean
@@ -22,6 +24,8 @@ export interface StudioLayoutState {
     commandBarOpen: boolean
     commandBarQuery: string
     selectedSlideForInspector: string | null
+    splitPanelMode: SplitPanelMode
+    splitPanelQuery: string | null
 }
 
 export const DEFAULT_STUDIO_STATE: StudioLayoutState = {
@@ -31,6 +35,8 @@ export const DEFAULT_STUDIO_STATE: StudioLayoutState = {
     commandBarOpen: false,
     commandBarQuery: '',
     selectedSlideForInspector: null,
+    splitPanelMode: null,
+    splitPanelQuery: null,
 }
 
 export interface NavRailItem {

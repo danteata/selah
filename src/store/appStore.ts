@@ -16,7 +16,7 @@ import type {
 } from '../types'
 import { bibleVersionObjects } from '../types'
 import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
-import type { NavSection } from '../types/studio'
+import type { NavSection, SplitPanelMode } from '../types/studio'
 
 // UI State types
 export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
@@ -71,6 +71,8 @@ export interface AppState {
     contextPanelOpen: boolean
     contextPanelWidth: number
     commandBarOpen: boolean
+    splitPanelMode: SplitPanelMode | null
+    splitPanelQuery: string | null
 
     // Undo/Redo stacks
     pastStates: Array<Partial<AppState>>
@@ -153,6 +155,8 @@ const initialState: AppState = {
     contextPanelOpen: true,
     contextPanelWidth: 320,
     commandBarOpen: false,
+    splitPanelMode: null as SplitPanelMode | null,
+    splitPanelQuery: null as string | null,
     // Undo/Redo
     pastStates: [],
     futureStates: [],
@@ -246,6 +250,9 @@ interface AppStore extends AppState {
     setContextPanelWidth: (width: number) => void
     setCommandBarOpen: (open: boolean) => void
     toggleCommandBar: () => void
+    setSplitPanelMode: (mode: SplitPanelMode | null) => void
+    setSplitPanelQuery: (query: string | null) => void
+    openBibleFromSermon: (verseReference: string) => void
 }
 
 export const useAppStore = create<AppStore>()(
@@ -825,6 +832,9 @@ export const useAppStore = create<AppStore>()(
                     activeNavSection: section,
                     // Auto-open context panel when selecting a section
                     contextPanelOpen: section !== null ? true : state.contextPanelOpen,
+                    // Clear split panel mode when switching away from sermon
+                    splitPanelMode: section === 'sermon' ? state.splitPanelMode : null,
+                    splitPanelQuery: section === 'sermon' ? state.splitPanelQuery : null,
                 }))
             },
 
@@ -846,6 +856,23 @@ export const useAppStore = create<AppStore>()(
 
             toggleCommandBar: () => {
                 set((state) => ({ commandBarOpen: !state.commandBarOpen }))
+            },
+
+            setSplitPanelMode: (mode) => {
+                set({ splitPanelMode: mode })
+            },
+
+            setSplitPanelQuery: (query) => {
+                set({ splitPanelQuery: query })
+            },
+
+            openBibleFromSermon: (verseReference) => {
+                set({ 
+                    activeNavSection: 'sermon',
+                    contextPanelOpen: true,
+                    splitPanelMode: 'sermon-bible',
+                    splitPanelQuery: verseReference,
+                })
             },
         }),
         {

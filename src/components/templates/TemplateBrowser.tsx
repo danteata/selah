@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { X, Search, Grid, List, Plus, Sparkles, FileText, Heart, Clock, Check, Trash2, Loader2, AlertCircle, RefreshCw, Edit2, Star } from 'lucide-react'
 import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
 import { CreateTemplateModal } from '../modals'
-import { useConvexAuth } from 'convex/react'
+import { useAuth } from '@clerk/clerk-react'
 
 interface TemplateBrowserProps {
     isOpen?: boolean
@@ -26,7 +26,8 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     const [favoritingId, setFavoritingId] = useState<string | null>(null)
 
     const { templates, customTemplates, isLoading, deleteTemplate, toggleFavorite, seedDefaultTemplates, resetDefaultTemplates } = useTemplates()
-    const { isAuthenticated } = useConvexAuth()
+    const { isSignedIn } = useAuth()
+    const isAuthenticated = isSignedIn ?? false
 
     // Seed default templates if none exist
     useEffect(() => {

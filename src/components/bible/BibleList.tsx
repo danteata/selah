@@ -260,6 +260,28 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
     }, [fetchScripture])
 
+    // Auto-search when initialQuery is provided (e.g. from sermon listener verse bridge)
+    useEffect(() => {
+        if (!initialQuery || !selectedVersion) return
+        const parsed = parseQuery(initialQuery)
+        if (!parsed) return
+        setLoading(true)
+        const label = `${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}${parsed.endVerse !== parsed.startVerse ? `-${parsed.endVerse}` : ''}`
+        fetchScripture(label, selectedVersion).then((result) => {
+            if (result) {
+                setScripture(result)
+                if (Array.isArray(result.content)) {
+                    setVerses(result.content as BibleVerse[])
+                }
+                setCurrentBookIndex(parsed.bookIndex)
+                setCurrentChapter(parsed.chapter)
+                setCurrentStartVerse(parsed.startVerse)
+                setCurrentEndVerse(parsed.endVerse)
+            }
+            setLoading(false)
+        })
+    }, [initialQuery, selectedVersion, parseQuery, fetchScripture])
+
     // Handle search
     const handleSearch = useCallback(() => {
         fetchScriptureWithVersion(selectedVersion)
@@ -628,35 +650,6 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                         </p>
                                     </button>
                                 ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Loading Indicator */}
-                    {isSemanticSearching && (
-                        <div className="flex items-center justify-center gap-2 py-4 text-xs text-gray-400">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--accent-teal)]" />
-                            Searching verses...
-                        </div>
-                    )}
-
-                    {/* Empty State */}
-                    {semanticResults.length === 0 && !isSemanticSearching && (
-                        <div className="p-4 text-center text-gray-500">
-                            <BookOpen className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                            <p className="font-medium">Quick Bible Search</p>
-                            <p className="text-sm mt-1">Type a verse reference above</p>
-                            <div className="mt-4 text-xs text-gray-400 space-y-0.5">
-                                <p>Examples:</p>
-                                <p>• John 3:16</p>
-                                <p>• Jn 3:16-18</p>
-                                <p>• Genesis 1:1-5</p>
-                                <p>• Ps 23:1-6</p>
-                                {hasEmbeddings && (
-                                    <p className="text-[var(--accent-teal)] mt-2">
-                                        Or search by meaning, e.g. &quot;God so loved the world&quot;
-                                    </p>
-                                )}
                             </div>
                         </div>
                     )}

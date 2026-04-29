@@ -14,7 +14,7 @@ import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter, NotebookPen, Minimize2 } from 'lucide-react'
+import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter, NotebookPen, Minimize2, BookOpen } from 'lucide-react'
 import type { Scripture, BibleVerse } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 
@@ -71,6 +71,7 @@ function SermonListenerPanelInner({
     const transcriptRef = useRef<HTMLDivElement>(null)
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
+    const openBibleFromSermon = useAppStore((state) => state.openBibleFromSermon)
 
     const {
         isListening,
@@ -157,6 +158,13 @@ function SermonListenerPanelInner({
 
     const handleVerseClick = (verse: DetectedVerse) => {
         void setCurrentDetectedVerse(verse)
+    }
+
+    const handleLookupInBible = (verse: DetectedVerse) => {
+        const ref = verse.verseEnd && verse.verseEnd !== verse.verseStart
+            ? `${verse.book} ${verse.chapter}:${verse.verseStart}-${verse.verseEnd}`
+            : `${verse.book} ${verse.chapter}:${verse.verseStart}`
+        openBibleFromSermon(ref)
     }
 
     const handleSaveTranscript = async () => {
@@ -354,13 +362,28 @@ function SermonListenerPanelInner({
                         <h4 className="font-semibold text-sm text-[var(--accent-teal)]">
                             {formatVerseForDisplay(currentVerse)}
                         </h4>
-                        <button
-                            onClick={displayCurrentVerse}
-                            className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal)] text-white rounded text-xs hover:brightness-110 transition-all shadow-sm"
-                        >
-                            <Send className="w-3 h-3" />
-                            Send
-                        </button>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => {
+                                    const ref = currentVerse.verseEnd && currentVerse.verseEnd !== currentVerse.verseStart
+                                        ? `${currentVerse.book} ${currentVerse.chapter}:${currentVerse.verseStart}-${currentVerse.verseEnd}`
+                                        : `${currentVerse.book} ${currentVerse.chapter}:${currentVerse.verseStart}`
+                                    openBibleFromSermon(ref)
+                                }}
+                                className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-tertiary)] text-[var(--accent-teal)] rounded text-xs hover:bg-[var(--accent-teal)]/10 transition-all"
+                                title="Look up in Bible panel"
+                            >
+                                <BookOpen className="w-3 h-3" />
+                                <span className="hidden sm:inline">Bible</span>
+                            </button>
+                            <button
+                                onClick={displayCurrentVerse}
+                                className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal)] text-white rounded text-xs hover:brightness-110 transition-all shadow-sm"
+                            >
+                                <Send className="w-3 h-3" />
+                                Send
+                            </button>
+                        </div>
                     </div>
                     <div className="text-xs text-gray-700 dark:text-gray-300 max-h-20 overflow-y-auto">
                         {Array.isArray(currentScripture.content) && currentScripture.content.slice(0, 3).map((verse: BibleVerse, idx: number) => (
@@ -476,12 +499,25 @@ function SermonListenerPanelInner({
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation()
+                                        handleLookupInBible(verse)
+                                    }}
+                                    className={`opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
+                                        ? 'text-white/70 hover:text-white'
+                                        : 'text-gray-400 hover:text-[var(--accent-teal)]'
+                                    }`}
+                                    title="Look up in Bible"
+                                >
+                                    <BookOpen className="w-3 h-3" />
+                                </button>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation()
                                         removeVerse(verse)
                                     }}
-                                    className={`ml-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
+                                    className={`opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
                                         ? 'text-white/70 hover:text-white'
                                         : 'text-gray-400 hover:text-red-500'
-                                        }`}
+                                    }`}
                                 >
                                     <Trash2 className="w-3 h-3" />
                                 </button>

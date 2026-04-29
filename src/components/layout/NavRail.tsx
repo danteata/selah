@@ -50,7 +50,6 @@ export function NavRail() {
 
     const handleNavClick = useCallback((section: NavSection) => {
         if (activeNavSection === section) {
-            // Toggle off if already active
             setActiveNavSection(null)
         } else {
             setActiveNavSection(section)
@@ -145,7 +144,7 @@ export function NavRail() {
                             )
                         })}
                     </div>
-                ))}
+                )                )}
             </div>
         </nav>
     )
