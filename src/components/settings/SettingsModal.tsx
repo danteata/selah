@@ -441,7 +441,7 @@ function DisplaySettings({
                             </button>
                         ) : (
                             <button
-                                onClick={ndiStart}
+                                onClick={() => ndiStart()}
                                 disabled={ndiLoading}
                                 className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50"
                             >
@@ -457,7 +457,7 @@ function DisplaySettings({
                             <>
                                 <p>NDI SDK not detected on this system.</p>
                                 <p className="mt-1">Install <a href="https://ndi.video/type/developer/" target="_blank" rel="noreferrer" className="text-purple-600 hover:underline">NDI Tools</a> (includes the SDK runtime) and restart the app.</p>
-                                {!window.__TAURI_INTERNALS__ && (
+                                {!(window as any).__TAURI_INTERNALS__ && (
                                     <p className="mt-1">Rebuild with <code className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-[10px]">cargo build --features ndi</code> to enable NDI support.</p>
                                 )}
                             </>

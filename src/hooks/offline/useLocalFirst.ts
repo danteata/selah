@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useConvex } from 'convex/react'
-import type { FunctionArgs, FunctionReference } from 'convex/server'
+import type { FunctionArgs, FunctionReference, FunctionReturnType } from 'convex/server'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { getIndexedDB } from '../useIndexedDB'
 

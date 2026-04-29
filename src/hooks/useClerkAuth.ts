@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useSignIn, useSignUp, useAuth } from '@clerk/clerk-react'
+import { useSignIn, useSignUp, useClerk } from '@clerk/clerk-react'
 import { useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 
@@ -8,7 +8,7 @@ export type AuthMode = 'signin' | 'signup'
 export function useClerkAuth(mode: AuthMode) {
     const { signIn, isLoaded: signInLoaded } = useSignIn()
     const { signUp, isLoaded: signUpLoaded } = useSignUp()
-    const { setActive } = useAuth()
+    const { setActive } = useClerk()
 
     const upsertUser = useMutation(api.users.upsertUser)
     const createChurch = useMutation(api.churches.createChurch)

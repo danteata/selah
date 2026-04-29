@@ -184,6 +184,19 @@ export interface BibleVerse {
     scripture: string
 }
 
+export interface VerseEmbedding {
+    reference: string
+    book: string
+    bookNumber: number
+    chapter: number
+    verse: number
+    text: string
+    embedding: number[]
+    fragmentType?: string
+    fragmentIndex?: number
+    embeddingVersion?: string
+}
+
 export interface BibleVersion {
     id: string
     name: string

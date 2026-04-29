@@ -54,6 +54,11 @@ export interface SemanticDetectionConfig {
     version?: string;
 }
 
+export interface ExcludedRange {
+    startIndex: number;
+    endIndex: number;
+}
+
 const DEFAULT_CONFIG: SemanticDetectionConfig = {
     enabled: true,
     limit: SEMANTIC_DETECTION_LIMIT,

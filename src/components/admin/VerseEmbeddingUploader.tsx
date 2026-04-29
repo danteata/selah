@@ -269,6 +269,9 @@ export function VerseEmbeddingUploader({ onClose }: VerseEmbeddingUploaderProps)
                 verse: number
                 text: string
                 embedding: number[]
+                fragmentType?: string
+                fragmentIndex?: number
+                embeddingVersion?: string
             }> = []
 
             // Book mappings

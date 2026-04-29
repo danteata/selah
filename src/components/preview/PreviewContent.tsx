@@ -332,7 +332,6 @@ export function PreviewContent() {
                         <SlideCard
                             key={slide.id}
                             slide={slide}
-                            index={index + 1}
                             isActive={activeSlide?.id === slide.id}
                             isLive={liveSlideId === slide.id}
                             isSelected={selectedSlideIds.includes(slide.id)}
@@ -344,7 +343,6 @@ export function PreviewContent() {
                             onSaveToLibrary={() => handleSaveToLibrary(slide)}
                             isSaved={isInLibrary(slide.id)}
                             onGoLive={() => setLiveSlide(slide.id)}
-                            variant="compact"
                         />
                     ))
                 ) : (

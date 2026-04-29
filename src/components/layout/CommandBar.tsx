@@ -111,7 +111,7 @@ export function CommandBar() {
             icon: Zap,
             category: 'action',
             shortcut: 'Esc',
-            action: () => { setLiveSlide(null); handleClose() }
+            action: () => { setLiveSlide(''); handleClose() }
         },
         {
             id: 'settings',
@@ -130,7 +130,7 @@ export function CommandBar() {
         .map(s => ({
             id: `slide-${s.id}`,
             title: s.name,
-            description: `Slide in ${activeSchedule?.title || 'Current Schedule'}`,
+            description: `Slide in ${activeSchedule?.name || 'Current Schedule'}`,
             icon: Play,
             category: 'slide',
             action: () => { setLiveSlide(s.id); handleClose() }

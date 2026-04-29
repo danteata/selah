@@ -29,7 +29,7 @@ window.reportError = function (error: any, ...args: any[]) {
         return
     }
     if (originalReportError) {
-        return originalReportError(error, ...args)
+        return (originalReportError as any)(error, ...args)
     }
 }
 

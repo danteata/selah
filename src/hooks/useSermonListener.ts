@@ -241,7 +241,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // State
     const [isListening, setIsListening] = useState(false)
-    const [isSupported, setIsSupported] = useState<boolean | null>(null)
+    const [isSupported, setIsSupported] = useState(false)
     const [transcript, setTranscript] = useState(() => readLiveState()?.transcript || '')
     const [interimTranscript, setInterimTranscript] = useState('')
     const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>(() => readLiveState()?.detectedVerses || [])

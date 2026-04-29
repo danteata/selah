@@ -6,6 +6,8 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { NavSection, SplitPanelMode } from '../../types/studio'
+import type { Slide, Countdown } from '../../types'
+import type { TemplateItem } from '../../hooks/useTemplates'
 
 // Existing panel components (reused during migration)
 import { BibleList } from '../bible/BibleList'
@@ -145,13 +147,13 @@ export function ContextPanel() {
             scheduleId: activeSchedule?._id || '',
             background: templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             backgroundType: templateSlide?.backgroundType || 'gradient',
-            backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId,
+            backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId || null,
         }
         appendActiveSlide(slide)
     }
 
     // Handle countdown creation
-    const handleCountdownCreate = (countdownData: CountdownData) => {
+    const handleCountdownCreate = (countdownData: { id: string; title: string; hours: number; minutes: number; seconds: number; background: string; backgroundType: string; backgroundStorageId?: string | null }) => {
         const timeString = `${String(countdownData.hours).padStart(2, '0')}:${String(countdownData.minutes).padStart(2, '0')}:${String(countdownData.seconds).padStart(2, '0')}`
         const isEditing = editingSlide?.id === countdownData.id
 

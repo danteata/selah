@@ -325,7 +325,7 @@ export function LiveOutput() {
                 <div className="flex items-center gap-2">
                     {ndiAvailable && (
                         <button
-                            onClick={ndiRunning ? ndiStop : ndiStart}
+                            onClick={ndiRunning ? () => ndiStop() : () => ndiStart()}
                             className={`p-1.5 rounded transition-colors ${ndiRunning ? 'text-purple-400 bg-purple-400/10' : 'text-gray-400 hover:text-white'}`}
                             title="NDI Output"
                         >

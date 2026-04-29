@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Bell, Plus } from 'lucide-react'
+import { X, Bell, Plus, AlertCircle } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Alert, Slide } from '../../types'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'

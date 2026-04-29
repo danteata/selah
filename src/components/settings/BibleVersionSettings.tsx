@@ -402,11 +402,6 @@ export function BibleVersionSettings() {
             if (result) {
                 // Refresh statuses
                 await refreshDownloadStatuses()
-
-                // Auto-sync embeddings if enabled
-                if (autoSyncEnabled) {
-                    await syncEmbeddings(versionId)
-                }
             } else {
                 alert(`Failed to download ${versionId}. Please try again.`)
             }

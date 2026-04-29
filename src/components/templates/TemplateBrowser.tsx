@@ -84,7 +84,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     const handleSelect = () => {
         if (selectedTemplate) {
             onSelect(selectedTemplate)
-            onClose()
+            onClose?.()
         }
     }
 
