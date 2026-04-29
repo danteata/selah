@@ -5,6 +5,7 @@ import {
     Archive, Calendar, Mic, Settings, Zap
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import type { NavSection } from '../../types/studio'
 
 const NAV_ICON_MAP: Record<NavSection, React.ElementType> = {
@@ -45,6 +46,7 @@ export function NavRail() {
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
+    const sermonListener = useSermonListenerContext()
 
     const handleNavClick = useCallback((section: NavSection) => {
         if (activeNavSection === section) {
@@ -95,6 +97,7 @@ export function NavRail() {
                             const Icon = NAV_ICON_MAP[section]
                             const isActive = activeNavSection === section
                             const label = NAV_LABELS[section]
+                            const isBackgroundRecording = section === 'sermon' && sermonListener?.isListening
 
                             return (
                                 <motion.button
@@ -104,10 +107,12 @@ export function NavRail() {
                                         nav-rail-btn relative
                                         ${isActive
                                             ? 'text-[var(--accent-teal)]'
-                                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                                            : isBackgroundRecording
+                                                ? 'text-red-500'
+                                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                                         }
                                     `}
-                                    title={label}
+                                    title={isBackgroundRecording && !isActive ? `${label} — Recording in background` : label}
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
                                     aria-pressed={isActive}
@@ -127,6 +132,13 @@ export function NavRail() {
                                             layoutId="nav-active-bg"
                                             transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                                         />
+                                    )}
+                                    {/* Background recording pulsing dot */}
+                                    {isBackgroundRecording && !isActive && (
+                                        <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+                                        </span>
                                     )}
                                     <Icon className="w-[18px] h-[18px] relative z-10" />
                                 </motion.button>

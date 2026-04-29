@@ -4,6 +4,7 @@ import { Radio, Mic, PanelRight, Keyboard, Monitor } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { SlideChip } from '../slides/SlideChip'
 import { OfflineIndicator } from '../offline/OfflineIndicator'
+import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 
 export function StatusBar() {
     const activeSlides = useAppStore((s) => s.activeSlides)
@@ -12,6 +13,7 @@ export function StatusBar() {
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
     const toggleContextPanel = useAppStore((s) => s.toggleContextPanel)
+    const sermonListener = useSermonListenerContext()
 
     // Get live slide info
     const liveSlide = useMemo(() => {
@@ -64,15 +66,23 @@ export function StatusBar() {
                 }}
                 className={`
                     flex items-center gap-1.5 px-2 py-0.5 rounded transition-colors
-                    ${activeNavSection === 'sermon'
-                        ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)]'
-                        : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+                    ${sermonListener?.isListening
+                        ? 'bg-red-500/10 text-red-500'
+                        : activeNavSection === 'sermon'
+                            ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)]'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                     }
                 `}
-                title="Toggle Sermon Listener"
+                title={sermonListener?.isListening && activeNavSection !== 'sermon' ? 'Sermon Listener — Recording in background (click to show)' : 'Toggle Sermon Listener'}
             >
+                {sermonListener?.isListening && (
+                    <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-60" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                    </span>
+                )}
                 <Mic className="w-3 h-3" />
-                <span>Sermon</span>
+                <span>{sermonListener?.isListening ? (activeNavSection === 'sermon' ? 'Recording' : 'Background') : 'Sermon'}</span>
             </button>
 
             {/* Right — Controls */}

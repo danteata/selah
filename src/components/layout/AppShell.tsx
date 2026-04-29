@@ -3,6 +3,7 @@ import { NavRail } from './NavRail'
 import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
 import { ContextPanel } from './ContextPanel'
+import { SermonListenerProvider } from '../sermon-listener/SermonListenerContext'
 import { useAppStore } from '../../store/appStore'
 import type { Schedule } from '../../types'
 
@@ -59,6 +60,7 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
     const panelVisible = contextPanelOpen && showInline
 
     return (
+        <SermonListenerProvider>
         <div className={`studio-shell ${isDark ? 'dark' : ''}`}>
             {/* Subtle Background Elements */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
@@ -92,5 +94,6 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
             {/* Status Bar */}
             <StatusBar />
         </div>
+        </SermonListenerProvider>
     )
 }

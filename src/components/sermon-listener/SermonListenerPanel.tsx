@@ -1,45 +1,71 @@
 /**
  * SermonListenerPanel Component
  * UI for the sermon listening feature with real-time verse detection
+ *
+ * When mounted inside a SermonListenerProvider, it uses the shared context
+ * state so transcription continues even when the panel is hidden.
+ * Otherwise, it creates its own useSermonListener instance (backward compat).
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { useSermonListener } from '../../hooks/useSermonListener'
+import { useSermonListener, type UseSermonListenerReturn } from '../../hooks/useSermonListener'
+import { useSermonListenerContext } from './SermonListenerContext'
 import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter, NotebookPen } from 'lucide-react'
+import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter, NotebookPen, Minimize2 } from 'lucide-react'
 import type { Scripture, BibleVerse } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 
 interface SermonListenerPanelProps {
-    /** Whether to auto-display detected verses */
     autoDisplay?: boolean
-    /** Whether to auto-lookup detected verses */
     autoLookup?: boolean
-    /** Initial language for speech recognition */
     language?: string
-    /** Callback when a verse is detected */
     onVerseDetected?: (verse: DetectedVerse, scripture: Scripture | null) => void
-    /** Compact mode for sidebar */
     compact?: boolean
+    onHide?: () => void
 }
 
-export function SermonListenerPanel({
+export function SermonListenerPanel(props: SermonListenerPanelProps) {
+    const contextState = useSermonListenerContext()
+
+    if (contextState) {
+        return <SermonListenerPanelInner {...props} sermonListener={contextState} />
+    }
+
+    return <SermonListenerPanelStandalone {...props} />
+}
+
+function SermonListenerPanelStandalone(props: SermonListenerPanelProps) {
+    const sermonListener = useSermonListener({
+        language: props.language,
+        autoLookup: props.autoLookup,
+        autoDisplay: props.autoDisplay,
+        onVerseDetected: props.onVerseDetected,
+    })
+
+    return <SermonListenerPanelInner {...props} sermonListener={sermonListener} />
+}
+
+interface SermonListenerPanelInnerProps extends SermonListenerPanelProps {
+    sermonListener: UseSermonListenerReturn
+}
+
+function SermonListenerPanelInner({
     autoDisplay = false,
-    autoLookup = true,
     language = 'en-US',
-    onVerseDetected,
     compact = false,
-}: SermonListenerPanelProps) {
+    onHide,
+    sermonListener,
+}: SermonListenerPanelInnerProps) {
     const [autoDisplayEnabled, setAutoDisplayEnabled] = useState(autoDisplay)
     const [showSavedTranscripts, setShowSavedTranscripts] = useState(false)
     const [showSaveDialog, setShowSaveDialog] = useState(false)
     const [transcriptTitle, setTranscriptTitle] = useState('')
     const [isSaving, setIsSaving] = useState(false)
     const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null)
-    const [showOnlyBestMatches, setShowOnlyBestMatches] = useState(true) // Default to showing only best matches
+    const [showOnlyBestMatches, setShowOnlyBestMatches] = useState(true)
     const [autoSaveTranscriptId, setAutoSaveTranscriptId] = useState<string | null>(null)
     const [sermonNotes, setSermonNotes] = useState('')
     const transcriptRef = useRef<HTMLDivElement>(null)
@@ -71,15 +97,10 @@ export function SermonListenerPanel({
         setCurrentDetectedVerse,
         nextVerse,
         previousVerse,
-    } = useSermonListener({
-        language,
-        autoLookup,
-        autoDisplay: autoDisplayEnabled,
-        onVerseDetected,
-    })
+    } = sermonListener
+
     const uniqueDetectedVerses = detectedVerses.filter((verse, index, arr) => arr.findIndex(v => v.reference === verse.reference) === index)
 
-    // Use the transcripts hook with the active schedule
     const {
         transcripts,
         scheduleTranscripts,
@@ -128,24 +149,16 @@ export function SermonListenerPanel({
         ].join('\n'))
     }
 
-    // Auto-scroll transcript
     useEffect(() => {
         if (transcriptRef.current) {
             transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
         }
     }, [transcript, interimTranscript])
 
-    // Debug: log transcript changes
-    useEffect(() => {
-        console.log('[SermonListenerPanel] Transcript updated:', transcript?.substring(0, 100))
-    }, [transcript])
-
-    // Handle verse click - set as current and lookup
     const handleVerseClick = (verse: DetectedVerse) => {
         void setCurrentDetectedVerse(verse)
     }
 
-    // Handle save transcript
     const handleSaveTranscript = async () => {
         if (!transcript.trim()) return
 
@@ -166,12 +179,9 @@ export function SermonListenerPanel({
         if (result) {
             setShowSaveDialog(false)
             setTranscriptTitle('')
-            // Optionally reset after saving
-            // reset()
         }
     }
 
-    // Handle delete transcript
     const handleDeleteTranscript = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation()
         if (confirm('Are you sure you want to delete this transcript?')) {
@@ -182,7 +192,6 @@ export function SermonListenerPanel({
         }
     }
 
-    // Format date for display
     const formatDate = (dateString: string) => {
         const date = new Date(dateString)
         return date.toLocaleDateString('en-US', {
@@ -194,11 +203,8 @@ export function SermonListenerPanel({
         })
     }
 
-    // Get the transcripts to display based on active schedule
     const displayTranscripts = activeSchedule?._id ? scheduleTranscripts : transcripts
 
-    // Show loading UI while we're still checking/initializing the provider
-    // This prevents the "Not Supported" flicker when opening the panel
     if (isInitializingProvider || isSupported === null || (!providerReady && isSupported)) {
         return (
             <div className={`flex flex-col h-full items-center justify-center gap-2 ${compact ? 'p-3' : 'p-6'} text-center text-gray-500 dark:text-gray-400`}>
@@ -213,7 +219,6 @@ export function SermonListenerPanel({
         )
     }
 
-    // Not supported message
     if (isSupported === false) {
         const unsupportedMessage = (() => {
             switch (provider) {
@@ -260,7 +265,6 @@ export function SermonListenerPanel({
                     {isListening && (
                         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full animate-ping" />
                     )}
-                    {/* Speech detection pulse ring */}
                     {isSpeechDetected && (
                         <span className="absolute inset-0 rounded-full bg-green-500/30 animate-[speech-pulse-ring_1s_ease-out_infinite]" />
                     )}
@@ -311,6 +315,18 @@ export function SermonListenerPanel({
                         Auto
                     </span>
                 </label>
+
+                {/* Hide to background button (only shown when listening and onHide available) */}
+                {isListening && onHide && (
+                    <button
+                        onClick={onHide}
+                        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all flex-shrink-0"
+                        title="Hide panel — keep recording in background"
+                    >
+                        <Minimize2 className="w-3 h-3" />
+                        <span className="hidden sm:inline">Background</span>
+                    </button>
+                )}
 
                 {/* Start/Stop button */}
                 <button
@@ -415,7 +431,6 @@ export function SermonListenerPanel({
                                     : `${uniqueDetectedVerses.length} total`
                                 } verse{uniqueDetectedVerses.length !== 1 ? 's' : ''}
                             </span>
-                            {/* Filter toggle */}
                             <button
                                 onClick={() => setShowOnlyBestMatches(!showOnlyBestMatches)}
                                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${showOnlyBestMatches
@@ -677,7 +692,6 @@ export function SermonListenerPanel({
                                         </button>
                                     </div>
 
-                                    {/* Expanded view */}
                                     {selectedTranscript?._id === t._id && (
                                         <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                                             <p className="text-[10px] text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">
@@ -718,6 +732,11 @@ export function SermonListenerPanel({
                         <p className="text-xs">
                             Click Start to detect verses
                         </p>
+                        {onHide && (
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+                                Hide this panel while recording to keep listening in the background
+                            </p>
+                        )}
                     </div>
                 </div>
             )}

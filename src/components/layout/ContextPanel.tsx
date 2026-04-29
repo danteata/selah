@@ -227,7 +227,7 @@ export function ContextPanel() {
                         )}
                         {activeNavSection === 'sermon' && (
                             <div className="h-full">
-                                <SermonListenerPanel />
+                                <SermonListenerPanel onHide={handleClose} />
                             </div>
                         )}
                         {activeNavSection === 'media' && (
