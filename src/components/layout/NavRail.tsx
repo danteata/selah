@@ -1,5 +1,5 @@
-import { useCallback } from 'react'
-import { motion } from 'framer-motion'
+import { useCallback, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
     BookOpen, Music, Image, Layout, Clock, AlertCircle,
     Archive, Calendar, Mic, Settings, Zap
@@ -34,12 +34,29 @@ const NAV_LABELS: Record<NavSection, string> = {
     settings: 'Settings',
 }
 
-// Group items with dividers between groups
-const NAV_GROUPS: { items: NavSection[]; }[] = [
+const NAV_GROUPS: { items: NavSection[] }[] = [
     { items: ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'library'] },
     { items: ['schedule', 'sermon'] },
     { items: ['settings'] },
 ]
+
+function NavTooltip({ label, visible }: { label: string; visible: boolean }) {
+    return (
+        <AnimatePresence>
+            {visible && (
+                <motion.div
+                    className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-2 py-1 text-[10px] font-medium whitespace-nowrap bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-default)] rounded-md shadow-lg pointer-events-none z-50"
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -4 }}
+                    transition={{ duration: 0.1 }}
+                >
+                    {label}
+                </motion.div>
+            )}
+        </AnimatePresence>
+    )
+}
 
 export function NavRail() {
     const activeNavSection = useAppStore((s) => s.activeNavSection)
@@ -47,6 +64,7 @@ export function NavRail() {
     const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const sermonListener = useSermonListenerContext()
+    const [hoveredSection, setHoveredSection] = useState<NavSection | 'quickAdd' | null>(null)
 
     const handleNavClick = useCallback((section: NavSection) => {
         if (activeNavSection === section) {
@@ -66,26 +84,26 @@ export function NavRail() {
             role="navigation"
             aria-label="Main navigation"
         >
-            {/* Quick Add button at top */}
             <motion.button
                 onClick={handleQuickAdd}
                 className={`
-                    nav-rail-btn mb-1
+                    nav-rail-btn mb-1 relative
                     ${commandBarOpen
                         ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]'
                         : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                     }
                 `}
-                title="Quick Add (⌘/)"
+                onMouseEnter={() => setHoveredSection('quickAdd')}
+                onMouseLeave={() => setHoveredSection(null)}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
             >
                 <Zap className="w-[18px] h-[18px]" />
+                <NavTooltip label="Quick Add (⌘/)" visible={hoveredSection === 'quickAdd'} />
             </motion.button>
 
             <div className="w-6 border-t border-[var(--border-subtle)] mb-1" />
 
-            {/* Navigation groups */}
             <div className="flex-1 flex flex-col items-center gap-0.5 overflow-y-auto nav-rail-scroll">
                 {NAV_GROUPS.map((group, groupIdx) => (
                     <div key={groupIdx} className="flex flex-col items-center gap-0.5">
@@ -111,13 +129,13 @@ export function NavRail() {
                                                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                                         }
                                     `}
-                                    title={isBackgroundRecording && !isActive ? `${label} — Recording in background` : label}
+                                    onMouseEnter={() => setHoveredSection(section)}
+                                    onMouseLeave={() => setHoveredSection(null)}
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
                                     aria-pressed={isActive}
                                     aria-label={label}
                                 >
-                                    {/* Active indicator pill */}
                                     {isActive && (
                                         <motion.div
                                             className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-[var(--accent-teal)]"
@@ -132,7 +150,6 @@ export function NavRail() {
                                             transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                                         />
                                     )}
-                                    {/* Background recording pulsing dot */}
                                     {isBackgroundRecording && !isActive && (
                                         <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
                                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
@@ -140,11 +157,15 @@ export function NavRail() {
                                         </span>
                                     )}
                                     <Icon className="w-[18px] h-[18px] relative z-10" />
+                                    <NavTooltip
+                                        label={isBackgroundRecording && !isActive ? `${label} — Recording` : label}
+                                        visible={hoveredSection === section}
+                                    />
                                 </motion.button>
                             )
                         })}
                     </div>
-                )                )}
+                ))}
             </div>
         </nav>
     )

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, BookOpen, ArrowLeft, ArrowRight, RefreshCw, LayoutTemplate, X, Sparkles, Loader2 } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
@@ -7,7 +8,6 @@ import type { Scripture, BibleVerse } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 
-// Book abbreviations map for smart parsing
 const bookAbbreviations: Record<string, string> = {
     'gen': 'Genesis', 'ex': 'Exodus', 'exod': 'Exodus', 'lev': 'Leviticus',
     'num': 'Numbers', 'deut': 'Deuteronomy', 'dt': 'Deuteronomy',
@@ -40,23 +40,8 @@ const bookAbbreviations: Record<string, string> = {
     'revelations': 'Revelation', 'revelation': 'Revelation',
 }
 
-// Chapter counts per book (approximate)
-const chapterCounts: Record<string, number> = {
-    'Genesis': 50, 'Exodus': 40, 'Leviticus': 27, 'Numbers': 36, 'Deuteronomy': 34,
-    'Joshua': 24, 'Judges': 21, 'Ruth': 4, '1 Samuel': 31, '2 Samuel': 24,
-    '1 Kings': 22, '2 Kings': 25, '1 Chronicles': 29, '2 Chronicles': 36, 'Ezra': 10,
-    'Nehemiah': 13, 'Esther': 10, 'Job': 42, 'Psalms': 150, 'Proverbs': 31,
-    'Ecclesiastes': 12, 'Song of Solomon': 8, 'Isaiah': 66, 'Jeremiah': 52, 'Lamentations': 5,
-    'Ezekiel': 48, 'Daniel': 12, 'Hosea': 14, 'Joel': 3, 'Amos': 9,
-    'Obadiah': 1, 'Jonah': 4, 'Micah': 7, 'Nahum': 3, 'Habakkuk': 3,
-    'Zephaniah': 3, 'Haggai': 2, 'Zechariah': 14, 'Malachi': 4,
-    'Matthew': 28, 'Mark': 16, 'Luke': 24, 'John': 21, 'Acts': 28,
-    'Romans': 16, '1 Corinthians': 16, '2 Corinthians': 13, 'Galatians': 6, 'Ephesians': 6,
-    'Philippians': 4, 'Colossians': 4, '1 Thessalonians': 5, '2 Thessalonians': 3, '1 Timothy': 6,
-    '2 Timothy': 4, 'Titus': 3, 'Philemon': 1, 'Hebrews': 13, 'James': 5,
-    '1 Peter': 5, '2 Peter': 3, '1 John': 5, '2 John': 1, '3 John': 1,
-    'Jude': 1, 'Revelation': 22,
-}
+const RECENT_VERSES_KEY = 'selah-recent-verses'
+const MAX_RECENT = 5
 
 interface BibleListProps {
     initialQuery?: string
@@ -64,30 +49,51 @@ interface BibleListProps {
     isInline?: boolean
 }
 
+interface VerseRow {
+    bookIndex: number
+    chapter: number
+    verse: number
+    scripture: string
+    reference: string
+    isCurrent: boolean
+    source: 'reference' | 'semantic' | 'neighbor'
+    score?: number
+}
+
 export function BibleList({ initialQuery = '', onClose, isInline = false }: BibleListProps) {
-    const [query, setQuery] = useState(initialQuery)
-    const [scripture, setScripture] = useState<Scripture | null>(null)
-    const [verses, setVerses] = useState<BibleVerse[]>([])
+    const biblePanelQuery = useAppStore((state) => state.biblePanelQuery)
+    const setBiblePanelQuery = useAppStore((state) => state.setBiblePanelQuery)
+    const [query, setQuery] = useState(initialQuery || biblePanelQuery || '')
     const [loading, setLoading] = useState(false)
     const [selectedVersion, setSelectedVersion] = useState<string>('')
     const [showSuggestions, setShowSuggestions] = useState(false)
-    const [suggestionType, setSuggestionType] = useState<'book' | 'chapter' | 'verse' | null>(null)
     const [currentBookIndex, setCurrentBookIndex] = useState<number | null>(null)
     const [currentChapter, setCurrentChapter] = useState<number | null>(null)
     const [currentStartVerse, setCurrentStartVerse] = useState<number | null>(null)
     const [currentEndVerse, setCurrentEndVerse] = useState<number | null>(null)
-    const [neighboringVerses, setNeighboringVerses] = useState<{ prev: BibleVerse[]; next: BibleVerse[] }>({ prev: [], next: [] })
+    const [currentVerses, setCurrentVerses] = useState<BibleVerse[]>([])
+    const [neighborVerses, setNeighborVerses] = useState<{ prev: BibleVerse[]; next: BibleVerse[] }>({ prev: [], next: [] })
+    const [hasSearched, setHasSearched] = useState(false)
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
+    const [focusedIndex, setFocusedIndex] = useState(-1)
+    const autoSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const [recentVerses, setRecentVerses] = useState<string[]>(() => {
+        try {
+            const stored = localStorage.getItem(RECENT_VERSES_KEY)
+            return stored ? JSON.parse(stored) : []
+        } catch { return [] }
+    })
 
     const inputRef = useRef<HTMLInputElement>(null)
+    const scrollRef = useRef<HTMLDivElement>(null)
 
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
-    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
-    const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
+    const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
+    const setLiveSlide = useAppStore((s) => s.setLiveSlide)
+    const defaultBibleVersion = useAppStore((s) => s.settings.defaultBibleVersion)
     const { templates } = useTemplates()
 
-    // Semantic verse search
     const {
         results: semanticResults,
         isSearching: isSemanticSearching,
@@ -104,175 +110,177 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         version: selectedVersion || undefined,
     })
 
-    // Initialize selected version with default
     useEffect(() => {
-        if (!selectedVersion) {
-            setSelectedVersion(defaultBibleVersion || 'KJV')
-        }
+        if (!selectedVersion) setSelectedVersion(defaultBibleVersion || 'KJV')
     }, [defaultBibleVersion, selectedVersion])
 
-    // Pre-warm embedder when panel opens and embeddings are available
     useEffect(() => {
-        if (hasEmbeddings && !isEmbedderReady) {
-            initEmbedder()
-        }
+        if (hasEmbeddings && !isEmbedderReady) initEmbedder()
     }, [hasEmbeddings, isEmbedderReady, initEmbedder])
 
-    // Trigger semantic search when query doesn't look like a reference
+    useEffect(() => { inputRef.current?.focus() }, [])
+
     useEffect(() => {
-        const trimmed = query.trim()
-        const looksLikeReference =
-            /^((?:\d\s?)?[a-z]+)\s+(\d+):(\d+)/i.test(trimmed) ||
-            /^(\d+):(\d+):(\d+)/.test(trimmed)
+        if (biblePanelQuery) { setQuery(biblePanelQuery); setBiblePanelQuery('') }
+    }, [biblePanelQuery, setBiblePanelQuery])
 
-        if (trimmed.length >= 3 && !looksLikeReference && hasEmbeddings) {
-            semanticSearch(trimmed)
-        } else {
-            clearSemanticResults()
-        }
-    }, [query, hasEmbeddings, semanticSearch, clearSemanticResults])
-
-    // Focus input on mount
+    useEffect(() => { setFocusedIndex(-1) }, [semanticResults, currentVerses, neighborVerses])
     useEffect(() => {
-        inputRef.current?.focus()
-    }, [])
+        const rows = buildVerseRows()
+        if (rows.length > 0 && focusedIndex === -1 && hasSearched) setFocusedIndex(0)
+    })
 
-    // Smart book suggestions based on input
     const bookSuggestions = useMemo(() => {
         if (!query || query.includes(':')) return []
-        const lowerQuery = query.toLowerCase().trim()
-
-        // Check if it matches an abbreviation
-        const abbrevMatch = bookAbbreviations[lowerQuery]
-        if (abbrevMatch) {
-            return [abbrevMatch]
-        }
-
-        // Filter books that start with or contain the query
-        return bibleBooks.filter(book =>
-            book.toLowerCase().startsWith(lowerQuery) ||
-            book.toLowerCase().includes(lowerQuery)
-        ).slice(0, 5)
+        const lq = query.toLowerCase().trim()
+        const am = bookAbbreviations[lq]
+        if (am) return [am]
+        return bibleBooks.filter(b => b.toLowerCase().startsWith(lq) || b.toLowerCase().includes(lq)).slice(0, 5)
     }, [query])
 
-    // Parse query intelligently
     const parseQuery = useCallback((q: string) => {
         const trimmed = q.trim()
         if (!trimmed) return null
-
-        // Pattern: Book Chapter:Verse or Book Chapter:Verse-Verse
-        // Handles: "John 3:16", "Jn 3:16", "jn 3:16-18", "1 John 2:1"
         const fullPattern = /^((?:\d\s?)?[a-z]+)\s+(\d+):(\d+)(?:-(\d+))?$/i
         const match = trimmed.match(fullPattern)
-
         if (match) {
             const bookInput = match[1].toLowerCase()
             const chapter = parseInt(match[2])
             const startVerse = parseInt(match[3])
             const endVerse = match[4] ? parseInt(match[4]) : startVerse
-
-            // Find book - check abbreviations first
             let bookName: string | undefined = bookAbbreviations[bookInput]
-
-            // If not found, search by name
             if (!bookName) {
-                const found = bibleBooks.find(b =>
-                    b.toLowerCase() === bookInput ||
-                    b.toLowerCase().startsWith(bookInput)
-                )
+                const found = bibleBooks.find(b => b.toLowerCase() === bookInput || b.toLowerCase().startsWith(bookInput))
                 bookName = found
             }
-
             if (bookName) {
                 const bookIndex = bibleBooks.indexOf(bookName as typeof bibleBooks[number]) + 1
                 return { bookIndex, bookName, chapter, startVerse, endVerse }
             }
         }
-
-        // Numeric format: BookIndex:Chapter:Verse
         const numericPattern = /^(\d+):(\d+):(\d+)(?:-(\d+))?$/
         const numMatch = trimmed.match(numericPattern)
-
         if (numMatch) {
             const bookIndex = parseInt(numMatch[1])
             const bookName = bibleBooks[bookIndex - 1]
-            return {
-                bookIndex,
-                bookName,
-                chapter: parseInt(numMatch[2]),
-                startVerse: parseInt(numMatch[3]),
-                endVerse: numMatch[4] ? parseInt(numMatch[4]) : parseInt(numMatch[3])
-            }
+            return { bookIndex, bookName, chapter: parseInt(numMatch[2]), startVerse: parseInt(numMatch[3]), endVerse: numMatch[4] ? parseInt(numMatch[4]) : parseInt(numMatch[3]) }
         }
-
         return null
     }, [])
 
-    // Fetch scripture with version
-    const fetchScriptureWithVersion = useCallback(async (version: string) => {
+    const addRecentVerse = useCallback((ref: string) => {
+        setRecentVerses(prev => {
+            const next = [ref, ...prev.filter(v => v !== ref)].slice(0, MAX_RECENT)
+            try { localStorage.setItem(RECENT_VERSES_KEY, JSON.stringify(next)) } catch {}
+            return next
+        })
+    }, [])
+
+    const goLiveWithScripture = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
+        const label = `${bookIndex}:${chapter}:${verse}`
+        const result = await fetchScripture(label, selectedVersion)
+        if (result) {
+            const slide = createBibleSlide(result, { template: selectedTemplate })
+            if (slide) {
+                appendActiveSlide(slide)
+                setLiveSlide(slide.id)
+                addRecentVerse(result.label || '')
+            }
+        }
+    }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, setLiveSlide, addRecentVerse])
+
+    const addToQueue = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
+        const label = `${bookIndex}:${chapter}:${verse}`
+        const result = await fetchScripture(label, selectedVersion)
+        if (result) {
+            const slide = createBibleSlide(result, { template: selectedTemplate })
+            if (slide) {
+                appendActiveSlide(slide)
+                addRecentVerse(result.label || '')
+            }
+        }
+    }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, addRecentVerse])
+
+    const handleSearch = useCallback(async () => {
         const parsed = parseQuery(query)
         if (!parsed) return
-
+        if (hasSearched && currentBookIndex === parsed.bookIndex && currentChapter === parsed.chapter && currentStartVerse === parsed.startVerse && currentEndVerse === parsed.endVerse) return
         setLoading(true)
+        setHasSearched(true)
+        setNeighborVerses({ prev: [], next: [] })
+        setFocusedIndex(-1)
         const label = `${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}${parsed.endVerse !== parsed.startVerse ? `-${parsed.endVerse}` : ''}`
-
-        const result = await fetchScripture(label, version)
-        if (result) {
-            setScripture(result)
-            if (Array.isArray(result.content)) {
-                setVerses(result.content as BibleVerse[])
-            }
-
-            // Store current position for navigation
+        const result = await fetchScripture(label, selectedVersion)
+        if (result && Array.isArray(result.content)) {
+            setCurrentVerses(result.content as BibleVerse[])
             setCurrentBookIndex(parsed.bookIndex)
             setCurrentChapter(parsed.chapter)
             setCurrentStartVerse(parsed.startVerse)
             setCurrentEndVerse(parsed.endVerse)
-
-            // Fetch neighboring verses
-            await fetchNeighboringVerses(parsed, version)
         }
         setLoading(false)
-    }, [query, parseQuery, fetchScripture])
-
-    // Fetch neighboring verses for navigation
-    const fetchNeighboringVerses = useCallback(async (parsed: ReturnType<typeof parseQuery>, version: string) => {
-        if (!parsed) return
-
         const { bookIndex, chapter, startVerse, endVerse } = parsed
-
-        // Fetch previous verses (3 before)
         const prevStart = Math.max(1, startVerse - 3)
-        if (prevStart < startVerse) {
-            const prevLabel = `${bookIndex}:${chapter}:${prevStart}-${startVerse - 1}`
-            const prevResult = await fetchScripture(prevLabel, version)
-            if (prevResult && Array.isArray(prevResult.content)) {
-                setNeighboringVerses(prev => ({ ...prev, prev: prevResult.content as BibleVerse[] }))
-            }
-        }
+        const prevPromise = prevStart < startVerse
+            ? fetchScripture(`${bookIndex}:${chapter}:${prevStart}-${startVerse - 1}`, selectedVersion)
+            : Promise.resolve(null)
+        const nextPromise = fetchScripture(`${bookIndex}:${chapter}:${endVerse + 1}-${endVerse + 3}`, selectedVersion)
+        Promise.all([prevPromise, nextPromise]).then(([prevResult, nextResult]) => {
+            setNeighborVerses({
+                prev: prevResult && Array.isArray(prevResult.content) ? prevResult.content as BibleVerse[] : [],
+                next: nextResult && Array.isArray(nextResult.content) ? nextResult.content as BibleVerse[] : [],
+            })
+        })
+        setShowSuggestions(false)
+    }, [query, parseQuery, fetchScripture, selectedVersion, hasSearched, currentBookIndex, currentChapter, currentStartVerse, currentEndVerse])
 
-        // Fetch next verses (3 after)
-        const nextEnd = endVerse + 3
-        const nextLabel = `${bookIndex}:${chapter}:${endVerse + 1}-${nextEnd}`
-        const nextResult = await fetchScripture(nextLabel, version)
-        if (nextResult && Array.isArray(nextResult.content)) {
-            setNeighboringVerses(prev => ({ ...prev, next: nextResult.content as BibleVerse[] }))
-        }
-    }, [fetchScripture])
-
-    // Auto-search when initialQuery is provided (e.g. from sermon listener verse bridge)
+    // Auto-search: reference queries trigger after 500ms debounce, semantic queries use their own debounce
     useEffect(() => {
-        if (!initialQuery || !selectedVersion) return
-        const parsed = parseQuery(initialQuery)
+        const trimmed = query.trim()
+        if (!trimmed || !selectedVersion) return
+
+        if (autoSearchTimerRef.current) clearTimeout(autoSearchTimerRef.current)
+
+        const parsed = parseQuery(trimmed)
+        if (parsed) {
+            autoSearchTimerRef.current = setTimeout(() => {
+                handleSearch()
+            }, 500)
+            clearSemanticResults()
+        } else if (trimmed.length >= 3 && hasEmbeddings) {
+            semanticSearch(trimmed)
+        } else {
+            clearSemanticResults()
+        }
+
+        return () => { if (autoSearchTimerRef.current) clearTimeout(autoSearchTimerRef.current) }
+    }, [query, selectedVersion, hasEmbeddings, semanticSearch, clearSemanticResults, parseQuery, handleSearch])
+
+    const navigateVerse = useCallback((direction: 'prev' | 'next') => {
+        if (!currentBookIndex || !currentChapter || !currentStartVerse) return
+        const range = (currentEndVerse || currentStartVerse) - currentStartVerse + 1
+        let newStart: number, newEnd: number
+        if (direction === 'prev') {
+            newStart = Math.max(1, currentStartVerse - range)
+            newEnd = newStart + range - 1
+        } else {
+            newStart = (currentEndVerse || currentStartVerse) + 1
+            newEnd = newStart + range - 1
+        }
+        const bookName = bibleBooks[currentBookIndex - 1]
+        setQuery(`${bookName} ${currentChapter}:${newStart}${newEnd !== newStart ? `-${newEnd}` : ''}`)
+        setHasSearched(false)
+        setCurrentVerses([])
+        setNeighborVerses({ prev: [], next: [] })
+        // Auto-trigger search after navigation
+        const parsed = parseQuery(`${bookName} ${currentChapter}:${newStart}${newEnd !== newStart ? `-${newEnd}` : ''}`)
         if (!parsed) return
         setLoading(true)
+        setHasSearched(true)
         const label = `${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}${parsed.endVerse !== parsed.startVerse ? `-${parsed.endVerse}` : ''}`
-        fetchScripture(label, selectedVersion).then((result) => {
-            if (result) {
-                setScripture(result)
-                if (Array.isArray(result.content)) {
-                    setVerses(result.content as BibleVerse[])
-                }
+        fetchScripture(label, selectedVersion).then(result => {
+            if (result && Array.isArray(result.content)) {
+                setCurrentVerses(result.content as BibleVerse[])
                 setCurrentBookIndex(parsed.bookIndex)
                 setCurrentChapter(parsed.chapter)
                 setCurrentStartVerse(parsed.startVerse)
@@ -280,410 +288,274 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             }
             setLoading(false)
         })
-    }, [initialQuery, selectedVersion, parseQuery, fetchScripture])
+        // Neighbors in parallel
+        const prevStart = Math.max(1, parsed.startVerse - 3)
+        const prevP = prevStart < parsed.startVerse ? fetchScripture(`${parsed.bookIndex}:${parsed.chapter}:${prevStart}-${parsed.startVerse - 1}`, selectedVersion) : Promise.resolve(null)
+        const nextP = fetchScripture(`${parsed.bookIndex}:${parsed.chapter}:${parsed.endVerse + 1}-${parsed.endVerse + 3}`, selectedVersion)
+        Promise.all([prevP, nextP]).then(([pr, nr]) => {
+            setNeighborVerses({
+                prev: pr && Array.isArray(pr.content) ? pr.content as BibleVerse[] : [],
+                next: nr && Array.isArray(nr.content) ? nr.content as BibleVerse[] : [],
+            })
+        })
+    }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse, parseQuery, fetchScripture, selectedVersion])
 
-    // Handle search
-    const handleSearch = useCallback(() => {
-        fetchScriptureWithVersion(selectedVersion)
-        setShowSuggestions(false)
-    }, [fetchScriptureWithVersion, selectedVersion])
+    const changeVersion = useCallback((newVersion: string) => {
+        setSelectedVersion(newVersion)
+        if (hasSearched) setTimeout(() => handleSearch(), 0)
+    }, [hasSearched, handleSearch])
 
-    // Handle key press
+    const buildVerseRows = useCallback((): VerseRow[] => {
+        const rows: VerseRow[] = []
+        if (hasSearched && currentBookIndex && currentChapter) {
+            for (const nv of neighborVerses.prev) {
+                rows.push({ bookIndex: currentBookIndex, chapter: currentChapter, verse: nv.verse, scripture: nv.scripture, reference: `${bibleBooks[currentBookIndex - 1]} ${currentChapter}:${nv.verse}`, isCurrent: false, source: 'neighbor' })
+            }
+            for (const cv of currentVerses) {
+                rows.push({ bookIndex: currentBookIndex!, chapter: currentChapter!, verse: cv.verse, scripture: cv.scripture, reference: `${bibleBooks[currentBookIndex! - 1]} ${currentChapter}:${cv.verse}`, isCurrent: true, source: 'reference' })
+            }
+            for (const nv of neighborVerses.next) {
+                rows.push({ bookIndex: currentBookIndex, chapter: currentChapter, verse: nv.verse, scripture: nv.scripture, reference: `${bibleBooks[currentBookIndex - 1]} ${currentChapter}:${nv.verse}`, isCurrent: false, source: 'neighbor' })
+            }
+        }
+        if (!hasSearched) {
+            for (const sr of semanticResults) {
+                rows.push({ bookIndex: sr.bookNumber, chapter: sr.chapter, verse: sr.verse, scripture: sr.text, reference: sr.reference, isCurrent: false, source: 'semantic', score: sr.score })
+            }
+        }
+        return rows
+    }, [hasSearched, currentBookIndex, currentChapter, currentVerses, neighborVerses, semanticResults])
+
+    const verseRows = useMemo(() => buildVerseRows(), [buildVerseRows])
+
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             e.preventDefault()
-            handleSearch()
+            if (focusedIndex >= 0 && verseRows.length > 0) {
+                const row = verseRows[focusedIndex]
+                if (e.shiftKey) goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
+                else addToQueue(row.bookIndex, row.chapter, row.verse)
+            } else if (!hasSearched) {
+                handleSearch()
+            }
+        } else if (e.key === 'ArrowDown') {
+            if (verseRows.length > 0) {
+                e.preventDefault()
+                setFocusedIndex(prev => (prev + 1) % verseRows.length)
+            }
+        } else if (e.key === 'ArrowUp') {
+            if (verseRows.length > 0) {
+                e.preventDefault()
+                setFocusedIndex(prev => prev <= 0 ? verseRows.length - 1 : prev - 1)
+            }
         } else if (e.key === 'Escape') {
-            setShowSuggestions(false)
+            if (hasSearched) {
+                setHasSearched(false)
+                setCurrentVerses([])
+                setNeighborVerses({ prev: [], next: [] })
+                setFocusedIndex(-1)
+            } else {
+                onClose()
+            }
+        } else if (e.key === 'Tab') {
+            e.preventDefault()
+            const ci = bibleVersionObjects.findIndex(v => v.id === selectedVersion)
+            setSelectedVersion(bibleVersionObjects[(ci + 1) % bibleVersionObjects.length].id)
         }
+    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, onClose, selectedVersion])
+
+    const handleRecentVerseClick = useCallback((ref: string) => {
+        setQuery(ref)
+        setHasSearched(false)
+        setCurrentVerses([])
+        setNeighborVerses({ prev: [], next: [] })
+        setTimeout(() => handleSearch(), 0)
     }, [handleSearch])
 
-    // Navigate to adjacent verse
-    const navigateVerse = useCallback((direction: 'prev' | 'next', count: number = 1) => {
-        if (!currentBookIndex || !currentChapter || !currentStartVerse) return
-
-        let newStartVerse: number
-        let newEndVerse: number
-
-        if (direction === 'prev') {
-            newStartVerse = Math.max(1, currentStartVerse - count)
-            newEndVerse = newStartVerse + (currentEndVerse! - currentStartVerse)
-        } else {
-            newStartVerse = currentStartVerse + count
-            newEndVerse = newStartVerse + (currentEndVerse! - currentStartVerse)
-        }
-
-        // Update query and fetch
-        const bookName = bibleBooks[currentBookIndex - 1]
-        setQuery(`${bookName} ${currentChapter}:${newStartVerse}${newEndVerse !== newStartVerse ? `-${newEndVerse}` : ''}`)
-    }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse])
-
-    // Quick verse selection from neighbors
-    const selectVerse = useCallback((verse: BibleVerse) => {
-        if (!currentBookIndex || !currentChapter) return
-
-        const bookName = bibleBooks[currentBookIndex - 1]
-        setQuery(`${bookName} ${currentChapter}:${verse.verse}`)
-    }, [currentBookIndex, currentChapter])
-
-    // Change version and refresh
-    const changeVersion = useCallback((newVersion: string) => {
-        setSelectedVersion(newVersion)
-        if (query) {
-            // Re-fetch with new version
-            setTimeout(() => {
-                fetchScriptureWithVersion(newVersion)
-            }, 0)
-        }
-    }, [query, fetchScriptureWithVersion])
-
-    // Select a semantic search result
-    const selectSemanticResult = useCallback(async (bookNumber: number, chapter: number, verse: number) => {
-        const label = `${bookNumber}:${chapter}:${verse}`
-        setLoading(true)
+    const handleRecentVerseGoLive = useCallback(async (ref: string) => {
+        const parsed = parseQuery(ref)
+        if (!parsed) return
+        const label = `${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}${parsed.endVerse !== parsed.startVerse ? `-${parsed.endVerse}` : ''}`
         const result = await fetchScripture(label, selectedVersion)
         if (result) {
-            setScripture(result)
-            if (Array.isArray(result.content)) {
-                setVerses(result.content as BibleVerse[])
-            }
-            setCurrentBookIndex(bookNumber)
-            setCurrentChapter(chapter)
-            setCurrentStartVerse(verse)
-            setCurrentEndVerse(verse)
-            setShowSuggestions(false)
-            clearSemanticResults()
+            const slide = createBibleSlide(result, { template: null })
+            if (slide) { appendActiveSlide(slide); setLiveSlide(slide.id); addRecentVerse(ref) }
         }
-        setLoading(false)
-    }, [fetchScripture, selectedVersion, clearSemanticResults])
+    }, [parseQuery, fetchScripture, selectedVersion, createBibleSlide, appendActiveSlide, setLiveSlide, addRecentVerse])
 
-    // Create slide with optional template
-    const handleCreateSlide = useCallback((template?: TemplateItem | null) => {
-        if (scripture) {
-            const slide = createBibleSlide(scripture, { template })
-            if (slide) {
-                appendActiveSlide(slide)
-            }
-            onClose()
-        }
-    }, [scripture, createBibleSlide, appendActiveSlide, onClose])
-
-    // Get downloaded versions for quick switch
-    const downloadedVersions = useMemo(() =>
-        bibleVersionObjects.filter(v => v.isDownloaded),
-        []
-    )
+    const downloadedVersions = useMemo(() => bibleVersionObjects.filter(v => v.isDownloaded), [])
 
     return (
-        <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
-            {/* Header - Hidden when inline in Studio sidebar */}
+        <div className="h-full flex flex-col bg-[var(--bg-secondary)] rounded-lg">
             {!isInline && (
-                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
+                <div className="flex items-center justify-between p-4 border-b border-[var(--border-subtle)]">
                     <div className="flex items-center gap-3">
-                        <button
-                            onClick={onClose}
-                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                        >
-                            <ChevronLeft className="w-5 h-5" />
-                        </button>
-                        <h2 className="text-lg font-semibold">Display Bible</h2>
+                        <button onClick={onClose} className="p-2 hover:bg-[var(--bg-tertiary)] rounded-lg text-[var(--text-secondary)]"><ChevronLeft className="w-5 h-5" /></button>
+                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Display Bible</h2>
                     </div>
                 </div>
             )}
 
-            {/* Smart Search */}
-            <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-                {/* Search Input - Full width */}
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={query}
-                        onChange={(e) => {
-                            setQuery(e.target.value)
-                            setShowSuggestions(true)
-                        }}
-                        onKeyDown={handleKeyDown}
-                        onFocus={() => setShowSuggestions(true)}
-                        placeholder="e.g., John 3:16 or Jn 3:16-18"
-                        className="w-full pl-10 pr-4 py-2.5 border border-[var(--border-default)] rounded-lg focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none bg-[var(--bg-tertiary)] dark:text-white transition-all"
-                    />
-
-                    {/* Book Suggestions Dropdown */}
-                    {showSuggestions && bookSuggestions.length > 0 && !scripture && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
-                            {bookSuggestions.map((book) => (
-                                <button
-                                    key={book}
-                                    onClick={() => {
-                                        setQuery(book + ' ')
-                                        inputRef.current?.focus()
-                                    }}
-                                    className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                >
-                                    {book}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+            {/* Recent Verses Strip */}
+            {recentVerses.length > 0 && (
+                <div className="px-3 pt-3 flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] shrink-0">Recent</span>
+                    {recentVerses.map((ref) => (
+                        <button key={ref} onClick={() => handleRecentVerseClick(ref)} className="group relative px-2 py-0.5 text-xs font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-full border border-[var(--border-default)] transition-colors">
+                            {ref}
+                            <span onClick={(e) => { e.stopPropagation(); handleRecentVerseGoLive(ref) }} className="ml-1 text-[var(--accent-teal)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" title="Go Live">⚡</span>
+                        </button>
+                    ))}
+                    <button onClick={() => { setRecentVerses([]); try { localStorage.removeItem(RECENT_VERSES_KEY) } catch {} }} className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">clear</button>
                 </div>
+            )}
 
-                {/* Version Selector and Action Button - Second row */}
-                <div className="flex items-center justify-between mt-3">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">Version:</span>
-                        <select
-                            value={selectedVersion}
-                            onChange={(e) => changeVersion(e.target.value)}
-                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500"
-                        >
-                            {bibleVersionObjects.map((v) => (
-                                <option key={v.id} value={v.id}>{v.id}</option>
-                            ))}
-                        </select>
+            {/* Search bar — always visible */}
+            <div className="p-4 border-b border-[var(--border-subtle)]">
+                <div className="relative flex items-center gap-2">
+                    <select value={selectedVersion} onChange={(e) => changeVersion(e.target.value)} className="shrink-0 px-2 py-2.5 text-xs font-medium rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none appearance-none cursor-pointer">
+                        {bibleVersionObjects.map((v) => (<option key={v.id} value={v.id}>{v.id}</option>))}
+                    </select>
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--text-muted)] w-4 h-4" />
+                        <input ref={inputRef} type="text" value={query} onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); if (hasSearched) { setHasSearched(false); setCurrentVerses([]); setNeighborVerses({ prev: [], next: [] }) } }} onKeyDown={handleKeyDown} onFocus={() => setShowSuggestions(true)} placeholder="e.g. John 3:16 or &quot;God so loved&quot;" className="w-full pl-9 pr-4 py-2.5 border border-[var(--border-default)] rounded-lg focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] transition-all placeholder:text-[var(--text-muted)]" />
+                        {query && <button onClick={() => { setQuery(''); setHasSearched(false); setCurrentVerses([]); setNeighborVerses({ prev: [], next: [] }) }} className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X className="w-3.5 h-3.5" /></button>}
                     </div>
-
-                    <button
-                        onClick={handleSearch}
-                        disabled={loading}
-                        className="px-5 py-1.5 bg-[var(--accent-teal)] text-white text-sm font-medium rounded-lg hover:brightness-110 disabled:opacity-50 transition-all shadow-sm"
-                    >
-                        {loading ? 'Searching...' : 'Search'}
-                    </button>
                 </div>
 
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    Type book name (or abbreviation like "Jn" for John), chapter:verse
-                </p>
+                {showSuggestions && bookSuggestions.length > 0 && !hasSearched && (
+                    <div className="relative mt-2">
+                        <div className="absolute top-0 left-0 right-0 bg-[var(--bg-elevated)] rounded-lg shadow-lg border border-[var(--border-default)] z-10">
+                            {bookSuggestions.map((book) => (<button key={book} onClick={() => { setQuery(book + ' '); inputRef.current?.focus() }} className="w-full text-left px-4 py-2 hover:bg-[var(--accent-teal)]/5 text-[var(--text-primary)] text-sm">{book}</button>))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Nav controls when verse is loaded */}
+                {hasSearched && currentBookIndex && currentChapter && (
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-[var(--border-subtle)]">
+                        <div className="flex items-center gap-1">
+                            <button onClick={() => navigateVerse('prev')} className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+                            <button onClick={() => navigateVerse('next')} className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                            <span className="text-xs font-semibold text-[var(--text-primary)] ml-1">{bibleBooks[currentBookIndex - 1]} {currentChapter}:{currentStartVerse}{currentEndVerse !== currentStartVerse ? `-${currentEndVerse}` : ''}</span>
+                            <span className="text-[10px] text-[var(--accent-teal)] ml-1">{selectedVersion}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            {downloadedVersions.slice(0, 4).map((v) => (<button key={v.id} onClick={() => changeVersion(v.id)} className={`px-1.5 py-0.5 text-[10px] font-medium rounded transition-colors ${selectedVersion === v.id ? 'bg-[var(--accent-teal)] text-white' : 'text-[var(--text-muted)] hover:bg-[var(--accent-teal)]/10'}`}>{v.id}</button>))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-muted)]">
+                    <span>Auto-searches as you type</span>
+                    <span className="text-[var(--border-emphasis)]">|</span>
+                    <span>Enter = Add</span>
+                    <span className="text-[var(--border-emphasis)]">|</span>
+                    <span>Shift+Enter = Live</span>
+                    <span className="text-[var(--border-emphasis)]">|</span>
+                    <span>↑↓ Navigate</span>
+                </div>
             </div>
 
-            {/* Scripture Display with Navigation */}
-            {scripture && (
-                <div className="flex-1 overflow-hidden flex flex-col">
-                    {/* Navigation Controls */}
-                    <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => navigateVerse('prev', 1)}
-                                className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                                title="Previous verse"
-                            >
-                                <ChevronLeft className="w-5 h-5" />
-                            </button>
-                            <button
-                                onClick={() => navigateVerse('next', 1)}
-                                className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                                title="Next verse"
-                            >
-                                <ChevronRight className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        {/* Quick Version Switch */}
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500">Version:</span>
-                            <div className="flex gap-1">
-                                {downloadedVersions.slice(0, 4).map((v) => (
-                                    <button
-                                        key={v.id}
-                                        onClick={() => changeVersion(v.id)}
-                                        className={`px-2 py-1 text-xs rounded ${selectedVersion === v.id
-                                            ? 'bg-primary-500 text-white'
-                                            : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'
-                                            }`}
-                                    >
-                                        {v.id}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
+            {/* Results list — unified for both reference search and semantic search */}
+            <div className="flex-1 min-h-0 overflow-y-auto" ref={scrollRef}>
+                {loading && (
+                    <div className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--text-muted)]">
+                        <Loader2 className="w-4 h-4 animate-spin text-[var(--accent-teal)]" /> Loading...
                     </div>
+                )}
 
-                    {/* Main Content */}
-                    <div className="flex-1 overflow-y-auto p-4">
-                        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="font-semibold text-lg">{scripture.label}</h3>
-                                <span className="text-sm text-primary-600 dark:text-primary-400 font-medium">
-                                    {scripture.version}
-                                </span>
-                            </div>
-                            <div className="space-y-2">
-                                {verses.map((verse, index) => (
-                                    <p key={index} className="text-gray-700 dark:text-gray-300">
-                                        <sup className="text-primary-500 font-medium mr-1">{verse.verse}</sup>
-                                        {verse.scripture}
-                                    </p>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Neighboring Verses Quick Select */}
-                        {(neighboringVerses.prev.length > 0 || neighboringVerses.next.length > 0) && (
-                            <div className="mt-4">
-                                <div className="text-xs font-medium text-gray-500 mb-2">Nearby Verses</div>
-                                <div className="flex flex-wrap gap-1">
-                                    {neighboringVerses.prev.map((v) => (
-                                        <button
-                                            key={v.verse}
-                                            onClick={() => selectVerse(v)}
-                                            className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 rounded"
-                                        >
-                                            {v.verse}
-                                        </button>
-                                    ))}
-                                    {verses.map((v) => (
-                                        <span
-                                            key={v.verse}
-                                            className="px-2 py-1 text-xs bg-primary-500 text-white rounded"
-                                        >
-                                            {v.verse}
-                                        </span>
-                                    ))}
-                                    {neighboringVerses.next.map((v) => (
-                                        <button
-                                            key={v.verse}
-                                            onClick={() => selectVerse(v)}
-                                            className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 rounded"
-                                        >
-                                            {v.verse}
-                                        </button>
-                                    ))}
-                                </div>
+                {verseRows.length > 0 && !loading && (
+                    <div className="p-2 space-y-1">
+                        {hasSearched && (
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 mb-1">
+                                {bibleBooks[currentBookIndex! - 1]} {currentChapter}
                             </div>
                         )}
-
-                        {/* Actions */}
-                        <div className="flex justify-end gap-2 mt-4">
-                            <button
-                                onClick={() => {
-                                    setScripture(null)
-                                    setVerses([])
-                                    setNeighboringVerses({ prev: [], next: [] })
-                                }}
-                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        {!hasSearched && (
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 mb-1">Search Results</div>
+                        )}
+                        {verseRows.map((row, index) => (
+                            <motion.div
+                                key={`${row.bookIndex}:${row.chapter}:${row.verse}`}
+                                initial={{ opacity: 0, y: 4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: index * 0.03 }}
+                                className={`group rounded-lg border transition-colors cursor-pointer ${row.isCurrent
+                                    ? 'bg-[var(--accent-teal)]/8 border-[var(--accent-teal)]/20'
+                                    : focusedIndex === index
+                                        ? 'bg-[var(--accent-teal)]/10 border-[var(--accent-teal)]/30 ring-1 ring-[var(--accent-teal)]/20'
+                                        : 'border-transparent hover:bg-[var(--accent-teal)]/5'
+                                }`}
+                                onClick={() => addToQueue(row.bookIndex, row.chapter, row.verse)}
+                                onMouseEnter={() => setFocusedIndex(index)}
                             >
-                                New Search
-                            </button>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => handleCreateSlide(selectedTemplate)}
-                                    className="px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm font-medium"
-                                >
-                                    Create Slide
-                                </button>
-                                <div className="relative">
-                                    <button
-                                        onClick={() => setSelectedTemplate(null)}
-                                        className={`p-2 rounded-lg border ${selectedTemplate
-                                            ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-600'
-                                            : 'border-gray-300 dark:border-gray-600 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                            }`}
-                                        title={selectedTemplate ? `Using: ${selectedTemplate.name}` : 'Use template'}
-                                    >
-                                        <LayoutTemplate className="w-5 h-5" />
-                                    </button>
+                                <div className="flex items-start gap-2 px-3 py-2">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-sm font-semibold ${row.isCurrent ? 'text-[var(--accent-teal)]' : 'text-[var(--text-primary)]'}`}>
+                                                {row.isCurrent ? `${row.verse}` : row.reference}
+                                            </span>
+                                            {row.source === 'semantic' && row.score !== undefined && (
+                                                <span className="text-[10px] text-[var(--accent-teal)]">{Math.round(row.score * 100)}%</span>
+                                            )}
+                                            {row.isCurrent && (
+                                                <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-teal)]/15 text-[var(--accent-teal)] rounded font-medium">CURRENT</span>
+                                            )}
+                                        </div>
+                                        <p className={`text-xs mt-0.5 leading-relaxed ${row.isCurrent ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'}`}>
+                                            {row.scripture}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pt-0.5">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); addToQueue(row.bookIndex, row.chapter, row.verse) }}
+                                            className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded transition-colors"
+                                        >
+                                            <Plus className="w-3 h-3" /> Add
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); goLiveWithScripture(row.bookIndex, row.chapter, row.verse) }}
+                                            className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--accent-teal)] text-white rounded hover:brightness-110 transition-all"
+                                        >
+                                            <Zap className="w-3 h-3" /> Live
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
-                        </div>
+                            </motion.div>
+                        ))}
 
                         {/* Template Selector */}
                         {templates && templates.length > 0 && (
-                            <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                                <label className="text-xs text-gray-500 dark:text-gray-400 mb-2 block">
-                                    Quick select template:
-                                </label>
+                            <div className="pt-3 mt-3 border-t border-[var(--border-subtle)]">
                                 <div className="flex flex-wrap gap-2">
                                     {templates.slice(0, 5).map(template => (
-                                        <button
-                                            key={template._id}
-                                            onClick={() => setSelectedTemplate(selectedTemplate?._id === template._id ? null : template)}
-                                            className={`px-3 py-1 text-xs rounded-full transition-colors ${selectedTemplate?._id === template._id
-                                                ? 'bg-primary-500 text-white'
-                                                : 'bg-gray-100 dark:bg-gray-700 hover:bg-primary-100 dark:hover:bg-primary-900/30 text-gray-700 dark:text-gray-300'
-                                                }`}
-                                        >
-                                            {template.name}
-                                        </button>
+                                        <button key={template._id} onClick={() => setSelectedTemplate(selectedTemplate?._id === template._id ? null : template)} className={`px-3 py-1 text-xs rounded-full transition-colors ${selectedTemplate?._id === template._id ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)]'}`}>{template.name}</button>
                                     ))}
-                                    {templates.length > 5 && (
-                                        <span className="px-3 py-1 text-xs text-gray-400 dark:text-gray-500">
-                                            +{templates.length - 5} more
-                                        </span>
-                                    )}
                                 </div>
                             </div>
                         )}
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* Book/Chapter Selector (when no scripture) */}
-            {!scripture && (
-                <div className="flex-1 overflow-y-auto">
-                    {/* Semantic Search Results */}
-                    {semanticResults.length > 0 && (
-                        <div className="px-4 pt-4">
-                            <div className="flex items-center gap-2 mb-2">
-                                <span className="text-xs font-medium text-[var(--accent-teal)] dark:text-[var(--accent-teal)]">
-                                    Search Results
-                                </span>
-                            </div>
-                            <div className="space-y-1">
-                                {semanticResults.map((verse) => (
-                                    <button
-                                        key={verse._id}
-                                        onClick={() => selectSemanticResult(verse.bookNumber, verse.chapter, verse.verse)}
-                                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-[var(--accent-teal)]/5 dark:hover:bg-[var(--accent-teal)]/10 transition-colors group"
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                                                {verse.reference}
-                                            </span>
-                                            <span className="text-[10px] text-[var(--accent-teal)] dark:text-[var(--accent-teal)]">
-                                                {Math.round(verse.score * 100)}% match
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-0.5">
-                                            {verse.text}
-                                        </p>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
+                {isSemanticSearching && !loading && (
+                    <div className="flex items-center justify-center gap-2 py-4 text-xs text-[var(--text-muted)]">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--accent-teal)]" /> Searching verses...
+                    </div>
+                )}
 
-                    {/* Loading Indicator */}
-                    {isSemanticSearching && (
-                        <div className="flex items-center justify-center gap-2 py-4 text-xs text-gray-400">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--accent-teal)]" />
-                            Searching verses...
+                {verseRows.length === 0 && !loading && !isSemanticSearching && (
+                    <div className="p-4 text-center text-[var(--text-tertiary)]">
+                        <BookOpen className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-30" />
+                        <p className="font-medium text-[var(--text-secondary)]">Quick Bible Search</p>
+                        <p className="text-sm mt-1 text-[var(--text-muted)]">Type a verse reference above to get started</p>
+                        <div className="mt-4 text-xs text-[var(--text-muted)] space-y-0.5">
+                            <p>Examples: John 3:16, Jn 3:16-18, Ps 23:1</p>
+                            {hasEmbeddings && <p className="text-[var(--accent-teal)] mt-2">Or search by meaning, e.g. &quot;God so loved the world&quot;</p>}
                         </div>
-                    )}
-
-                    {/* Empty State */}
-                    {semanticResults.length === 0 && !isSemanticSearching && (
-                        <div className="p-4 text-center text-gray-500">
-                            <BookOpen className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                            <p className="font-medium">Quick Bible Search</p>
-                            <p className="text-sm mt-1">Type a verse reference above</p>
-                            <div className="mt-4 text-xs text-gray-400 space-y-0.5">
-                                <p>Examples:</p>
-                                <p>• John 3:16</p>
-                                <p>• Jn 3:16-18</p>
-                                <p>• Genesis 1:1-5</p>
-                                <p>• Ps 23:1-6</p>
-                                {hasEmbeddings && (
-                                    <p className="text-[var(--accent-teal)] mt-2">
-                                        Or search by meaning, e.g. &quot;God so loved the world&quot;
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
+                    </div>
+                )}
+            </div>
         </div>
     )
 }

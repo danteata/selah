@@ -70,7 +70,12 @@ export interface AppState {
     activeNavSection: NavSection | null
     contextPanelOpen: boolean
     contextPanelWidth: number
+    slideQueueWidth: number
+    panelMode: 'docked' | 'floating'
+    panelPosition: { x: number; y: number }
     commandBarOpen: boolean
+    quickBibleBarOpen: boolean
+    biblePanelQuery: string
     splitPanelMode: SplitPanelMode | null
     splitPanelQuery: string | null
 
@@ -151,10 +156,15 @@ const initialState: AppState = {
     bulkSelectMode: false,
     selectedSlideIds: [],
     // Studio Mode layout state
-    activeNavSection: null,
+    activeNavSection: null as NavSection | null,
     contextPanelOpen: true,
     contextPanelWidth: 320,
+    slideQueueWidth: 280,
+    panelMode: 'docked' as 'docked' | 'floating',
+    panelPosition: { x: 0, y: 0 },
     commandBarOpen: false,
+    quickBibleBarOpen: false,
+    biblePanelQuery: '',
     splitPanelMode: null as SplitPanelMode | null,
     splitPanelQuery: null as string | null,
     // Undo/Redo
@@ -248,8 +258,14 @@ interface AppStore extends AppState {
     toggleContextPanel: () => void
     setContextPanelOpen: (open: boolean) => void
     setContextPanelWidth: (width: number) => void
+    setSlideQueueWidth: (width: number) => void
+    setPanelMode: (mode: 'docked' | 'floating') => void
+    setPanelPosition: (position: { x: number; y: number }) => void
     setCommandBarOpen: (open: boolean) => void
     toggleCommandBar: () => void
+    setQuickBibleBarOpen: (open: boolean) => void
+    toggleQuickBibleBar: () => void
+    setBiblePanelQuery: (query: string) => void
     setSplitPanelMode: (mode: SplitPanelMode | null) => void
     setSplitPanelQuery: (query: string | null) => void
     openBibleFromSermon: (verseReference: string) => void
@@ -850,12 +866,36 @@ export const useAppStore = create<AppStore>()(
                 set({ contextPanelWidth: Math.max(260, Math.min(460, width)) })
             },
 
+            setSlideQueueWidth: (width) => {
+                set({ slideQueueWidth: Math.max(200, Math.min(500, width)) })
+            },
+
+            setPanelMode: (mode) => {
+                set({ panelMode: mode })
+            },
+
+            setPanelPosition: (position) => {
+                set({ panelPosition: position })
+            },
+
             setCommandBarOpen: (open) => {
                 set({ commandBarOpen: open })
             },
 
             toggleCommandBar: () => {
                 set((state) => ({ commandBarOpen: !state.commandBarOpen }))
+            },
+
+            setQuickBibleBarOpen: (open) => {
+                set({ quickBibleBarOpen: open })
+            },
+
+            toggleQuickBibleBar: () => {
+                set((state) => ({ quickBibleBarOpen: !state.quickBibleBarOpen }))
+            },
+
+            setBiblePanelQuery: (query) => {
+                set({ biblePanelQuery: query })
             },
 
             setSplitPanelMode: (mode) => {
@@ -888,6 +928,9 @@ export const useAppStore = create<AppStore>()(
                 // Persist studio layout preferences
                 contextPanelOpen: state.contextPanelOpen,
                 contextPanelWidth: state.contextPanelWidth,
+                slideQueueWidth: state.slideQueueWidth,
+                panelMode: state.panelMode,
+                panelPosition: state.panelPosition,
                 activeNavSection: state.activeNavSection,
             }),
         }

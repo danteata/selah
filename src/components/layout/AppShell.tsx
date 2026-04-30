@@ -3,6 +3,7 @@ import { NavRail } from './NavRail'
 import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
 import { ContextPanel } from './ContextPanel'
+import { QuickBibleBar } from '../bible/QuickBibleBar'
 import { SermonListenerProvider } from '../sermon-listener/SermonListenerContext'
 import { useAppStore } from '../../store/appStore'
 import type { Schedule } from '../../types'
@@ -18,27 +19,13 @@ interface AppShellProps {
     children: React.ReactNode
 }
 
-/**
- * AppShell — The master Studio Mode layout.
- * 
- * Provides the fixed chrome: TopBar, NavRail, StatusBar, ContextPanel.
- * The `children` prop renders into the main workspace area.
- * 
- * Layout (CSS Grid):
- * ┌──────────────────────────────────────┐
- * │              TopBar (40px)           │
- * ├────┬────────────────────┬────────────┤
- * │ NR │    Main Workspace  │  Context   │
- * │56px│     (children)     │   Panel    │
- * ├────┴────────────────────┴────────────┤
- * │            StatusBar (32px)          │
- * └──────────────────────────────────────┘
- */
 export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children }: AppShellProps) {
     const openModal = useAppStore((s) => s.openModal)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
     const activeNavSection = useAppStore((s) => s.activeNavSection)
+    const panelMode = useAppStore((s) => s.panelMode)
+    const toggleQuickBibleBar = useAppStore((s) => s.toggleQuickBibleBar)
 
     // Handle sections that trigger modals instead of the inline sidebar
     useEffect(() => {
@@ -53,6 +40,18 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
             setActiveNavSection(null)
         }
     }, [activeNavSection, openModal, setActiveNavSection])
+
+    // Ctrl+B shortcut for Quick Bible Bar
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+                e.preventDefault()
+                toggleQuickBibleBar()
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [toggleQuickBibleBar])
 
     // Determine if context panel is actually showing inline content
     const INLINE_SECTIONS = ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'sermon']
@@ -88,8 +87,14 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
                     {children}
                 </main>
 
-                {panelVisible && <ContextPanel />}
+                {panelVisible && panelMode === 'docked' && <ContextPanel />}
             </div>
+
+            {/* Floating context panel renders outside the flex flow */}
+            {panelVisible && panelMode === 'floating' && <ContextPanel />}
+
+            {/* Quick Bible Bar overlay */}
+            <QuickBibleBar />
 
             {/* Status Bar */}
             <StatusBar />

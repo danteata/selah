@@ -613,7 +613,7 @@ h6 {
     width: 52px;
     flex-shrink: 0;
     z-index: 30;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .nav-rail-btn {
@@ -628,6 +628,7 @@ h6 {
     border: none;
     background: none;
     position: relative;
+    overflow: visible;
 }
 
 .nav-rail-scroll {
@@ -678,7 +679,6 @@ h6 {
 
 /* Slide queue (left side of workspace) */
 .studio-slide-queue {
-    width: 280px;
     flex-shrink: 0;
     border-right: 1px solid var(--border-subtle);
     display: flex;
@@ -706,6 +706,18 @@ h6 {
     position: relative;
     background-color: #1f2937;
     box-shadow: var(--shadow-lg);
+    transition: box-shadow 0.4s ease;
+}
+
+.studio-live-monitor.is-live {
+    box-shadow: 0 0 0 2px #16a34a, 0 0 24px rgba(22,163,74,0.2);
+}
+
+/* Floating context panel */
+.studio-context-panel--floating {
+    resize: both;
+    min-width: 260px;
+    min-height: 300px;
 }
 
 /* Tabular numbers for countdown timers and verse references */
@@ -716,7 +728,7 @@ h6 {
 /* Responsive adjustments */
 @media (max-width: 1200px) {
     .studio-slide-queue {
-        width: 240px;
+        width: 240px !important;
     }
 }
 
@@ -731,7 +743,7 @@ h6 {
     }
 
     .studio-slide-queue {
-        width: 200px;
+        width: 200px !important;
     }
 
     .studio-context-panel {

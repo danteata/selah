@@ -360,7 +360,7 @@ export function LiveOutput() {
                             <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
                             Live Feed
                         </div>
-                        <div className="studio-live-monitor border border-gray-800 ring-1 ring-white/5 shadow-2xl">
+                        <div className={`studio-live-monitor border border-gray-800 ring-1 ring-white/5 shadow-2xl ${liveSlide ? 'is-live' : ''}`}>
                             {liveSlide ? (
                                 <div
                                     className="w-full h-full relative"
@@ -392,9 +392,14 @@ export function LiveOutput() {
                                     </div>
                                 </div>
                             ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 gap-4">
-                                    <Monitor className="w-12 h-12 opacity-20" />
-                                    <p className="text-sm font-medium opacity-40">No Live Content</p>
+                                <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[var(--bg-primary)]">
+                                    <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/10 flex items-center justify-center">
+                                        <Monitor className="w-8 h-8 text-[var(--accent-teal)]/40" />
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-sm font-semibold text-[var(--text-secondary)] opacity-60">Selah</p>
+                                        <p className="text-[10px] text-[var(--text-muted)] mt-1">Nothing is live yet</p>
+                                    </div>
                                 </div>
                             )}
                         </div>
