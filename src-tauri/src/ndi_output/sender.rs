@@ -10,6 +10,7 @@
 use grafton_ndi::{PixelFormat, SenderOptions, VideoFrame, NDI};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::types::NdiOutputConfig;
 
@@ -17,8 +18,9 @@ struct NdiSenderInner {
     ndi: Arc<NDI>,
     sender: grafton_ndi::Sender,
     source_name: String,
-    frames_sent: u64,
 }
+
+static FRAME_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub struct NdiSender {
     inner: RwLock<Option<NdiSenderInner>>,
@@ -48,11 +50,12 @@ impl NdiSender {
             config.source_name
         );
 
+        FRAME_COUNTER.store(0, Ordering::SeqCst);
+
         *self.inner.write() = Some(NdiSenderInner {
             ndi: Arc::new(ndi),
             sender,
             source_name: config.source_name.clone(),
-            frames_sent: 0,
         });
 
         Ok(())
@@ -79,12 +82,39 @@ impl NdiSender {
         let src_stride = bytes_per_row as usize;
         let dst_stride = (width as usize) * 4;
 
+        if data.len() < dst_stride {
+            return Err(format!(
+                "Frame data too small: got {} bytes, need at least {}",
+                data.len(),
+                dst_stride
+            ));
+        }
+
+        let frame_num = FRAME_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let timecode = (frame_num * 1001 / 30) as i64;
+
         let mut frame = VideoFrame::builder()
             .resolution(width as i32, height as i32)
             .pixel_format(PixelFormat::BGRA)
             .frame_rate(30, 1)
+            .timecode(timecode)
+            .timestamp(frame_num as i64 * 33_333_333)
             .build()
             .map_err(|e| format!("Failed to build video frame: {:?}", e))?;
+
+        if frame_num <= 2 || frame_num % 300 == 0 {
+            let sample_offset = dst_stride * (height as usize / 2) + (width as usize / 2) * 4;
+            let sample_bytes: [u8; 4] = if sample_offset + 4 <= data.len() {
+                data[sample_offset..sample_offset + 4].try_into().unwrap_or([0; 4])
+            } else {
+                [0; 4]
+            };
+            eprintln!(
+                "NDI send_frame #{}: {}x{} stride_src={} stride_dst={} timecode={} px_center=[{:02X}{:02X}{:02X}{:02X}]",
+                frame_num, width, height, src_stride, dst_stride, timecode,
+                sample_bytes[0], sample_bytes[1], sample_bytes[2], sample_bytes[3]
+            );
+        }
 
         if src_stride == dst_stride {
             let copy_len = data.len().min(frame.data.len());
@@ -131,11 +161,7 @@ impl NdiSender {
     }
 
     pub fn frames_sent(&self) -> u64 {
-        self.inner
-            .read()
-            .as_ref()
-            .map(|i| i.frames_sent)
-            .unwrap_or(0)
+        FRAME_COUNTER.load(Ordering::SeqCst)
     }
 
     pub fn source_name(&self) -> Option<String> {

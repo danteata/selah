@@ -11,13 +11,15 @@ use screencapturekit::{
         SCStream,
     },
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::sender::NdiSender;
 use super::types::NdiOutputConfig;
+
+static CAPTURE_FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
 
 enum CaptureFrame {
     Video {
@@ -54,6 +56,23 @@ impl SCStreamOutputTrait for CaptureHandler {
                         let raw: &[u8] = guard.as_slice();
                         let sz = (bpr * h) as usize;
                         if raw.len() >= sz {
+                            let fc = CAPTURE_FRAME_COUNT.fetch_add(1, Ordering::SeqCst);
+                            let center_offset = bpr as usize * (h as usize / 2)
+                                + (w as usize / 2) * 4;
+                            let sample: [u8; 4] = if center_offset + 4 <= sz {
+                                raw[center_offset..center_offset + 4]
+                                    .try_into()
+                                    .unwrap_or([0; 4])
+                            } else {
+                                [0; 4]
+                            };
+                            if fc <= 2 || fc % 300 == 0 {
+                                eprintln!(
+                                    "SCCapture frame #{}: {}x{} bpr={} len={} center=[{:02X}{:02X}{:02X}{:02X}]",
+                                    fc, w, h, bpr, raw.len(),
+                                    sample[0], sample[1], sample[2], sample[3]
+                                );
+                            }
                             let _ = self.tx.send(CaptureFrame::Video {
                                 data: raw[..sz].to_vec(),
                                 width: w,
@@ -144,7 +163,6 @@ fn find_live_window(
 ) -> Result<
     (
         screencapturekit::shareable_content::window::SCWindow,
-        screencapturekit::shareable_content::display::SCDisplay,
     ),
     String,
 > {
@@ -156,12 +174,8 @@ fn find_live_window(
         .iter()
         .find(|w| w.title().contains(window_title))
         .ok_or_else(|| format!("Window containing '{}' not found", window_title))?;
-    let displays = content.displays();
-    let display = displays
-        .first()
-        .ok_or_else(|| "No displays found".to_string())?;
 
-    Ok((window.clone(), display.clone()))
+    Ok((window.clone(),))
 }
 
 fn capture_loop(
@@ -175,9 +189,9 @@ fn capture_loop(
     let mut waited_logged = false;
     while stop.load(Ordering::SeqCst) {
         match find_live_window(window_title) {
-            Ok((window, display)) => {
+            Ok((window,)) => {
                 eprintln!("NDI capture: found '{window_title}' window");
-                if let Err(e) = run_capture(&window, &display, sender.clone(), include_audio, stop)
+                if let Err(e) = run_capture(&window, sender.clone(), include_audio, stop)
                 {
                     eprintln!("NDI capture stream ended: {e}, will retry if window reappears...");
                 }
@@ -202,7 +216,6 @@ fn capture_loop(
 
 fn run_capture(
     window: &screencapturekit::shareable_content::window::SCWindow,
-    display: &screencapturekit::shareable_content::display::SCDisplay,
     sender: Arc<NdiSender>,
     include_audio: bool,
     stop: &Arc<AtomicBool>,
@@ -211,7 +224,11 @@ fn run_capture(
     let width = frame.size.width as u32;
     let height = frame.size.height as u32;
 
-    let filter = SCContentFilter::new().with_display_including_windows(display, &[window]);
+    let filter = SCContentFilter::new()
+        .with_desktop_independent_window(window);
+
+    eprintln!("NDI capture: window filter on '{:?}' at ({},{}) {}x{}",
+        window.title(), frame.origin.x, frame.origin.y, width, height);
 
     let mut cfg = SCStreamConfiguration::new()
         .set_width(width)
