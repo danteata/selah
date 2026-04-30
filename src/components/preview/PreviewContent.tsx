@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare } from 'lucide-react'
+import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare, Rows3, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
@@ -298,14 +298,21 @@ export function PreviewContent() {
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
             {/* Header - Compact */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-800">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Slide Queue
-                </h2>
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/30">
+                <div className="flex items-center gap-2">
+                    <Rows3 className="w-4 h-4 text-[var(--accent-teal)]" />
+                    <h2 className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">
+                        Slide Queue
+                    </h2>
+                </div>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={toggleBulkSelectMode}
-                        className={`p-1.5 rounded transition-colors ${bulkSelectMode ? 'bg-amber-500/20 text-amber-500' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+                        className={`p-1.5 rounded-lg transition-all ${
+                            bulkSelectMode 
+                                ? 'bg-[var(--accent-amber)]/10 text-[var(--accent-amber)]' 
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                        }`}
                         title="Bulk Select"
                     >
                         <LayoutGrid className="w-4 h-4" />
@@ -314,7 +321,7 @@ export function PreviewContent() {
                         <button
                             onClick={handleDeleteSelected}
                             disabled={selectedSlideIds.length === 0}
-                            className="p-1.5 text-red-500 hover:bg-red-500/10 rounded disabled:opacity-30"
+                            className="p-1.5 text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/10 rounded-lg disabled:opacity-30 transition-colors"
                         >
                             <Trash2 className="w-4 h-4" />
                         </button>
@@ -325,7 +332,7 @@ export function PreviewContent() {
             {/* Slides List - High Density Vertical */}
             <div
                 ref={slidesGridRef}
-                className="flex-1 overflow-y-auto p-2 space-y-2"
+                className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar"
             >
                 {slides.length > 0 ? (
                     slides.map((slide, index) => (
@@ -346,7 +353,7 @@ export function PreviewContent() {
                         />
                     ))
                 ) : (
-                    <div className="py-20">
+                    <div className="py-20 flex flex-col items-center opacity-40">
                         <EmptyState
                             icon="i-bx-slideshow"
                             sub="Queue Empty"
@@ -359,12 +366,13 @@ export function PreviewContent() {
             </div>
 
             {/* Quick Add Footer */}
-            <div className="p-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+            <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
                 <button
                     onClick={handleCreateNewSlide}
-                    className="w-full py-2 px-4 bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium transition-colors border border-gray-300 dark:border-gray-700"
+                    className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--bg-tertiary)] hover:bg-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-lg text-xs font-medium transition-all border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30"
                 >
-                    + Add New Slide
+                    <Plus className="w-3.5 h-3.5" />
+                    Add New Slide
                 </button>
             </div>
         </div>

@@ -15,6 +15,7 @@ import { LibraryPanel } from '../components/library/LibraryPanel'
 import { ScheduleModal } from '../components/schedules/ScheduleModal'
 import { AppShell } from '../components/layout/AppShell'
 import { StudioWorkspace } from '../components/layout/StudioWorkspace'
+import { DashboardLayout } from '../components/dashboard'
 import { CommandBar } from '../components/layout/CommandBar'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
@@ -71,6 +72,11 @@ export default function Dashboard() {
 
     // Get user role for admin access
     const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
+
+    const workspaceMode = useAppStore((s) => s.workspaceMode)
+
+    // Sermon listener visibility for dashboard mode
+    const [showSermonListener, setShowSermonListener] = useState(true)
 
     // Templates hook for creating custom templates
     const { createTemplate } = useTemplates()
@@ -343,7 +349,14 @@ export default function Dashboard() {
                 onSignOut: () => signOut()
             }}
         >
-            <StudioWorkspace />
+            {workspaceMode === 'dashboard' ? (
+                <DashboardLayout
+                    showSermonListener={showSermonListener}
+                    onSermonListenerToggle={() => setShowSermonListener(prev => !prev)}
+                />
+            ) : (
+                <StudioWorkspace />
+            )}
 
             <CommandBar />
 

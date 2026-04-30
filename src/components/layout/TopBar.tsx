@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command } from 'lucide-react'
+import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Schedule } from '../../types'
 
@@ -19,6 +19,8 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
     const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const openModal = useAppStore((s) => s.openModal)
+    const workspaceMode = useAppStore((s) => s.workspaceMode)
+    const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode)
     const searchInputRef = useRef<HTMLInputElement>(null)
 
     // Close user menu when clicking outside
@@ -107,6 +109,19 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
 
             {/* Right actions */}
             <div className="flex items-center gap-1.5 flex-shrink-0">
+                {/* Workspace Mode Toggle */}
+                <button
+                    onClick={() => setWorkspaceMode(workspaceMode === 'studio' ? 'dashboard' : 'studio')}
+                    className={`p-1.5 rounded-lg transition-all ${
+                        workspaceMode === 'dashboard'
+                            ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                    }`}
+                    title={workspaceMode === 'studio' ? 'Switch to dashboard layout' : 'Switch to studio layout'}
+                >
+                    {workspaceMode === 'studio' ? <LayoutGrid className="w-4 h-4" /> : <Rows3 className="w-4 h-4" />}
+                </button>
+
                 {/* Theme Toggle */}
                 <motion.button
                     onClick={onToggleTheme}

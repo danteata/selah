@@ -79,6 +79,9 @@ export interface AppState {
     splitPanelMode: SplitPanelMode | null
     splitPanelQuery: string | null
 
+    // Workspace mode
+    workspaceMode: 'studio' | 'dashboard'
+
     // Undo/Redo stacks
     pastStates: Array<Partial<AppState>>
     futureStates: Array<Partial<AppState>>
@@ -167,6 +170,8 @@ const initialState: AppState = {
     biblePanelQuery: '',
     splitPanelMode: null as SplitPanelMode | null,
     splitPanelQuery: null as string | null,
+    // Workspace mode
+    workspaceMode: 'studio' as 'studio' | 'dashboard',
     // Undo/Redo
     pastStates: [],
     futureStates: [],
@@ -269,6 +274,7 @@ interface AppStore extends AppState {
     setSplitPanelMode: (mode: SplitPanelMode | null) => void
     setSplitPanelQuery: (query: string | null) => void
     openBibleFromSermon: (verseReference: string) => void
+    setWorkspaceMode: (mode: 'studio' | 'dashboard') => void
 }
 
 export const useAppStore = create<AppStore>()(
@@ -914,6 +920,10 @@ export const useAppStore = create<AppStore>()(
                     splitPanelQuery: verseReference,
                 })
             },
+
+            setWorkspaceMode: (mode) => {
+                set({ workspaceMode: mode })
+            },
         }),
         {
             name: 'app-storage',
@@ -932,6 +942,7 @@ export const useAppStore = create<AppStore>()(
                 panelMode: state.panelMode,
                 panelPosition: state.panelPosition,
                 activeNavSection: state.activeNavSection,
+                workspaceMode: state.workspaceMode,
             }),
         }
     )

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { Zap, LayoutGrid, Monitor, Mic, Library } from 'lucide-react'
+import { Zap, LayoutGrid, Monitor, Mic, Library, RotateCcw } from 'lucide-react'
 import { DraggablePanel } from './DraggablePanel'
 import { QuickActionsSidebar } from '../quick-actions/QuickActionsSidebar'
 import { PreviewContent } from '../preview/PreviewContent'
@@ -11,6 +11,7 @@ import {
     type PanelId,
     type LayoutItem
 } from '../../types/dashboard'
+import { LibraryContent } from '../library/LibraryContent'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import './dashboard.css'
@@ -197,6 +198,13 @@ export function DashboardLayout({
         })
     }, [])
 
+    const resetLayout = useCallback(() => {
+        setLayouts(DEFAULT_LAYOUTS)
+        setHiddenPanels(new Set())
+        setCollapsedPanels(new Set())
+        originalHeightsRef.current = {}
+    }, [])
+
     // Filter visible panels
     const visiblePanels = useMemo(() => {
         return DEFAULT_PANEL_CONFIGS.filter(p => !hiddenPanels.has(p.id))
@@ -231,7 +239,7 @@ export function DashboardLayout({
                     />
                 )
             case 'library':
-                return <div className="text-gray-500">Library coming soon...</div>
+                return <LibraryContent compact={true} />
             default:
                 return <div>Unknown panel</div>
         }
@@ -331,6 +339,15 @@ export function DashboardLayout({
                             </button>
                         )
                     })}
+                    <div className="w-px h-4 bg-[var(--border-default)] mx-0.5 hidden sm:block" />
+                    <button
+                        onClick={resetLayout}
+                        className="flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-all duration-200"
+                        title="Reset layout to defaults"
+                    >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Reset</span>
+                    </button>
                 </div>
             </div>
         </div>

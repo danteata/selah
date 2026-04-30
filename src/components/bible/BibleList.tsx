@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
@@ -55,8 +55,11 @@ interface VerseRow {
     verse: number
     scripture: string
     reference: string
+    displayLabel: string
     isCurrent: boolean
     source: 'reference' | 'semantic' | 'neighbor'
+    showChapterHeader: boolean
+    chapterHeaderLabel: string
     score?: number
 }
 
@@ -76,7 +79,10 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const [hasSearched, setHasSearched] = useState(false)
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
     const [focusedIndex, setFocusedIndex] = useState(-1)
+    const [activeVerseKey, setActiveVerseKey] = useState<string | null>(null)
     const autoSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const navigatingRef = useRef(false)
+    const lastSearchedRef = useRef<{ bookIndex: number; chapter: number; startVerse: number; endVerse: number } | null>(null)
     const [recentVerses, setRecentVerses] = useState<string[]>(() => {
         try {
             const stored = localStorage.getItem(RECENT_VERSES_KEY)
@@ -99,12 +105,13 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         isSearching: isSemanticSearching,
         hasEmbeddings,
         isEmbedderReady,
+        isLoadingEmbedder,
         search: semanticSearch,
         clearResults: clearSemanticResults,
         initEmbedder,
     } = useSemanticVerseSearch({
-        threshold: 0.55,
-        limit: 5,
+        threshold: 0.35,
+        limit: 8,
         debounceMs: 400,
         minQueryLength: 3,
         version: selectedVersion || undefined,
@@ -127,7 +134,13 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     useEffect(() => { setFocusedIndex(-1) }, [semanticResults, currentVerses, neighborVerses])
     useEffect(() => {
         const rows = buildVerseRows()
-        if (rows.length > 0 && focusedIndex === -1 && hasSearched) setFocusedIndex(0)
+        if (rows.length === 0 || focusedIndex !== -1) return
+        if (hasSearched) {
+            const currentIdx = rows.findIndex(r => r.isCurrent)
+            setFocusedIndex(currentIdx >= 0 ? currentIdx : 0)
+        } else if (semanticResults.length > 0) {
+            setFocusedIndex(0)
+        }
     })
 
     const bookSuggestions = useMemo(() => {
@@ -186,6 +199,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 setLiveSlide(slide.id)
                 addRecentVerse(result.label || '')
             }
+            setActiveVerseKey(`${bookIndex}:${chapter}:${verse}`)
         }
     }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, setLiveSlide, addRecentVerse])
 
@@ -201,10 +215,45 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
     }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, addRecentVerse])
 
+    const loadVerseWithNeighbors = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
+        navigatingRef.current = true
+        lastSearchedRef.current = { bookIndex, chapter, startVerse: verse, endVerse: verse }
+        setLoading(true)
+        setHasSearched(true)
+        setNeighborVerses({ prev: [], next: [] })
+        setFocusedIndex(-1)
+        setQuery(`${bibleBooks[bookIndex - 1]} ${chapter}:${verse}`)
+        clearSemanticResults()
+
+        const label = `${bookIndex}:${chapter}:${verse}`
+        const result = await fetchScripture(label, selectedVersion)
+        if (result && Array.isArray(result.content)) {
+            setCurrentVerses(result.content as BibleVerse[])
+            setCurrentBookIndex(bookIndex)
+            setCurrentChapter(chapter)
+            setCurrentStartVerse(verse)
+            setCurrentEndVerse(verse)
+            setActiveVerseKey(`${bookIndex}:${chapter}:${verse}`)
+        }
+        setLoading(false)
+        navigatingRef.current = false
+
+        const prevStart = Math.max(1, verse - 3)
+        const prevP = prevStart < verse ? fetchScripture(`${bookIndex}:${chapter}:${prevStart}-${verse - 1}`, selectedVersion) : Promise.resolve(null)
+        const nextP = fetchScripture(`${bookIndex}:${chapter}:${verse + 1}-${verse + 3}`, selectedVersion)
+        Promise.all([prevP, nextP]).then(([pr, nr]) => {
+            setNeighborVerses({
+                prev: pr && Array.isArray(pr.content) ? pr.content as BibleVerse[] : [],
+                next: nr && Array.isArray(nr.content) ? nr.content as BibleVerse[] : [],
+            })
+        })
+    }, [fetchScripture, selectedVersion, clearSemanticResults])
+
     const handleSearch = useCallback(async () => {
         const parsed = parseQuery(query)
         if (!parsed) return
-        if (hasSearched && currentBookIndex === parsed.bookIndex && currentChapter === parsed.chapter && currentStartVerse === parsed.startVerse && currentEndVerse === parsed.endVerse) return
+        if (lastSearchedRef.current && lastSearchedRef.current.bookIndex === parsed.bookIndex && lastSearchedRef.current.chapter === parsed.chapter && lastSearchedRef.current.startVerse === parsed.startVerse && lastSearchedRef.current.endVerse === parsed.endVerse) return
+        lastSearchedRef.current = { bookIndex: parsed.bookIndex, chapter: parsed.chapter, startVerse: parsed.startVerse, endVerse: parsed.endVerse }
         setLoading(true)
         setHasSearched(true)
         setNeighborVerses({ prev: [], next: [] })
@@ -217,6 +266,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             setCurrentChapter(parsed.chapter)
             setCurrentStartVerse(parsed.startVerse)
             setCurrentEndVerse(parsed.endVerse)
+            setActiveVerseKey(`${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}`)
         }
         setLoading(false)
         const { bookIndex, chapter, startVerse, endVerse } = parsed
@@ -232,22 +282,22 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             })
         })
         setShowSuggestions(false)
-    }, [query, parseQuery, fetchScripture, selectedVersion, hasSearched, currentBookIndex, currentChapter, currentStartVerse, currentEndVerse])
+    }, [query, parseQuery, fetchScripture, selectedVersion])
 
-    // Auto-search: reference queries trigger after 500ms debounce, semantic queries use their own debounce
     useEffect(() => {
         const trimmed = query.trim()
         if (!trimmed || !selectedVersion) return
-
+        if (navigatingRef.current) return
         if (autoSearchTimerRef.current) clearTimeout(autoSearchTimerRef.current)
 
         const parsed = parseQuery(trimmed)
         if (parsed) {
+            if (lastSearchedRef.current && lastSearchedRef.current.bookIndex === parsed.bookIndex && lastSearchedRef.current.chapter === parsed.chapter && lastSearchedRef.current.startVerse === parsed.startVerse && lastSearchedRef.current.endVerse === parsed.endVerse) return
             autoSearchTimerRef.current = setTimeout(() => {
-                handleSearch()
+                if (!navigatingRef.current) handleSearch()
             }, 500)
             clearSemanticResults()
-        } else if (trimmed.length >= 3 && hasEmbeddings) {
+        } else if (trimmed.length >= 3 && hasEmbeddings && isEmbedderReady) {
             semanticSearch(trimmed)
         } else {
             clearSemanticResults()
@@ -256,7 +306,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         return () => { if (autoSearchTimerRef.current) clearTimeout(autoSearchTimerRef.current) }
     }, [query, selectedVersion, hasEmbeddings, semanticSearch, clearSemanticResults, parseQuery, handleSearch])
 
-    const navigateVerse = useCallback((direction: 'prev' | 'next') => {
+    const navigateVerse = useCallback(async (direction: 'prev' | 'next') => {
         if (!currentBookIndex || !currentChapter || !currentStartVerse) return
         const range = (currentEndVerse || currentStartVerse) - currentStartVerse + 1
         let newStart: number, newEnd: number
@@ -267,38 +317,44 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             newStart = (currentEndVerse || currentStartVerse) + 1
             newEnd = newStart + range - 1
         }
-        const bookName = bibleBooks[currentBookIndex - 1]
-        setQuery(`${bookName} ${currentChapter}:${newStart}${newEnd !== newStart ? `-${newEnd}` : ''}`)
-        setHasSearched(false)
-        setCurrentVerses([])
-        setNeighborVerses({ prev: [], next: [] })
-        // Auto-trigger search after navigation
-        const parsed = parseQuery(`${bookName} ${currentChapter}:${newStart}${newEnd !== newStart ? `-${newEnd}` : ''}`)
-        if (!parsed) return
+        
+        navigatingRef.current = true
+        lastSearchedRef.current = { bookIndex: currentBookIndex, chapter: currentChapter, startVerse: newStart, endVerse: newEnd }
+        
         setLoading(true)
         setHasSearched(true)
-        const label = `${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}${parsed.endVerse !== parsed.startVerse ? `-${parsed.endVerse}` : ''}`
-        fetchScripture(label, selectedVersion).then(result => {
-            if (result && Array.isArray(result.content)) {
-                setCurrentVerses(result.content as BibleVerse[])
-                setCurrentBookIndex(parsed.bookIndex)
-                setCurrentChapter(parsed.chapter)
-                setCurrentStartVerse(parsed.startVerse)
-                setCurrentEndVerse(parsed.endVerse)
+        setNeighborVerses({ prev: [], next: [] })
+        setFocusedIndex(-1)
+        
+        const label = `${currentBookIndex}:${currentChapter}:${newStart}${newEnd !== newStart ? `-${newEnd}` : ''}`
+        const result = await fetchScripture(label, selectedVersion)
+        
+        if (result && Array.isArray(result.content)) {
+            setCurrentVerses(result.content as BibleVerse[])
+            setCurrentStartVerse(newStart)
+            setCurrentEndVerse(newEnd)
+            setActiveVerseKey(`${currentBookIndex}:${currentChapter}:${newStart}`)
+            
+            const liveSlideId = useAppStore.getState().liveSlideId
+            if (liveSlideId) {
+                goLiveWithScripture(currentBookIndex, currentChapter, newStart)
             }
-            setLoading(false)
-        })
-        // Neighbors in parallel
-        const prevStart = Math.max(1, parsed.startVerse - 3)
-        const prevP = prevStart < parsed.startVerse ? fetchScripture(`${parsed.bookIndex}:${parsed.chapter}:${prevStart}-${parsed.startVerse - 1}`, selectedVersion) : Promise.resolve(null)
-        const nextP = fetchScripture(`${parsed.bookIndex}:${parsed.chapter}:${parsed.endVerse + 1}-${parsed.endVerse + 3}`, selectedVersion)
+        }
+        
+        setLoading(false)
+        navigatingRef.current = false
+        
+        const prevStart = Math.max(1, newStart - 3)
+        const prevP = prevStart < newStart ? fetchScripture(`${currentBookIndex}:${currentChapter}:${prevStart}-${newStart - 1}`, selectedVersion) : Promise.resolve(null)
+        const nextP = fetchScripture(`${currentBookIndex}:${currentChapter}:${newEnd + 1}-${newEnd + 3}`, selectedVersion)
+        
         Promise.all([prevP, nextP]).then(([pr, nr]) => {
             setNeighborVerses({
                 prev: pr && Array.isArray(pr.content) ? pr.content as BibleVerse[] : [],
                 next: nr && Array.isArray(nr.content) ? nr.content as BibleVerse[] : [],
             })
         })
-    }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse, parseQuery, fetchScripture, selectedVersion])
+    }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse, fetchScripture, selectedVersion, goLiveWithScripture])
 
     const changeVersion = useCallback((newVersion: string) => {
         setSelectedVersion(newVersion)
@@ -308,19 +364,33 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const buildVerseRows = useCallback((): VerseRow[] => {
         const rows: VerseRow[] = []
         if (hasSearched && currentBookIndex && currentChapter) {
+            let prevChapter: number | null = null
             for (const nv of neighborVerses.prev) {
-                rows.push({ bookIndex: currentBookIndex, chapter: currentChapter, verse: nv.verse, scripture: nv.scripture, reference: `${bibleBooks[currentBookIndex - 1]} ${currentChapter}:${nv.verse}`, isCurrent: false, source: 'neighbor' })
+                const showHeader = prevChapter !== null && nv.chapter !== prevChapter
+                const headerLabel = nv.chapter !== currentChapter
+                    ? `${bibleBooks[currentBookIndex - 1]} ${nv.chapter}`
+                    : ''
+                rows.push({ bookIndex: currentBookIndex, chapter: nv.chapter, verse: nv.verse, scripture: nv.scripture, reference: `${bibleBooks[currentBookIndex - 1]} ${nv.chapter}:${nv.verse}`, displayLabel: `${nv.verse}`, isCurrent: false, source: 'neighbor', showChapterHeader: showHeader, chapterHeaderLabel: headerLabel })
+                prevChapter = nv.chapter
             }
             for (const cv of currentVerses) {
-                rows.push({ bookIndex: currentBookIndex!, chapter: currentChapter!, verse: cv.verse, scripture: cv.scripture, reference: `${bibleBooks[currentBookIndex! - 1]} ${currentChapter}:${cv.verse}`, isCurrent: true, source: 'reference' })
+                const showHeader = prevChapter !== null && cv.chapter !== prevChapter
+                const headerLabel = ''
+                rows.push({ bookIndex: currentBookIndex!, chapter: currentChapter!, verse: cv.verse, scripture: cv.scripture, reference: `${bibleBooks[currentBookIndex! - 1]} ${currentChapter}:${cv.verse}`, displayLabel: `${cv.verse}`, isCurrent: true, source: 'reference', showChapterHeader: showHeader, chapterHeaderLabel: headerLabel })
+                prevChapter = cv.chapter
             }
             for (const nv of neighborVerses.next) {
-                rows.push({ bookIndex: currentBookIndex, chapter: currentChapter, verse: nv.verse, scripture: nv.scripture, reference: `${bibleBooks[currentBookIndex - 1]} ${currentChapter}:${nv.verse}`, isCurrent: false, source: 'neighbor' })
+                const showHeader = nv.chapter !== prevChapter
+                const headerLabel = nv.chapter !== currentChapter
+                    ? `${bibleBooks[currentBookIndex - 1]} ${nv.chapter}`
+                    : ''
+                rows.push({ bookIndex: currentBookIndex, chapter: nv.chapter, verse: nv.verse, scripture: nv.scripture, reference: `${bibleBooks[currentBookIndex - 1]} ${nv.chapter}:${nv.verse}`, displayLabel: `${nv.verse}`, isCurrent: false, source: 'neighbor', showChapterHeader: showHeader, chapterHeaderLabel: headerLabel })
+                prevChapter = nv.chapter
             }
         }
         if (!hasSearched) {
             for (const sr of semanticResults) {
-                rows.push({ bookIndex: sr.bookNumber, chapter: sr.chapter, verse: sr.verse, scripture: sr.text, reference: sr.reference, isCurrent: false, source: 'semantic', score: sr.score })
+                rows.push({ bookIndex: sr.bookNumber, chapter: sr.chapter, verse: sr.verse, scripture: sr.text, reference: sr.reference, displayLabel: sr.reference, isCurrent: false, source: 'semantic', showChapterHeader: false, chapterHeaderLabel: '', score: sr.score })
             }
         }
         return rows
@@ -333,8 +403,14 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             e.preventDefault()
             if (focusedIndex >= 0 && verseRows.length > 0) {
                 const row = verseRows[focusedIndex]
-                if (e.shiftKey) goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
-                else addToQueue(row.bookIndex, row.chapter, row.verse)
+                if (row.source === 'semantic') {
+                    loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
+                    if (e.shiftKey) goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
+                } else if (e.shiftKey) {
+                    goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
+                } else {
+                    addToQueue(row.bookIndex, row.chapter, row.verse)
+                }
             } else if (!hasSearched) {
                 handleSearch()
             }
@@ -362,7 +438,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             const ci = bibleVersionObjects.findIndex(v => v.id === selectedVersion)
             setSelectedVersion(bibleVersionObjects[(ci + 1) % bibleVersionObjects.length].id)
         }
-    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, onClose, selectedVersion])
+    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, loadVerseWithNeighbors, onClose, selectedVersion])
 
     const handleRecentVerseClick = useCallback((ref: string) => {
         setQuery(ref)
@@ -458,7 +534,11 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             </div>
 
             {/* Results list — unified for both reference search and semantic search */}
-            <div className="flex-1 min-h-0 overflow-y-auto" ref={scrollRef}>
+            <div
+                className="flex-1 min-h-0 overflow-y-auto"
+                ref={scrollRef}
+                onMouseLeave={() => setFocusedIndex(-1)}
+            >
                 {loading && (
                     <div className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--text-muted)]">
                         <Loader2 className="w-4 h-4 animate-spin text-[var(--accent-teal)]" /> Loading...
@@ -466,64 +546,94 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 )}
 
                 {verseRows.length > 0 && !loading && (
-                    <div className="p-2 space-y-1">
+                    <div className="px-2 py-1 space-y-0.5">
                         {hasSearched && (
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 mb-1">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 py-1">
                                 {bibleBooks[currentBookIndex! - 1]} {currentChapter}
                             </div>
                         )}
                         {!hasSearched && (
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 mb-1">Search Results</div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 py-1">Search Results</div>
                         )}
-                        {verseRows.map((row, index) => (
-                            <motion.div
-                                key={`${row.bookIndex}:${row.chapter}:${row.verse}`}
-                                initial={{ opacity: 0, y: 4 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: index * 0.03 }}
-                                className={`group rounded-lg border transition-colors cursor-pointer ${row.isCurrent
-                                    ? 'bg-[var(--accent-teal)]/8 border-[var(--accent-teal)]/20'
-                                    : focusedIndex === index
-                                        ? 'bg-[var(--accent-teal)]/10 border-[var(--accent-teal)]/30 ring-1 ring-[var(--accent-teal)]/20'
-                                        : 'border-transparent hover:bg-[var(--accent-teal)]/5'
-                                }`}
-                                onClick={() => addToQueue(row.bookIndex, row.chapter, row.verse)}
-                                onMouseEnter={() => setFocusedIndex(index)}
-                            >
-                                <div className="flex items-start gap-2 px-3 py-2">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <span className={`text-sm font-semibold ${row.isCurrent ? 'text-[var(--accent-teal)]' : 'text-[var(--text-primary)]'}`}>
-                                                {row.isCurrent ? `${row.verse}` : row.reference}
+                        {verseRows.map((row, index) => {
+                            const verseKey = `${row.bookIndex}:${row.chapter}:${row.verse}`
+                            const isActive = activeVerseKey === verseKey
+                            const isHovered = focusedIndex === index
+                            const handleRowClick = row.source === 'semantic'
+                                ? () => loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
+                                : () => addToQueue(row.bookIndex, row.chapter, row.verse)
+                            return (
+                            <Fragment key={verseKey}>
+                                {row.showChapterHeader && row.chapterHeaderLabel && (
+                                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-indigo)] px-1 pt-2 pb-0.5 flex items-center gap-1">
+                                        <BookOpen className="w-3 h-3" />
+                                        {row.chapterHeaderLabel}
+                                    </div>
+                                )}
+                                <motion.div
+                                    layout
+                                    initial={{ opacity: 0, y: 4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: index * 0.02, layout: { duration: 0.2 } }}
+                                    className={`group rounded-lg border transition-colors cursor-pointer ${
+                                        isActive
+                                            ? 'bg-[var(--accent-teal)]/12 border-[var(--accent-teal)]/30 ring-1 ring-[var(--accent-teal)]/25'
+                                            : row.isCurrent
+                                                ? 'bg-[var(--accent-teal)]/8 border-[var(--accent-teal)]/20'
+                                                : isHovered
+                                                    ? 'bg-[var(--accent-teal)]/5 border-[var(--accent-teal)]/15'
+                                                    : 'border-transparent hover:bg-[var(--accent-teal)]/5'
+                                    }`}
+                                    onClick={handleRowClick}
+                                    onMouseEnter={() => setFocusedIndex(index)}
+                                >
+                                    <div className="px-3 py-2">
+                                        <div className="flex items-center gap-2 mb-0.5">
+                                            <span className={`text-[13px] font-bold shrink-0 ${isActive || row.isCurrent ? 'text-[var(--accent-teal)]' : 'text-[var(--text-secondary)]'}`}>
+                                                {row.displayLabel}
                                             </span>
                                             {row.source === 'semantic' && row.score !== undefined && (
-                                                <span className="text-[10px] text-[var(--accent-teal)]">{Math.round(row.score * 100)}%</span>
+                                                <span className="text-[10px] text-[var(--accent-teal)] font-medium opacity-80">{Math.round(row.score * 100)}% Match</span>
                                             )}
-                                            {row.isCurrent && (
+                                            {isActive && (
+                                                <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-teal)] text-white rounded font-medium">LIVE</span>
+                                            )}
+                                            {row.isCurrent && !isActive && (
                                                 <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-teal)]/15 text-[var(--accent-teal)] rounded font-medium">CURRENT</span>
                                             )}
+                                            <div className={`ml-auto flex items-center gap-0.5 shrink-0 ${
+                                                row.isCurrent || isActive || isHovered ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                            } transition-opacity`}>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); addToQueue(row.bookIndex, row.chapter, row.verse) }}
+                                                    className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded transition-colors"
+                                                >
+                                                    <Plus className="w-3 h-3" /> Add
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
+                                                        if (row.source === 'semantic') loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
+                                                    }}
+                                                    className={`flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium rounded transition-all ${
+                                                        isActive
+                                                            ? 'bg-[var(--accent-teal)] text-white hover:brightness-110'
+                                                            : 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] hover:bg-[var(--accent-teal)] hover:text-white'
+                                                    }`}
+                                                >
+                                                    <Zap className="w-3 h-3" /> Live
+                                                </button>
+                                            </div>
                                         </div>
-                                        <p className={`text-xs mt-0.5 leading-relaxed ${row.isCurrent ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'}`}>
+                                        <p className={`text-xs leading-relaxed ${isActive || row.isCurrent ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-tertiary)]'}`}>
                                             {row.scripture}
                                         </p>
                                     </div>
-                                    <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pt-0.5">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); addToQueue(row.bookIndex, row.chapter, row.verse) }}
-                                            className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded transition-colors"
-                                        >
-                                            <Plus className="w-3 h-3" /> Add
-                                        </button>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); goLiveWithScripture(row.bookIndex, row.chapter, row.verse) }}
-                                            className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--accent-teal)] text-white rounded hover:brightness-110 transition-all"
-                                        >
-                                            <Zap className="w-3 h-3" /> Live
-                                        </button>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        ))}
+                                </motion.div>
+                            </Fragment>
+                            )
+                        })}
 
                         {/* Template Selector */}
                         {templates && templates.length > 0 && (
@@ -551,7 +661,12 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                         <p className="text-sm mt-1 text-[var(--text-muted)]">Type a verse reference above to get started</p>
                         <div className="mt-4 text-xs text-[var(--text-muted)] space-y-0.5">
                             <p>Examples: John 3:16, Jn 3:16-18, Ps 23:1</p>
-                            {hasEmbeddings && <p className="text-[var(--accent-teal)] mt-2">Or search by meaning, e.g. &quot;God so loved the world&quot;</p>}
+                            {hasEmbeddings && isEmbedderReady && <p className="text-[var(--accent-teal)] mt-2">Or search by meaning, e.g. &quot;God so loved the world&quot;</p>}
+                            {hasEmbeddings && !isEmbedderReady && (
+                                <p className="text-[var(--accent-amber)] mt-2 flex items-center justify-center gap-1.5">
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Warming up semantic search...
+                                </p>
+                            )}
                         </div>
                     </div>
                 )}

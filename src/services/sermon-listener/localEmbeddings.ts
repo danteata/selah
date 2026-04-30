@@ -509,6 +509,34 @@ export async function hasFragmentEmbeddings(version: string): Promise<boolean> {
     }
 }
 
+let prewarmPromise: Promise<void> | null = null
+let prewarmedEmbeddings: Map<string, CachedVerseEmbedding[]> = new Map()
+
+export function prewarmSemanticSearch(): Promise<void> {
+    if (prewarmPromise) return prewarmPromise
+
+    prewarmPromise = (async () => {
+        try {
+            const [, versions] = await Promise.all([
+                getEmbedder(),
+                getLocalCachedVersions(),
+            ])
+            if (versions.length > 0) {
+                const embeddings = await getCachedVerseEmbeddings(versions[0])
+                prewarmedEmbeddings.set(versions[0], embeddings)
+            }
+        } catch {
+            // Pre-warm is best-effort; failures are handled at search time
+        }
+    })()
+
+    return prewarmPromise
+}
+
+export function getPrewarmedEmbeddings(version: string): CachedVerseEmbedding[] | null {
+    return prewarmedEmbeddings.get(version) || null
+}
+
 export default {
     initializeEmbedder,
     isEmbedderReady,
@@ -523,4 +551,6 @@ export default {
     hasCachedEmbeddings,
     hasFragmentEmbeddings,
     getLocalCachedVersions,
+    prewarmSemanticSearch,
+    getPrewarmedEmbeddings,
 };

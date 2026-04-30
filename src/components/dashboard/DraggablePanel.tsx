@@ -157,8 +157,8 @@ export function DraggablePanel({
                     {/* Accent indicator */}
                     <div className={`w-1 h-4 rounded-full ${colors.indicator} opacity-80`} />
 
-                    <div className="text-[var(--text-muted)] group-hover:text-[var(--text-tertiary)] transition-colors cursor-grab active:cursor-grabbing flex-shrink-0">
-                        <GripVertical className="w-3.5 h-3.5" />
+                    <div className="cursor-grab active:cursor-grabbing flex-shrink-0 flex items-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">
+                        <GripVertical className="w-4 h-4" />
                     </div>
 
                     <div className={`${colors.text} flex-shrink-0`}>
@@ -312,9 +312,7 @@ export function DraggablePanel({
                         transition={{ duration: 0.15, ease: 'easeOut' }}
                         className="flex-1 min-h-0 overflow-y-auto"
                     >
-                        <div className="p-3">
-                            {children}
-                        </div>
+                        {children}
                     </motion.div>
                 )}
             </AnimatePresence>

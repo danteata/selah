@@ -1,4 +1,4 @@
-import { Trash2, Copy, Bookmark, Pencil, Radio, Play } from 'lucide-react'
+import { Trash2, Copy, Bookmark, Pencil, Radio, Play, Zap } from 'lucide-react'
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
 import { useFileUrl } from '../../hooks/useTemplates'
@@ -139,7 +139,7 @@ export function SlideCard({
                         className="absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100"
                         title="Send to Live"
                     >
-                        <Radio className="w-4 h-4" />
+                        <Zap className="w-4 h-4" />
                     </button>
                 )}
             </div>

@@ -1,11 +1,11 @@
-const THRESHOLD_FLOOR = 0.35
-const THRESHOLD_CEILING = 0.60
+const THRESHOLD_FLOOR = 0.28
+const THRESHOLD_CEILING = 0.50
 
 const BANDS: Array<{ maxWords: number; threshold: number }> = [
-    { maxWords: 4, threshold: 0.38 },
-    { maxWords: 8, threshold: 0.44 },
-    { maxWords: 14, threshold: 0.49 },
-    { maxWords: Infinity, threshold: 0.52 },
+    { maxWords: 4, threshold: 0.30 },
+    { maxWords: 8, threshold: 0.35 },
+    { maxWords: 14, threshold: 0.40 },
+    { maxWords: Infinity, threshold: 0.45 },
 ]
 
 export function getDynamicThreshold(wordCount: number): number {

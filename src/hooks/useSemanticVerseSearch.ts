@@ -24,6 +24,7 @@ import {
     hasCachedEmbeddings,
     findSimilarLocally,
     getLocalCachedVersions,
+    getPrewarmedEmbeddings,
 } from '../services/sermon-listener/localEmbeddings'
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
 import { getDynamicThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
@@ -77,6 +78,8 @@ interface UseSemanticVerseSearchReturn {
     initEmbedder: () => Promise<void>
 }
 
+const embeddingsAvailabilityCache = new Map<string, boolean>()
+
 export function useSemanticVerseSearch(
     options: UseSemanticVerseSearchOptions = {}
 ): UseSemanticVerseSearchReturn {
@@ -92,7 +95,11 @@ export function useSemanticVerseSearch(
     const convex = useConvex()
     const [results, setResults] = useState<SemanticVerseResult[]>([])
     const [isSearching, setIsSearching] = useState(false)
-    const [hasEmbeddings, setHasEmbeddings] = useState<boolean | null>(null)
+    const cacheKey = version || 'KJV'
+    const [hasEmbeddings, setHasEmbeddings] = useState<boolean | null>(() => {
+        const cached = embeddingsAvailabilityCache.get(cacheKey)
+        return cached !== undefined ? cached : null
+    })
     const [hasLocalEmbeddings, setHasLocalEmbeddings] = useState(false)
     const [isEmbedderReady, setIsEmbedderReady] = useState(false)
     const [isLoadingEmbedder, setIsLoadingEmbedder] = useState(false)
@@ -109,16 +116,39 @@ export function useSemanticVerseSearch(
     // Check if embeddings are available (both local and remote)
     useEffect(() => {
         const checkEmbeddings = async () => {
-            // First check local IndexedDB for requested version
             const requestedVersion = version || 'KJV'
+
+            // Try pre-warmed embeddings first (instant, no IndexedDB read)
+            const prewarmed = getPrewarmedEmbeddings(requestedVersion)
+            if (prewarmed && prewarmed.length > 0) {
+                localEmbeddingsCache.current = prewarmed
+                effectiveVersionRef.current = requestedVersion
+                setHasLocalEmbeddings(true)
+                setHasEmbeddings(true)
+                embeddingsAvailabilityCache.set(cacheKey, true)
+                return
+            }
+
             let hasLocal = await hasCachedEmbeddings(requestedVersion)
             let workingVersion = requestedVersion
 
                 if (!hasLocal) {
                     const cachedVersions = await getLocalCachedVersions()
                     if (cachedVersions.length > 0) {
-                        workingVersion = cachedVersions[0]
-                        hasLocal = true
+                        // Also check pre-warmed for fallback versions
+                        for (const v of cachedVersions) {
+                            const pw = getPrewarmedEmbeddings(v)
+                            if (pw && pw.length > 0) {
+                                localEmbeddingsCache.current = pw
+                                workingVersion = v
+                                hasLocal = true
+                                break
+                            }
+                        }
+                        if (!hasLocal) {
+                            workingVersion = cachedVersions[0]
+                            hasLocal = true
+                        }
                     }
                 }
 
@@ -130,6 +160,7 @@ export function useSemanticVerseSearch(
                 localEmbeddingsCache.current = localEmbeddings
                 setHasLocalEmbeddings(true)
                 setHasEmbeddings(true)
+                embeddingsAvailabilityCache.set(cacheKey, true)
             } else {
                 setHasLocalEmbeddings(false)
                 // Fall back to checking Convex
@@ -138,12 +169,14 @@ export function useSemanticVerseSearch(
                         version,
                     })
                     setHasEmbeddings(result)
+                    embeddingsAvailabilityCache.set(cacheKey, result)
                     if (result) {
                         effectiveVersionRef.current = version
                     }
                 } catch (err) {
                     console.error('[useSemanticVerseSearch] Failed to check remote embeddings:', err)
                     setHasEmbeddings(false)
+                    embeddingsAvailabilityCache.set(cacheKey, false)
                 }
             }
         }

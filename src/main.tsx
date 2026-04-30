@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { prewarmSemanticSearch } from './services/sermon-listener/localEmbeddings'
 
 const savedTheme = localStorage.getItem('theme')
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -41,6 +42,10 @@ window.addEventListener('error', (event: ErrorEvent) => {
         return
     }
 }, true)
+
+// Pre-warm semantic search: load embeddings model + cache into memory in background
+// This fires before React mounts so the first search is instant
+prewarmSemanticSearch()
 
 window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
     if (isConvexError(event.reason)) {

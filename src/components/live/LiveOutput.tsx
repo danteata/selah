@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown, Cpu, Radio, RadioTower } from 'lucide-react'
+import { Eye, Trash2, Edit, Monitor, Airplay, ChevronUp, ChevronDown, Cpu, Radio, RadioTower, Zap } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -344,7 +344,7 @@ export function LiveOutput() {
                             onClick={handleOpenLive}
                             className="flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-teal)] hover:brightness-110 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-[var(--accent-teal)]/20"
                         >
-                            <Eye className="w-4 h-4" />
+                            <Zap className="w-4 h-4" />
                             GO LIVE
                         </button>
                     )}
@@ -392,12 +392,12 @@ export function LiveOutput() {
                                     </div>
                                 </div>
                             ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[var(--bg-primary)]">
-                                    <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/10 flex items-center justify-center">
-                                        <Monitor className="w-8 h-8 text-[var(--accent-teal)]/40" />
+                                <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">
+                                    <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/5 flex items-center justify-center border border-[var(--accent-teal)]/10">
+                                        <Monitor className="w-8 h-8 text-[var(--accent-teal)]/20" />
                                     </div>
                                     <div className="text-center">
-                                        <p className="text-sm font-semibold text-[var(--text-secondary)] opacity-60">Selah</p>
+                                        <p className="text-sm font-semibold text-[var(--text-primary)] opacity-40">Selah</p>
                                         <p className="text-[10px] text-[var(--text-muted)] mt-1">Nothing is live yet</p>
                                     </div>
                                 </div>

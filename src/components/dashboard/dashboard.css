@@ -25,6 +25,20 @@
     opacity: 1 !important;
 }
 
+/* Drag handle: make the grip area clearly interactive */
+.dashboard-layout .draggable-panel .cursor-move {
+    cursor: grab;
+}
+
+.dashboard-layout .draggable-panel .cursor-move:active {
+    cursor: grabbing;
+}
+
+/* Highlight drag handle on panel hover */
+.dashboard-layout .react-grid-item:hover .draggable-panel .cursor-grab {
+    color: var(--text-secondary);
+}
+
 /* react-resizable handle styling */
 .dashboard-layout .react-resizable-handle {
     opacity: 0;
