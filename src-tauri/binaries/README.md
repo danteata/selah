@@ -4,7 +4,15 @@ This directory contains the faster-whisper server that gets bundled with the Sel
 
 ## Overview
 
-The whisper server is a Python-based HTTP server that provides transcription endpoints using [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2-based implementation). It's packaged as a standalone executable using PyInstaller and bundled with the Tauri app as a sidecar.
+The whisper server is a Python-based HTTP server that provides transcription endpoints using [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2-based implementation). It's packaged as a standalone executable using PyInstaller and bundled with the Tauri app as a **sidecar** via `externalBin`.
+
+Binaries must follow Tauri's naming convention with target triples:
+- `selah-whisper-server-x86_64-unknown-linux-gnu` (Linux x86_64)
+- `selah-whisper-server-aarch64-apple-darwin` (macOS Apple Silicon)
+- `selah-whisper-server-x86_64-apple-darwin` (macOS Intel)
+- `selah-whisper-server-x86_64-pc-windows-msvc.exe` (Windows)
+
+Tauri automatically detects the current platform and uses the matching binary.
 
 ## Building the Server
 

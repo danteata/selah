@@ -198,14 +198,24 @@ selah/
    bunx convex dev
    ```
 
-5. Start the frontend dev server:
+5. (Optional — Desktop only) Set up the Whisper transcription sidecar:
+   ```bash
+   # Build the whisper server binary for your platform
+   cd src-tauri/binaries && ./build-whisper.sh && cd ../..
+
+   # Download the Whisper base.en model (~105MB)
+   ./scripts/download-whisper-model.sh
+   ```
+   The sidecar binary must be rebuilt on each target platform (macOS, Linux, Windows) using `build-whisper.sh` (or `build-whisper.bat` on Windows). The desktop app will fall back to downloading the model at runtime if the download script is skipped.
+
+6. Start the frontend dev server:
    ```bash
    bun run dev
    # or
    npm run dev
    ```
 
-6. Open [http://localhost:5173](http://localhost:5173) in your browser.
+7. Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ### Available Scripts
 
@@ -218,6 +228,9 @@ selah/
 | `test` | Run all tests once |
 | `test:watch` | Run tests in watch mode |
 | `whisper:start` | Build and start the local Whisper.cpp server via Docker |
+| `download-whisper-model` | Download the bundled Whisper model for desktop transcription |
+| `desktop:dev` | Start Tauri desktop app in dev mode |
+| `desktop:build` | Build Tauri desktop app for production |
 
 ## Sermon Listener
 
