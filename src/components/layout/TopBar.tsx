@@ -1,7 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useQuery } from 'convex/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3 } from 'lucide-react'
+import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3, Users } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import { useUserRole } from '../../hooks/useUserRole'
+import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
+import { api } from '../../../convex/_generated/api'
+import { LiveSessionControls } from '../live/LiveSessionControls'
+import { PresenceAvatars } from '../live/PresenceAvatars'
 import type { Schedule } from '../../types'
 
 interface TopBarProps {
@@ -15,6 +21,9 @@ interface TopBarProps {
 }
 
 export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarProps) {
+    const { currentUser } = useUserRole()
+    const { isOffline } = useConvexConnection()
+    const churchId = currentUser?.churchId || ''
     const [showUserMenu, setShowUserMenu] = useState(false)
     const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
@@ -22,6 +31,20 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
     const workspaceMode = useAppStore((s) => s.workspaceMode)
     const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode)
     const searchInputRef = useRef<HTMLInputElement>(null)
+
+    const scheduleViewers = useQuery(
+        api.presence.getPresenceByChurch,
+        churchId && !isOffline ? { churchId } : 'skip'
+    )
+
+    const onlineScheduleCount = useMemo(() => {
+        if (!scheduleViewers || !activeSchedule) return 0
+        return scheduleViewers.filter(
+            (u: any) =>
+                u.activeScheduleId === activeSchedule._id &&
+                u.userId !== currentUser?._id
+        ).length
+    }, [scheduleViewers, activeSchedule, currentUser?._id])
 
     // Close user menu when clicking outside
     useEffect(() => {
@@ -88,6 +111,14 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
                 <span className="text-[var(--text-secondary)] font-medium max-w-[120px] truncate">
                     {activeSchedule?.name || 'No Schedule'}
                 </span>
+                {onlineScheduleCount > 0 && (
+                    <span className="flex items-center gap-0.5 px-1 py-0.5 bg-[var(--bg-secondary)] rounded text-[9px] text-[var(--text-muted)]"
+                        title={`${onlineScheduleCount} other team member${onlineScheduleCount > 1 ? 's' : ''} viewing this schedule`}
+                    >
+                        <Users className="w-2.5 h-2.5" />
+                        {onlineScheduleCount}
+                    </span>
+                )}
                 <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" />
             </button>
 
@@ -109,6 +140,14 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
 
             {/* Right actions */}
             <div className="flex items-center gap-1.5 flex-shrink-0">
+                {/* Collaboration: Presence & Live Session */}
+                {churchId && (
+                    <>
+                        <PresenceAvatars churchId={churchId} maxVisible={3} />
+                        <LiveSessionControls churchId={churchId} />
+                    </>
+                )}
+
                 {/* Workspace Mode Toggle */}
                 <button
                     onClick={() => setWorkspaceMode(workspaceMode === 'studio' ? 'dashboard' : 'studio')}

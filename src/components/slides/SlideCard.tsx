@@ -16,6 +16,7 @@ interface SlideCardProps {
     onSaveToLibrary?: () => void
     isSaved?: boolean
     onGoLive?: () => void
+    lockedBy?: string
 }
 
 export function SlideCard({
@@ -31,6 +32,7 @@ export function SlideCard({
     onSaveToLibrary,
     isSaved = false,
     onGoLive,
+    lockedBy,
 }: SlideCardProps) {
     // Get file URL if slide has a backgroundStorageId
     const fileUrl = useFileUrl(slide.backgroundStorageId || null)
@@ -63,6 +65,18 @@ export function SlideCard({
                 <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs font-medium rounded-full">
                     <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
                     LIVE
+                </div>
+            )}
+
+            {/* Locked indicator */}
+            {lockedBy && (
+                <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-0.5 bg-amber-500 text-white text-xs font-medium rounded-full"
+                    title={`This slide is being edited by another user`}
+                >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    Editing
                 </div>
             )}
 

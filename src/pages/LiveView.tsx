@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Maximize2, Minimize2, X } from 'lucide-react'
+import { useQuery } from 'convex/react'
+import { useAuth } from '@clerk/clerk-react'
+import { api } from '../../convex/_generated/api'
 import type { Slide, Countdown } from '../types'
 import { useFileUrl } from '../hooks/useTemplates'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
@@ -16,11 +19,8 @@ interface LiveState {
         songAndHymnLabelsVisibility: boolean
         defaultFont: string
     }
-}
-
-// Check if running in Tauri
-function isTauri(): boolean {
-    return typeof window !== 'undefined' && '__TAURI__' in window
+    overlay?: string
+    alert?: unknown
 }
 
 export default function LiveView() {
@@ -35,10 +35,32 @@ export default function LiveView() {
     const monitorColor = searchParams.get('monitorColor') || null
     const monitorName = searchParams.get('monitorName') || null
 
-    // Countdown timer state
+    const { isSignedIn } = useAuth()
+    const sessionId = searchParams.get('session')
+
+    const sharedSession = useQuery(
+        api.liveSessions.getSession,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        isSignedIn && sessionId ? { sessionId: sessionId as any } : 'skip'
+    )
+
     const [countdownSeconds, setCountdownSeconds] = useState<number>(0)
     const [countdownPaused, setCountdownPaused] = useState(false)
     const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const previousSessionSlideRef = useRef<string | null>(null)
+
+    const sessionSlideId = useMemo(() => {
+        if (!sharedSession || sharedSession.status !== 'active') return null
+        if (sharedSession.isBlank) return ''
+        return sharedSession.liveSlideId || null
+    }, [sharedSession])
+
+    useEffect(() => {
+        if (sessionSlideId !== null && sessionSlideId !== previousSessionSlideRef.current) {
+            previousSessionSlideRef.current = sessionSlideId
+            requestAnimationFrame(() => setCurrentSlideId(sessionSlideId))
+        }
+    }, [sessionSlideId])
 
     // Initialize desktop mode and native event listeners
     useEffect(() => {
@@ -96,8 +118,13 @@ export default function LiveView() {
         }
     }, [])
 
+    // Shared session state takes precedence when sessionId is provided
+    const isSessionMode = Boolean(sessionId && isSignedIn && sharedSession?.status === 'active')
+
     // Initialize BroadcastChannel for cross-window communication
     useEffect(() => {
+        if (isSessionMode) return // Don't use localBroadcast when in shared session mode
+
         broadcastChannelRef.current = new BroadcastChannel('selah-live-channel')
 
         broadcastChannelRef.current.onmessage = (event) => {
@@ -152,7 +179,7 @@ export default function LiveView() {
             flashChannel.close()
             window.removeEventListener('storage', handleStorageChange)
         }
-    }, [currentSlideId])
+    }, [isSessionMode, currentSlideId])
 
     // Get current live slide
     const slide = useMemo(() => {

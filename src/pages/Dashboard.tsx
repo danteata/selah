@@ -2,7 +2,7 @@ import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback } from 'react'
 import { Shield, Database, Book, X, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
-import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useTemplates } from '../hooks'
+import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates } from '../hooks'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
 import { SlideEditor } from '../components/editor/SlideEditor'
@@ -53,8 +53,20 @@ export default function Dashboard() {
     const closeModal = useAppStore((state) => state.closeModal)
     const openModal = useAppStore((state) => state.openModal)
 
+    // Get user role for admin access
+    const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
+
+    // Shared live session for collaboration
+    const { sessionId } = useLiveSession()
+
+    // Collaboration toast notifications
+    useCollaborationToasts(currentUser?.churchId || undefined, sessionId || undefined)
+
     // Sync live state to other windows (for multi-monitor support)
     useLiveSync()
+
+    // Presence heartbeat — marks this user as online
+    usePresence(currentUser?.churchId || undefined)
 
     const [isDark, setIsDark] = useState(() => {
         if (typeof window === 'undefined') return false
@@ -69,9 +81,6 @@ export default function Dashboard() {
     // Admin panel state
     const [showAdminPanel, setShowAdminPanel] = useState(false)
     const [adminTab, setAdminTab] = useState<'bible' | 'embeddings' | 'sermon-settings'>('bible')
-
-    // Get user role for admin access
-    const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
 
     const workspaceMode = useAppStore((s) => s.workspaceMode)
 

@@ -103,6 +103,8 @@ export interface Slide {
     data?: Song | Scripture | Hymn | Countdown | ExtendedFileT
     slideStyle?: SlideStyle
     saved?: boolean
+    lockedBy?: string
+    lockedAt?: number
     createdAt?: string
     updatedAt?: string
     // Verse tracking for songs/hymns

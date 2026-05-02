@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ClerkProvider, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import Dashboard from './pages/Dashboard'
 import LiveView from './pages/LiveView'
 import ChurchSetup from './pages/ChurchSetup'
@@ -71,6 +72,7 @@ function AppRoutes() {
                         element={<OfflineApp />}
                     />
                 </Routes>
+                <Toaster position="top-right" />
             </>
         )
     }
@@ -98,6 +100,7 @@ function AppRoutes() {
                     }
                 />
             </Routes>
+            <Toaster position="top-right" />
         </>
     )
 }
