@@ -114,7 +114,6 @@ fn extract_audio(buffers: &[core_audio_types_rs::audio_buffer::AudioBuffer]) -> 
         }
     } else {
         let mut chans: Vec<Vec<f32>> = Vec::new();
-        let mut mx = 0usize;
         for b in buffers {
             let d: &[u8] = b.data();
             let n = d.len() / 4;
@@ -122,20 +121,9 @@ fn extract_audio(buffers: &[core_audio_types_rs::audio_buffer::AudioBuffer]) -> 
                 unsafe {
                     chans.push(std::slice::from_raw_parts(d.as_ptr() as *const f32, n).to_vec())
                 }
-                mx = mx.max(n);
             }
         }
-        let nc = chans.len();
-        if nc == 0 || mx == 0 {
-            return Vec::new();
-        }
-        let mut out = Vec::with_capacity(mx * nc);
-        for i in 0..mx {
-            for ch in &chans {
-                out.push(if i < ch.len() { ch[i] } else { 0.0 });
-            }
-        }
-        out
+        interleave_audio_channels(&chans)
     }
 }
 
@@ -311,4 +299,91 @@ fn run_capture(
     let _ = stream.stop_capture();
     eprintln!("NDI capture stopped after {frame_count} frames");
     Ok(())
+}
+
+pub fn interleave_audio_channels(channels: &[Vec<f32>]) -> Vec<f32> {
+    let nc = channels.len();
+    if nc == 0 {
+        return Vec::new();
+    }
+    let mx = channels.iter().map(|c| c.len()).max().unwrap_or(0);
+    if mx == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(mx * nc);
+    for i in 0..mx {
+        for ch in channels {
+            out.push(if i < ch.len() { ch[i] } else { 0.0 });
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_interleave_stereo() {
+        let left = vec![1.0f32, 2.0, 3.0];
+        let right = vec![10.0f32, 20.0, 30.0];
+        let result = interleave_audio_channels(&[left, right]);
+        assert_eq!(result, vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0]);
+    }
+
+    #[test]
+    fn test_interleave_mono() {
+        let mono = vec![1.0f32, 2.0, 3.0];
+        let result = interleave_audio_channels(&[mono.clone()]);
+        assert_eq!(result, mono);
+    }
+
+    #[test]
+    fn test_interleave_uneven_channels() {
+        let long = vec![1.0f32, 2.0, 3.0];
+        let short = vec![10.0f32];
+        let result = interleave_audio_channels(&[long, short]);
+        assert_eq!(result, vec![1.0, 10.0, 2.0, 0.0, 3.0, 0.0]);
+    }
+
+    #[test]
+    fn test_interleave_empty() {
+        let result = interleave_audio_channels(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_interleave_all_empty_channels() {
+        let result = interleave_audio_channels(&[vec![], vec![]]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_interleave_three_channels() {
+        let ch1 = vec![1.0f32];
+        let ch2 = vec![2.0f32];
+        let ch3 = vec![3.0f32];
+        let result = interleave_audio_channels(&[ch1, ch2, ch3]);
+        assert_eq!(result, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_interleave_preserves_silence_padding() {
+        let left = vec![1.0f32, 2.0];
+        let right = vec![10.0f32];
+        let result = interleave_audio_channels(&[left, right]);
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[2], 2.0);
+        assert_eq!(result[3], 0.0);
+    }
+
+    #[test]
+    fn test_capture_frame_count_atomics() {
+        CAPTURE_FRAME_COUNT.store(0, Ordering::SeqCst);
+        assert_eq!(CAPTURE_FRAME_COUNT.load(Ordering::SeqCst), 0);
+        let v = CAPTURE_FRAME_COUNT.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(v, 0);
+        assert_eq!(CAPTURE_FRAME_COUNT.load(Ordering::SeqCst), 1);
+        CAPTURE_FRAME_COUNT.store(0, Ordering::SeqCst);
+    }
 }

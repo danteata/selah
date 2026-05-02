@@ -126,3 +126,59 @@ impl Default for NdiManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ndi_output_state_default() {
+        let state = NdiOutputState::default();
+        assert!(!state.is_available);
+        assert!(!state.is_running);
+        assert_eq!(state.source_name, "Selah Live Output");
+        assert_eq!(state.frames_sent, 0);
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn test_ndi_output_state_serialization_roundtrip() {
+        let state = NdiOutputState::default();
+        let json = serde_json::to_string(&state).unwrap();
+        let deserialized: NdiOutputState = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.is_available, state.is_available);
+        assert_eq!(deserialized.is_running, state.is_running);
+        assert_eq!(deserialized.source_name, state.source_name);
+        assert_eq!(deserialized.frames_sent, state.frames_sent);
+        assert_eq!(deserialized.error, state.error);
+    }
+
+    #[test]
+    fn test_ndi_output_state_camelcase() {
+        let state = NdiOutputState::default();
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("isAvailable"), "is_available should serialize as isAvailable");
+        assert!(json.contains("isRunning"), "is_running should serialize as isRunning");
+        assert!(json.contains("sourceName"), "source_name should serialize as sourceName");
+        assert!(json.contains("framesSent"), "frames_sent should serialize as framesSent");
+    }
+
+    #[test]
+    fn test_ndi_source_name_constant() {
+        assert_eq!(NDI_SOURCE_NAME, "Selah Live Output");
+    }
+
+    #[test]
+    fn test_ndi_output_state_with_error() {
+        let mut state = NdiOutputState::default();
+        state.is_running = true;
+        state.error = Some("test error".to_string());
+        state.frames_sent = 42;
+
+        let json = serde_json::to_string(&state).unwrap();
+        let deserialized: NdiOutputState = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.is_running);
+        assert_eq!(deserialized.error, Some("test error".to_string()));
+        assert_eq!(deserialized.frames_sent, 42);
+    }
+}

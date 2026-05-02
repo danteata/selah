@@ -5,7 +5,7 @@ class NullWatch {
     private listener: ((value: any) => void) | null = null
 
     localQueryResult() {
-        return undefined
+        return []
     }
 
     journal() {
@@ -14,6 +14,9 @@ class NullWatch {
 
     onUpdate(callback: (value: any) => void) {
         this.listener = callback
+        if (this.listener) {
+            this.listener([])
+        }
         return () => {
             this.listener = null
         }
@@ -22,7 +25,7 @@ class NullWatch {
 
 class NullConvexReactClient {
     query() {
-        return Promise.resolve(undefined)
+        return Promise.resolve([])
     }
 
     mutation() {

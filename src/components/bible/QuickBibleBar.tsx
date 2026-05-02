@@ -5,63 +5,7 @@ import { useScripture, useSlideCreation, useSemanticVerseSearch } from '../../ho
 import { useAppStore } from '../../store/appStore'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 import type { Scripture, BibleVerse } from '../../types'
-
-const bookAbbreviations: Record<string, string> = {
-    'gen': 'Genesis', 'ex': 'Exodus', 'exod': 'Exodus', 'lev': 'Leviticus',
-    'num': 'Numbers', 'deut': 'Deuteronomy', 'dt': 'Deuteronomy',
-    'josh': 'Joshua', 'judg': 'Judges', 'ruth': 'Ruth',
-    '1sam': '1 Samuel', '1sa': '1 Samuel', '2sam': '2 Samuel', '2sa': '2 Samuel',
-    '1kgs': '1 Kings', '1ki': '1 Kings', '2kgs': '2 Kings', '2ki': '2 Kings',
-    '1chr': '1 Chronicles', '1ch': '1 Chronicles', '2chr': '2 Chronicles', '2ch': '2 Chronicles',
-    'ezra': 'Ezra', 'neh': 'Nehemiah', 'esth': 'Esther', 'est': 'Esther',
-    'job': 'Job', 'ps': 'Psalms', 'psa': 'Psalms', 'psalm': 'Psalms',
-    'prov': 'Proverbs', 'pr': 'Proverbs', 'eccl': 'Ecclesiastes', 'ec': 'Ecclesiastes',
-    'song': 'Song of Solomon', 'sos': 'Song of Solomon', 'isa': 'Isaiah',
-    'jer': 'Jeremiah', 'lam': 'Lamentations', 'ezek': 'Ezekiel', 'dan': 'Daniel',
-    'hos': 'Hosea', 'joel': 'Joel', 'amos': 'Amos', 'obad': 'Obadiah', 'ob': 'Obadiah',
-    'jon': 'Jonah', 'mic': 'Micah', 'nah': 'Nahum', 'hab': 'Habakkuk',
-    'zeph': 'Zephaniah', 'hag': 'Haggai', 'zech': 'Zechariah', 'zec': 'Zechariah',
-    'mal': 'Malachi',
-    'mt': 'Matthew', 'matt': 'Matthew', 'mk': 'Mark', 'mrk': 'Mark',
-    'lk': 'Luke', 'luk': 'Luke', 'jn': 'John', 'joh': 'John',
-    'acts': 'Acts', 'act': 'Acts', 'rom': 'Romans', 'ro': 'Romans',
-    '1cor': '1 Corinthians', '1co': '1 Corinthians', '2cor': '2 Corinthians', '2co': '2 Corinthians',
-    'gal': 'Galatians', 'ga': 'Galatians', 'eph': 'Ephesians', 'ep': 'Ephesians',
-    'phil': 'Philippians', 'php': 'Philippians', 'col': 'Colossians',
-    '1thess': '1 Thessalonians', '1th': '1 Thessalonians', '2thess': '2 Thessalonians', '2th': '2 Thessalonians',
-    '1tim': '1 Timothy', '1ti': '1 Timothy', '2tim': '2 Timothy', '2ti': '2 Timothy',
-    'tit': 'Titus', 'titus': 'Titus', 'phlm': 'Philemon', 'philem': 'Philemon',
-    'heb': 'Hebrews', 'jas': 'James', 'jam': 'James', 'james': 'James',
-    '1pet': '1 Peter', '1pe': '1 Peter', '1pt': '1 Peter', '2pet': '2 Peter', '2pe': '2 Peter', '2pt': '2 Peter',
-    '1jn': '1 John', '1joh': '1 John', '1john': '1 John', '2jn': '2 John', '2joh': '2 John', '2john': '2 John',
-    '3jn': '3 John', '3joh': '3 John', '3john': '3 John', 'jude': 'Jude', 'rev': 'Revelation',
-    'revelations': 'Revelation', 'revelation': 'Revelation',
-}
-
-function parseReference(q: string) {
-    const trimmed = q.trim()
-    if (!trimmed) return null
-    const fullPattern = /^((?:\d\s?)?[a-z]+)\s+(\d+):(\d+)(?:-(\d+))?$/i
-    const match = trimmed.match(fullPattern)
-    if (match) {
-        const bookInput = match[1].toLowerCase()
-        const chapter = parseInt(match[2])
-        const startVerse = parseInt(match[3])
-        const endVerse = match[4] ? parseInt(match[4]) : startVerse
-        let bookName: string | undefined = bookAbbreviations[bookInput]
-        if (!bookName) {
-            const found = bibleBooks.find(b =>
-                b.toLowerCase() === bookInput || b.toLowerCase().startsWith(bookInput)
-            )
-            bookName = found
-        }
-        if (bookName) {
-            const bookIndex = bibleBooks.indexOf(bookName as typeof bibleBooks[number]) + 1
-            return { bookIndex, bookName, chapter, startVerse, endVerse }
-        }
-    }
-    return null
-}
+import { parseBibleQuery } from '../../utils/bibleReference'
 
 export function QuickBibleBar() {
     const quickBibleBarOpen = useAppStore((s) => s.quickBibleBarOpen)
@@ -145,7 +89,7 @@ export function QuickBibleBar() {
     }, [fetchScripture, defaultBibleVersion])
 
     const handleSearch = useCallback(async () => {
-        const parsed = parseReference(query)
+        const parsed = parseBibleQuery(query)
         if (!parsed) return
         await fetchAndSetScripture(parsed)
     }, [query, fetchAndSetScripture])
@@ -195,7 +139,7 @@ export function QuickBibleBar() {
         }
         const newQuery = `${currentPosition.bookName} ${currentPosition.chapter}:${newStart}${newEnd !== newStart ? `-${newEnd}` : ''}`
         setQuery(newQuery)
-        const parsed = parseReference(newQuery)
+        const parsed = parseBibleQuery(newQuery)
         if (parsed) fetchAndSetScripture(parsed)
     }, [currentPosition, fetchAndSetScripture])
 
@@ -331,7 +275,7 @@ export function QuickBibleBar() {
                                                     onClick={async () => {
                                                         const ref = `${currentPosition.bookName} ${currentPosition.chapter}:${v.verse}`
                                                         setQuery(ref)
-                                                        const parsed = parseReference(ref)
+                                                        const parsed = parseBibleQuery(ref)
                                                         if (parsed) await fetchAndSetScripture(parsed)
                                                     }}
                                                     className="px-1.5 py-0.5 text-[10px] bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded transition-colors"
@@ -348,7 +292,7 @@ export function QuickBibleBar() {
                                                     onClick={async () => {
                                                         const ref = `${currentPosition.bookName} ${currentPosition.chapter}:${v.verse}`
                                                         setQuery(ref)
-                                                        const parsed = parseReference(ref)
+                                                        const parsed = parseBibleQuery(ref)
                                                         if (parsed) await fetchAndSetScripture(parsed)
                                                     }}
                                                     className="px-1.5 py-0.5 text-[10px] bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded transition-colors"
