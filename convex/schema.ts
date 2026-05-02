@@ -157,13 +157,16 @@ export default defineSchema({
             lowerThirdAccentColor: v.optional(v.string()),
             lowerThirdSubtitle: v.optional(v.string()),
         })),
+        lockedBy: v.optional(v.string()),
+        lockedAt: v.optional(v.number()),
         saved: v.optional(v.boolean()),
         createdAt: v.optional(v.string()),
         updatedAt: v.optional(v.string()),
     })
         .index("by_schedule", ["scheduleId"])
         .index("by_church", ["churchId"])
-        .index("by_user", ["userId"]),
+        .index("by_user", ["userId"])
+        .index("by_locked", ["lockedBy"]),
 
     // Songs table
     songs: defineTable({
@@ -348,6 +351,47 @@ export default defineSchema({
         .index("by_church", ["churchId"])
         .index("by_email", ["email"])
         .index("by_status", ["status"]),
+
+    // Live Sessions - for collaborative live presentation control
+    liveSessions: defineTable({
+        churchId: v.string(),
+        scheduleId: v.string(),
+        operatorId: v.string(),
+        liveSlideId: v.optional(v.string()),
+        queuedSlideIds: v.optional(v.array(v.string())),
+        isLive: v.boolean(),
+        isBlank: v.optional(v.boolean()),
+        activeAlertId: v.optional(v.string()),
+        activeOverlay: v.optional(v.string()),
+        status: v.union(v.literal("active"), v.literal("ended")),
+        startedAt: v.string(),
+        endedAt: v.optional(v.string()),
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    })
+        .index("by_church", ["churchId"])
+        .index("by_schedule", ["scheduleId"])
+        .index("by_church_active", ["churchId", "status"]),
+
+    // Presence - tracks who's currently online and what they're viewing
+    presence: defineTable({
+        userId: v.string(),
+        churchId: v.string(),
+        location: v.string(),
+        activeScheduleId: v.optional(v.string()),
+        liveSessionId: v.optional(v.string()),
+        sessionRole: v.optional(v.union(
+            v.literal("operator"),
+            v.literal("contributor"),
+            v.literal("viewer")
+        )),
+        selectedSlideId: v.optional(v.string()),
+        lastSeen: v.number(),
+        createdAt: v.string(),
+    })
+        .index("by_church", ["churchId"])
+        .index("by_user", ["userId"])
+        .index("by_session", ["liveSessionId"]),
 
     // Global App Settings - managed by super admin (system-wide)
     // These settings apply to ALL users across ALL churches
