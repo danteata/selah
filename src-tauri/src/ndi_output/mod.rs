@@ -20,6 +20,7 @@ mod sender;
 #[cfg(all(feature = "ndi", target_os = "macos"))]
 mod capture;
 
+#[cfg(feature = "ndi")]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use parking_lot::RwLock;

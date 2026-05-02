@@ -25,10 +25,13 @@ dist-ssr
 
 # Tauri
 src-tauri/target
-src-tauri/binaries
-src-tauri/binaries/dist
 src-tauri/binaries/.venv-build
 src-tauri/binaries/.build
+src-tauri/binaries/dist
+# Sidecar binaries (built via build-whisper.sh / build-whisper.bat)
+src-tauri/binaries/selah-whisper-server-*
+!src-tauri/binaries/.gitkeep
 *.spec
 
-src-tauri/assets/whisper-models
+# Whisper model binary files (downloaded via scripts/download-whisper-model.sh)
+src-tauri/assets/whisper-models/**/*.bin

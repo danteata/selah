@@ -52,3 +52,4 @@ tauri-plugin-process = "2.0"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 ndi = ["dep:grafton-ndi"]
+whisper-sidecar = []

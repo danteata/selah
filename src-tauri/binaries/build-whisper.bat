@@ -1,7 +1,11 @@
 @echo off
 REM Build script for creating standalone whisper-server executables on Windows
-REM This creates platform-specific binaries that can be bundled with Tauri
-REM Uses uv for faster dependency management
+REM This creates platform-specific binaries for the Tauri sidecar (externalBin).
+REM
+REM Binaries must follow Tauri's naming convention:
+REM   selah-whisper-server-{target-triple}
+REM
+REM And be placed in src-tauri/binaries/ for the externalBin config to find them.
 
 set TARGET_TRIPLE=x86_64-pc-windows-msvc
 set SCRIPT_DIR=%~dp0
@@ -57,7 +61,7 @@ pip install -r "%SCRIPT_DIR%requirements.txt"
 goto :build
 
 :build
-REM Build with PyInstaller
+REM Build with PyInstaller — output goes directly into binaries/ (Tauri sidecar location)
 echo Running PyInstaller...
 pyinstaller ^
     --onefile ^

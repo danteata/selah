@@ -1,6 +1,11 @@
 #!/bin/bash
 # Build script for creating standalone whisper-server executables
-# This creates platform-specific binaries that can be bundled with Tauri
+# This creates platform-specific binaries for the Tauri sidecar (externalBin).
+#
+# Binaries must follow Tauri's naming convention:
+#   selah-whisper-server-{target-triple}
+#
+# And be placed in src-tauri/binaries/ for the externalBin config to find them.
 
 set -e
 
@@ -48,7 +53,7 @@ pip install --upgrade pip
 pip install pyinstaller
 pip install -r "${SCRIPT_DIR}/requirements.txt"
 
-# Build with PyInstaller
+# Build with PyInstaller — output goes directly into binaries/ (Tauri sidecar location)
 pyinstaller \
     --onefile \
     --name "selah-whisper-server-${TARGET_TRIPLE}" \

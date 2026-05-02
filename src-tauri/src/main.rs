@@ -8,7 +8,6 @@ mod ndi_output;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandChild;
 
 use audio_capture::{
     AudioCaptureState,
@@ -64,7 +63,7 @@ use ndi_output::{
 const WHISPER_SERVER_PORT: u16 = 17493;
 
 struct WhisperServerState {
-    child: Arc<Mutex<Option<CommandChild>>>,
+    child_pid: Arc<Mutex<Option<u32>>>,
     server_pid: Arc<Mutex<Option<u32>>>,
 }
 
@@ -78,7 +77,11 @@ fn resolve_bundled_model_path(app: &tauri::AppHandle) -> Option<String> {
         println!("Found bundled whisper model at: {}", bundled_path.display());
         Some(bundled_path.to_string_lossy().to_string())
     } else {
-        println!("No bundled whisper model found at: {}", bundled_path.display());
+        eprintln!(
+            "No bundled whisper model found at: {}. \
+             Run scripts/download-whisper-model.sh to download it.",
+            bundled_path.display()
+        );
         None
     }
 }
@@ -88,7 +91,7 @@ async fn run_whisper_server(
     state: &WhisperServerState,
     model: Option<String>,
 ) -> Result<String, String> {
-    if state.child.lock().unwrap().is_some() {
+    if state.child_pid.lock().unwrap().is_some() {
         return Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT));
     }
 
@@ -138,47 +141,41 @@ async fn run_whisper_server(
 
     let model_arg = model.unwrap_or_else(|| "base.en".to_string());
 
-    let mut sidecar_args = vec![
-        "--port".to_string(),
-        WHISPER_SERVER_PORT.to_string(),
-        "--model".to_string(),
-        model_arg.clone(),
-    ];
+    let (mut rx, child_pid) = {
+        let mut sidecar_cmd = app.shell().sidecar("selah-whisper-server")
+            .map_err(|e| format!("Failed to create whisper server sidecar: {}", e))?;
 
-    if let Some(bundled_path) = resolve_bundled_model_path(&app) {
-        println!("Using bundled model path: {}", bundled_path);
-        sidecar_args.push("--model-path".to_string());
-        sidecar_args.push(bundled_path);
-    }
+        sidecar_cmd = sidecar_cmd.args(["--port", &WHISPER_SERVER_PORT.to_string(), "--model", &model_arg]);
 
-    let shell = app.shell();
-    let sidecar_command = shell.sidecar("selah-whisper-server")
-        .map_err(|e| format!("Failed to create sidecar command: {}", e))?
-        .args(&sidecar_args);
+        if let Some(bundled_path) = resolve_bundled_model_path(&app) {
+            println!("Using bundled model path: {}", bundled_path);
+            sidecar_cmd = sidecar_cmd.args(["--model-path", &bundled_path]);
+        }
 
-    let (rx, child) = sidecar_command.spawn()
-        .map_err(|e| format!("Failed to spawn whisper server: {}", e))?;
+        let (rx, child) = sidecar_cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn whisper server sidecar: {}", e))?;
 
-    *state.child.lock().unwrap() = Some(child);
+        let pid = child.pid();
+        println!("Whisper server started with PID: {}", pid);
+        (rx, pid)
+    };
 
-    let sidecar_rx = rx;
-    tokio::spawn(async move {
+    *state.child_pid.lock().unwrap() = Some(child_pid);
+
+    // Spawn a task to log sidecar output
+    tauri::async_runtime::spawn(async move {
         use tauri_plugin_shell::process::CommandEvent;
-        let mut rx = sidecar_rx;
         while let Some(event) = rx.recv().await {
             match event {
-                CommandEvent::Stdout(line) => {
-                    println!("[WhisperServer] {}", String::from_utf8_lossy(&line));
-                }
-                CommandEvent::Stderr(line) => {
-                    eprintln!("[WhisperServer:stderr] {}", String::from_utf8_lossy(&line));
-                }
+                CommandEvent::Stdout(line) => println!("[whisper-server] {}", String::from_utf8_lossy(&line)),
+                CommandEvent::Stderr(line) => eprintln!("[whisper-server] {}", String::from_utf8_lossy(&line)),
                 CommandEvent::Terminated(status) => {
-                    println!("[WhisperServer] Process exited with status: {:?}", status);
+                    println!("[whisper-server] exited with status: {:?}", status);
                     break;
                 }
                 CommandEvent::Error(err) => {
-                    eprintln!("[WhisperServer:error] {}", err);
+                    eprintln!("[whisper-server] error: {}", err);
                     break;
                 }
                 _ => {}
@@ -203,15 +200,15 @@ async fn run_whisper_server(
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    let child_guard = state.child.lock().unwrap();
-    let still_running = child_guard.is_some();
-    drop(child_guard);
+    let pid_guard = state.child_pid.lock().unwrap();
+    let still_running = pid_guard.is_some();
+    drop(pid_guard);
 
     if still_running {
         println!("Whisper server process is running but not responding on port {}", WHISPER_SERVER_PORT);
         Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT))
     } else {
-        Err(format!("Whisper server process exited - check logs for errors"))
+        Err("Whisper server process exited - check logs for errors".to_string())
     }
 }
 
@@ -227,11 +224,24 @@ async fn start_whisper_server(
 async fn stop_whisper_server(
     state: tauri::State<'_, WhisperServerState>,
 ) -> Result<(), String> {
-    let mut child_guard = state.child.lock().unwrap();
+    let mut pid_guard = state.child_pid.lock().unwrap();
     
-    if let Some(child) = child_guard.take() {
-        child.kill().map_err(|e| format!("Failed to kill whisper server: {}", e))?;
-        println!("Whisper server stopped");
+    if let Some(pid) = pid_guard.take() {
+        #[cfg(unix)]
+        {
+            use std::process::Command;
+            let _ = Command::new("kill")
+                .args([&pid.to_string()])
+                .spawn();
+        }
+        #[cfg(windows)]
+        {
+            use std::process::Command;
+            let _ = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/F"])
+                .spawn();
+        }
+        println!("Whisper server stopped (PID: {})", pid);
     }
     
     Ok(())
@@ -241,7 +251,7 @@ async fn stop_whisper_server(
 async fn get_whisper_server_status(
     state: tauri::State<'_, WhisperServerState>,
 ) -> Result<serde_json::Value, String> {
-    let is_running = state.child.lock().unwrap().is_some() || 
+    let is_running = state.child_pid.lock().unwrap().is_some() || 
         state.server_pid.lock().unwrap().is_some();
     
     let client = reqwest::Client::new();
@@ -265,9 +275,9 @@ async fn get_whisper_server_status(
     }))
 }
 
-fn prewarm_whisper_server(app: tauri::AppHandle, child: Arc<Mutex<Option<CommandChild>>>, server_pid: Arc<Mutex<Option<u32>>>) {
+fn prewarm_whisper_server(app: tauri::AppHandle, child_pid: Arc<Mutex<Option<u32>>>, server_pid: Arc<Mutex<Option<u32>>>) {
     println!("[PreWarm] Starting whisper server pre-warm on app launch...");
-    let state = WhisperServerState { child, server_pid };
+    let state = WhisperServerState { child_pid, server_pid };
     tauri::async_runtime::spawn(async move {
         match run_whisper_server(app, &state, None).await {
             Ok(endpoint) => {
@@ -284,9 +294,9 @@ fn prewarm_whisper_server(app: tauri::AppHandle, child: Arc<Mutex<Option<Command
 pub fn run() {
     let multi_monitor_state: Arc<MultiMonitorState> = Arc::new(MultiMonitorState::new());
     let ndi_manager: Arc<NdiManager> = Arc::new(NdiManager::new());
-    let whisper_child: Arc<Mutex<Option<CommandChild>>> = Arc::new(Mutex::new(None));
+    let whisper_child_pid: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
     let whisper_pid: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
-    let whisper_child_for_prewarm = whisper_child.clone();
+    let whisper_child_pid_for_prewarm = whisper_child_pid.clone();
     let whisper_pid_for_prewarm = whisper_pid.clone();
     
     tauri::Builder::default()
@@ -294,7 +304,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .manage(WhisperServerState {
-            child: whisper_child,
+            child_pid: whisper_child_pid,
             server_pid: whisper_pid,
         })
         .manage(AudioCaptureState::new())
@@ -349,7 +359,7 @@ pub fn run() {
             ndi_manager.init(app.handle().clone());
 
             let app_handle = app.handle().clone();
-            prewarm_whisper_server(app_handle, whisper_child_for_prewarm.clone(), whisper_pid_for_prewarm.clone());
+            prewarm_whisper_server(app_handle, whisper_child_pid_for_prewarm.clone(), whisper_pid_for_prewarm.clone());
             
             #[cfg(debug_assertions)]
             {

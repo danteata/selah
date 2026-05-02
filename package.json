@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "whisper:start": "./scripts/start-whisper-cpp.sh",
+    "download-whisper-model": "./scripts/download-whisper-model.sh",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
