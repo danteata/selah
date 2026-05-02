@@ -301,3 +301,117 @@ export const unsaveSlide = mutation({
         return args.slideId;
     },
 });
+
+export const lockSlide = mutation({
+    args: {
+        slideId: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) {
+            throw new Error("Not authenticated");
+        }
+
+        const slide = await ctx.db
+            .query("slides")
+            .filter((q) => q.eq(q.field("_id"), args.slideId))
+            .unique();
+
+        if (!slide) {
+            throw new Error("Slide not found");
+        }
+
+        const user = await ctx.db
+            .query("users")
+            .withIndex("by_email", (q) => q.eq("email", identity.email!))
+            .unique();
+
+        if (!user || user.churchId !== slide.churchId) {
+            throw new Error("Unauthorized");
+        }
+
+        const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+        if (slide.lockedBy && slide.lockedBy !== user._id) {
+            const lockAge = Date.now() - (slide.lockedAt || 0);
+            if (lockAge < LOCK_TIMEOUT_MS) {
+                const lockingUser = await ctx.db.get(slide.lockedBy as Id<"users">);
+                throw new Error(`This slide is being edited by ${lockingUser?.fullname || 'another user'}`);
+            }
+        }
+
+        await ctx.db.patch(args.slideId as Id<"slides">, {
+            lockedBy: user._id,
+            lockedAt: Date.now(),
+            updatedAt: new Date().toISOString(),
+        });
+
+        return args.slideId;
+    },
+});
+
+export const unlockSlide = mutation({
+    args: {
+        slideId: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) {
+            throw new Error("Not authenticated");
+        }
+
+        const slide = await ctx.db
+            .query("slides")
+            .filter((q) => q.eq(q.field("_id"), args.slideId))
+            .unique();
+
+        if (!slide) {
+            throw new Error("Slide not found");
+        }
+
+        const user = await ctx.db
+            .query("users")
+            .withIndex("by_email", (q) => q.eq("email", identity.email!))
+            .unique();
+
+        if (!user || user.churchId !== slide.churchId) {
+            throw new Error("Unauthorized");
+        }
+
+        if (slide.lockedBy && slide.lockedBy !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+            throw new Error("Only the locking user or an admin can unlock this slide");
+        }
+
+        await ctx.db.patch(args.slideId as Id<"slides">, {
+            lockedBy: undefined,
+            lockedAt: undefined,
+            updatedAt: new Date().toISOString(),
+        });
+
+        return args.slideId;
+    },
+});
+
+export const unlockExpiredLocks = mutation({
+    args: {
+        churchId: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+        const cutoff = Date.now() - LOCK_TIMEOUT_MS;
+
+        const lockedSlides = await ctx.db
+            .query("slides")
+            .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
+            .filter((q) => q.lt(q.field("lockedAt"), cutoff))
+            .collect();
+
+        for (const slide of lockedSlides) {
+            await ctx.db.patch(slide._id!, {
+                lockedBy: undefined,
+                lockedAt: undefined,
+            });
+        }
+
+        return lockedSlides.length;
+    },
+});
