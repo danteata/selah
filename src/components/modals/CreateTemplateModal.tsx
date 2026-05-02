@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { X, Save, Upload, Image, Palette, Type, Loader2, Video } from 'lucide-react'
 import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
 import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
-import { useConvex } from 'convex/react'
 import { openFileDialog } from '../../utils/fileDialog'
+import { isDesktop } from '../../platform'
 
 interface CreateTemplateModalProps {
     isOpen: boolean
@@ -13,7 +13,6 @@ interface CreateTemplateModalProps {
 
 export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: CreateTemplateModalProps) {
     const { createTemplate, updateTemplate, generateUploadUrl } = useTemplates()
-    const convex = useConvex()
     const [name, setName] = useState('')
     const [category, setCategory] = useState<string>('general')
     const [description, setDescription] = useState('')
@@ -158,64 +157,85 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
     const handleVideoUploadClick = async () => {
         try {
-            const files = await openFileDialog({
-                multiple: false,
-                accept: 'video/*',
-            });
+            if (isDesktop()) {
+                const { open } = await import('@tauri-apps/plugin-dialog')
 
-            if (!files || files.length === 0) return;
-            const file = files[0];
-
-            // Validate file type
-            if (!file.type.startsWith('video/')) {
-                alert('Please upload a video file')
-                return
-            }
-
-            // Validate file size (max 50MB for videos)
-            if (file.size > 50 * 1024 * 1024) {
-                alert('Video must be less than 50MB')
-                return
-            }
-
-            setIsUploading(true)
-            try {
-                // Step 1: Get upload URL from Convex
-                const uploadUrl = await generateUploadUrl()
-
-                // Step 2: POST the file to the upload URL
-                const response = await fetch(uploadUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': file.type,
-                    },
-                    body: file,
+                const selected = await open({
+                    multiple: false,
+                    filters: [{ name: 'Videos', extensions: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'] }],
                 })
 
-                if (!response.ok) {
-                    throw new Error('Failed to upload video')
+                if (!selected) return
+
+                const filePath = typeof selected === 'string' ? selected : selected as string
+
+                const tauriInternals = (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+                const convertFileSrc = tauriInternals && typeof tauriInternals === 'object' && 'convertFileSrc' in tauriInternals
+                    ? (tauriInternals as { convertFileSrc: (p: string) => string }).convertFileSrc
+                    : null
+
+                if (!convertFileSrc) {
+                    console.error('Tauri asset protocol not available')
+                    alert('Local video playback is not available in this environment.')
+                    return
                 }
 
-                // Step 3: Get the storage ID from the response
-                const { storageId } = await response.json()
+                const localUrl = convertFileSrc(filePath)
 
-                // Step 4: Store the storage ID and set a placeholder for preview
-                setBackgroundStorageId(storageId)
                 setBackgroundType('video')
-
-                // Create a local object URL for preview purposes
-                const localUrl = URL.createObjectURL(file)
                 setBackground(localUrl)
+                setBackgroundStorageId(null)
                 setCustomImageUrl('')
+            } else {
+                const files = await openFileDialog({
+                    multiple: false,
+                    accept: 'video/*',
+                })
 
-            } catch (error) {
-                console.error('Video upload error:', error)
-                alert('Failed to upload video. Please try again.')
-            } finally {
-                setIsUploading(false)
+                if (!files || files.length === 0) return
+                const file = files[0]
+
+                if (!file.type.startsWith('video/')) {
+                    alert('Please upload a video file')
+                    return
+                }
+
+                if (file.size > 50 * 1024 * 1024) {
+                    alert('Video must be less than 50MB')
+                    return
+                }
+
+                setIsUploading(true)
+                try {
+                    const uploadUrl = await generateUploadUrl()
+
+                    const response = await fetch(uploadUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': file.type },
+                        body: file,
+                    })
+
+                    if (!response.ok) {
+                        throw new Error('Failed to upload video')
+                    }
+
+                    const { storageId } = await response.json()
+
+                    setBackgroundStorageId(storageId)
+                    setBackgroundType('video')
+
+                    const localUrl = URL.createObjectURL(file)
+                    setBackground(localUrl)
+                    setCustomImageUrl('')
+                } catch (error) {
+                    console.error('Video upload error:', error)
+                    alert('Failed to upload video. Please try again.')
+                } finally {
+                    setIsUploading(false)
+                }
             }
         } catch (error) {
-            console.error('Video dialog failed:', error);
+            console.error('Video dialog failed:', error)
         }
     }
 
@@ -231,11 +251,10 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 contents: content ? [content] : ['Your content here'],
                 background,
                 backgroundType,
-                backgroundStorageId, // Include storage ID for videos
+                backgroundStorageId,
             }
 
             if (isEditing && editingTemplate) {
-                // Update existing template
                 await updateTemplate(editingTemplate._id, {
                     name: name.trim(),
                     description: description.trim() || undefined,
@@ -245,7 +264,6 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     backgroundStorageId: backgroundStorageId || undefined,
                 })
             } else {
-                // Create new template
                 await createTemplate({
                     name: name.trim(),
                     description: description.trim() || undefined,
@@ -256,6 +274,9 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 })
             }
             onClose()
+        } catch (error) {
+            console.error('Failed to save template:', error)
+            alert('Failed to save template. Please try again.')
         } finally {
             setIsSaving(false)
         }
@@ -490,7 +511,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 </div>
 
                                 {/* Video Preview */}
-                                {background && background.startsWith('data:video') && (
+                                {background && backgroundType === 'video' && (
                                     <div className="relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
                                         <video
                                             src={background}

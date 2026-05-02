@@ -1,10 +1,17 @@
+import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
-import type { Id } from '../../convex/_generated/dataModel'
+import { useConvexConnection } from '../providers/ConvexConnectionProvider'
+import {
+    saveLocalTemplate,
+    getLocalTemplates,
+    deleteLocalTemplate as deleteLocalTemplateFromDB,
+    updateLocalTemplate as updateLocalTemplateFromDB,
+    type LocalTemplate,
+} from './useIndexedDB'
 
-// Type for template items returned from the database
 export type TemplateItem = {
-    _id: Id<'templates'>
+    _id: string
     name: string
     description?: string
     slideId: string | unknown
@@ -45,10 +52,23 @@ export type UseTemplatesReturn = {
     resetDefaultTemplates: () => Promise<{ seeded: boolean; count?: number; message?: string }>
 }
 
-// Hook for getting file URL from storage ID
+function localTemplateToTemplateItem(local: LocalTemplate): TemplateItem {
+    return {
+        _id: local.id,
+        name: local.name,
+        description: local.description,
+        slideId: local.slideId,
+        category: local.category as TemplateItem['category'],
+        thumbnail: local.thumbnail,
+        createdBy: local.createdBy,
+        favoritedBy: local.favoritedBy,
+        backgroundStorageId: local.backgroundStorageId,
+        createdAt: local.createdAt,
+        updatedAt: local.updatedAt,
+    }
+}
+
 export function useFileUrl(storageId: string | null) {
-    // Return null early if no storage ID provided
-    // This avoids making a query with empty string
     const result = useQuery(
         api.templates.getFileUrl,
         storageId ? { storageId } : 'skip'
@@ -58,6 +78,7 @@ export function useFileUrl(storageId: string | null) {
 }
 
 export function useTemplates(): UseTemplatesReturn {
+    const { isOffline } = useConvexConnection()
     const templates = useQuery(api.templates.getTemplates)
     const createTemplateMutation = useMutation(api.templates.createTemplate)
     const updateTemplateMutation = useMutation(api.templates.updateTemplate)
@@ -67,8 +88,25 @@ export function useTemplates(): UseTemplatesReturn {
     const seedDefaultTemplatesMutation = useMutation(api.templates.seedDefaultTemplates)
     const resetDefaultTemplatesMutation = useMutation(api.templates.resetDefaultTemplates)
 
-    // Filter to get only custom (user-created) templates
-    const customTemplates = templates?.filter(t => t.createdBy)
+    const [localTemplates, setLocalTemplates] = useState<LocalTemplate[]>([])
+
+    useEffect(() => {
+        if (!isOffline) return
+        getLocalTemplates().then(setLocalTemplates).catch(() => {})
+    }, [isOffline])
+
+    const refreshLocalTemplates = useCallback(async () => {
+        const locals = await getLocalTemplates()
+        setLocalTemplates(locals)
+    }, [])
+
+    const customTemplates = isOffline
+        ? localTemplates.filter(t => t.createdBy).map(localTemplateToTemplateItem)
+        : templates?.filter(t => t.createdBy)
+
+    const effectiveTemplates: TemplateItem[] | undefined = isOffline
+        ? localTemplates.map(localTemplateToTemplateItem)
+        : templates
 
     const createTemplate = async (data: {
         name: string
@@ -78,6 +116,28 @@ export function useTemplates(): UseTemplatesReturn {
         thumbnail?: string
         backgroundStorageId?: string
     }): Promise<string> => {
+        if (isOffline) {
+            const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+            const now = new Date().toISOString()
+            const localTemplate: LocalTemplate = {
+                id,
+                name: data.name,
+                description: data.description,
+                slideId: typeof data.slideId === 'string' ? data.slideId : JSON.stringify(data.slideId),
+                category: data.category,
+                thumbnail: data.thumbnail,
+                backgroundStorageId: data.backgroundStorageId,
+                createdBy: 'local',
+                favoritedBy: [],
+                createdAt: now,
+                updatedAt: now,
+                synced: false,
+            }
+            await saveLocalTemplate(localTemplate)
+            await refreshLocalTemplates()
+            return id
+        }
+
         return await createTemplateMutation({
             name: data.name,
             description: data.description,
@@ -99,40 +159,63 @@ export function useTemplates(): UseTemplatesReturn {
             backgroundStorageId?: string
         }
     ): Promise<string> => {
+        if (isOffline && templateId.startsWith('local_')) {
+            await updateLocalTemplateFromDB(templateId, {
+                ...updates,
+                slideId: updates.slideId ? (typeof updates.slideId === 'string' ? updates.slideId : JSON.stringify(updates.slideId)) : undefined,
+            })
+            await refreshLocalTemplates()
+            return templateId
+        }
+
         return await updateTemplateMutation({ templateId, updates })
     }
 
     const deleteTemplate = async (templateId: string): Promise<boolean> => {
+        if (isOffline && templateId.startsWith('local_')) {
+            await deleteLocalTemplateFromDB(templateId)
+            await refreshLocalTemplates()
+            return true
+        }
+
         return await deleteTemplateMutation({ templateId })
     }
 
     const toggleFavorite = async (templateId: string): Promise<boolean> => {
+        if (isOffline) return false
         return await toggleFavoriteMutation({ templateId })
     }
 
     const generateUploadUrl = async (): Promise<string> => {
+        if (isOffline) {
+            throw new Error('Cannot generate upload URL while offline')
+        }
         return await generateUploadUrlMutation({})
     }
 
-    // This is a synchronous function that returns null - use useFileUrl hook for actual URLs
     const getFileUrl = (storageId: string | null): string | null => {
         if (!storageId) return null
-        // For actual URL retrieval, use the useFileUrl hook
         return null
     }
 
     const seedDefaultTemplates = async (): Promise<{ seeded: boolean; count?: number; message?: string }> => {
+        if (isOffline) {
+            return { seeded: false, message: 'Cannot seed templates while offline' }
+        }
         return await seedDefaultTemplatesMutation({})
     }
 
     const resetDefaultTemplates = async (): Promise<{ seeded: boolean; count?: number; message?: string }> => {
+        if (isOffline) {
+            return { seeded: false, message: 'Cannot reset templates while offline' }
+        }
         return await resetDefaultTemplatesMutation({})
     }
 
     return {
-        templates,
+        templates: effectiveTemplates,
         customTemplates,
-        isLoading: templates === undefined,
+        isLoading: isOffline ? false : templates === undefined,
         createTemplate,
         updateTemplate,
         deleteTemplate,

@@ -1,6 +1,22 @@
 import Dexie, { type Table } from 'dexie'
 import type { Song, Media, LibraryItem, Scripture, Hymn } from '../types'
 
+export interface LocalTemplate {
+    id: string
+    name: string
+    description?: string
+    slideId: string
+    category: string
+    thumbnail?: string
+    backgroundStorageId?: string
+    createdBy?: string
+    favoritedBy?: string[]
+    createdAt: string
+    updatedAt: string
+    synced?: boolean
+    serverId?: string
+}
+
 export interface CachedAuthSession {
     id: string
     clerkId: string
@@ -54,6 +70,7 @@ class WorshipCloudDatabase extends Dexie {
     churches!: Table<CachedChurch, string>
     appSettings!: Table<CachedSetting, string>
     pendingMutations!: Table<PendingMutation, number>
+    localTemplates!: Table<LocalTemplate, string>
 
     constructor() {
         super('WorshipCloudDatabase')
@@ -74,6 +91,18 @@ class WorshipCloudDatabase extends Dexie {
             churches: 'id,serverId,name,cachedAt',
             appSettings: 'id,cachedAt',
             pendingMutations: '++id,status,createdAt,mutationName'
+        })
+        this.version(4).stores({
+            songs: 'id,lyrics,title,album,cover,artist,verses,createdAt,updatedAt',
+            media: 'id,content,data,createdAt,updatedAt',
+            library: 'id,type,content,createdAt,updatedAt',
+            cached: 'id,content,data,createdAt,updatedAt',
+            bibleAndHymns: 'id,data,createdAt,updatedAt',
+            authSessions: 'id,clerkId,email,cachedAt',
+            churches: 'id,serverId,name,cachedAt',
+            appSettings: 'id,cachedAt',
+            pendingMutations: '++id,status,createdAt,mutationName',
+            localTemplates: 'id,category,createdAt,updatedAt,synced'
         })
     }
 }
@@ -268,4 +297,36 @@ export async function clearCompletedMutations(): Promise<void> {
 export async function clearAllPendingMutations(): Promise<void> {
     const db = getIndexedDB()
     await db.pendingMutations.clear()
+}
+
+// Local templates (offline support)
+export async function saveLocalTemplate(template: LocalTemplate): Promise<void> {
+    const db = getIndexedDB()
+    await db.localTemplates.put({
+        ...template,
+        updatedAt: new Date().toISOString(),
+    })
+}
+
+export async function getLocalTemplates(): Promise<LocalTemplate[]> {
+    const db = getIndexedDB()
+    return await db.localTemplates.toArray()
+}
+
+export async function getLocalTemplate(id: string): Promise<LocalTemplate | undefined> {
+    const db = getIndexedDB()
+    return await db.localTemplates.get(id)
+}
+
+export async function deleteLocalTemplate(id: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.localTemplates.delete(id)
+}
+
+export async function updateLocalTemplate(id: string, updates: Partial<LocalTemplate>): Promise<void> {
+    const db = getIndexedDB()
+    await db.localTemplates.update(id, {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+    })
 }
