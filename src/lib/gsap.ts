@@ -5,6 +5,7 @@
  */
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
+// @ts-ignore - GSAP Flip types casing conflict on Linux with case-sensitive FS
 import { Flip } from 'gsap/Flip'
 import { TextPlugin } from 'gsap/TextPlugin'
 

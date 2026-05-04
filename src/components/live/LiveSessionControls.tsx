@@ -70,7 +70,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
         }
     }
 
-    const handleJoin = async (role: SessionRole = 'contributor') => {
+    const handleJoin = async (role: 'contributor' | 'viewer') => {
         if (!activeSession?._id || isOffline) return
 
         try {
@@ -106,7 +106,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
         try {
             await transferOperator({
                 sessionId: activeSession._id as Id<"liveSessions">,
-                newOperatorId,
+                newOperatorId: newOperatorId as Id<"users">,
             })
             setShowTransferMenu(false)
         } catch (err: unknown) {

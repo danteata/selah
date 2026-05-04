@@ -7,7 +7,7 @@ import { useTemplates } from '../../hooks/useTemplates'
 import type { Scripture, BibleVerse } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
-import { parseBibleQuery, getBookSuggestions as getBookSuggestionsUtil, buildVerseRows as buildVerseRowsUtil } from '../../utils/bibleReference'
+import { parseBibleQuery, getBookSuggestions as getBookSuggestionsUtil, buildVerseRows as buildVerseRowsUtil, type BibleVerseLike } from '../../utils/bibleReference'
 import type { VerseRow as VerseRowType } from '../../utils/bibleReference'
 
 const RECENT_VERSES_KEY = 'selah-recent-verses'
@@ -294,8 +294,11 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             hasSearched,
             currentBookIndex,
             currentChapter,
-            currentVerses,
-            neighborVerses,
+            currentVerses as unknown as BibleVerseLike[],
+            {
+                prev: neighborVerses.prev as unknown as BibleVerseLike[],
+                next: neighborVerses.next as unknown as BibleVerseLike[],
+            },
             semanticResults,
         )
     }, [hasSearched, currentBookIndex, currentChapter, currentVerses, neighborVerses, semanticResults])

@@ -17,7 +17,7 @@ interface UseLiveSessionReturn {
     isConnected: boolean
     isStarting: boolean
     startSession: (scheduleId: string, churchId: string) => Promise<Id<"liveSessions"> | null>
-    joinSession: (sessionId: Id<"liveSessions">, role?: SessionRole) => Promise<boolean>
+    joinSession: (sessionId: Id<"liveSessions">, role?: 'contributor' | 'viewer') => Promise<boolean>
     leaveSession: () => Promise<void>
     endSession: () => Promise<void>
     setLiveSlide: (slideId: string | null) => Promise<void>
@@ -151,7 +151,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }
     }, [sessionId, endSessionMutation])
 
-    const joinSession = useCallback(async (sessId: Id<"liveSessions">, role: SessionRole = 'contributor') => {
+    const joinSession = useCallback(async (sessId: Id<"liveSessions">, role: 'contributor' | 'viewer' = 'contributor') => {
         if (!isConvexConnected || isOffline) return false
 
         try {
@@ -244,7 +244,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const handleTransferOperator = useCallback(async (newOperatorId: string) => {
         if (sessionId && isConvexConnected && !isOffline) {
             try {
-                await transferOperatorMutation({ sessionId, newOperatorId })
+                await transferOperatorMutation({ sessionId, newOperatorId: newOperatorId as Id<"users"> })
             } catch (err) {
                 console.error('[useLiveSession] Failed to transfer operator:', err)
             }
