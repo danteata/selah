@@ -13,6 +13,7 @@ export { useHymn } from './useHymn'
 export { useSong } from './useSong'
 export { useSongs } from './useSongs'
 export { useChurch } from './useChurch'
+export { useSchedules } from './useSchedules'
 export { useLibrary } from './useLibrary'
 export { useQuickActionHandlers } from './useQuickActionHandlers'
 export {

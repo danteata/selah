@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Calendar, Plus, ChevronDown, Trash2, Edit, Check } from 'lucide-react'
-import { useAppStore } from '../../store/appStore'
+import { Calendar, Plus, ChevronDown, Trash2, Edit, Check, Loader2 } from 'lucide-react'
+import { useSchedules } from '../../hooks/useSchedules'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 import type { Schedule } from '../../types'
 
@@ -11,12 +11,15 @@ export function ScheduleSelector() {
     const [isEditing, setIsEditing] = useState<string | null>(null)
     const [editName, setEditName] = useState('')
 
-    const activeSchedule = useAppStore((state) => state.activeSchedule)
-    const schedules = useAppStore((state) => state.schedules)
-    const setActiveSchedule = useAppStore((state) => state.setActiveSchedule)
-    const createSchedule = useAppStore((state) => state.createSchedule)
-    const deleteSchedule = useAppStore((state) => state.deleteSchedule)
-    const updateSchedule = useAppStore((state) => state.updateSchedule)
+    const {
+        schedules,
+        activeSchedule,
+        setActiveSchedule,
+        createSchedule,
+        deleteSchedule,
+        updateSchedule,
+        isLoading,
+    } = useSchedules()
 
     const { confirm, ConfirmDialog } = useConfirmDialog()
 
@@ -134,7 +137,12 @@ export function ScheduleSelector() {
 
                         {/* Schedule list */}
                         <div className="max-h-64 overflow-y-auto">
-                            {schedules.length === 0 ? (
+                            {isLoading ? (
+                                <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400 flex items-center justify-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Loading...
+                                </div>
+                            ) : schedules.length === 0 ? (
                                 <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
                                     No schedules yet
                                 </div>

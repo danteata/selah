@@ -129,7 +129,7 @@ export interface Schedule {
     _id: string
     name: string
     authorId: string
-    editorIds: User[]
+    editorIds: string[]
     churchId: string
     lastUpdated?: string
     createdAt?: string

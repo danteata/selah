@@ -4,9 +4,8 @@ import { Radio, StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, Ar
 import { api } from '../../../convex/_generated/api'
 import type { Id } from '../../../convex/_generated/dataModel'
 import { useUserRole } from '../../hooks/useUserRole'
+import { useSchedules } from '../../hooks/useSchedules'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
-import { useAppStore } from '../../store/appStore'
-import type { Schedule } from '../../types'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 
@@ -28,9 +27,7 @@ interface SessionUser {
 export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const { isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
-    const activeSchedule = useAppStore((s) => s.activeSchedule)
-    const setActiveSchedule = useAppStore((s) => s.setActiveSchedule)
-    const schedules = useAppStore((s) => s.schedules)
+    const { activeSchedule, schedules, setActiveSchedule } = useSchedules()
 
     const [isStarting, setIsStarting] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -93,7 +90,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
 
         if (discoveredSession) {
             const matchingSchedule = schedules.find(
-                (s: Schedule) => s?._id === discoveredSession.scheduleId
+                (s) => s?._id === discoveredSession.scheduleId
             )
             if (matchingSchedule && matchingSchedule._id !== activeSchedule?._id) {
                 setActiveSchedule(matchingSchedule)

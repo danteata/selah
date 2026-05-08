@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X, Calendar, Plus, CalendarDays } from 'lucide-react'
-import { useAppStore } from '../../store/appStore'
+import { useSchedules } from '../../hooks/useSchedules'
 
 interface ScheduleModalProps {
     isOpen: boolean
@@ -9,7 +9,7 @@ interface ScheduleModalProps {
 
 export function ScheduleModal({ isOpen, onClose }: ScheduleModalProps) {
     const [scheduleName, setScheduleName] = useState('')
-    const createSchedule = useAppStore((state) => state.createSchedule)
+    const { createSchedule } = useSchedules()
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
