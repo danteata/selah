@@ -226,7 +226,7 @@ export function QuickBibleBar() {
                                     setCurrentPosition(null)
                                 }}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Quick verse... (Enter = Go Live, Shift+Enter = Live, Esc = back)"
+                                placeholder="Quick verse... (Enter = Present, Shift+Enter = Add to queue, Esc = back)"
                                 className="flex-1 bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none text-sm"
                             />
                             {query && (

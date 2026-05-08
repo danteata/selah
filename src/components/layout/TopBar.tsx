@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useQuery } from 'convex/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3, Users } from 'lucide-react'
+import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3, Users, Plus, Check, Loader2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
+import { useSchedules } from '../../hooks/useSchedules'
 import { api } from '../../../convex/_generated/api'
 import { LiveSessionControls } from '../live/LiveSessionControls'
 import { PresenceAvatars } from '../live/PresenceAvatars'
@@ -25,12 +26,24 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
     const { isOffline } = useConvexConnection()
     const churchId = currentUser?.churchId || ''
     const [showUserMenu, setShowUserMenu] = useState(false)
+    const [showScheduleMenu, setShowScheduleMenu] = useState(false)
     const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const openModal = useAppStore((s) => s.openModal)
     const workspaceMode = useAppStore((s) => s.workspaceMode)
     const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode)
     const searchInputRef = useRef<HTMLInputElement>(null)
+    const scheduleMenuRef = useRef<HTMLDivElement>(null)
+
+    const {
+        schedules,
+        activeSchedule: currentSchedule,
+        setActiveSchedule,
+        createSchedule,
+        deleteSchedule,
+        updateSchedule,
+        isLoading: schedulesLoading,
+    } = useSchedules()
 
     const scheduleViewers = useQuery(
         api.presence.getPresenceByChurch,
@@ -38,22 +51,29 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
     )
 
     const onlineScheduleCount = useMemo(() => {
-        if (!scheduleViewers || !activeSchedule) return 0
+        if (!scheduleViewers || !currentSchedule) return 0
         return scheduleViewers.filter(
             (u: any) =>
-                u.activeScheduleId === activeSchedule._id &&
+                u.activeScheduleId === currentSchedule._id &&
                 u.userId !== currentUser?._id
         ).length
-    }, [scheduleViewers, activeSchedule, currentUser?._id])
+    }, [scheduleViewers, currentSchedule, currentUser?._id])
 
     // Close user menu when clicking outside
     useEffect(() => {
-        const handleClickOutside = () => setShowUserMenu(false)
-        if (showUserMenu) {
-            document.addEventListener('click', handleClickOutside)
-            return () => document.removeEventListener('click', handleClickOutside)
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            if (showUserMenu && !target.closest('.user-menu')) {
+                setShowUserMenu(false)
+            }
+            if (showScheduleMenu && scheduleMenuRef.current && !scheduleMenuRef.current.contains(target)) {
+                setShowScheduleMenu(false)
+            }
         }
-    }, [showUserMenu])
+
+        document.addEventListener('click', handleClickOutside)
+        return () => document.removeEventListener('click', handleClickOutside)
+    }, [showUserMenu, showScheduleMenu])
 
     // Focus search input when command bar opens
     useEffect(() => {
@@ -78,10 +98,6 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [commandBarOpen, setCommandBarOpen])
 
-    const handleOpenSchedule = useCallback(() => {
-        openModal('scheduleModal')
-    }, [openModal])
-
     return (
         <header className="studio-top-bar glass-panel border-b border-[var(--border-subtle)] flex items-center px-4 gap-3">
             {/* Logo */}
@@ -102,25 +118,92 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
                 </div>
             </motion.div>
 
-            {/* Schedule selector */}
-            <button
-                onClick={handleOpenSchedule}
-                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30 transition-colors text-xs"
-            >
-                <Calendar className="w-3 h-3 text-[var(--accent-teal)]" />
-                <span className="text-[var(--text-secondary)] font-medium max-w-[120px] truncate">
-                    {activeSchedule?.name || 'No Schedule'}
-                </span>
-                {onlineScheduleCount > 0 && (
-                    <span className="flex items-center gap-0.5 px-1 py-0.5 bg-[var(--bg-secondary)] rounded text-[9px] text-[var(--text-muted)]"
-                        title={`${onlineScheduleCount} other team member${onlineScheduleCount > 1 ? 's' : ''} viewing this schedule`}
-                    >
-                        <Users className="w-2.5 h-2.5" />
-                        {onlineScheduleCount}
+            {/* Schedule selector dropdown */}
+            <div className="relative" ref={scheduleMenuRef}>
+                <button
+                    onClick={() => setShowScheduleMenu(!showScheduleMenu)}
+                    className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30 transition-colors text-xs"
+                >
+                    <Calendar className="w-3 h-3 text-[var(--accent-teal)]" />
+                    <span className="text-[var(--text-secondary)] font-medium max-w-[120px] truncate">
+                        {currentSchedule?.name || 'No Schedule'}
                     </span>
-                )}
-                <ChevronDown className="w-3 h-3 text-[var(--text-muted)]" />
-            </button>
+                    {onlineScheduleCount > 0 && (
+                        <span className="flex items-center gap-0.5 px-1 py-0.5 bg-[var(--bg-secondary)] rounded text-[9px] text-[var(--text-muted)]"
+                            title={`${onlineScheduleCount} other team member${onlineScheduleCount > 1 ? 's' : ''} viewing this schedule`}
+                        >
+                            <Users className="w-2.5 h-2.5" />
+                            {onlineScheduleCount}
+                        </span>
+                    )}
+                    <ChevronDown className={`w-3 h-3 text-[var(--text-muted)] transition-transform ${showScheduleMenu ? 'rotate-180' : ''}`} />
+                </button>
+
+                <AnimatePresence>
+                    {showScheduleMenu && (
+                        <motion.div
+                            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                            transition={{ duration: 0.12 }}
+                            className="absolute top-full left-0 mt-1.5 w-64 rounded-xl bg-[var(--bg-elevated)] shadow-xl border border-[var(--border-default)] overflow-hidden z-50"
+                        >
+                            <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
+                                <span className="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                                    Schedules
+                                </span>
+                            </div>
+
+                            <div className="max-h-52 overflow-y-auto">
+                                {schedulesLoading ? (
+                                    <div className="flex items-center justify-center gap-2 px-3 py-4 text-xs text-[var(--text-muted)]">
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                        Loading...
+                                    </div>
+                                ) : schedules.length === 0 ? (
+                                    <div className="px-3 py-4 text-xs text-[var(--text-muted)] text-center">
+                                        No schedules yet
+                                    </div>
+                                ) : (
+                                    schedules.map((schedule) => (
+                                        <button
+                                            key={schedule._id}
+                                            onClick={() => {
+                                                setActiveSchedule(schedule)
+                                                setShowScheduleMenu(false)
+                                            }}
+                                            className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                                                currentSchedule?._id === schedule._id
+                                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                                    : 'text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                                            }`}
+                                        >
+                                            <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${currentSchedule?._id === schedule._id ? 'text-[var(--accent-teal)]' : 'text-[var(--text-muted)]'}`} />
+                                            <span className="truncate flex-1 text-left">{schedule.name}</span>
+                                            {currentSchedule?._id === schedule._id && (
+                                                <Check className="w-3 h-3 text-[var(--accent-teal)] flex-shrink-0" />
+                                            )}
+                                        </button>
+                                    ))
+                                )}
+                            </div>
+
+                            <div className="border-t border-[var(--border-subtle)]">
+                                <button
+                                    onClick={() => {
+                                        setShowScheduleMenu(false)
+                                        openModal('scheduleModal')
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/5 transition-colors"
+                                >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    Create New Schedule
+                                </button>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
 
             {/* Command Bar (center) */}
             <div className="flex-1 flex justify-center max-w-xl mx-auto">

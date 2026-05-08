@@ -146,7 +146,7 @@ export function SlideCard({
                     )
                 )}
 
-                {/* Quick Go Live button - appears on hover */}
+                {/* Quick Present button - appears on hover */}
                 {onGoLive && !isLive && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onGoLive(); }}

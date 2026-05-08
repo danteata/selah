@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Zap, Crown, Shield, Lightbulb } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -379,15 +379,15 @@ export function LiveOutput() {
                             onClick={handleStopLive}
                             className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-all"
                         >
-                            STOP LIVE
+                            STOP
                         </button>
                     ) : (
                         <button
                             onClick={handleOpenLive}
                             className="flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-teal)] hover:brightness-110 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-[var(--accent-teal)]/20"
                         >
-                            <Zap className="w-4 h-4" />
-                            GO LIVE
+                            <Presentation className="w-4 h-4" />
+                            PRESENT
                         </button>
                     )}
                 </div>

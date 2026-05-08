@@ -529,14 +529,14 @@ export function QuickActionsSidebar() {
                                             {verseText}
                                         </span>
 
-                                        {/* Quick Go Live Button */}
+                                        {/* Quick Present Button */}
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation()
                                                 executeAction(action, true)
                                             }}
                                             className="absolute right-2 top-1.5 p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100 z-10"
-                                            title="Go Live"
+                                            title="Present"
                                         >
                                             <Radio className="w-4 h-4" />
                                         </button>
@@ -566,7 +566,7 @@ export function QuickActionsSidebar() {
                                         <SlideChip slideType={action.type} />
                                     )}
 
-                                    {/* Quick Go Live Button for Bible/Hymn */}
+                                    {/* Quick Present Button for Bible/Hymn */}
                                     {(action.type === 'bible' || action.type === 'hymn') && (
                                         <button
                                             onClick={(e) => {
@@ -574,7 +574,7 @@ export function QuickActionsSidebar() {
                                                 executeAction(action, true)
                                             }}
                                             className="ml-auto p-1 bg-red-500 hover:bg-red-600 text-white rounded opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100 z-10"
-                                            title="Go Live"
+                                            title="Present"
                                         >
                                             <Radio className="w-3.5 h-3.5" />
                                         </button>
@@ -615,14 +615,14 @@ export function QuickActionsSidebar() {
                                                 {verse.text}
                                             </span>
 
-                                            {/* Quick Go Live Button */}
+                                            {/* Quick Present Button */}
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation()
                                                     executeAction(`semantic-verse:${verse.bookNumber}:${verse.chapter}:${verse.verse}`, true)
                                                 }}
                                                 className="absolute right-2 top-1.5 p-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100 z-10"
-                                                title="Go Live"
+                                                title="Present"
                                             >
                                                 <Radio className="w-4 h-4" />
                                             </button>

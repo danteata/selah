@@ -68,7 +68,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const leaveSession = useMutation(api.liveSessions.leaveSession)
     const transferOperator = useMutation(api.liveSessions.transferOperator)
 
-    const handleGoLive = async () => {
+    const handleStartSession = async () => {
         if (!activeSchedule?._id || !churchId || isOffline) return
 
         setIsStarting(true)
@@ -159,7 +159,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                 <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                     <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                        LIVE
+                        SESSION
                     </span>
                     {sessionUsers && sessionUsers.length > 0 && (
                         <div className="flex items-center gap-1 text-[10px] text-emerald-600/70 dark:text-emerald-400/70">
@@ -213,7 +213,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                         <button
                             onClick={handleEndSession}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-colors"
-                            title="End live session"
+                            title="End collaborative session"
                         >
                             <StopCircle className="w-3.5 h-3.5" />
                             End
@@ -274,17 +274,17 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     return (
         <div className="flex items-center gap-2">
             <button
-                onClick={handleGoLive}
+                onClick={handleStartSession}
                 disabled={isStarting || !activeSchedule?._id}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] border border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title={!activeSchedule?._id ? 'Select a schedule first' : 'Start live session'}
+                title={!activeSchedule?._id ? 'Select a schedule first' : 'Start collaborative session'}
             >
                 {isStarting ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                    <Radio className="w-3.5 h-3.5" />
+                    <Users className="w-3.5 h-3.5" />
                 )}
-                Go Live
+                Start Session
             </button>
             {error && (
                 <span className="text-[10px] text-rose-500">{error}</span>

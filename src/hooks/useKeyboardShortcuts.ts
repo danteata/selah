@@ -114,7 +114,7 @@ export function useSlideNavigationShortcuts(
         { key: 'ArrowDown', callback: onNextSlide },
         // Navigate to previous slide (Arrow Up)
         { key: 'ArrowUp', callback: onPrevSlide },
-        // Go live (Ctrl/Cmd + P)
+        // Present output (Ctrl/Cmd + P)
         ...(onGoLive ? [{ key: 'p', callback: onGoLive, options: { ctrlOrMeta: true } }] : []),
         // Open settings (Ctrl/Cmd + Comma)
         ...(onOpenSettings ? [{ key: ',', callback: onOpenSettings, options: { ctrlOrMeta: true } }] : []),

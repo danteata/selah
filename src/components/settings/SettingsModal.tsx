@@ -241,7 +241,7 @@ function DisplaySettings({
                     Default Output Display
                 </label>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    Pre-select a display for quick Go Live. Shows the Screen Picker only if not set.
+                    Pre-select a display for quick presenting. Shows the Screen Picker only if not set.
                 </p>
                 {monitors.length > 0 ? (
                     <div className="space-y-1">
