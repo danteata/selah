@@ -1,11 +1,12 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useMutation, useQuery } from 'convex/react'
-import { Radio, StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera } from 'lucide-react'
+import { Radio, StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight } from 'lucide-react'
 import { api } from '../../../convex/_generated/api'
 import type { Id } from '../../../convex/_generated/dataModel'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { useAppStore } from '../../store/appStore'
+import type { Schedule } from '../../types'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 
@@ -28,6 +29,8 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const { isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
     const activeSchedule = useAppStore((s) => s.activeSchedule)
+    const setActiveSchedule = useAppStore((s) => s.setActiveSchedule)
+    const schedules = useAppStore((s) => s.schedules)
 
     const [isStarting, setIsStarting] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -40,10 +43,25 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
             : 'skip'
     )
 
+    const churchSessions = useQuery(
+        api.liveSessions.getActiveSessionByChurch,
+        churchId && !isOffline
+            ? { churchId }
+            : 'skip'
+    )
+
+    const discoveredSession = useMemo(() => {
+        if (!churchSessions || churchSessions.length === 0) return null
+        if (activeSession?._id) return null
+        return churchSessions[0]
+    }, [churchSessions, activeSession?._id])
+
+    const effectiveSession = activeSession || discoveredSession
+
     const sessionUsers = useQuery(
         api.presence.getPresenceBySession,
-        activeSession?._id && !isOffline
-            ? { sessionId: activeSession._id as Id<"liveSessions"> }
+        effectiveSession?._id && !isOffline
+            ? { sessionId: effectiveSession._id as Id<"liveSessions"> }
             : 'skip'
     )
 
@@ -71,51 +89,61 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     }
 
     const handleJoin = async (role: 'contributor' | 'viewer') => {
-        if (!activeSession?._id || isOffline) return
+        if (!effectiveSession?._id || isOffline) return
+
+        if (discoveredSession) {
+            const matchingSchedule = schedules.find(
+                (s: Schedule) => s?._id === discoveredSession.scheduleId
+            )
+            if (matchingSchedule && matchingSchedule._id !== activeSchedule?._id) {
+                setActiveSchedule(matchingSchedule)
+            }
+        }
 
         try {
-            await joinSession({ sessionId: activeSession._id as Id<"liveSessions">, role })
+            await joinSession({ sessionId: effectiveSession._id as Id<"liveSessions">, role })
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to join session')
         }
     }
 
     const handleEndSession = async () => {
-        if (!activeSession?._id || isOffline) return
+        if (!effectiveSession?._id || isOffline) return
 
         try {
-            await endSession({ sessionId: activeSession._id as Id<"liveSessions"> })
+            await endSession({ sessionId: effectiveSession._id as Id<"liveSessions"> })
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to end session')
         }
     }
 
     const handleLeave = async () => {
-        if (!activeSession?._id || isOffline) return
+        if (!effectiveSession?._id || isOffline) return
 
         try {
-            await leaveSession({ sessionId: activeSession._id as Id<"liveSessions"> })
+            await leaveSession({ sessionId: effectiveSession._id as Id<"liveSessions"> })
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to leave session')
         }
     }
 
     const handleTransfer = useCallback(async (newOperatorId: string) => {
-        if (!activeSession?._id || isOffline) return
+        if (!effectiveSession?._id || isOffline) return
 
         try {
             await transferOperator({
-                sessionId: activeSession._id as Id<"liveSessions">,
+                sessionId: effectiveSession._id as Id<"liveSessions">,
                 newOperatorId: newOperatorId as Id<"users">,
             })
             setShowTransferMenu(false)
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to transfer control')
         }
-    }, [activeSession?._id, isOffline, transferOperator])
+    }, [effectiveSession?._id, isOffline, transferOperator])
 
-    const isOperator = activeSession?.operatorId === currentUser?._id
-    const isActive = activeSession?.status === 'active'
+    const isOperator = effectiveSession?.operatorId === currentUser?._id
+    const isActive = effectiveSession?.status === 'active'
+    const isInSession = sessionUsers?.some((u: SessionUser) => u.userId === currentUser?._id)
 
     if (isOffline) {
         return (
@@ -126,7 +154,9 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
         )
     }
 
-    if (isActive && activeSession) {
+    if (isActive && effectiveSession) {
+        const isDifferentSchedule = discoveredSession && discoveredSession.scheduleId !== activeSchedule?._id
+
         return (
             <div className="flex items-center gap-2 relative">
                 <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
@@ -149,7 +179,6 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                             <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400">Operator</span>
                         </div>
 
-                        {/* Transfer operator button */}
                         <div className="relative">
                             <button
                                 onClick={() => setShowTransferMenu(!showTransferMenu)}
@@ -193,8 +222,34 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                             End
                         </button>
                     </div>
+                ) : isInSession ? (
+                    <div className="flex items-center gap-1">
+                        {sessionUsers?.find((u: SessionUser) => u.userId === currentUser?._id)?.sessionRole === 'contributor' ? (
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+                                <Shield className="w-3 h-3" />
+                                Contributor
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] border border-[var(--border-default)] text-[10px] font-medium text-[var(--text-secondary)]">
+                                <Eye className="w-3 h-3" />
+                                Viewer
+                            </span>
+                        )}
+                        <button
+                            onClick={handleLeave}
+                            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                            title="Leave session"
+                        >
+                            <StopCircle className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
                 ) : (
                     <div className="flex items-center gap-1">
+                        {isDifferentSchedule && (
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-600 dark:text-amber-400" title="Live session is on a different schedule — joining will switch your view">
+                                <ArrowRight className="w-3 h-3" />
+                            </span>
+                        )}
                         <button
                             onClick={() => handleJoin('contributor')}
                             className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-[10px] font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 transition-colors"
@@ -208,13 +263,6 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                         >
                             <Eye className="w-3 h-3" />
                             Watch
-                        </button>
-                        <button
-                            onClick={handleLeave}
-                            className="p-1 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                            title="Leave session"
-                        >
-                            <StopCircle className="w-3.5 h-3.5" />
                         </button>
                     </div>
                 )}
