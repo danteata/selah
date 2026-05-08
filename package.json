@@ -50,7 +50,7 @@
     "@types/react-resizable": "^3.0.8",
     "@xenova/transformers": "^2.17.2",
     "clsx": "^2.1.1",
-    "convex": "^1.37.0",
+    "convex": "^1.38.0",
     "dexie": "^4.0.10",
     "dexie-react-hooks": "^1.1.7",
     "framer-motion": "^12.34.0",
