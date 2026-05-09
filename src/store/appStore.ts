@@ -427,13 +427,29 @@ export const useAppStore = create<AppStore>()(
 
             addSharedQueueSlideIds: (slideIds) => {
                 set((state) => ({
-                    sharedQueueSlideIds: [...state.sharedQueueSlideIds, ...slideIds.filter(id => !state.sharedQueueSlideIds.includes(id))]
+                    // Preserve queue order and duplicates to mirror shared session queue semantics
+                    sharedQueueSlideIds: [...state.sharedQueueSlideIds, ...slideIds]
                 }))
             },
 
             removeSharedQueueSlideIds: (slideIds) => {
                 set((state) => ({
-                    sharedQueueSlideIds: state.sharedQueueSlideIds.filter(id => !slideIds.includes(id))
+                    // Remove by occurrence count, not "all matching ids", to preserve duplicate entries
+                    sharedQueueSlideIds: (() => {
+                        const remainingRemovals = new Map<string, number>()
+                        for (const id of slideIds) {
+                            remainingRemovals.set(id, (remainingRemovals.get(id) || 0) + 1)
+                        }
+
+                        return state.sharedQueueSlideIds.filter((id) => {
+                            const count = remainingRemovals.get(id) || 0
+                            if (count > 0) {
+                                remainingRemovals.set(id, count - 1)
+                                return false
+                            }
+                            return true
+                        })
+                    })()
                 }))
             },
 

@@ -5,6 +5,7 @@ import type { Id } from '../../convex/_generated/dataModel'
 import { useAppStore } from '../store/appStore'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import { useUserRole } from './useUserRole'
+import { canClientPushLiveSlide } from './liveSessionUtils'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
@@ -276,14 +277,20 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         setLiveSlideStore(slideId || '')
         previousLiveSlideRef.current = slideId
 
-        if (sessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
+        const isOpenMode = collaborationMode === 'open'
+        if (sessionId && canClientPushLiveSlide({
+            isConnected: isConvexConnected,
+            isOffline,
+            isOperator: sessionRole === 'operator',
+            isOpenMode,
+        })) {
             try {
                 await setLiveSlideMutation({ sessionId, slideId: slideId || undefined })
             } catch (err) {
                 console.error('[useLiveSession] Failed to set live slide:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, sessionRole, setLiveSlideMutation, setLiveSlideStore])
+    }, [sessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, setLiveSlideMutation, setLiveSlideStore])
 
     const handleAddToQueue = useCallback(async (slideIds: string[], position?: number) => {
         const addLocally = useAppStore.getState().addSharedQueueSlideIds

@@ -230,6 +230,30 @@ describe('appStore', () => {
         })
     })
 
+    describe('shared queue', () => {
+        it('preserves order and duplicate entries when adding queue items', () => {
+            const store = useAppStore.getState()
+
+            act(() => {
+                store.setSharedQueueSlideIds([])
+                store.addSharedQueueSlideIds(['slide-1', 'slide-2', 'slide-1'])
+            })
+
+            expect(useAppStore.getState().sharedQueueSlideIds).toEqual(['slide-1', 'slide-2', 'slide-1'])
+        })
+
+        it('removes queue entries by occurrence count', () => {
+            const store = useAppStore.getState()
+
+            act(() => {
+                store.setSharedQueueSlideIds(['slide-1', 'slide-2', 'slide-1', 'slide-3'])
+                store.removeSharedQueueSlideIds(['slide-1'])
+            })
+
+            expect(useAppStore.getState().sharedQueueSlideIds).toEqual(['slide-2', 'slide-1', 'slide-3'])
+        })
+    })
+
     describe('signOut', () => {
         it('should reset all state', () => {
             const store = useAppStore.getState()
