@@ -293,16 +293,28 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     }, [sessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, setLiveSlideMutation, setLiveSlideStore])
 
     const handleAddToQueue = useCallback(async (slideIds: string[], position?: number) => {
+        const isSharedSessionConnected = !!sessionId && isConvexConnected && !isOffline
+
+        // Solo/local mode support (no shared session): keep local queue behavior.
+        if (!sessionId) {
+            useAppStore.getState().addSharedQueueSlideIds(slideIds)
+            return
+        }
+
+        // Shared session exists but connection is unavailable: avoid fake local-only sync.
+        if (!isSharedSessionConnected) {
+            console.warn('[useLiveSession] Shared session queue update skipped: not connected')
+            return
+        }
+
         const addLocally = useAppStore.getState().addSharedQueueSlideIds
         addLocally(slideIds)
 
-        if (sessionId && isConvexConnected && !isOffline) {
-            try {
-                await addToQueueMutation({ sessionId, slideIds, position })
-            } catch (err) {
-                useAppStore.getState().removeSharedQueueSlideIds(slideIds)
-                console.error('[useLiveSession] Failed to add to queue:', err)
-            }
+        try {
+            await addToQueueMutation({ sessionId, slideIds, position })
+        } catch (err) {
+            useAppStore.getState().removeSharedQueueSlideIds(slideIds)
+            console.error('[useLiveSession] Failed to add to queue:', err)
         }
     }, [sessionId, isConvexConnected, isOffline, addToQueueMutation])
 

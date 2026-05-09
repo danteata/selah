@@ -204,6 +204,8 @@ export const setLiveSlide = mutation({
 
         await ctx.db.patch(args.sessionId, {
             liveSlideId: args.slideId,
+            // Any explicit live slide change should unblank the output.
+            isBlank: false,
             updatedAt: new Date().toISOString(),
         });
 
