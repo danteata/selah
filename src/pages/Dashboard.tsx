@@ -57,7 +57,7 @@ export default function Dashboard() {
     const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
 
     // Shared live session for collaboration
-    const { sessionId } = useLiveSession()
+    const { sessionId, sessionRole } = useLiveSession()
 
     // Collaboration toast notifications
     useCollaborationToasts(currentUser?.churchId || undefined, sessionId || undefined)
@@ -66,7 +66,7 @@ export default function Dashboard() {
     useLiveSync()
 
     // Presence heartbeat — marks this user as online
-    usePresence(currentUser?.churchId || undefined)
+    usePresence(currentUser?.churchId || undefined, sessionId || undefined, sessionRole)
 
     const [isDark, setIsDark] = useState(() => {
         if (typeof window === 'undefined') return false

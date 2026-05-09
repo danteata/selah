@@ -94,6 +94,8 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         activeSessionRef.current = activeSession
     }, [activeSession])
 
+    const resolvedSessionId = sessionId || (activeSession?._id ?? null)
+
     useEffect(() => {
         if (activeSession && activeSession.status === 'active') {
             setSessionId(activeSession._id)
@@ -278,25 +280,25 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         previousLiveSlideRef.current = slideId
 
         const isOpenMode = collaborationMode === 'open'
-        if (sessionId && canClientPushLiveSlide({
+        if (resolvedSessionId && canClientPushLiveSlide({
             isConnected: isConvexConnected,
             isOffline,
             isOperator: sessionRole === 'operator',
             isOpenMode,
         })) {
             try {
-                await setLiveSlideMutation({ sessionId, slideId: slideId || undefined })
+                await setLiveSlideMutation({ sessionId: resolvedSessionId, slideId: slideId || undefined })
             } catch (err) {
                 console.error('[useLiveSession] Failed to set live slide:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, setLiveSlideMutation, setLiveSlideStore])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, setLiveSlideMutation, setLiveSlideStore])
 
     const handleAddToQueue = useCallback(async (slideIds: string[], position?: number) => {
-        const isSharedSessionConnected = !!sessionId && isConvexConnected && !isOffline
+        const isSharedSessionConnected = !!resolvedSessionId && isConvexConnected && !isOffline
 
         // Solo/local mode support (no shared session): keep local queue behavior.
-        if (!sessionId) {
+        if (!resolvedSessionId) {
             useAppStore.getState().addSharedQueueSlideIds(slideIds)
             return
         }
@@ -311,12 +313,12 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         addLocally(slideIds)
 
         try {
-            await addToQueueMutation({ sessionId, slideIds, position })
+            await addToQueueMutation({ sessionId: resolvedSessionId, slideIds, position })
         } catch (err) {
             useAppStore.getState().removeSharedQueueSlideIds(slideIds)
             console.error('[useLiveSession] Failed to add to queue:', err)
         }
-    }, [sessionId, isConvexConnected, isOffline, addToQueueMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, addToQueueMutation])
 
     const handleRemoveFromQueue = useCallback(async (slideIds: string[]) => {
         const prevQueue = useAppStore.getState().sharedQueueSlideIds

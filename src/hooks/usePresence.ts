@@ -34,7 +34,11 @@ interface UsePresenceReturn {
     cleanup: () => void
 }
 
-export function usePresence(churchId?: string, liveSessionId?: Id<"liveSessions">): UsePresenceReturn {
+export function usePresence(
+    churchId?: string,
+    liveSessionId?: Id<"liveSessions">,
+    sessionRole?: 'operator' | 'contributor' | 'viewer',
+): UsePresenceReturn {
     const { isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
 
@@ -88,10 +92,20 @@ export function usePresence(churchId?: string, liveSessionId?: Id<"liveSessions"
     useEffect(() => {
         if (isOffline || !currentUser || !churchId) return
 
-        heartbeat('dashboard')
+        heartbeat(
+            liveSessionId ? 'live' : 'dashboard',
+            undefined,
+            liveSessionId,
+            sessionRole,
+        )
 
         heartbeatTimerRef.current = setInterval(() => {
-            heartbeat('dashboard')
+            heartbeat(
+                liveSessionId ? 'live' : 'dashboard',
+                undefined,
+                liveSessionId,
+                sessionRole,
+            )
         }, HEARTBEAT_INTERVAL)
 
         return () => {
@@ -100,7 +114,7 @@ export function usePresence(churchId?: string, liveSessionId?: Id<"liveSessions"
                 heartbeatTimerRef.current = null
             }
         }
-    }, [isOffline, currentUser, churchId, heartbeat])
+    }, [isOffline, currentUser, churchId, liveSessionId, sessionRole, heartbeat])
 
     useEffect(() => {
         const handleBeforeUnload = () => {
@@ -111,9 +125,14 @@ export function usePresence(churchId?: string, liveSessionId?: Id<"liveSessions"
 
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'hidden' && churchId && !isOffline) {
-                heartbeat('away')
+                heartbeat('away', undefined, liveSessionId, sessionRole)
             } else if (document.visibilityState === 'visible' && churchId && !isOffline) {
-                heartbeat('dashboard')
+                heartbeat(
+                    liveSessionId ? 'live' : 'dashboard',
+                    undefined,
+                    liveSessionId,
+                    sessionRole,
+                )
             }
         }
 
@@ -124,7 +143,7 @@ export function usePresence(churchId?: string, liveSessionId?: Id<"liveSessions"
             window.removeEventListener('beforeunload', handleBeforeUnload)
             document.removeEventListener('visibilitychange', handleVisibilityChange)
         }
-    }, [churchId, isOffline, heartbeat, leavePresenceMutation])
+    }, [churchId, isOffline, liveSessionId, sessionRole, heartbeat, leavePresenceMutation])
 
     return {
         onlineUsers: (onlineUsers as PresenceUser[] | undefined) || [],
