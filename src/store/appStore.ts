@@ -41,6 +41,7 @@ export interface AppState {
     activeSchedule: Schedule | null
     activeSlides: Slide[]
     liveOutputSlidesId: string[] | null
+    sharedQueueSlideIds: string[]
     liveSlideId: string | null
     emitter: Emitter<Record<EventType, unknown>> | null
     settings: AppSettings
@@ -135,6 +136,7 @@ const initialState: AppState = {
     activeSchedule: null,
     activeSlides: [],
     liveOutputSlidesId: null,
+    sharedQueueSlideIds: [],
     liveSlideId: null,
     emitter: null,
     settings: defaultSettings,
@@ -201,6 +203,9 @@ interface AppStore extends AppState {
     replaceScheduleActiveSlides: (slides: Slide[]) => void
     setActiveSlides: (slides: Slide[]) => void
     setLiveOutputSlidesId: (slides: string[]) => void
+    setSharedQueueSlideIds: (slideIds: string[]) => void
+    addSharedQueueSlideIds: (slideIds: string[]) => void
+    removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string) => void
     setEmitter: (emitter: Emitter<Record<EventType, unknown>> | null) => void
     setAppSettings: (settings: AppSettings) => void
@@ -414,6 +419,22 @@ export const useAppStore = create<AppStore>()(
 
             setLiveOutputSlidesId: (slides) => {
                 set({ liveOutputSlidesId: Array.from(new Set(slides)) })
+            },
+
+            setSharedQueueSlideIds: (slideIds) => {
+                set({ sharedQueueSlideIds: slideIds })
+            },
+
+            addSharedQueueSlideIds: (slideIds) => {
+                set((state) => ({
+                    sharedQueueSlideIds: [...state.sharedQueueSlideIds, ...slideIds.filter(id => !state.sharedQueueSlideIds.includes(id))]
+                }))
+            },
+
+            removeSharedQueueSlideIds: (slideIds) => {
+                set((state) => ({
+                    sharedQueueSlideIds: state.sharedQueueSlideIds.filter(id => !slideIds.includes(id))
+                }))
             },
 
             setLiveSlide: (slideId) => {

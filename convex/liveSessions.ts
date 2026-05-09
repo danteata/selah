@@ -84,6 +84,11 @@ export const startSession = mutation({
     args: {
         scheduleId: v.string(),
         churchId: v.string(),
+        collaborationMode: v.optional(v.union(
+            v.literal("strict"),
+            v.literal("open"),
+            v.literal("moderated"),
+        )),
     },
     handler: async (ctx, args) => {
         const user = await getAuthenticatedUser(ctx);
@@ -102,13 +107,16 @@ export const startSession = mutation({
             throw new Error("An active session already exists for this schedule");
         }
 
+        const mode = args.collaborationMode || "moderated";
         const now = new Date().toISOString();
         const sessionId = await ctx.db.insert("liveSessions", {
             churchId: args.churchId,
             scheduleId: args.scheduleId,
             operatorId: user._id!,
             liveSlideId: undefined,
-            queuedSlideIds: [],
+            operatorSlideIds: [],
+            queue: [],
+            collaborationMode: mode,
             isLive: true,
             isBlank: false,
             activeAlertId: undefined,
@@ -186,12 +194,42 @@ export const setLiveSlide = mutation({
             throw new Error("No active session found");
         }
 
-        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+        const isOperator = session.operatorId === user._id;
+        const isAdmin = user.role === "superadmin" || user.role === "admin";
+        const isOpen = session.collaborationMode === "open";
+
+        if (!isOperator && !isAdmin && !isOpen) {
             throw new Error("Only the operator can change the live slide");
         }
 
         await ctx.db.patch(args.sessionId, {
             liveSlideId: args.slideId,
+            updatedAt: new Date().toISOString(),
+        });
+
+        return true;
+    },
+});
+
+export const setOperatorSlides = mutation({
+    args: {
+        sessionId: v.id("liveSessions"),
+        slideIds: v.array(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const user = await getAuthenticatedUser(ctx);
+
+        const session = await ctx.db.get(args.sessionId);
+        if (!session || session.status !== "active") {
+            throw new Error("No active session found");
+        }
+
+        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+            throw new Error("Only the operator can set the slide order");
+        }
+
+        await ctx.db.patch(args.sessionId, {
+            operatorSlideIds: args.slideIds,
             updatedAt: new Date().toISOString(),
         });
 
@@ -217,18 +255,37 @@ export const addToQueue = mutation({
             throw new Error("Unauthorized");
         }
 
-        const currentQueue = session.queuedSlideIds || [];
-        let updatedQueue: string[];
+        const mode = session.collaborationMode || "moderated";
+        const isOperator = session.operatorId === user._id;
+        const isAdmin = user.role === "superadmin" || user.role === "admin";
 
-        if (args.position !== undefined && args.position >= 0) {
-            updatedQueue = [...currentQueue];
-            updatedQueue.splice(args.position, 0, ...args.slideIds);
+        if (mode === "strict" && !isOperator && !isAdmin) {
+            throw new Error("Only the operator can add slides in strict mode");
+        }
+
+        const now = Date.now();
+        const newEntries = args.slideIds.map(slideId => ({
+            slideId,
+            suggestedBy: user._id!,
+            suggestedAt: now,
+        }));
+
+        const currentQueue = session.queue || [];
+        let updatedQueue;
+
+        if (mode === "open") {
+            if (args.position !== undefined && args.position >= 0) {
+                updatedQueue = [...currentQueue];
+                updatedQueue.splice(args.position, 0, ...newEntries);
+            } else {
+                updatedQueue = [...currentQueue, ...newEntries];
+            }
         } else {
-            updatedQueue = [...currentQueue, ...args.slideIds];
+            updatedQueue = [...currentQueue, ...newEntries];
         }
 
         await ctx.db.patch(args.sessionId, {
-            queuedSlideIds: updatedQueue,
+            queue: updatedQueue,
             updatedAt: new Date().toISOString(),
         });
 
@@ -253,11 +310,44 @@ export const removeFromQueue = mutation({
             throw new Error("Unauthorized");
         }
 
-        const currentQueue = session.queuedSlideIds || [];
-        const updatedQueue = currentQueue.filter(id => !args.slideIds.includes(id));
+        const currentQueue = session.queue || [];
+        const updatedQueue = currentQueue.filter(entry => !args.slideIds.includes(entry.slideId));
 
         await ctx.db.patch(args.sessionId, {
-            queuedSlideIds: updatedQueue,
+            queue: updatedQueue,
+            updatedAt: new Date().toISOString(),
+        });
+
+        return true;
+    },
+});
+
+export const acceptFromQueue = mutation({
+    args: {
+        sessionId: v.id("liveSessions"),
+        slideIds: v.array(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const user = await getAuthenticatedUser(ctx);
+
+        const session = await ctx.db.get(args.sessionId);
+        if (!session || session.status !== "active") {
+            throw new Error("No active session found");
+        }
+
+        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+            throw new Error("Only the operator can accept slides from the queue");
+        }
+
+        const currentQueue = session.queue || [];
+        const updatedQueue = currentQueue.filter(entry => !args.slideIds.includes(entry.slideId));
+
+        const currentSlides = session.operatorSlideIds || [];
+        const newSlides = [...currentSlides, ...args.slideIds.filter(id => !currentSlides.includes(id))];
+
+        await ctx.db.patch(args.sessionId, {
+            queue: updatedQueue,
+            operatorSlideIds: newSlides,
             updatedAt: new Date().toISOString(),
         });
 
@@ -282,8 +372,13 @@ export const reorderQueue = mutation({
             throw new Error("Only the operator can reorder the queue");
         }
 
+        const currentQueue = session.queue || [];
+        const reorderedQueue = args.orderedSlideIds
+            .map(slideId => currentQueue.find(entry => entry.slideId === slideId))
+            .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+
         await ctx.db.patch(args.sessionId, {
-            queuedSlideIds: args.orderedSlideIds,
+            queue: reorderedQueue,
             updatedAt: new Date().toISOString(),
         });
 

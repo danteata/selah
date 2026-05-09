@@ -358,7 +358,17 @@ export default defineSchema({
         scheduleId: v.string(),
         operatorId: v.string(),
         liveSlideId: v.optional(v.string()),
-        queuedSlideIds: v.optional(v.array(v.string())),
+        operatorSlideIds: v.optional(v.array(v.string())),
+        queue: v.optional(v.array(v.object({
+            slideId: v.string(),
+            suggestedBy: v.string(),
+            suggestedAt: v.number(),
+        }))),
+        collaborationMode: v.optional(v.union(
+            v.literal("strict"),
+            v.literal("open"),
+            v.literal("moderated"),
+        )),
         isLive: v.boolean(),
         isBlank: v.optional(v.boolean()),
         activeAlertId: v.optional(v.string()),

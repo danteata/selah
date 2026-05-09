@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useMutation, useQuery } from 'convex/react'
-import { Radio, StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight } from 'lucide-react'
+import { Radio, StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight, Lock, Unlock, MessageSquare } from 'lucide-react'
 import { api } from '../../../convex/_generated/api'
 import type { Id } from '../../../convex/_generated/dataModel'
 import { useUserRole } from '../../hooks/useUserRole'
@@ -8,6 +8,13 @@ import { useSchedules } from '../../hooks/useSchedules'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
+type CollaborationMode = 'strict' | 'open' | 'moderated'
+
+const MODE_INFO: Record<CollaborationMode, { label: string; description: string; icon: typeof Lock }> = {
+    strict: { label: 'Strict', description: 'Only operator controls slides', icon: Lock },
+    moderated: { label: 'Review', description: 'Suggestions need operator approval', icon: MessageSquare },
+    open: { label: 'Open', description: 'Team can advance slides directly', icon: Unlock },
+}
 
 interface LiveSessionControlsProps {
     churchId: string
@@ -32,6 +39,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const [isStarting, setIsStarting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [showTransferMenu, setShowTransferMenu] = useState(false)
+    const [collabMode, setCollabMode] = useState<CollaborationMode>('moderated')
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
@@ -77,6 +85,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
             await startSession({
                 scheduleId: activeSchedule._id as string,
                 churchId,
+                collaborationMode: collabMode,
             })
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to start session')
@@ -166,6 +175,12 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                             <Users className="w-3 h-3" />
                             {sessionUsers.length}
                         </div>
+                    )}
+                    {effectiveSession.collaborationMode && (
+                        <span className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600/70 dark:text-emerald-400/70" title={MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.description}>
+                            {(() => { const ModeIcon = MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.icon; return ModeIcon ? <ModeIcon className="w-2.5 h-2.5" /> : null })()}
+                            {MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.label}
+                        </span>
                     )}
                 </div>
 
@@ -273,11 +288,32 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
 
     return (
         <div className="flex items-center gap-2">
+            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-default)] overflow-hidden">
+                {(Object.keys(MODE_INFO) as CollaborationMode[]).map((mode) => {
+                    const info = MODE_INFO[mode]
+                    const Icon = info.icon
+                    return (
+                        <button
+                            key={mode}
+                            onClick={() => setCollabMode(mode)}
+                            className={`flex items-center gap-1 px-1.5 py-1 text-[10px] font-medium transition-colors ${
+                                collabMode === mode
+                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                            }`}
+                            title={info.description}
+                        >
+                            <Icon className="w-3 h-3" />
+                            <span className="hidden sm:inline">{info.label}</span>
+                        </button>
+                    )
+                })}
+            </div>
             <button
                 onClick={handleStartSession}
                 disabled={isStarting || !activeSchedule?._id}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] border border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title={!activeSchedule?._id ? 'Select a schedule first' : 'Start collaborative session'}
+                title={!activeSchedule?._id ? 'Select a schedule first' : `Start ${MODE_INFO[collabMode].label.toLowerCase()} session`}
             >
                 {isStarting ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

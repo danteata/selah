@@ -45,23 +45,37 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
             })
         }
 
-        // Queue was reordered
-        if (
-            JSON.stringify(sharedSession.queuedSlideIds) !==
-            JSON.stringify(prev.queuedSlideIds)
-        ) {
-            // Notify operator if a contributor added something
+        // Queue changed (uses structured queue array)
+        const currentQueueIds = (sharedSession.queue || []).map((e: { slideId: string }) => e.slideId)
+        const prevQueueIds = (prev.queue || []).map((e: { slideId: string }) => e.slideId)
+
+        if (JSON.stringify(currentQueueIds) !== JSON.stringify(prevQueueIds)) {
+            // Notify operator if a contributor suggested something
             if (sharedSession.operatorId === selfId) {
-                const addedIds =
-                    (sharedSession.queuedSlideIds || []).filter(
-                        (id: string) => !(prev.queuedSlideIds || []).includes(id)
-                    )
+                const addedIds = currentQueueIds.filter(
+                    (id: string) => !prevQueueIds.includes(id)
+                )
                 if (addedIds.length > 0) {
-                    toast.info('Queue updated', {
-                        description: `A contributor added ${addedIds.length} slide${
+                    toast.info('New suggestion', {
+                        description: `A contributor suggested ${addedIds.length} slide${
                             addedIds.length > 1 ? 's' : ''
-                        } to the queue.`,
+                        }.`,
                         duration: 4000,
+                    })
+                }
+            }
+
+            // Notify contributors when their suggestion is accepted (removed from queue)
+            if (sharedSession.operatorId !== selfId) {
+                const removedIds = prevQueueIds.filter(
+                    (id: string) => !currentQueueIds.includes(id)
+                )
+                if (removedIds.length > 0) {
+                    toast.success('Suggestion accepted', {
+                        description: `The operator accepted ${removedIds.length} slide${
+                            removedIds.length > 1 ? 's' : ''
+                        } from the queue.`,
+                        duration: 3000,
                     })
                 }
             }

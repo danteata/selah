@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -56,8 +56,10 @@ export function LiveOutput() {
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
     const liveOutputSlidesId = useAppStore((state) => state.liveOutputSlidesId)
+    const sharedQueueSlideIds = useAppStore((state) => state.sharedQueueSlideIds)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
+    const setLiveOutputSlidesId = useAppStore((state) => state.setLiveOutputSlidesId)
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
     const openModal = useAppStore((state) => state.openModal)
@@ -68,8 +70,12 @@ export function LiveOutput() {
         isContributor,
         isViewer,
         isConnected,
+        isOpen,
+        collaborationMode,
         setLiveSlide: setLiveSlideShared,
         addToQueue,
+        removeFromQueue,
+        acceptFromQueue,
     } = useLiveSession()
 
     // Role badge label
@@ -97,6 +103,14 @@ export function LiveOutput() {
         // If no active schedule, show all slides without a scheduleId
         return slides.filter(slide => !slide.scheduleId || slide.scheduleId === '')
     }, [liveOutputSlidesId, activeSlides, activeSchedule])
+
+    // Shared queue slides — contributed by non-operators
+    const sharedQueueSlides = useMemo(() => {
+        if (!sharedQueueSlideIds || sharedQueueSlideIds.length === 0) return []
+        return sharedQueueSlideIds
+            .map(id => activeSlides.find(slide => slide.id === id))
+            .filter((slide): slide is Slide => slide !== undefined)
+    }, [sharedQueueSlideIds, activeSlides])
 
     // Get live slide
     const liveSlide = useMemo(() => {
@@ -131,8 +145,8 @@ export function LiveOutput() {
     const handleSetLiveSlide = useCallback((slideId: string) => {
         setLiveSlide(slideId)
 
-        // Sync to shared session if operator
-        if (isConnected && isOperator) {
+        // Sync to shared session if operator or open-mode contributor
+        if (isConnected && (isOperator || isOpen)) {
             setLiveSlideShared(slideId)
         }
 
@@ -145,7 +159,7 @@ export function LiveOutput() {
             // Broadcast to other windows (for web mode)
             window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: slide }))
         }
-    }, [setLiveSlide, activeSlides, isDesktop, sendSlideToLive, isConnected, isOperator, setLiveSlideShared])
+    }, [setLiveSlide, activeSlides, isDesktop, sendSlideToLive, isConnected, isOperator, isOpen, setLiveSlideShared])
 
     const handleSuggestNext = useCallback((slideId: string) => {
         if (!isConnected || isOperator) return
@@ -447,6 +461,59 @@ export function LiveOutput() {
                         </div>
                     </div>
 
+                    {/* Shared Queue — contributions from non-operators */}
+                    {isConnected && sharedQueueSlides.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                            <div className="flex items-center justify-between">
+                                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                                    Suggested ({sharedQueueSlides.length})
+                                </div>
+                                {isOperator && (
+                                    <button
+                                        onClick={() => {
+                                            const queueIds = sharedQueueSlides.map(s => s.id)
+                                            acceptFromQueue(queueIds)
+                                        }}
+                                        className="text-[10px] font-medium text-[var(--accent-teal)] hover:text-[var(--accent-teal)]/80 transition-colors"
+                                    >
+                                        Accept All
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                                {sharedQueueSlides.map((slide) => (
+                                    <div
+                                        key={slide.id}
+                                        className="flex-shrink-0 w-32 bg-gray-800/50 border border-blue-500/20 rounded-lg p-2 group relative"
+                                    >
+                                        <div className="text-[10px] text-white/70 truncate">{slide.name}</div>
+                                        <div className="text-[8px] text-blue-400 mt-0.5">
+                                            {slide.type === 'bible' ? 'Bible' : slide.type === 'song' ? 'Song' : slide.type === 'hymn' ? 'Hymn' : 'Slide'}
+                                        </div>
+                                        {isOperator && (
+                                            <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => acceptFromQueue([slide.id])}
+                                                    className="p-0.5 bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] rounded hover:bg-[var(--accent-teal)]/30"
+                                                    title="Accept slide"
+                                                >
+                                                    <Check className="w-2.5 h-2.5" />
+                                                </button>
+                                                <button
+                                                    onClick={() => removeFromQueue([slide.id])}
+                                                    className="p-0.5 bg-rose-500/20 text-rose-400 rounded hover:bg-rose-500/30"
+                                                    title="Dismiss slide"
+                                                >
+                                                    <X className="w-2.5 h-2.5" />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Secondary/Next Preview & Controls Row */}
                     <div className="grid grid-cols-2 gap-6">
                         {/* Next Preview */}
@@ -488,12 +555,12 @@ export function LiveOutput() {
                                 <div className="flex gap-2">
                                     <button
                                         onClick={() => prevSlide && handleSetLiveSlide(prevSlide.id)}
-                                        disabled={!prevSlide || (!isOperator && isConnected)}
+                                        disabled={!prevSlide || (!isOperator && isConnected && !isOpen)}
                                         className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-20 rounded-lg text-white transition-colors"
                                     >
                                         <ChevronUp className="w-5 h-5 mx-auto" />
                                     </button>
-                                    {isConnected && !isOperator && nextSlide && (
+                                    {isConnected && !isOperator && !isOpen && nextSlide && (
                                         <button
                                             onClick={() => handleSuggestNext(nextSlide.id)}
                                             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-medium transition-colors flex items-center justify-center gap-1"
@@ -505,7 +572,7 @@ export function LiveOutput() {
                                     )}
                                     <button
                                         onClick={() => nextSlide && handleSetLiveSlide(nextSlide.id)}
-                                        disabled={!nextSlide || (!isOperator && isConnected)}
+                                        disabled={!nextSlide || (!isOperator && isConnected && !isOpen)}
                                         className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-20 rounded-lg text-white transition-colors"
                                     >
                                         <ChevronDown className="w-5 h-5 mx-auto" />

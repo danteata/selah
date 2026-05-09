@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare, Rows3, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useSlideCreation, useLibrary, useScripture } from '../../hooks'
+import { useSlideCreation, useLibrary, useScripture, useLiveSession } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
 import { bibleBooks } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
@@ -33,6 +33,7 @@ export function PreviewContent() {
     const { createTextSlide, duplicateSlide } = useSlideCreation()
     const { addToLibrary, isInLibrary } = useLibrary()
     const { fetchScripture } = useScripture()
+    const { isContributor, isConnected, addToQueue } = useLiveSession()
     const slidesGridRef = useRef<HTMLDivElement>(null)
 
     // Derive slides from store - single source of truth
@@ -350,6 +351,7 @@ export function PreviewContent() {
                             onSaveToLibrary={() => handleSaveToLibrary(slide)}
                             isSaved={isInLibrary(slide.id)}
                             onGoLive={() => setLiveSlide(slide.id)}
+                            onSuggestToQueue={isContributor && isConnected ? () => addToQueue([slide.id]) : undefined}
                         />
                     ))
                 ) : (

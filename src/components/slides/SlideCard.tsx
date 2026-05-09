@@ -1,4 +1,4 @@
-import { Trash2, Copy, Bookmark, Pencil, Radio, Play, Zap } from 'lucide-react'
+import { Trash2, Copy, Bookmark, Pencil, Radio, Play, Zap, Lightbulb } from 'lucide-react'
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
 import { useFileUrl } from '../../hooks/useTemplates'
@@ -16,6 +16,7 @@ interface SlideCardProps {
     onSaveToLibrary?: () => void
     isSaved?: boolean
     onGoLive?: () => void
+    onSuggestToQueue?: () => void
     lockedBy?: string
 }
 
@@ -32,6 +33,7 @@ export function SlideCard({
     onSaveToLibrary,
     isSaved = false,
     onGoLive,
+    onSuggestToQueue,
     lockedBy,
 }: SlideCardProps) {
     // Get file URL if slide has a backgroundStorageId
@@ -154,6 +156,15 @@ export function SlideCard({
                         title="Send to Live"
                     >
                         <Zap className="w-4 h-4" />
+                    </button>
+                )}
+                {onSuggestToQueue && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onSuggestToQueue(); }}
+                        className="absolute top-2 left-2 z-10 p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100"
+                        title="Suggest to queue"
+                    >
+                        <Lightbulb className="w-4 h-4" />
                     </button>
                 )}
             </div>

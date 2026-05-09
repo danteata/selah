@@ -7,23 +7,36 @@ import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import { useUserRole } from './useUserRole'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
+type CollaborationMode = 'strict' | 'open' | 'moderated'
+
+interface QueueEntry {
+    slideId: string
+    suggestedBy: string
+    suggestedAt: number
+}
 
 interface UseLiveSessionReturn {
     sessionId: Id<"liveSessions"> | null
     sessionRole: SessionRole
+    collaborationMode: CollaborationMode | null
     isOperator: boolean
     isContributor: boolean
     isViewer: boolean
+    isOpen: boolean
+    isStrict: boolean
+    isModerated: boolean
     isConnected: boolean
     isStarting: boolean
-    startSession: (scheduleId: string, churchId: string) => Promise<Id<"liveSessions"> | null>
+    startSession: (scheduleId: string, churchId: string, collaborationMode?: CollaborationMode) => Promise<Id<"liveSessions"> | null>
     joinSession: (sessionId: Id<"liveSessions">, role?: 'contributor' | 'viewer') => Promise<boolean>
     leaveSession: () => Promise<void>
     endSession: () => Promise<void>
     setLiveSlide: (slideId: string | null) => Promise<void>
     addToQueue: (slideIds: string[], position?: number) => Promise<void>
     removeFromQueue: (slideIds: string[]) => Promise<void>
+    acceptFromQueue: (slideIds: string[]) => Promise<void>
     reorderQueue: (orderedSlideIds: string[]) => Promise<void>
+    syncOperatorSlides: (slideIds: string[]) => Promise<void>
     toggleBlank: (isBlank: boolean) => Promise<void>
     setOverlay: (overlay?: string, alertId?: string) => Promise<void>
     transferOperator: (newOperatorId: string) => Promise<void>
@@ -35,6 +48,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
     const [sessionId, setSessionId] = useState<Id<"liveSessions"> | null>(null)
     const [sessionRole, setSessionRole] = useState<SessionRole>('contributor')
+    const [collaborationMode, setCollaborationMode] = useState<CollaborationMode | null>(null)
     const [isStarting, setIsStarting] = useState(false)
 
     const activeScheduleId = useAppStore((s) => s.activeSchedule?._id)
@@ -42,6 +56,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
     const setLiveSlideStore = useAppStore((s) => s.setLiveSlide)
     const setLiveOutputSlidesId = useAppStore((s) => s.setLiveOutputSlidesId)
+    const setSharedQueueSlideIds = useAppStore((s) => s.setSharedQueueSlideIds)
     const setActiveOverlay = useAppStore((s) => s.setActiveOverlay)
 
     const liveSession = useQuery(
@@ -59,8 +74,10 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const joinSessionMutation = useMutation(api.liveSessions.joinSession)
     const leaveSessionMutation = useMutation(api.liveSessions.leaveSession)
     const setLiveSlideMutation = useMutation(api.liveSessions.setLiveSlide)
+    const setOperatorSlidesMutation = useMutation(api.liveSessions.setOperatorSlides)
     const addToQueueMutation = useMutation(api.liveSessions.addToQueue)
     const removeFromQueueMutation = useMutation(api.liveSessions.removeFromQueue)
+    const acceptFromQueueMutation = useMutation(api.liveSessions.acceptFromQueue)
     const reorderQueueMutation = useMutation(api.liveSessions.reorderQueue)
     const toggleBlankMutation = useMutation(api.liveSessions.toggleBlank)
     const setOverlayMutation = useMutation(api.liveSessions.setOverlay)
@@ -82,11 +99,19 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             if (currentRole !== sessionRole) {
                 setSessionRole(currentRole)
             }
+            if (activeSession.collaborationMode) {
+                setCollaborationMode(activeSession.collaborationMode as CollaborationMode)
+            }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeSession, currentUser?._id])
 
     useEffect(() => {
+        if (liveSession?.status === 'ended') {
+            useAppStore.getState().setSharedQueueSlideIds([])
+            return
+        }
+
         if (!liveSession || liveSession.status !== 'active') return
 
         // Only apply server slide state if it has been explicitly set (not undefined)
@@ -99,8 +124,21 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             }
         }
 
-        if (liveSession.queuedSlideIds) {
-            setLiveOutputSlidesId(liveSession.queuedSlideIds)
+        // Sync structured queue (only if changed to avoid re-render thrash)
+        if (liveSession.queue) {
+            const queueSlideIds = liveSession.queue.map((entry: QueueEntry) => entry.slideId)
+            const currentQueue = useAppStore.getState().sharedQueueSlideIds
+            if (JSON.stringify(currentQueue) !== JSON.stringify(queueSlideIds)) {
+                setSharedQueueSlideIds(queueSlideIds)
+            }
+        }
+
+        // Sync operator's slide order (only if changed to avoid re-render thrash)
+        if (liveSession.operatorSlideIds && liveSession.operatorSlideIds.length > 0) {
+            const currentIds = useAppStore.getState().liveOutputSlidesId
+            if (JSON.stringify(currentIds) !== JSON.stringify(liveSession.operatorSlideIds)) {
+                setLiveOutputSlidesId(liveSession.operatorSlideIds)
+            }
         }
 
         // Explicit blank command overrides liveSlideId
@@ -116,10 +154,14 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         if (isOp !== (sessionRole === 'operator')) {
             setSessionRole(isOp ? 'operator' : 'contributor')
         }
+
+        if (liveSession.collaborationMode) {
+            setCollaborationMode(liveSession.collaborationMode as CollaborationMode)
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [liveSession, currentUser?._id])
 
-    const startSession = useCallback(async (schedId: string, churchId: string) => {
+    const startSession = useCallback(async (schedId: string, churchId: string, collabMode: CollaborationMode = 'moderated') => {
         if (!isConvexConnected || isOffline) return null
 
         setIsStarting(true)
@@ -127,9 +169,11 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             const newSessionId = await startSessionMutation({
                 scheduleId: schedId,
                 churchId,
+                collaborationMode: collabMode,
             })
             setSessionId(newSessionId)
             setSessionRole('operator')
+            setCollaborationMode(collabMode)
             return newSessionId
         } catch (err) {
             console.error('[useLiveSession] Failed to start session:', err)
@@ -191,20 +235,29 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     }, [sessionId, isConvexConnected, isOffline, sessionRole, setLiveSlideMutation, setLiveSlideStore])
 
     const handleAddToQueue = useCallback(async (slideIds: string[], position?: number) => {
+        const addLocally = useAppStore.getState().addSharedQueueSlideIds
+        addLocally(slideIds)
+
         if (sessionId && isConvexConnected && !isOffline) {
             try {
                 await addToQueueMutation({ sessionId, slideIds, position })
             } catch (err) {
+                useAppStore.getState().removeSharedQueueSlideIds(slideIds)
                 console.error('[useLiveSession] Failed to add to queue:', err)
             }
         }
     }, [sessionId, isConvexConnected, isOffline, addToQueueMutation])
 
     const handleRemoveFromQueue = useCallback(async (slideIds: string[]) => {
+        const prevQueue = useAppStore.getState().sharedQueueSlideIds
+        const removeLocally = useAppStore.getState().removeSharedQueueSlideIds
+        removeLocally(slideIds)
+
         if (sessionId && isConvexConnected && !isOffline) {
             try {
                 await removeFromQueueMutation({ sessionId, slideIds })
             } catch (err) {
+                useAppStore.getState().setSharedQueueSlideIds(prevQueue)
                 console.error('[useLiveSession] Failed to remove from queue:', err)
             }
         }
@@ -219,6 +272,31 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             }
         }
     }, [sessionId, isConvexConnected, isOffline, sessionRole, reorderQueueMutation])
+
+    const handleSyncOperatorSlides = useCallback(async (slideIds: string[]) => {
+        if (sessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
+            try {
+                await setOperatorSlidesMutation({ sessionId, slideIds })
+            } catch (err) {
+                console.error('[useLiveSession] Failed to sync operator slides:', err)
+            }
+        }
+    }, [sessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
+
+    const handleAcceptFromQueue = useCallback(async (slideIds: string[]) => {
+        const removeLocally = useAppStore.getState().removeSharedQueueSlideIds
+        removeLocally(slideIds)
+
+        if (sessionId && isConvexConnected && !isOffline) {
+            try {
+                await acceptFromQueueMutation({ sessionId, slideIds })
+            } catch (err) {
+                const addLocally = useAppStore.getState().addSharedQueueSlideIds
+                addLocally(slideIds)
+                console.error('[useLiveSession] Failed to accept from queue:', err)
+            }
+        }
+    }, [sessionId, isConvexConnected, isOffline, acceptFromQueueMutation])
 
     const handleToggleBlank = useCallback(async (isBlank: boolean) => {
         if (sessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
@@ -263,9 +341,13 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     return {
         sessionId,
         sessionRole,
+        collaborationMode,
         isOperator: sessionRole === 'operator',
         isContributor: sessionRole === 'contributor',
         isViewer: sessionRole === 'viewer',
+        isOpen: collaborationMode === 'open',
+        isStrict: collaborationMode === 'strict',
+        isModerated: collaborationMode === 'moderated',
         isConnected: !!sessionId && isConvexConnected && !isOffline,
         isStarting,
         startSession,
@@ -275,7 +357,9 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         setLiveSlide: handleSetLiveSlide,
         addToQueue: handleAddToQueue,
         removeFromQueue: handleRemoveFromQueue,
+        acceptFromQueue: handleAcceptFromQueue,
         reorderQueue: handleReorderQueue,
+        syncOperatorSlides: handleSyncOperatorSlides,
         toggleBlank: handleToggleBlank,
         setOverlay: handleSetOverlay,
         transferOperator: handleTransferOperator,
