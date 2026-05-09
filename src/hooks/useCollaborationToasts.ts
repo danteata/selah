@@ -45,9 +45,15 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
             })
         }
 
-        // Queue changed (uses structured queue array)
-        const currentQueueIds = (sharedSession.queue || []).map((e: { slideId: string }) => e.slideId)
-        const prevQueueIds = (prev.queue || []).map((e: { slideId: string }) => e.slideId)
+        // Queue changed (handles both new `queue` and legacy `queuedSlideIds`)
+        const currentQueue = sharedSession.queue || (sharedSession as any).queuedSlideIds || []
+        const prevQueue = prev.queue || (prev as any).queuedSlideIds || []
+        const currentQueueIds: string[] = Array.isArray(currentQueue) && currentQueue.length > 0 && typeof currentQueue[0] === 'object'
+            ? (currentQueue as { slideId: string }[]).map((e) => e.slideId)
+            : currentQueue as string[]
+        const prevQueueIds: string[] = Array.isArray(prevQueue) && prevQueue.length > 0 && typeof prevQueue[0] === 'object'
+            ? (prevQueue as { slideId: string }[]).map((e) => e.slideId)
+            : prevQueue as string[]
 
         if (JSON.stringify(currentQueueIds) !== JSON.stringify(prevQueueIds)) {
             // Notify operator if a contributor suggested something

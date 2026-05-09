@@ -59,6 +59,8 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const setSharedQueueSlideIds = useAppStore((s) => s.setSharedQueueSlideIds)
     const setActiveOverlay = useAppStore((s) => s.setActiveOverlay)
 
+    const liveOutputSlidesId = useAppStore((s) => s.liveOutputSlidesId)
+
     const liveSession = useQuery(
         api.liveSessions.getSession,
         sessionId ? { sessionId } : 'skip'
@@ -85,6 +87,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
     const activeSessionRef = useRef(activeSession)
     const previousLiveSlideRef = useRef<string | null>(null)
+    const lastSyncedSlidesRef = useRef<string | null>(null)
 
     useEffect(() => {
         activeSessionRef.current = activeSession
@@ -101,6 +104,36 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             }
             if (activeSession.collaborationMode) {
                 setCollaborationMode(activeSession.collaborationMode as CollaborationMode)
+            }
+
+            // Also sync queue and operatorSlideIds from activeSession
+            // so they're available immediately even before getSession resolves
+            const queue = (activeSession as any).queue
+            if (queue && Array.isArray(queue)) {
+                const queueSlideIds = queue.map((entry: QueueEntry) => entry.slideId)
+                const currentQueue = useAppStore.getState().sharedQueueSlideIds
+                if (JSON.stringify(currentQueue) !== JSON.stringify(queueSlideIds)) {
+                    setSharedQueueSlideIds(queueSlideIds)
+                }
+            } else if ((activeSession as any).queuedSlideIds) {
+                // Backward compat with old schema
+                const queuedIds = (activeSession as any).queuedSlideIds as string[]
+                const currentQueue = useAppStore.getState().sharedQueueSlideIds
+                if (JSON.stringify(currentQueue) !== JSON.stringify(queuedIds)) {
+                    setSharedQueueSlideIds(queuedIds)
+                }
+            }
+
+            const operatorSlides = (activeSession as any).operatorSlideIds as string[] | undefined
+            if (operatorSlides && operatorSlides.length > 0) {
+                const currentIds = useAppStore.getState().liveOutputSlidesId
+                if (JSON.stringify(currentIds) !== JSON.stringify(operatorSlides)) {
+                    const isOp = activeSession.operatorId === currentUser?._id
+                    if (!isOp) {
+                        setLiveOutputSlidesId(operatorSlides)
+                        lastSyncedSlidesRef.current = JSON.stringify(operatorSlides)
+                    }
+                }
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,25 +152,43 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             const serverSlideId = liveSession.liveSlideId
             if (serverSlideId !== previousLiveSlideRef.current) {
                 previousLiveSlideRef.current = serverSlideId
-                // Null/'' means intentional blank; undefined was already filtered out
                 setLiveSlideStore(serverSlideId ?? '')
             }
         }
 
-        // Sync structured queue (only if changed to avoid re-render thrash)
-        if (liveSession.queue) {
-            const queueSlideIds = liveSession.queue.map((entry: QueueEntry) => entry.slideId)
+        // Sync structured queue — handle both new `queue` field and legacy `queuedSlideIds`
+        const queue = (liveSession as any).queue
+        const queuedSlideIds = (liveSession as any).queuedSlideIds
+        if (queue && Array.isArray(queue)) {
+            const queueSlideIds = queue.map((entry: QueueEntry) => entry.slideId)
             const currentQueue = useAppStore.getState().sharedQueueSlideIds
             if (JSON.stringify(currentQueue) !== JSON.stringify(queueSlideIds)) {
                 setSharedQueueSlideIds(queueSlideIds)
             }
+        } else if (queuedSlideIds && Array.isArray(queuedSlideIds)) {
+            // Backward compat with sessions that still use queuedSlideIds
+            const currentQueue = useAppStore.getState().sharedQueueSlideIds
+            if (JSON.stringify(currentQueue) !== JSON.stringify(queuedSlideIds)) {
+                setSharedQueueSlideIds(queuedSlideIds)
+            }
+        } else if (queue !== undefined || queuedSlideIds !== undefined) {
+            // queue/queuedSlideIds is explicitly empty (null/[]), clear local
+            const currentQueue = useAppStore.getState().sharedQueueSlideIds
+            if (currentQueue.length > 0) {
+                setSharedQueueSlideIds([])
+            }
         }
 
-        // Sync operator's slide order (only if changed to avoid re-render thrash)
-        if (liveSession.operatorSlideIds && liveSession.operatorSlideIds.length > 0) {
+        // Sync operator's slide order — only for non-operators to prevent
+        // overwriting the operator's local deck changes. The operator pushes
+        // their deck to Convex via syncOperatorSlides, so contributors stay in sync.
+        const isOperatorRemote = liveSession.operatorId === currentUser?._id
+        const operatorSlides = (liveSession as any).operatorSlideIds as string[] | undefined
+        if (operatorSlides && operatorSlides.length > 0 && !isOperatorRemote) {
             const currentIds = useAppStore.getState().liveOutputSlidesId
-            if (JSON.stringify(currentIds) !== JSON.stringify(liveSession.operatorSlideIds)) {
-                setLiveOutputSlidesId(liveSession.operatorSlideIds)
+            if (JSON.stringify(currentIds) !== JSON.stringify(operatorSlides)) {
+                setLiveOutputSlidesId(operatorSlides)
+                lastSyncedSlidesRef.current = JSON.stringify(operatorSlides)
             }
         }
 
@@ -328,6 +379,29 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             }
         }
     }, [sessionId, isConvexConnected, isOffline, transferOperatorMutation])
+
+    // Auto-sync operator's slide order to Convex when it changes locally
+    useEffect(() => {
+        if (!sessionId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
+        if (!liveOutputSlidesId || liveOutputSlidesId.length === 0) return
+
+        const slidesKey = JSON.stringify(liveOutputSlidesId)
+        if (slidesKey === lastSyncedSlidesRef.current) return
+
+        const timeoutId = setTimeout(() => {
+            if (sessionId && isConvexConnected && !isOffline) {
+                setOperatorSlidesMutation({ sessionId, slideIds: liveOutputSlidesId })
+                    .then(() => {
+                        lastSyncedSlidesRef.current = slidesKey
+                    })
+                    .catch((err: unknown) => {
+                        console.error('[useLiveSession] Failed to sync operator slides:', err)
+                    })
+            }
+        }, 500)
+
+        return () => clearTimeout(timeoutId)
+    }, [liveOutputSlidesId, sessionId, isConvexConnected, isOffline, sessionRole])
 
     useEffect(() => {
         return () => {
