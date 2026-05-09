@@ -159,10 +159,13 @@ export function LiveOutput() {
         : ''
 
     const handleSetLiveSlide = useCallback((slideId: string) => {
+        if (isConnected && !isOperator && !isOpen) {
+            return
+        }
+
         setLiveSlide(slideId)
 
-        // Sync to shared session if operator or open-mode contributor
-        if (isConnected && (isOperator || isOpen)) {
+        if (isConnected) {
             setLiveSlideShared(slideId)
         }
 

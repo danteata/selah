@@ -64,6 +64,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const replaceSlidesForSchedule = useAppStore((s) => s.replaceSlidesForSchedule)
 
     const liveOutputSlidesId = useAppStore((s) => s.liveOutputSlidesId)
+    const activeSlides = useAppStore((s) => s.activeSlides)
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
@@ -102,9 +103,11 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const toggleBlankMutation = useMutation(api.liveSessions.toggleBlank)
     const setOverlayMutation = useMutation(api.liveSessions.setOverlay)
     const transferOperatorMutation = useMutation(api.liveSessions.transferOperator)
+    const syncScheduleSlidesMutation = useMutation(api.slides.syncScheduleSlides)
 
     const previousLiveSlideRef = useRef<string | null>(null)
     const lastSyncedSlidesRef = useRef<string | null>(null)
+    const lastSyncedScheduleSlidesRef = useRef<string | null>(null)
 
     const resolvedSessionId = (sessionId || (resolvedActiveSession?._id as Id<"liveSessions"> | undefined) || null) as Id<"liveSessions"> | null
     const sessionScheduleId = (liveSession?.scheduleId || resolvedActiveSession?.scheduleId || effectiveScheduleId || null) as string | null
@@ -172,6 +175,10 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             index: typeof slide.index === 'number' ? slide.index : index,
         }))
 
+        if (mappedSlides.length === 0) {
+            return
+        }
+
         replaceSlidesForSchedule(sessionScheduleId, mappedSlides, true)
 
         const idsFromSessionSlides = mappedSlides.map((s) => s.id)
@@ -182,7 +189,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
         // Fallback deck order so collaborators can still render feed/next-up
         // before explicit operator ordering is synced.
-        if (!hasOperatorOrdering && JSON.stringify(currentIds) !== JSON.stringify(idsFromSessionSlides)) {
+        if (currentIds.length === 0 && !hasOperatorOrdering && JSON.stringify(currentIds) !== JSON.stringify(idsFromSessionSlides)) {
             setLiveOutputSlidesId(idsFromSessionSlides)
         }
     }, [scheduleSlides, sessionScheduleId, liveSession, replaceSlidesForSchedule, setLiveOutputSlidesId])
@@ -321,23 +328,27 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     }, [resolvedSessionId, leaveSessionMutation])
 
     const handleSetLiveSlide = useCallback(async (slideId: string | null) => {
-        setLiveSlideStore(slideId || '')
-        previousLiveSlideRef.current = slideId
-
-        const isOpenMode = collaborationMode === 'open'
-        if (resolvedSessionId && canClientPushLiveSlide({
+        const effectiveMode = (liveSession?.collaborationMode || resolvedActiveSession?.collaborationMode || collaborationMode) as CollaborationMode | null
+        const canPushShared = !!resolvedSessionId && canClientPushLiveSlide({
             isConnected: isConvexConnected,
             isOffline,
             isOperator: sessionRole === 'operator',
-            isOpenMode,
-        })) {
+            isOpenMode: effectiveMode === 'open',
+        })
+
+        if (!resolvedSessionId || canPushShared) {
+            setLiveSlideStore(slideId || '')
+            previousLiveSlideRef.current = slideId
+        }
+
+        if (resolvedSessionId && canPushShared) {
             try {
                 await setLiveSlideMutation({ sessionId: resolvedSessionId, slideId: slideId || undefined })
             } catch (err) {
                 console.error('[useLiveSession] Failed to set live slide:', err)
             }
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, setLiveSlideMutation, setLiveSlideStore])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, liveSession?.collaborationMode, resolvedActiveSession?.collaborationMode, setLiveSlideMutation, setLiveSlideStore])
 
     const handleAddToQueue = useCallback(async (slideIds: string[], position?: number) => {
         const isSharedSessionConnected = !!resolvedSessionId && isConvexConnected && !isOffline
@@ -468,6 +479,51 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
         return () => clearTimeout(timeoutId)
     }, [liveOutputSlidesId, resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
+
+    useEffect(() => {
+        if (!sessionScheduleId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
+
+        const scheduleActiveSlides = activeSlides
+            .filter((slide) => slide.scheduleId === sessionScheduleId || !slide.scheduleId || slide.scheduleId === '')
+            .map((slide, index) => ({
+                id: slide.id,
+                index: typeof slide.index === 'number' ? slide.index : index,
+                name: slide.name || 'Untitled',
+                type: slide.type,
+                layout: slide.layout,
+                contents: slide.contents || [],
+                backgroundType: slide.backgroundType,
+                background: slide.background,
+                backgroundVideoKey: slide.backgroundVideoKey,
+                backgroundStorageId: slide.backgroundStorageId,
+                title: slide.title,
+                songId: slide.songId,
+                hasChorus: slide.hasChorus,
+                data: slide.data,
+                slideStyle: slide.slideStyle,
+                saved: slide.saved,
+                verseIndex: slide.verseIndex,
+                totalVerses: slide.totalVerses,
+                verseLabel: slide.verseLabel,
+            }))
+
+        if (scheduleActiveSlides.length === 0) return
+
+        const slidesKey = JSON.stringify(scheduleActiveSlides)
+        if (slidesKey === lastSyncedScheduleSlidesRef.current) return
+
+        const timeoutId = setTimeout(() => {
+            syncScheduleSlidesMutation({ scheduleId: sessionScheduleId, slides: scheduleActiveSlides })
+                .then(() => {
+                    lastSyncedScheduleSlidesRef.current = slidesKey
+                })
+                .catch((err: unknown) => {
+                    console.error('[useLiveSession] Failed to sync schedule slides:', err)
+                })
+        }, 750)
+
+        return () => clearTimeout(timeoutId)
+    }, [activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, syncScheduleSlidesMutation])
 
     return {
         sessionId: resolvedSessionId,

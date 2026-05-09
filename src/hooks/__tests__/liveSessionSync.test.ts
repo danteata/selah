@@ -83,7 +83,7 @@ describe('collaboration mode behaviors', () => {
     })
 
     it('open mode: contributors can add to queue', () => {
-        const collaborationMode = 'open'
+        const collaborationMode: string = 'open'
         const isOperator = false
 
         const canAdd = collaborationMode === 'strict' ? isOperator : true
@@ -91,7 +91,7 @@ describe('collaboration mode behaviors', () => {
     })
 
     it('moderated mode: contributors can add to queue', () => {
-        const collaborationMode = 'moderated'
+        const collaborationMode: string = 'moderated'
         const isOperator = false
 
         const canAdd = collaborationMode === 'strict' ? isOperator : true
@@ -99,7 +99,7 @@ describe('collaboration mode behaviors', () => {
     })
 
     it('open mode: contributors can change live slides', () => {
-        const collaborationMode = 'open'
+        const collaborationMode: string = 'open'
         const isOperator = false
 
         const canChangeLive = collaborationMode === 'open' || isOperator
@@ -107,7 +107,7 @@ describe('collaboration mode behaviors', () => {
     })
 
     it('moderated mode: contributors cannot change live slides directly', () => {
-        const collaborationMode = 'moderated'
+        const collaborationMode: string = 'moderated'
         const isOperator = false
 
         const canChangeLive = collaborationMode === 'open' || isOperator
@@ -117,19 +117,17 @@ describe('collaboration mode behaviors', () => {
 
 describe('session cleanup race condition', () => {
     it('should clear queue when session status is ended', () => {
-        const liveSession = { status: 'ended' }
+        const liveSession: { status: string } = { status: 'ended' }
         const shouldClear = liveSession.status === 'ended'
         expect(shouldClear).toBe(true)
     })
 
     it('should NOT clear queue when session is undefined (reconnection)', () => {
-        const liveSession = undefined
-        // Old code: clear on !liveSession → wipes queue during reconnection
+        const liveSession: { status: string } | undefined = undefined
         const oldBehavior = !liveSession
-        // New code: only clear on status === 'ended'
-        const newBehavior = liveSession?.status === 'ended'
-        expect(oldBehavior).toBe(true) // Bug: clears on reconnect
-        expect(newBehavior).toBe(false) // Fix: preserves queue on reconnect
+        const newBehavior = (liveSession as { status: string } | undefined)?.status === 'ended'
+        expect(oldBehavior).toBe(true)
+        expect(newBehavior).toBe(false)
     })
 
     it('should NOT clear queue when session is active', () => {

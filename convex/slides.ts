@@ -226,6 +226,88 @@ export const batchUpdateSlides = mutation({
     },
 });
 
+export const syncScheduleSlides = mutation({
+    args: {
+        scheduleId: v.string(),
+        slides: v.array(v.object({
+            id: v.string(),
+            index: v.number(),
+            name: v.string(),
+            type: v.string(),
+            layout: v.string(),
+            contents: v.array(v.string()),
+            backgroundType: v.optional(v.string()),
+            background: v.optional(v.string()),
+            backgroundVideoKey: v.optional(v.union(v.string(), v.null())),
+            backgroundStorageId: v.optional(v.union(v.string(), v.null())),
+            title: v.optional(v.string()),
+            songId: v.optional(v.string()),
+            hasChorus: v.optional(v.boolean()),
+            data: v.optional(v.any()),
+            slideStyle: v.optional(v.any()),
+            saved: v.optional(v.boolean()),
+            verseIndex: v.optional(v.number()),
+            totalVerses: v.optional(v.number()),
+            verseLabel: v.optional(v.string()),
+        })),
+    },
+    handler: async (ctx, args) => {
+        const identity = await ctx.auth.getUserIdentity();
+        if (!identity) {
+            throw new Error("Not authenticated");
+        }
+
+        const user = await ctx.db
+            .query("users")
+            .withIndex("by_email", (q) => q.eq("email", identity.email!))
+            .unique();
+
+        if (!user) {
+            throw new Error("User not found");
+        }
+
+        const now = new Date().toISOString();
+        const existingSlides = await ctx.db
+            .query("slides")
+            .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+            .collect();
+
+        const existingByStableId = new Map(existingSlides.map((slide) => [slide.id, slide]));
+        const incomingIds = new Set(args.slides.map((slide) => slide.id));
+
+        for (const slide of existingSlides) {
+            if (slide.churchId === user.churchId && !incomingIds.has(slide.id)) {
+                await ctx.db.delete(slide._id);
+            }
+        }
+
+        for (const slide of args.slides) {
+            const existing = existingByStableId.get(slide.id);
+            const payload = {
+                ...slide,
+                userId: user._id!,
+                churchId: user.churchId,
+                scheduleId: args.scheduleId,
+                updatedAt: now,
+            };
+
+            if (existing) {
+                if (existing.churchId !== user.churchId) {
+                    throw new Error("Unauthorized");
+                }
+                await ctx.db.patch(existing._id, payload);
+            } else {
+                await ctx.db.insert("slides", {
+                    ...payload,
+                    createdAt: now,
+                });
+            }
+        }
+
+        return true;
+    },
+});
+
 // Save slide (mark as saved)
 export const saveSlide = mutation({
     args: {

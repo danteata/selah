@@ -76,6 +76,7 @@ export default defineSchema({
         backgroundType: v.optional(v.string()),
         background: v.optional(v.string()),
         backgroundVideoKey: v.optional(v.union(v.string(), v.null())),
+        backgroundStorageId: v.optional(v.union(v.string(), v.null())),
         title: v.optional(v.string()),
         songId: v.optional(v.string()),
         hasChorus: v.optional(v.boolean()),
@@ -160,6 +161,9 @@ export default defineSchema({
         lockedBy: v.optional(v.string()),
         lockedAt: v.optional(v.number()),
         saved: v.optional(v.boolean()),
+        verseIndex: v.optional(v.number()),
+        totalVerses: v.optional(v.number()),
+        verseLabel: v.optional(v.string()),
         createdAt: v.optional(v.string()),
         updatedAt: v.optional(v.string()),
     })
