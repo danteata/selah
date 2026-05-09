@@ -108,8 +108,16 @@ export function LiveOutput() {
     const sharedQueueSlides = useMemo(() => {
         if (!sharedQueueSlideIds || sharedQueueSlideIds.length === 0) return []
         return sharedQueueSlideIds
-            .map(id => activeSlides.find(slide => slide.id === id))
-            .filter((slide): slide is Slide => slide !== undefined)
+            .map((id, idx) => {
+                const slide = activeSlides.find(s => s.id === id)
+                if (!slide) return null
+                return {
+                    queueKey: `${id}-${idx}`,
+                    slideId: id,
+                    slide,
+                }
+            })
+            .filter((entry): entry is { queueKey: string; slideId: string; slide: Slide } => entry !== null)
     }, [sharedQueueSlideIds, activeSlides])
 
     // Get live slide
@@ -471,7 +479,7 @@ export function LiveOutput() {
                                 {isOperator && (
                                     <button
                                         onClick={() => {
-                                            const queueIds = sharedQueueSlides.map(s => s.id)
+                                            const queueIds = sharedQueueSlides.map(s => s.slideId)
                                             acceptFromQueue(queueIds)
                                         }}
                                         className="text-[10px] font-medium text-[var(--accent-teal)] hover:text-[var(--accent-teal)]/80 transition-colors"
@@ -481,26 +489,26 @@ export function LiveOutput() {
                                 )}
                             </div>
                             <div className="flex gap-2 overflow-x-auto pb-1">
-                                {sharedQueueSlides.map((slide) => (
+                                {sharedQueueSlides.map((entry) => (
                                     <div
-                                        key={slide.id}
+                                        key={entry.queueKey}
                                         className="flex-shrink-0 w-32 bg-gray-800/50 border border-blue-500/20 rounded-lg p-2 group relative"
                                     >
-                                        <div className="text-[10px] text-white/70 truncate">{slide.name}</div>
+                                        <div className="text-[10px] text-white/70 truncate">{entry.slide.name}</div>
                                         <div className="text-[8px] text-blue-400 mt-0.5">
-                                            {slide.type === 'bible' ? 'Bible' : slide.type === 'song' ? 'Song' : slide.type === 'hymn' ? 'Hymn' : 'Slide'}
+                                            {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : 'Slide'}
                                         </div>
                                         {isOperator && (
                                             <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <button
-                                                    onClick={() => acceptFromQueue([slide.id])}
+                                                    onClick={() => acceptFromQueue([entry.slideId])}
                                                     className="p-0.5 bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] rounded hover:bg-[var(--accent-teal)]/30"
                                                     title="Accept slide"
                                                 >
                                                     <Check className="w-2.5 h-2.5" />
                                                 </button>
                                                 <button
-                                                    onClick={() => removeFromQueue([slide.id])}
+                                                    onClick={() => removeFromQueue([entry.slideId])}
                                                     className="p-0.5 bg-rose-500/20 text-rose-400 rounded hover:bg-rose-500/30"
                                                     title="Dismiss slide"
                                                 >
