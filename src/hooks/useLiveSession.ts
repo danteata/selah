@@ -5,7 +5,8 @@ import type { Id } from '../../convex/_generated/dataModel'
 import { useAppStore } from '../store/appStore'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import { useUserRole } from './useUserRole'
-import { canClientPushLiveSlide } from './liveSessionUtils'
+import { canClientPushLiveSlide, selectDiscoveredSession } from './liveSessionUtils'
+import type { Slide } from '../types'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
@@ -18,6 +19,7 @@ interface QueueEntry {
 
 interface UseLiveSessionReturn {
     sessionId: Id<"liveSessions"> | null
+    sessionScheduleId: string | null
     sessionRole: SessionRole
     collaborationMode: CollaborationMode | null
     isOperator: boolean
@@ -59,17 +61,32 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const setLiveOutputSlidesId = useAppStore((s) => s.setLiveOutputSlidesId)
     const setSharedQueueSlideIds = useAppStore((s) => s.setSharedQueueSlideIds)
     const setActiveOverlay = useAppStore((s) => s.setActiveOverlay)
+    const replaceSlidesForSchedule = useAppStore((s) => s.replaceSlidesForSchedule)
 
     const liveOutputSlidesId = useAppStore((s) => s.liveOutputSlidesId)
-
-    const liveSession = useQuery(
-        api.liveSessions.getSession,
-        sessionId ? { sessionId } : 'skip'
-    )
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
         effectiveScheduleId ? { scheduleId: effectiveScheduleId } : 'skip'
+    )
+
+    const activeSessionsByChurch = useQuery(
+        api.liveSessions.getActiveSessionByChurch,
+        currentUser?.churchId && !isOffline ? { churchId: currentUser.churchId } : 'skip'
+    )
+
+    const discoveredSession = selectDiscoveredSession({
+        activeSessionId: activeSession?._id || null,
+        activeScheduleId: effectiveScheduleId || null,
+        sessionsByChurch: activeSessionsByChurch || null,
+    })
+    const resolvedActiveSession = activeSession || discoveredSession
+
+    const liveSession = useQuery(
+        api.liveSessions.getSession,
+        (sessionId || resolvedActiveSession?._id)
+            ? { sessionId: (sessionId || resolvedActiveSession?._id) as Id<"liveSessions"> }
+            : 'skip'
     )
 
     const startSessionMutation = useMutation(api.liveSessions.startSession)
@@ -86,52 +103,55 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const setOverlayMutation = useMutation(api.liveSessions.setOverlay)
     const transferOperatorMutation = useMutation(api.liveSessions.transferOperator)
 
-    const activeSessionRef = useRef(activeSession)
     const previousLiveSlideRef = useRef<string | null>(null)
     const lastSyncedSlidesRef = useRef<string | null>(null)
 
+    const resolvedSessionId = (sessionId || (resolvedActiveSession?._id as Id<"liveSessions"> | undefined) || null) as Id<"liveSessions"> | null
+    const sessionScheduleId = (liveSession?.scheduleId || resolvedActiveSession?.scheduleId || effectiveScheduleId || null) as string | null
+
+    const scheduleSlides = useQuery(
+        api.slides.getSlides,
+        sessionScheduleId && isConvexConnected && !isOffline
+            ? { scheduleId: sessionScheduleId }
+            : 'skip'
+    )
+
     useEffect(() => {
-        activeSessionRef.current = activeSession
-    }, [activeSession])
+        if (resolvedActiveSession && resolvedActiveSession.status === 'active') {
+            setSessionId(resolvedActiveSession._id as Id<"liveSessions">)
 
-    const resolvedSessionId = sessionId || (activeSession?._id ?? null)
-
-    useEffect(() => {
-        if (activeSession && activeSession.status === 'active') {
-            setSessionId(activeSession._id)
-
-            const isOp = activeSession.operatorId === currentUser?._id
+            const isOp = resolvedActiveSession.operatorId === currentUser?._id
             const currentRole = isOp ? 'operator' : sessionRole
             if (currentRole !== sessionRole) {
                 setSessionRole(currentRole)
             }
-            if (activeSession.collaborationMode) {
-                setCollaborationMode(activeSession.collaborationMode as CollaborationMode)
+            if (resolvedActiveSession.collaborationMode) {
+                setCollaborationMode(resolvedActiveSession.collaborationMode as CollaborationMode)
             }
 
             // Also sync queue and operatorSlideIds from activeSession
             // so they're available immediately even before getSession resolves
-            const queue = (activeSession as any).queue
+            const queue = (resolvedActiveSession as any).queue
             if (queue && Array.isArray(queue)) {
                 const queueSlideIds = queue.map((entry: QueueEntry) => entry.slideId)
                 const currentQueue = useAppStore.getState().sharedQueueSlideIds
                 if (JSON.stringify(currentQueue) !== JSON.stringify(queueSlideIds)) {
                     setSharedQueueSlideIds(queueSlideIds)
                 }
-            } else if ((activeSession as any).queuedSlideIds) {
+            } else if ((resolvedActiveSession as any).queuedSlideIds) {
                 // Backward compat with old schema
-                const queuedIds = (activeSession as any).queuedSlideIds as string[]
+                const queuedIds = (resolvedActiveSession as any).queuedSlideIds as string[]
                 const currentQueue = useAppStore.getState().sharedQueueSlideIds
                 if (JSON.stringify(currentQueue) !== JSON.stringify(queuedIds)) {
                     setSharedQueueSlideIds(queuedIds)
                 }
             }
 
-            const operatorSlides = (activeSession as any).operatorSlideIds as string[] | undefined
+            const operatorSlides = (resolvedActiveSession as any).operatorSlideIds as string[] | undefined
             if (operatorSlides && operatorSlides.length > 0) {
                 const currentIds = useAppStore.getState().liveOutputSlidesId
                 if (JSON.stringify(currentIds) !== JSON.stringify(operatorSlides)) {
-                    const isOp = activeSession.operatorId === currentUser?._id
+                    const isOp = resolvedActiveSession.operatorId === currentUser?._id
                     if (!isOp) {
                         setLiveOutputSlidesId(operatorSlides)
                         lastSyncedSlidesRef.current = JSON.stringify(operatorSlides)
@@ -140,7 +160,32 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeSession, currentUser?._id])
+    }, [resolvedActiveSession, currentUser?._id])
+
+    useEffect(() => {
+        if (!scheduleSlides || !sessionScheduleId) return
+
+        const mappedSlides: Slide[] = scheduleSlides.map((slide: any, index: number) => ({
+            ...slide,
+            _id: slide._id as string,
+            id: slide.id || String(slide._id),
+            index: typeof slide.index === 'number' ? slide.index : index,
+        }))
+
+        replaceSlidesForSchedule(sessionScheduleId, mappedSlides, true)
+
+        const idsFromSessionSlides = mappedSlides.map((s) => s.id)
+        const currentIds = useAppStore.getState().liveOutputSlidesId || []
+        const hasOperatorOrdering =
+            Array.isArray((liveSession as any)?.operatorSlideIds) &&
+            ((liveSession as any).operatorSlideIds as string[]).length > 0
+
+        // Fallback deck order so collaborators can still render feed/next-up
+        // before explicit operator ordering is synced.
+        if (!hasOperatorOrdering && JSON.stringify(currentIds) !== JSON.stringify(idsFromSessionSlides)) {
+            setLiveOutputSlidesId(idsFromSessionSlides)
+        }
+    }, [scheduleSlides, sessionScheduleId, liveSession, replaceSlidesForSchedule, setLiveOutputSlidesId])
 
     useEffect(() => {
         if (liveSession?.status === 'ended') {
@@ -238,16 +283,16 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     }, [isConvexConnected, isOffline, startSessionMutation])
 
     const endSession = useCallback(async () => {
-        if (!sessionId) return
+        if (!resolvedSessionId) return
 
         try {
-            await endSessionMutation({ sessionId })
+            await endSessionMutation({ sessionId: resolvedSessionId })
             setSessionId(null)
             setSessionRole('contributor')
         } catch (err) {
             console.error('[useLiveSession] Failed to end session:', err)
         }
-    }, [sessionId, endSessionMutation])
+    }, [resolvedSessionId, endSessionMutation])
 
     const joinSession = useCallback(async (sessId: Id<"liveSessions">, role: 'contributor' | 'viewer' = 'contributor') => {
         if (!isConvexConnected || isOffline) return false
@@ -264,16 +309,16 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     }, [isConvexConnected, isOffline, joinSessionMutation])
 
     const leaveSession = useCallback(async () => {
-        if (!sessionId) return
+        if (!resolvedSessionId) return
 
         try {
-            await leaveSessionMutation({ sessionId })
+            await leaveSessionMutation({ sessionId: resolvedSessionId })
             setSessionId(null)
             setSessionRole('contributor')
         } catch (err) {
             console.error('[useLiveSession] Failed to leave session:', err)
         }
-    }, [sessionId, leaveSessionMutation])
+    }, [resolvedSessionId, leaveSessionMutation])
 
     const handleSetLiveSlide = useCallback(async (slideId: string | null) => {
         setLiveSlideStore(slideId || '')
@@ -325,93 +370,93 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         const removeLocally = useAppStore.getState().removeSharedQueueSlideIds
         removeLocally(slideIds)
 
-        if (sessionId && isConvexConnected && !isOffline) {
+        if (resolvedSessionId && isConvexConnected && !isOffline) {
             try {
-                await removeFromQueueMutation({ sessionId, slideIds })
+                await removeFromQueueMutation({ sessionId: resolvedSessionId, slideIds })
             } catch (err) {
                 useAppStore.getState().setSharedQueueSlideIds(prevQueue)
                 console.error('[useLiveSession] Failed to remove from queue:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, removeFromQueueMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, removeFromQueueMutation])
 
     const handleReorderQueue = useCallback(async (orderedSlideIds: string[]) => {
-        if (sessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
+        if (resolvedSessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
             try {
-                await reorderQueueMutation({ sessionId, orderedSlideIds })
+                await reorderQueueMutation({ sessionId: resolvedSessionId, orderedSlideIds })
             } catch (err) {
                 console.error('[useLiveSession] Failed to reorder queue:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, sessionRole, reorderQueueMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, reorderQueueMutation])
 
     const handleSyncOperatorSlides = useCallback(async (slideIds: string[]) => {
-        if (sessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
+        if (resolvedSessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
             try {
-                await setOperatorSlidesMutation({ sessionId, slideIds })
+                await setOperatorSlidesMutation({ sessionId: resolvedSessionId, slideIds })
             } catch (err) {
                 console.error('[useLiveSession] Failed to sync operator slides:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
 
     const handleAcceptFromQueue = useCallback(async (slideIds: string[]) => {
         const removeLocally = useAppStore.getState().removeSharedQueueSlideIds
         removeLocally(slideIds)
 
-        if (sessionId && isConvexConnected && !isOffline) {
+        if (resolvedSessionId && isConvexConnected && !isOffline) {
             try {
-                await acceptFromQueueMutation({ sessionId, slideIds })
+                await acceptFromQueueMutation({ sessionId: resolvedSessionId, slideIds })
             } catch (err) {
                 const addLocally = useAppStore.getState().addSharedQueueSlideIds
                 addLocally(slideIds)
                 console.error('[useLiveSession] Failed to accept from queue:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, acceptFromQueueMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, acceptFromQueueMutation])
 
     const handleToggleBlank = useCallback(async (isBlank: boolean) => {
-        if (sessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
+        if (resolvedSessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
             try {
-                await toggleBlankMutation({ sessionId, isBlank })
+                await toggleBlankMutation({ sessionId: resolvedSessionId, isBlank })
             } catch (err) {
                 console.error('[useLiveSession] Failed to toggle blank:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, sessionRole, toggleBlankMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, toggleBlankMutation])
 
     const handleSetOverlay = useCallback(async (overlay?: string, alertId?: string) => {
         setActiveOverlay(overlay || 'none')
-        if (sessionId && isConvexConnected && !isOffline) {
+        if (resolvedSessionId && isConvexConnected && !isOffline) {
             try {
-                await setOverlayMutation({ sessionId, overlay, alertId })
+                await setOverlayMutation({ sessionId: resolvedSessionId, overlay, alertId })
             } catch (err) {
                 console.error('[useLiveSession] Failed to set overlay:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, setOverlayMutation, setActiveOverlay])
+    }, [resolvedSessionId, isConvexConnected, isOffline, setOverlayMutation, setActiveOverlay])
 
     const handleTransferOperator = useCallback(async (newOperatorId: string) => {
-        if (sessionId && isConvexConnected && !isOffline) {
+        if (resolvedSessionId && isConvexConnected && !isOffline) {
             try {
-                await transferOperatorMutation({ sessionId, newOperatorId: newOperatorId as Id<"users"> })
+                await transferOperatorMutation({ sessionId: resolvedSessionId, newOperatorId: newOperatorId as Id<"users"> })
             } catch (err) {
                 console.error('[useLiveSession] Failed to transfer operator:', err)
             }
         }
-    }, [sessionId, isConvexConnected, isOffline, transferOperatorMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, transferOperatorMutation])
 
     // Auto-sync operator's slide order to Convex when it changes locally
     useEffect(() => {
-        if (!sessionId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
+        if (!resolvedSessionId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
         if (!liveOutputSlidesId || liveOutputSlidesId.length === 0) return
 
         const slidesKey = JSON.stringify(liveOutputSlidesId)
         if (slidesKey === lastSyncedSlidesRef.current) return
 
         const timeoutId = setTimeout(() => {
-            if (sessionId && isConvexConnected && !isOffline) {
-                setOperatorSlidesMutation({ sessionId, slideIds: liveOutputSlidesId })
+            if (resolvedSessionId && isConvexConnected && !isOffline) {
+                setOperatorSlidesMutation({ sessionId: resolvedSessionId, slideIds: liveOutputSlidesId })
                     .then(() => {
                         lastSyncedSlidesRef.current = slidesKey
                     })
@@ -422,19 +467,11 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }, 500)
 
         return () => clearTimeout(timeoutId)
-    }, [liveOutputSlidesId, sessionId, isConvexConnected, isOffline, sessionRole])
-
-    useEffect(() => {
-        return () => {
-            if (sessionId && isConvexConnected && !isOffline) {
-                leaveSessionMutation({ sessionId }).catch(console.error)
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [liveOutputSlidesId, resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
 
     return {
-        sessionId,
+        sessionId: resolvedSessionId,
+        sessionScheduleId,
         sessionRole,
         collaborationMode,
         isOperator: sessionRole === 'operator',
@@ -443,7 +480,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         isOpen: collaborationMode === 'open',
         isStrict: collaborationMode === 'strict',
         isModerated: collaborationMode === 'moderated',
-        isConnected: !!sessionId && isConvexConnected && !isOffline,
+        isConnected: !!resolvedSessionId && isConvexConnected && !isOffline,
         isStarting,
         startSession,
         joinSession,

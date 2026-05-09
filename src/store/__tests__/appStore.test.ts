@@ -254,6 +254,47 @@ describe('appStore', () => {
         })
     })
 
+    describe('session slide hydration', () => {
+        it('replaces slides for a specific schedule without clobbering live output order', () => {
+            const store = useAppStore.getState()
+            const scheduleASlide: Slide = {
+                id: 'a-1',
+                index: 0,
+                name: 'A1',
+                type: 'text',
+                layout: 'full-text',
+                userId: 'user-1',
+                churchId: 'church-1',
+                scheduleId: 'schedule-a',
+                contents: [],
+            }
+            const scheduleBSlide: Slide = {
+                id: 'b-1',
+                index: 0,
+                name: 'B1',
+                type: 'text',
+                layout: 'full-text',
+                userId: 'user-1',
+                churchId: 'church-1',
+                scheduleId: 'schedule-b',
+                contents: [],
+            }
+
+            act(() => {
+                store.setActiveSlides([scheduleASlide, scheduleBSlide])
+                store.setLiveOutputSlidesId(['b-1', 'a-1'])
+                store.replaceSlidesForSchedule('schedule-a', [{
+                    ...scheduleASlide,
+                    id: 'a-2',
+                    name: 'A2',
+                }], true)
+            })
+
+            expect(useAppStore.getState().activeSlides.some((s) => s.id === 'a-2')).toBe(true)
+            expect(useAppStore.getState().liveOutputSlidesId).toEqual(['b-1', 'a-1'])
+        })
+    })
+
     describe('signOut', () => {
         it('should reset all state', () => {
             const store = useAppStore.getState()

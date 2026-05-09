@@ -44,6 +44,13 @@ export default function LiveView() {
         isSignedIn && sessionId ? { sessionId: sessionId as any } : 'skip'
     )
 
+    const sessionSlides = useQuery(
+        api.slides.getSlides,
+        isSignedIn && sharedSession?.status === 'active' && sharedSession.scheduleId
+            ? { scheduleId: sharedSession.scheduleId }
+            : 'skip'
+    )
+
     const [countdownSeconds, setCountdownSeconds] = useState<number>(0)
     const [countdownPaused, setCountdownPaused] = useState(false)
     const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -181,11 +188,18 @@ export default function LiveView() {
         }
     }, [isSessionMode, currentSlideId])
 
+    const resolvedSlides = useMemo(() => {
+        if (isSessionMode) {
+            return (sessionSlides || []) as Slide[]
+        }
+        return liveState?.slides || []
+    }, [isSessionMode, sessionSlides, liveState?.slides])
+
     // Get current live slide
     const slide = useMemo(() => {
-        if (!liveState?.slides) return null
-        return liveState.slides.find(s => s.id === currentSlideId)
-    }, [liveState, currentSlideId])
+        if (!resolvedSlides.length) return null
+        return resolvedSlides.find(s => s.id === currentSlideId) || null
+    }, [resolvedSlides, currentSlideId])
 
     // Get file URL if slide has a backgroundStorageId
     const fileUrl = useFileUrl(slide?.backgroundStorageId || null)

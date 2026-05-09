@@ -201,6 +201,7 @@ interface AppStore extends AppState {
     updateActiveSlide: (slide: Slide) => void
     removeActiveSlide: (slide: Slide) => void
     replaceScheduleActiveSlides: (slides: Slide[]) => void
+    replaceSlidesForSchedule: (scheduleId: string, slides: Slide[], preserveLiveOutputOrder?: boolean) => void
     setActiveSlides: (slides: Slide[]) => void
     setLiveOutputSlidesId: (slides: string[]) => void
     setSharedQueueSlideIds: (slideIds: string[]) => void
@@ -405,6 +406,26 @@ export const useAppStore = create<AppStore>()(
                         activeSlides: ensureUniqueIds(tempSlides),
                         liveOutputSlidesId: Array.from(new Set(tempSlides.map((slide) => slide.id))),
                         futureStates: []
+                    }
+                })
+            },
+
+            replaceSlidesForSchedule: (scheduleId, slides, preserveLiveOutputOrder = true) => {
+                set((state) => {
+                    if (!scheduleId) return state
+
+                    const mergedSlides = [
+                        ...state.activeSlides.filter((slide) => slide.scheduleId !== scheduleId),
+                        ...slides,
+                    ]
+                    const uniqueSlides = ensureUniqueIds(mergedSlides)
+
+                    return {
+                        activeSlides: uniqueSlides,
+                        liveOutputSlidesId: preserveLiveOutputOrder
+                            ? state.liveOutputSlidesId
+                            : Array.from(new Set(uniqueSlides.map((slide) => slide.id))),
+                        futureStates: [],
                     }
                 })
             },

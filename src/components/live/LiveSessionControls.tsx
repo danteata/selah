@@ -6,6 +6,7 @@ import type { Id } from '../../../convex/_generated/dataModel'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useSchedules } from '../../hooks/useSchedules'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
+import { selectDiscoveredSession } from '../../hooks/liveSessionUtils'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
@@ -56,10 +57,12 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     )
 
     const discoveredSession = useMemo(() => {
-        if (!churchSessions || churchSessions.length === 0) return null
-        if (activeSession?._id) return null
-        return churchSessions[0]
-    }, [churchSessions, activeSession?._id])
+        return selectDiscoveredSession({
+            activeSessionId: activeSession?._id || null,
+            activeScheduleId: activeSchedule?._id || null,
+            sessionsByChurch: churchSessions || null,
+        })
+    }, [churchSessions, activeSession?._id, activeSchedule?._id])
 
     const effectiveSession = activeSession || discoveredSession
 

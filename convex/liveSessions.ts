@@ -20,6 +20,25 @@ async function getAuthenticatedUser(ctx: any) {
     return user;
 }
 
+function removeQueueEntriesByOccurrence(
+    queue: Array<{ slideId: string; suggestedBy: string; suggestedAt: number }>,
+    slideIds: string[]
+) {
+    const counts = new Map<string, number>();
+    for (const id of slideIds) {
+        counts.set(id, (counts.get(id) || 0) + 1);
+    }
+
+    return queue.filter((entry) => {
+        const remaining = counts.get(entry.slideId) || 0;
+        if (remaining > 0) {
+            counts.set(entry.slideId, remaining - 1);
+            return false;
+        }
+        return true;
+    });
+}
+
 export const getActiveSession = query({
     args: {
         scheduleId: v.string(),
@@ -313,7 +332,7 @@ export const removeFromQueue = mutation({
         }
 
         const currentQueue = session.queue || [];
-        const updatedQueue = currentQueue.filter(entry => !args.slideIds.includes(entry.slideId));
+        const updatedQueue = removeQueueEntriesByOccurrence(currentQueue, args.slideIds);
 
         await ctx.db.patch(args.sessionId, {
             queue: updatedQueue,
@@ -342,7 +361,7 @@ export const acceptFromQueue = mutation({
         }
 
         const currentQueue = session.queue || [];
-        const updatedQueue = currentQueue.filter(entry => !args.slideIds.includes(entry.slideId));
+        const updatedQueue = removeQueueEntriesByOccurrence(currentQueue, args.slideIds);
 
         const currentSlides = session.operatorSlideIds || [];
         const newSlides = [...currentSlides, ...args.slideIds.filter(id => !currentSlides.includes(id))];
@@ -375,9 +394,21 @@ export const reorderQueue = mutation({
         }
 
         const currentQueue = session.queue || [];
-        const reorderedQueue = args.orderedSlideIds
-            .map(slideId => currentQueue.find(entry => entry.slideId === slideId))
-            .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+        const buckets = new Map<string, Array<typeof currentQueue[number]>>();
+        for (const entry of currentQueue) {
+            const existing = buckets.get(entry.slideId) || [];
+            existing.push(entry);
+            buckets.set(entry.slideId, existing);
+        }
+
+        const reorderedQueue: typeof currentQueue = [];
+        for (const slideId of args.orderedSlideIds) {
+            const bucket = buckets.get(slideId);
+            if (bucket && bucket.length > 0) {
+                const next = bucket.shift();
+                if (next) reorderedQueue.push(next);
+            }
+        }
 
         await ctx.db.patch(args.sessionId, {
             queue: reorderedQueue,

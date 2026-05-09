@@ -71,6 +71,7 @@ export function LiveOutput() {
         isViewer,
         isConnected,
         isOpen,
+        sessionScheduleId,
         collaborationMode,
         setLiveSlide: setLiveSlideShared,
         addToQueue,
@@ -94,15 +95,16 @@ export function LiveOutput() {
             .map(id => activeSlides.find(slide => slide.id === id))
             .filter((slide): slide is Slide => slide !== undefined)
 
-        // Filter by active schedule (show slides with matching scheduleId or no scheduleId)
-        if (activeSchedule) {
+        // Prefer session schedule while collaborating; fallback to selected schedule.
+        const effectiveScheduleId = sessionScheduleId || activeSchedule?._id
+        if (effectiveScheduleId) {
             return slides.filter(slide =>
-                slide.scheduleId === activeSchedule._id || !slide.scheduleId || slide.scheduleId === ''
+                slide.scheduleId === effectiveScheduleId || !slide.scheduleId || slide.scheduleId === ''
             )
         }
         // If no active schedule, show all slides without a scheduleId
         return slides.filter(slide => !slide.scheduleId || slide.scheduleId === '')
-    }, [liveOutputSlidesId, activeSlides, activeSchedule])
+    }, [liveOutputSlidesId, activeSlides, activeSchedule?._id, sessionScheduleId])
 
     // Shared queue slides — contributed by non-operators
     const sharedQueueSlides = useMemo(() => {

@@ -20,7 +20,6 @@ export function PreviewContent() {
     const setActiveSlides = useAppStore((state) => state.setActiveSlides)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
-    const setLiveSlide = useAppStore((state) => state.setLiveSlide)
     const bulkSelectMode = useAppStore((state) => state.bulkSelectMode)
     const selectedSlideIds = useAppStore((state) => state.selectedSlideIds)
     const toggleBulkSelectMode = useAppStore((state) => state.toggleBulkSelectMode)
@@ -33,20 +32,21 @@ export function PreviewContent() {
     const { createTextSlide, duplicateSlide } = useSlideCreation()
     const { addToLibrary, isInLibrary } = useLibrary()
     const { fetchScripture } = useScripture()
-    const { isContributor, isConnected, addToQueue } = useLiveSession()
+    const { isContributor, isConnected, addToQueue, setLiveSlide: setSharedLiveSlide, sessionScheduleId } = useLiveSession()
     const slidesGridRef = useRef<HTMLDivElement>(null)
 
     // Derive slides from store - single source of truth
     // Show slides that match the active schedule, or slides without a schedule if no active schedule
     const slides = useMemo(() => {
-        if (activeSchedule) {
+        const effectiveScheduleId = sessionScheduleId || activeSchedule?._id
+        if (effectiveScheduleId) {
             return activeSlides.filter(
-                (slide) => slide.scheduleId === activeSchedule._id || slide.scheduleId === ''
+                (slide) => slide.scheduleId === effectiveScheduleId || slide.scheduleId === ''
             )
         }
         // If no active schedule, show all slides without a scheduleId
         return activeSlides.filter((slide) => !slide.scheduleId || slide.scheduleId === '')
-    }, [activeSlides, activeSchedule])
+    }, [activeSlides, activeSchedule?._id, sessionScheduleId])
 
     const handleDeleteSlide = useCallback((slideId: string) => {
         const slide = slides.find(s => s.id === slideId)
@@ -83,12 +83,6 @@ export function PreviewContent() {
             setActiveSlide(slide)
         }
     }, [bulkSelectMode, toggleSlideSelection])
-
-    const handleGoLive = useCallback(() => {
-        if (activeSlide) {
-            setLiveSlide(activeSlide.id)
-        }
-    }, [activeSlide, setLiveSlide])
 
     const handleDeleteSelected = useCallback(() => {
         selectedSlideIds.forEach(id => {
@@ -350,7 +344,7 @@ export function PreviewContent() {
                             onEdit={() => handleEditSlide(slide)}
                             onSaveToLibrary={() => handleSaveToLibrary(slide)}
                             isSaved={isInLibrary(slide.id)}
-                            onGoLive={() => setLiveSlide(slide.id)}
+                            onGoLive={() => { void setSharedLiveSlide(slide.id) }}
                             onSuggestToQueue={isContributor && isConnected ? () => addToQueue([slide.id]) : undefined}
                         />
                     ))

@@ -1,5 +1,5 @@
 import { useUser, useClerk } from '@clerk/clerk-react'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Shield, Database, Book, X, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates } from '../hooks'
@@ -41,7 +41,6 @@ export default function Dashboard() {
     const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
     const activeSlides = useAppStore((state) => state.activeSlides)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
-    const setLiveSlide = useAppStore((state) => state.setLiveSlide)
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
     const selectedSlideIds = useAppStore((state) => state.selectedSlideIds)
     const clearSelectedSlides = useAppStore((state) => state.clearSelectedSlides)
@@ -57,7 +56,7 @@ export default function Dashboard() {
     const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
 
     // Shared live session for collaboration
-    const { sessionId, sessionRole } = useLiveSession()
+    const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession } = useLiveSession()
 
     // Collaboration toast notifications
     useCollaborationToasts(currentUser?.churchId || undefined, sessionId || undefined)
@@ -67,6 +66,18 @@ export default function Dashboard() {
 
     // Presence heartbeat — marks this user as online
     usePresence(currentUser?.churchId || undefined, sessionId || undefined, sessionRole)
+
+    const leaveSessionRef = useRef(leaveSession)
+    useEffect(() => {
+        leaveSessionRef.current = leaveSession
+    }, [leaveSession])
+
+    // Ensure session membership is cleaned up when leaving dashboard route.
+    useEffect(() => {
+        return () => {
+            void leaveSessionRef.current()
+        }
+    }, [])
 
     const [isDark, setIsDark] = useState(() => {
         if (typeof window === 'undefined') return false
@@ -131,28 +142,28 @@ export default function Dashboard() {
     const navigateToNextSlide = useCallback(() => {
         const currentIndex = scheduleSlides.findIndex(s => s.id === liveSlideId)
         if (currentIndex < scheduleSlides.length - 1) {
-            setLiveSlide(scheduleSlides[currentIndex + 1].id)
+            void setSharedLiveSlide(scheduleSlides[currentIndex + 1].id)
         }
-    }, [scheduleSlides, liveSlideId, setLiveSlide])
+    }, [scheduleSlides, liveSlideId, setSharedLiveSlide])
 
     const navigateToPrevSlide = useCallback(() => {
         const currentIndex = scheduleSlides.findIndex(s => s.id === liveSlideId)
         if (currentIndex > 0) {
-            setLiveSlide(scheduleSlides[currentIndex - 1].id)
+            void setSharedLiveSlide(scheduleSlides[currentIndex - 1].id)
         }
-    }, [scheduleSlides, liveSlideId, setLiveSlide])
+    }, [scheduleSlides, liveSlideId, setSharedLiveSlide])
 
     const navigateToFirstSlide = useCallback(() => {
         if (scheduleSlides.length > 0) {
-            setLiveSlide(scheduleSlides[0].id)
+            void setSharedLiveSlide(scheduleSlides[0].id)
         }
-    }, [scheduleSlides, setLiveSlide])
+    }, [scheduleSlides, setSharedLiveSlide])
 
     const navigateToLastSlide = useCallback(() => {
         if (scheduleSlides.length > 0) {
-            setLiveSlide(scheduleSlides[scheduleSlides.length - 1].id)
+            void setSharedLiveSlide(scheduleSlides[scheduleSlides.length - 1].id)
         }
-    }, [scheduleSlides, setLiveSlide])
+    }, [scheduleSlides, setSharedLiveSlide])
 
     // Delete selected slides
     const deleteSelectedSlides = useCallback(() => {
@@ -170,9 +181,9 @@ export default function Dashboard() {
     // Toggle live slide (promote current preview slide to live)
     const promoteToLive = useCallback(() => {
         if (!liveSlideId && scheduleSlides.length > 0) {
-            setLiveSlide(scheduleSlides[0].id)
+            void setSharedLiveSlide(scheduleSlides[0].id)
         }
-    }, [liveSlideId, scheduleSlides, setLiveSlide])
+    }, [liveSlideId, scheduleSlides, setSharedLiveSlide])
 
     // Toggle overlay (black/white screen)
     const toggleBlackScreen = useCallback(() => {

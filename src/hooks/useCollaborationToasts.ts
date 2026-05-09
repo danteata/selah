@@ -11,6 +11,7 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
     const { isOffline } = useConvexConnection()
     const previousSessionRef = useRef<any | null>(null)
     const previousUsersRef = useRef<any[] | null>(null)
+    const previousSessionIdRef = useRef<string | null>(null)
 
     const sharedSession = useQuery(
         api.liveSessions.getSession,
@@ -21,6 +22,14 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
         api.presence.getPresenceBySession,
         liveSessionId && !isOffline ? { sessionId: liveSessionId } : 'skip'
     )
+
+    useEffect(() => {
+        if (previousSessionIdRef.current !== (liveSessionId || null)) {
+            previousSessionRef.current = null
+            previousUsersRef.current = null
+            previousSessionIdRef.current = liveSessionId || null
+        }
+    }, [liveSessionId])
 
     useEffect(() => {
         if (!sharedSession || !liveSessionId) return
