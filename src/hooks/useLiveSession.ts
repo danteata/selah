@@ -17,6 +17,30 @@ interface QueueEntry {
     suggestedAt: number
 }
 
+function removeByOccurrence(source: string[], removals: string[]) {
+    const counts = new Map<string, number>()
+    for (const id of removals) {
+        counts.set(id, (counts.get(id) || 0) + 1)
+    }
+
+    return source.filter((id) => {
+        const count = counts.get(id) || 0
+        if (count > 0) {
+            counts.set(id, count - 1)
+            return false
+        }
+        return true
+    })
+}
+
+function mergePendingQueue(serverQueue: string[], pendingQueue: string[]) {
+    const stillPending = removeByOccurrence(pendingQueue, serverQueue)
+    return {
+        stillPending,
+        displayQueue: [...serverQueue, ...stillPending],
+    }
+}
+
 interface UseLiveSessionReturn {
     sessionId: Id<"liveSessions"> | null
     sessionScheduleId: string | null
@@ -108,6 +132,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const previousLiveSlideRef = useRef<string | null>(null)
     const lastSyncedSlidesRef = useRef<string | null>(null)
     const lastSyncedScheduleSlidesRef = useRef<string | null>(null)
+    const pendingQueueSlideIdsRef = useRef<string[]>([])
 
     const resolvedSessionId = (sessionId || (resolvedActiveSession?._id as Id<"liveSessions"> | undefined) || null) as Id<"liveSessions"> | null
     const sessionScheduleId = (liveSession?.scheduleId || resolvedActiveSession?.scheduleId || effectiveScheduleId || null) as string | null
@@ -137,16 +162,20 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             const queue = (resolvedActiveSession as any).queue
             if (queue && Array.isArray(queue)) {
                 const queueSlideIds = queue.map((entry: QueueEntry) => entry.slideId)
+                const { stillPending, displayQueue } = mergePendingQueue(queueSlideIds, pendingQueueSlideIdsRef.current)
+                pendingQueueSlideIdsRef.current = stillPending
                 const currentQueue = useAppStore.getState().sharedQueueSlideIds
-                if (JSON.stringify(currentQueue) !== JSON.stringify(queueSlideIds)) {
-                    setSharedQueueSlideIds(queueSlideIds)
+                if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
+                    setSharedQueueSlideIds(displayQueue)
                 }
             } else if ((resolvedActiveSession as any).queuedSlideIds) {
                 // Backward compat with old schema
                 const queuedIds = (resolvedActiveSession as any).queuedSlideIds as string[]
+                const { stillPending, displayQueue } = mergePendingQueue(queuedIds, pendingQueueSlideIdsRef.current)
+                pendingQueueSlideIdsRef.current = stillPending
                 const currentQueue = useAppStore.getState().sharedQueueSlideIds
-                if (JSON.stringify(currentQueue) !== JSON.stringify(queuedIds)) {
-                    setSharedQueueSlideIds(queuedIds)
+                if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
+                    setSharedQueueSlideIds(displayQueue)
                 }
             }
 
@@ -216,20 +245,26 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         const queuedSlideIds = (liveSession as any).queuedSlideIds
         if (queue && Array.isArray(queue)) {
             const queueSlideIds = queue.map((entry: QueueEntry) => entry.slideId)
+            const { stillPending, displayQueue } = mergePendingQueue(queueSlideIds, pendingQueueSlideIdsRef.current)
+            pendingQueueSlideIdsRef.current = stillPending
             const currentQueue = useAppStore.getState().sharedQueueSlideIds
-            if (JSON.stringify(currentQueue) !== JSON.stringify(queueSlideIds)) {
-                setSharedQueueSlideIds(queueSlideIds)
+            if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
+                setSharedQueueSlideIds(displayQueue)
             }
         } else if (queuedSlideIds && Array.isArray(queuedSlideIds)) {
             // Backward compat with sessions that still use queuedSlideIds
+            const { stillPending, displayQueue } = mergePendingQueue(queuedSlideIds, pendingQueueSlideIdsRef.current)
+            pendingQueueSlideIdsRef.current = stillPending
             const currentQueue = useAppStore.getState().sharedQueueSlideIds
-            if (JSON.stringify(currentQueue) !== JSON.stringify(queuedSlideIds)) {
-                setSharedQueueSlideIds(queuedSlideIds)
+            if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
+                setSharedQueueSlideIds(displayQueue)
             }
         } else if (queue !== undefined || queuedSlideIds !== undefined) {
             // queue/queuedSlideIds is explicitly empty (null/[]), clear local
             const currentQueue = useAppStore.getState().sharedQueueSlideIds
-            if (currentQueue.length > 0) {
+            if (pendingQueueSlideIdsRef.current.length > 0) {
+                setSharedQueueSlideIds(pendingQueueSlideIdsRef.current)
+            } else if (currentQueue.length > 0) {
                 setSharedQueueSlideIds([])
             }
         }
@@ -366,11 +401,13 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }
 
         const addLocally = useAppStore.getState().addSharedQueueSlideIds
+        pendingQueueSlideIdsRef.current = [...pendingQueueSlideIdsRef.current, ...slideIds]
         addLocally(slideIds)
 
         try {
             await addToQueueMutation({ sessionId: resolvedSessionId, slideIds, position })
         } catch (err) {
+            pendingQueueSlideIdsRef.current = removeByOccurrence(pendingQueueSlideIdsRef.current, slideIds)
             useAppStore.getState().removeSharedQueueSlideIds(slideIds)
             console.error('[useLiveSession] Failed to add to queue:', err)
         }

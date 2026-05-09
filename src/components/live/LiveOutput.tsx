@@ -71,6 +71,7 @@ export function LiveOutput() {
         isViewer,
         isConnected,
         isOpen,
+        isStrict,
         sessionScheduleId,
         collaborationMode,
         setLiveSlide: setLiveSlideShared,
@@ -610,7 +611,7 @@ export function LiveOutput() {
                                     >
                                         <ChevronUp className="w-5 h-5 mx-auto" />
                                     </button>
-                                    {isConnected && !isOperator && !isOpen && nextSlide && (
+                                    {isConnected && !isOperator && !isOpen && !isStrict && nextSlide && (
                                         <button
                                             onClick={() => handleSuggestNext(nextSlide.id)}
                                             className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-medium transition-colors flex items-center justify-center gap-1"

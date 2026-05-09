@@ -32,7 +32,16 @@ export function PreviewContent() {
     const { createTextSlide, duplicateSlide } = useSlideCreation()
     const { addToLibrary, isInLibrary } = useLibrary()
     const { fetchScripture } = useScripture()
-    const { isContributor, isConnected, addToQueue, setLiveSlide: setSharedLiveSlide, sessionScheduleId } = useLiveSession()
+    const {
+        isOperator,
+        isContributor,
+        isConnected,
+        isOpen,
+        isStrict,
+        addToQueue,
+        setLiveSlide: setSharedLiveSlide,
+        sessionScheduleId,
+    } = useLiveSession()
     const slidesGridRef = useRef<HTMLDivElement>(null)
 
     // Derive slides from store - single source of truth
@@ -47,6 +56,9 @@ export function PreviewContent() {
         // If no active schedule, show all slides without a scheduleId
         return activeSlides.filter((slide) => !slide.scheduleId || slide.scheduleId === '')
     }, [activeSlides, activeSchedule?._id, sessionScheduleId])
+
+    const canGoLive = !isConnected || isOperator || (isContributor && isOpen)
+    const canQueueSlide = isConnected && isContributor && !isStrict
 
     const handleDeleteSlide = useCallback((slideId: string) => {
         const slide = slides.find(s => s.id === slideId)
@@ -344,8 +356,8 @@ export function PreviewContent() {
                             onEdit={() => handleEditSlide(slide)}
                             onSaveToLibrary={() => handleSaveToLibrary(slide)}
                             isSaved={isInLibrary(slide.id)}
-                            onGoLive={() => { void setSharedLiveSlide(slide.id) }}
-                            onSuggestToQueue={isContributor && isConnected ? () => addToQueue([slide.id]) : undefined}
+                            onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
+                            onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
                         />
                     ))
                 ) : (
