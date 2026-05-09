@@ -127,20 +127,26 @@ export function LiveOutput() {
         return activeSlides.find(slide => slide.id === liveSlideId)
     }, [activeSlides, liveSlideId])
 
-    // Get file URL for live slide if it has a backgroundStorageId
+    // Get next/prev slide indices (used both for hook params and for reading slides)
+    const currentIndex = useMemo(() => {
+        return liveOutputSlides.findIndex(slide => slide.id === liveSlideId)
+    }, [liveOutputSlides, liveSlideId])
+    const nextSlideStorageId = liveOutputSlides[currentIndex + 1]?.backgroundStorageId || null
+
+    // Get file URL for live slide and next slide backgrounds (hooks must be at top level)
     const liveSlideFileUrl = useFileUrl(liveSlide?.backgroundStorageId || null)
+    const nextSlideFileUrl = useFileUrl(nextSlideStorageId)
 
     // Determine the background URL for live slide
     const liveSlideBackground = liveSlideFileUrl || liveSlide?.background
     const isLiveSlideVideo = liveSlide?.backgroundType === 'video' && liveSlideBackground
 
-    // Get next and previous slides
-    const currentIndex = useMemo(() => {
-        return liveOutputSlides.findIndex(slide => slide.id === liveSlideId)
-    }, [liveOutputSlides, liveSlideId])
-
     const nextSlide = liveOutputSlides[currentIndex + 1]
     const prevSlide = liveOutputSlides[currentIndex - 1]
+
+    // Determine the background URL for next slide preview
+    const nextSlideBackground = nextSlideFileUrl || nextSlide?.background
+    const isNextSlideVideo = nextSlide?.backgroundType === 'video' && nextSlideBackground
     const liveHtml = liveSlide
         ? (liveSlide.type === 'bible' && liveSlide.contents[1]
             ? `${liveSlide.contents[0] || ''}${liveSlide.contents[1] || ''}`
@@ -543,16 +549,33 @@ export function LiveOutput() {
                         {/* Next Preview */}
                         <div className="space-y-2">
                             <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Next Up</div>
-                            <div className="aspect-video bg-gray-900 border border-gray-800 rounded-lg overflow-hidden relative opacity-60 grayscale-[0.5]">
+                            <div className="aspect-video border border-gray-800 rounded-lg overflow-hidden relative">
                                 {nextSlide ? (
-                                    <div className="w-full h-full p-4 flex items-center justify-center">
-                                        <div
-                                            className="text-white/60 text-center text-[0.8vw] line-clamp-3"
-                                            dangerouslySetInnerHTML={{ __html: nextUpHtml }}
-                                        />
+                                    <div
+                                        className="w-full h-full relative"
+                                        style={{
+                                            backgroundImage: !isNextSlideVideo && nextSlideBackground ? `url(${nextSlideBackground})` : undefined,
+                                            backgroundSize: 'cover',
+                                            backgroundPosition: 'center',
+                                            backgroundColor: !nextSlideBackground ? '#0a0a0a' : undefined,
+                                        }}
+                                    >
+                                        {isNextSlideVideo && (
+                                            <video
+                                                src={nextSlideBackground}
+                                                className="absolute inset-0 w-full h-full object-cover"
+                                                autoPlay loop muted playsInline
+                                            />
+                                        )}
+                                        <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/40">
+                                            <div
+                                                className="text-white/70 text-center text-[0.8vw] line-clamp-3 drop-shadow-lg"
+                                                dangerouslySetInnerHTML={{ __html: nextUpHtml }}
+                                            />
+                                        </div>
                                     </div>
                                 ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-800 italic text-[10px]">
+                                    <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-800 italic text-[10px]">
                                         End of Schedule
                                     </div>
                                 )}
