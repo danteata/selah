@@ -64,6 +64,7 @@ interface UseLiveSessionReturn {
     acceptFromQueue: (slideIds: string[]) => Promise<void>
     reorderQueue: (orderedSlideIds: string[]) => Promise<void>
     syncOperatorSlides: (slideIds: string[]) => Promise<void>
+    syncSlideContent: (slide: Slide) => Promise<void>
     toggleBlank: (isBlank: boolean) => Promise<void>
     setOverlay: (overlay?: string, alertId?: string) => Promise<void>
     transferOperator: (newOperatorId: string) => Promise<void>
@@ -128,6 +129,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const setOverlayMutation = useMutation(api.liveSessions.setOverlay)
     const transferOperatorMutation = useMutation(api.liveSessions.transferOperator)
     const syncScheduleSlidesMutation = useMutation(api.slides.syncScheduleSlides)
+    const upsertScheduleSlideMutation = useMutation(api.slides.upsertScheduleSlide)
 
     const previousLiveSlideRef = useRef<string | null>(null)
     const lastSyncedSlidesRef = useRef<string | null>(null)
@@ -364,26 +366,56 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
     const handleSetLiveSlide = useCallback(async (slideId: string | null) => {
         const effectiveMode = (liveSession?.collaborationMode || resolvedActiveSession?.collaborationMode || collaborationMode) as CollaborationMode | null
-        const canPushShared = !!resolvedSessionId && canClientPushLiveSlide({
+        const canOptimisticallyPush = !!resolvedSessionId && canClientPushLiveSlide({
             isConnected: isConvexConnected,
             isOffline,
             isOperator: sessionRole === 'operator',
             isOpenMode: effectiveMode === 'open',
         })
 
-        if (!resolvedSessionId || canPushShared) {
+        if (!resolvedSessionId || canOptimisticallyPush) {
             setLiveSlideStore(slideId || '')
             previousLiveSlideRef.current = slideId
         }
 
-        if (resolvedSessionId && canPushShared) {
+        if (resolvedSessionId && isConvexConnected && !isOffline) {
             try {
+                const localSlide = slideId ? activeSlides.find((slide) => slide.id === slideId) : null
+                if (localSlide && sessionScheduleId) {
+                    await upsertScheduleSlideMutation({
+                        scheduleId: sessionScheduleId,
+                        slide: {
+                            id: localSlide.id,
+                            index: typeof localSlide.index === 'number' ? localSlide.index : 0,
+                            name: localSlide.name || 'Untitled',
+                            type: localSlide.type,
+                            layout: localSlide.layout,
+                            contents: localSlide.contents || [],
+                            backgroundType: localSlide.backgroundType,
+                            background: localSlide.background,
+                            backgroundVideoKey: localSlide.backgroundVideoKey,
+                            backgroundStorageId: localSlide.backgroundStorageId,
+                            title: localSlide.title,
+                            songId: localSlide.songId,
+                            hasChorus: localSlide.hasChorus,
+                            data: localSlide.data,
+                            slideStyle: localSlide.slideStyle,
+                            saved: localSlide.saved,
+                            verseIndex: localSlide.verseIndex,
+                            totalVerses: localSlide.totalVerses,
+                            verseLabel: localSlide.verseLabel,
+                        },
+                    })
+                }
                 await setLiveSlideMutation({ sessionId: resolvedSessionId, slideId: slideId || undefined })
             } catch (err) {
+                const serverSlideId = liveSession?.liveSlideId || ''
+                setLiveSlideStore(serverSlideId)
+                previousLiveSlideRef.current = serverSlideId || null
                 console.error('[useLiveSession] Failed to set live slide:', err)
             }
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, liveSession?.collaborationMode, resolvedActiveSession?.collaborationMode, setLiveSlideMutation, setLiveSlideStore])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, liveSession?.collaborationMode, liveSession?.liveSlideId, resolvedActiveSession?.collaborationMode, activeSlides, sessionScheduleId, upsertScheduleSlideMutation, setLiveSlideMutation, setLiveSlideStore])
 
     const handleAddToQueue = useCallback(async (slideIds: string[], position?: number) => {
         const isSharedSessionConnected = !!resolvedSessionId && isConvexConnected && !isOffline
@@ -447,6 +479,39 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
+
+    const handleSyncSlideContent = useCallback(async (slide: Slide) => {
+        if (!sessionScheduleId || !isConvexConnected || isOffline) return
+
+        try {
+            await upsertScheduleSlideMutation({
+                scheduleId: sessionScheduleId,
+                slide: {
+                    id: slide.id,
+                    index: typeof slide.index === 'number' ? slide.index : 0,
+                    name: slide.name || 'Untitled',
+                    type: slide.type,
+                    layout: slide.layout,
+                    contents: slide.contents || [],
+                    backgroundType: slide.backgroundType,
+                    background: slide.background,
+                    backgroundVideoKey: slide.backgroundVideoKey,
+                    backgroundStorageId: slide.backgroundStorageId,
+                    title: slide.title,
+                    songId: slide.songId,
+                    hasChorus: slide.hasChorus,
+                    data: slide.data,
+                    slideStyle: slide.slideStyle,
+                    saved: slide.saved,
+                    verseIndex: slide.verseIndex,
+                    totalVerses: slide.totalVerses,
+                    verseLabel: slide.verseLabel,
+                },
+            })
+        } catch (err) {
+            console.error('[useLiveSession] Failed to sync slide content:', err)
+        }
+    }, [sessionScheduleId, isConvexConnected, isOffline, upsertScheduleSlideMutation])
 
     const handleAcceptFromQueue = useCallback(async (slideIds: string[]) => {
         const removeLocally = useAppStore.getState().removeSharedQueueSlideIds
@@ -585,6 +650,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         acceptFromQueue: handleAcceptFromQueue,
         reorderQueue: handleReorderQueue,
         syncOperatorSlides: handleSyncOperatorSlides,
+        syncSlideContent: handleSyncSlideContent,
         toggleBlank: handleToggleBlank,
         setOverlay: handleSetOverlay,
         transferOperator: handleTransferOperator,

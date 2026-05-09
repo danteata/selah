@@ -75,6 +75,7 @@ export function LiveOutput() {
         sessionScheduleId,
         collaborationMode,
         setLiveSlide: setLiveSlideShared,
+        syncSlideContent,
         addToQueue,
         removeFromQueue,
         acceptFromQueue,
@@ -379,7 +380,12 @@ export function LiveOutput() {
         if (isDesktop) {
             sendSlideToLive(liveSlide.id, updatedSlide as unknown as Record<string, unknown>)
         }
-    }, [liveSlide, generateSlideContent, isDesktop, sendSlideToLive])
+
+        void syncSlideContent(updatedSlide)
+        if (isConnected) {
+            void setLiveSlideShared(updatedSlide.id)
+        }
+    }, [liveSlide, generateSlideContent, isDesktop, sendSlideToLive, syncSlideContent, isConnected, setLiveSlideShared])
 
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
@@ -494,6 +500,15 @@ export function LiveOutput() {
                             )}
                         </div>
                     </div>
+
+                    {liveSlide?.type === 'bible' && (
+                        <div className="mt-4">
+                            <BibleVerseNavigator
+                                currentSlide={liveSlide}
+                                onVerseSelect={handleVerseSelect}
+                            />
+                        </div>
+                    )}
 
                     {/* Shared Queue — contributions from non-operators */}
                     {isConnected && sharedQueueSlides.length > 0 && (

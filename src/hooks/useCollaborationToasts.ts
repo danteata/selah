@@ -49,7 +49,7 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
             sharedSession.operatorId !== selfId
         ) {
             toast.info('Live slide updated', {
-                description: 'The operator changed the current slide.',
+                description: 'The current slide changed in the live session.',
                 duration: 3000,
             })
         }
