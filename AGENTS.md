@@ -58,3 +58,20 @@ Multi-user real-time collaboration for live presentation control. Uses Convex su
 - **Per-schedule sessions** support simultaneous services (main + youth)
 - **Presence as separate table** (not embedded array) for proper Convex indexing
 - **Toast library: sonner** (`sonner` package installed)
+
+## Multi-Monitor / Live Output (Web + Desktop)
+
+### Architecture
+The live output system has **two code paths**: native (Tauri desktop) and web (browser Presentation API). Both are managed through `useNativeMultiMonitor`, which auto-detects the environment.
+
+### Critical Rule: Every desktop-only code path MUST have a web fallback
+When adding features to `useNativeMultiMonitor`, `ScreenPicker`, or `LiveOutput`:
+- Every `if (isDesktop)` branch MUST have an `else` that handles web mode
+- `openLiveWindow()` MUST NOT throw in web mode — use `multiMonitorService.startPresentation()` or `window.open()` as fallback
+- `detectMonitors()` MUST call `setMonitors()` in BOTH branches — the web branch previously only returned mapped screens without updating React state, causing "No screens detected"
+- `init()` web branch MUST auto-detect screens (call `multiMonitorService.detectScreens()` + `setMonitors()`), not just subscribe to `webState`
+- ScreenPicker MUST use `monitors` (not `screens`) for the screen list, since `monitors` is the unified state that's populated in both modes
+
+### Testing
+- Test files: `src/store/__tests__/sharedQueue.test.ts`, `src/hooks/__tests__/liveSessionSync.test.ts`, `src/hooks/__tests__/useNativeMultiMonitor.test.ts`
+- Key scenarios covered: queue sync backward compat (queue vs queuedSlideIds), operatorSlideIds operator-only sync, collaboration mode behaviors, session cleanup race conditions, screen detection mapping

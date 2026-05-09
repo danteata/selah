@@ -255,7 +255,7 @@ export function LiveOutput() {
 
     const liveOutputMonitorId = useAppStore((state) => state.settings.liveOutputMonitorId)
 
-    // Handle open live with screen picker
+    // Handle open live with screen picker or auto-open
     const handleOpenLive = useCallback(async () => {
         if (liveOutputMonitorId && isDesktop) {
             await openLiveWindow({
@@ -263,6 +263,13 @@ export function LiveOutput() {
                 fullscreen: true,
                 decorations: false,
                 always_on_top: true,
+                initial_slide_id: liveSlideId || undefined,
+            })
+        } else if (!isDesktop && liveOutputMonitorId) {
+            // Web mode with saved monitor preference
+            await openLiveWindow({
+                monitor_id: liveOutputMonitorId,
+                fullscreen: true,
                 initial_slide_id: liveSlideId || undefined,
             })
         } else {
@@ -279,6 +286,13 @@ export function LiveOutput() {
                 fullscreen: true,
                 decorations: false,
                 always_on_top: true,
+                initial_slide_id: liveSlideId || undefined,
+            })
+        } else {
+            // Web mode: use Presentation API or popup window
+            await openLiveWindow({
+                monitor_id: screenId,
+                fullscreen: true,
                 initial_slide_id: liveSlideId || undefined,
             })
         }

@@ -97,6 +97,26 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 } else {
                     // Subscribe to web state changes
                     const unsubscribe = multiMonitorService.subscribe(setWebState)
+
+                    // Auto-detect screens in web mode so monitors is populated
+                    try {
+                        const detectedScreens = await multiMonitorService.detectScreens()
+                        const mappedMonitors = detectedScreens.map((s, idx) => ({
+                            id: s.id,
+                            name: s.name,
+                            width: s.width,
+                            height: s.height,
+                            position_x: s.left,
+                            position_y: s.top,
+                            scale_factor: 1,
+                            is_primary: s.isPrimary,
+                            color: getMonitorColor(idx),
+                        }))
+                        setMonitors(mappedMonitors)
+                    } catch {
+                        // Screen detection may not be available (e.g. no Presentation API)
+                    }
+
                     return unsubscribe
                 }
             } finally {
@@ -135,7 +155,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 return monitorList
             } else {
                 const screens = await multiMonitorService.detectScreens()
-                return screens.map((s, idx) => ({
+                const mapped = screens.map((s, idx) => ({
                     id: s.id,
                     name: s.name,
                     width: s.width,
@@ -146,11 +166,12 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     is_primary: s.isPrimary,
                     color: getMonitorColor(idx),
                 }))
+                setMonitors(mapped)
+                return mapped
             }
         } finally {
             setIsLoading(false)
         }
-        return []
     }, [isDesktop])
 
     // Open live window
@@ -162,7 +183,32 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 setSelectedMonitorId(config.monitor_id)
             }
         } else {
-            throw new Error('Native live window requires desktop app')
+            // Web fallback: start Presentation API or open popup window
+            const liveViewUrl = `${window.location.origin}/live`
+            if (config?.monitor_id && config.monitor_id !== 'presentation-api') {
+                // Open on a specific screen
+                const win = await multiMonitorService.openLiveViewOnScreen(
+                    config.monitor_id,
+                    liveViewUrl,
+                    config.initial_slide_id
+                )
+                if (win) {
+                    setLiveWindowState('Open')
+                    setSelectedMonitorId(config.monitor_id)
+                }
+            } else {
+                // Use Presentation API or best available screen
+                const started = await multiMonitorService.startPresentation(liveViewUrl)
+                if (started) {
+                    setLiveWindowState('Fullscreen')
+                } else {
+                    // Fallback: open a popup window
+                    const win = window.open(liveViewUrl, 'selah-live', 'width=1280,height=720')
+                    if (win) {
+                        setLiveWindowState('Open')
+                    }
+                }
+            }
         }
     }, [isDesktop])
 

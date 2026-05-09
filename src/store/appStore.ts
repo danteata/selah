@@ -448,8 +448,7 @@ export const useAppStore = create<AppStore>()(
 
             addSharedQueueSlideIds: (slideIds) => {
                 set((state) => ({
-                    // Preserve queue order and duplicates to mirror shared session queue semantics
-                    sharedQueueSlideIds: [...state.sharedQueueSlideIds, ...slideIds]
+                    sharedQueueSlideIds: [...state.sharedQueueSlideIds, ...slideIds.filter(id => !state.sharedQueueSlideIds.includes(id))]
                 }))
             },
 
