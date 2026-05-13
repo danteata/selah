@@ -163,45 +163,45 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
 
 /**
  * Generate embeddings for multiple texts in batch.
- * More efficient than calling embedText multiple times.
- * 
+ * Uses true batched inference (passing arrays to the model) for dramatically
+ * better throughput — the ONNX runtime can parallelize across the batch.
+ *
  * @param texts - Array of texts to embed
  * @returns Array of embedding vectors
  */
 export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
-    const model = await getEmbedder();
+    if (texts.length === 0) return []
 
-    const results: EmbeddingResult[] = [];
+    const model = await getEmbedder()
 
-    // Process in batches to avoid memory issues
-    const BATCH_SIZE = 8;
+    const INFERENCE_BATCH = 32
+    const allResults: EmbeddingResult[] = []
 
-    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-        const batch = texts.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < texts.length; i += INFERENCE_BATCH) {
+        const batch = texts.slice(i, i + INFERENCE_BATCH)
 
-        const batchResults = await Promise.all(
-            batch.map(async (text) => {
-                const result = await model(text, {
-                    pooling: 'mean',
-                    normalize: true,
-                } as any);
-                const tensor = result as unknown as { data: Float32Array; dims: number[] };
-                return Array.from(tensor.data) as number[];
-            })
-        );
+        if (batch.length === 1) {
+            const result = await model(batch[0], { pooling: 'mean', normalize: true } as any)
+            const tensor = result as unknown as { data: Float32Array; dims: number[] }
+            allResults.push({ embedding: Array.from(tensor.data) as number[], dimensions: tensor.data.length })
+        } else {
+            const results = await model(batch, { pooling: 'mean', normalize: true } as any)
+            const batchTensor = results as unknown as { data: Float32Array; dims: number[] }
+            const dim = batchTensor.dims[batchTensor.dims.length - 1]
 
-        results.push(...batchResults.map((embedding) => ({
-            embedding,
-            dimensions: embedding.length,
-        })));
+            for (let j = 0; j < batch.length; j++) {
+                const start = j * dim
+                const embedding = Array.from(batchTensor.data.slice(start, start + dim)) as number[]
+                allResults.push({ embedding, dimensions: dim })
+            }
+        }
 
-        // Log progress for large batches
         if (texts.length > 100) {
-            console.log(`[Embeddings] Processed ${Math.min(i + BATCH_SIZE, texts.length)}/${texts.length} texts`);
+            console.log(`[Embeddings] Processed ${Math.min(i + INFERENCE_BATCH, texts.length)}/${texts.length} texts`)
         }
     }
 
-    return results;
+    return allResults
 }
 
 /**
@@ -355,29 +355,29 @@ export async function getCachedVerseEmbeddings(
 }
 
 /**
- * Cache verse embeddings in IndexedDB.
+ * Cache verse embeddings in IndexedDB, writing in chunked transactions
+ * to avoid blocking the main thread with huge writes.
  */
 export async function cacheVerseEmbeddings(
-    embeddings: CachedVerseEmbedding[]
+    embeddings: CachedVerseEmbedding[],
+    chunkSize = 500
 ): Promise<void> {
-    try {
-        const db = await openVerseCache();
-        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite');
-        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
+    if (embeddings.length === 0) return
 
-        for (const embedding of embeddings) {
-            store.put({
-                ...embedding,
-                cachedAt: Date.now(),
-            });
+    for (let i = 0; i < embeddings.length; i += chunkSize) {
+        const chunk = embeddings.slice(i, i + chunkSize)
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite')
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME)
+
+        for (const embedding of chunk) {
+            store.put({ ...embedding, cachedAt: Date.now() })
         }
 
-        return new Promise((resolve, reject) => {
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-        });
-    } catch (error) {
-        console.error('[Embeddings] Failed to cache embeddings:', error);
+        await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+        })
     }
 }
 

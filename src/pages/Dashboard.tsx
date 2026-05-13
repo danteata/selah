@@ -20,6 +20,7 @@ import { CommandBar } from '../components/layout/CommandBar'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
+import { EmbeddingSyncIndicator } from '../components/settings/EmbeddingSyncIndicator'
 import type { Slide } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
 
@@ -474,6 +475,8 @@ export default function Dashboard() {
                     onSave={handleSlideEditorSave}
                 />
             )}
+
+            <EmbeddingSyncIndicator />
 
             {/* Admin Panel Modal */}
             {showAdminPanel && (
