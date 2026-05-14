@@ -42,6 +42,78 @@ interface WhisperCppResponse {
 type ResultCallback = (result: WhisperCppTranscriptionResult) => void
 type ErrorCallback = (error: string) => void
 
+// ---------------------------------------------------------------------------
+// WAV Encoding Web Worker singleton
+// ---------------------------------------------------------------------------
+
+interface WavWorkerRequest {
+    id: number
+    type: 'encodeChunk' | 'convertBlob'
+    samples?: Float32Array
+    nativeSampleRate?: number
+    targetSampleRate?: number
+    needsResampling?: boolean
+    audioBlob?: Blob
+}
+
+interface WavWorkerSuccess {
+    id: number
+    wavBlob: Blob
+    maxAmplitude?: number
+    resampledSamples?: number
+    nativeSamples?: number
+    duration?: number
+}
+
+interface WavWorkerError {
+    id: number
+    error: string
+}
+
+type WavWorkerResponse = WavWorkerSuccess | WavWorkerError
+
+let wavWorkerInstance: Worker | null = null
+let wavWorkerNextId = 0
+const wavWorkerPending = new Map<
+    number,
+    { resolve: (v: WavWorkerSuccess) => void; reject: (e: Error) => void }
+>()
+
+function getWavWorker(): Worker {
+    if (wavWorkerInstance) return wavWorkerInstance
+    wavWorkerInstance = new Worker(new URL('./wav.worker.ts', import.meta.url), {
+        type: 'module',
+    })
+    wavWorkerInstance.onmessage = (event: MessageEvent<WavWorkerResponse>) => {
+        const res = event.data
+        const handler = wavWorkerPending.get(res.id)
+        if (!handler) return
+        wavWorkerPending.delete(res.id)
+        if ('error' in res) {
+            handler.reject(new Error(res.error))
+        } else {
+            handler.resolve(res)
+        }
+    }
+    wavWorkerInstance.onerror = (err) => {
+        console.error('[Whisper.cpp] WAV worker error:', err)
+        for (const [, h] of wavWorkerPending) {
+            h.reject(new Error('WAV worker failed'))
+        }
+        wavWorkerPending.clear()
+    }
+    return wavWorkerInstance
+}
+
+function postToWavWorker(req: Omit<WavWorkerRequest, 'id'>): Promise<WavWorkerSuccess> {
+    const worker = getWavWorker()
+    const id = ++wavWorkerNextId
+    return new Promise((resolve, reject) => {
+        wavWorkerPending.set(id, { resolve, reject })
+        worker.postMessage({ id, ...req } as WavWorkerRequest)
+    })
+}
+
 class WhisperCppTranscriptionService {
     private config: WhisperCppConfig = {}
     private isInitialized = false
@@ -50,11 +122,9 @@ class WhisperCppTranscriptionService {
     private mediaRecorder: MediaRecorder | null = null
     private mediaStream: MediaStream | null = null
     private isStreaming = false
-    // AudioContext-based capture (replaces MediaRecorder for raw PCM)
     private audioContext: AudioContext | null = null
-    private scriptProcessor: ScriptProcessorNode | null = null
+    private workletNode: AudioWorkletNode | null = null
     private audioBuffer: Float32Array[] = []
-    // Track active requests for parallel processing (max 2 concurrent)
     private activeRequests = 0
     private readonly maxConcurrentRequests = 2
 
@@ -209,86 +279,104 @@ class WhisperCppTranscriptionService {
             return false
         }
 
-        // Use AudioContext to capture raw PCM data instead of MediaRecorder
-        // MediaRecorder produces webm/opus which decodeAudioData can't decode
+        // Use AudioContext + AudioWorklet to capture raw PCM data
+        // AudioWorklet runs on the audio rendering thread, not the main thread
         try {
-            // Create AudioContext at 16kHz to match whisper.cpp's expected sample rate
-            // This eliminates the need for resampling and improves audio quality
             const targetSampleRate = 16000
             try {
                 this.audioContext = new AudioContext({ sampleRate: targetSampleRate })
             } catch {
-                // Fallback to default sample rate if 16kHz is not supported
                 console.warn('[Whisper.cpp] 16kHz AudioContext not supported, using native sample rate')
                 this.audioContext = new AudioContext()
             }
             const nativeSampleRate = this.audioContext.sampleRate
             const needsResampling = nativeSampleRate !== targetSampleRate
 
-            console.log('[Whisper.cpp] AudioContext sample rate:', nativeSampleRate, needsResampling ? '(will resample to 16kHz)' : '(optimal - no resampling needed)')
+            console.log('[Whisper.cpp] AudioContext sample rate:', nativeSampleRate, needsResampling ? '(will resample in worker)' : '(optimal - no resampling needed)')
 
             const source = this.audioContext.createMediaStreamSource(this.mediaStream)
 
-            // Buffer to accumulate audio samples
             this.audioBuffer = []
             const chunkDuration = chunkDurationMs || this.config.chunkDurationMs || DEFAULT_CHUNK_DURATION_MS
-            // Calculate samples based on the AudioContext's actual sample rate
             const samplesPerChunk = nativeSampleRate * (chunkDuration / 1000)
 
-            // Use ScriptProcessorNode to capture raw PCM data
-            // Note: ScriptProcessorNode is deprecated but AudioWorklet requires more complex setup
-            const bufferSize = 4096
-            this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1)
-
-            this.scriptProcessor.onaudioprocess = (event) => {
-                if (!this.isStreaming) return
-
-                const inputData = event.inputBuffer.getChannelData(0)
-                // Copy the data since it's reused by the browser
-                this.audioBuffer.push(new Float32Array(inputData))
-
-                // Check if we have enough samples for a chunk
-                const totalSamples = this.audioBuffer.reduce((sum, arr) => sum + arr.length, 0)
-
-                if (totalSamples >= samplesPerChunk) {
-                    // Combine all buffered samples
-                    const combined = new Float32Array(totalSamples)
-                    let offset = 0
-                    for (const chunk of this.audioBuffer) {
-                        combined.set(chunk, offset)
-                        offset += chunk.length
+            // Inline AudioWorklet that accumulates samples and posts full chunks back
+            const workletCode = `
+                class WhisperCaptureProcessor extends AudioWorkletProcessor {
+                    constructor() {
+                        super();
+                        this.buffer = [];
+                        this.samplesPerChunk = ${samplesPerChunk};
+                        this.targetSampleRate = ${targetSampleRate};
+                        this.nativeSampleRate = ${nativeSampleRate};
                     }
+                    process(inputs, outputs, parameters) {
+                        const input = inputs[0];
+                        if (input.length > 0) {
+                            const channelData = input[0];
+                            // Copy data because the underlying buffer is reused
+                            const copy = new Float32Array(channelData.length);
+                            for (let i = 0; i < channelData.length; i++) {
+                                copy[i] = channelData[i];
+                            }
+                            this.buffer.push(copy);
 
-                    // Clear the buffer
-                    this.audioBuffer = []
-
-                    // Process the chunk in parallel (up to max concurrent requests)
-                    if (this.activeRequests < this.maxConcurrentRequests) {
-                        this.activeRequests++
-                        this.processChunkAsync(combined, nativeSampleRate, targetSampleRate, needsResampling, onResult, onError)
-                            .finally(() => {
-                                this.activeRequests--
-                            })
-                    } else {
-                        // Skip this chunk if we're at max capacity (prevents memory buildup)
-                        console.log('[Whisper.cpp] Skipping chunk - max concurrent requests reached')
+                            const totalSamples = this.buffer.reduce((sum, arr) => sum + arr.length, 0);
+                            if (totalSamples >= this.samplesPerChunk) {
+                                const combined = new Float32Array(totalSamples);
+                                let offset = 0;
+                                for (const chunk of this.buffer) {
+                                    combined.set(chunk, offset);
+                                    offset += chunk.length;
+                                }
+                                this.buffer = [];
+                                this.port.postMessage({
+                                    samples: combined,
+                                    nativeSampleRate: this.nativeSampleRate,
+                                    targetSampleRate: this.targetSampleRate,
+                                    needsResampling: this.nativeSampleRate !== this.targetSampleRate,
+                                });
+                            }
+                        }
+                        return true;
                     }
                 }
-            }
+                registerProcessor('whisper-capture-processor', WhisperCaptureProcessor);
+            `;
 
-            source.connect(this.scriptProcessor)
-            this.scriptProcessor.connect(this.audioContext.destination)
+            const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
+            const workletUrl = URL.createObjectURL(workletBlob);
+            await this.audioContext.audioWorklet.addModule(workletUrl);
+            URL.revokeObjectURL(workletUrl);
 
-            this.isStreaming = true
-            this.config.onStatus?.('whisper.cpp realtime transcription started')
-            console.log('[Whisper.cpp] Started audio capture via AudioContext')
+            this.workletNode = new AudioWorkletNode(this.audioContext, 'whisper-capture-processor');
+            this.workletNode.port.onmessage = (event) => {
+                if (!this.isStreaming) return;
+                const { samples, nativeSampleRate, targetSampleRate, needsResampling } = event.data;
+                if (this.activeRequests < this.maxConcurrentRequests) {
+                    this.activeRequests++;
+                    this.processChunkAsync(samples, nativeSampleRate, targetSampleRate, needsResampling, onResult, onError)
+                        .finally(() => {
+                            this.activeRequests--;
+                        });
+                } else {
+                    console.log('[Whisper.cpp] Skipping chunk - max concurrent requests reached');
+                }
+            };
 
-            return true
+            source.connect(this.workletNode);
+            this.workletNode.connect(this.audioContext.destination);
+
+            this.isStreaming = true;
+            this.config.onStatus?.('whisper.cpp realtime transcription started');
+            console.log('[Whisper.cpp] Started audio capture via AudioWorklet');
+
+            return true;
         } catch (error) {
-            console.error('[Whisper.cpp] Failed to setup audio capture:', error)
-            onError('Failed to initialize audio capture')
-            this.cleanupMedia()
-            return false
+            console.error('[Whisper.cpp] Failed to setup audio capture:', error);
+            onError('Failed to initialize audio capture');
+            this.cleanupMedia();
+            return false;
         }
     }
 
@@ -298,10 +386,10 @@ class WhisperCppTranscriptionService {
         this.isStreaming = false
 
         try {
-            // Disconnect ScriptProcessorNode
-            if (this.scriptProcessor) {
-                this.scriptProcessor.disconnect()
-                this.scriptProcessor.onaudioprocess = null
+            // Disconnect AudioWorkletNode
+            if (this.workletNode) {
+                this.workletNode.disconnect()
+                this.workletNode.port.onmessage = null
             }
 
             // Close AudioContext
@@ -313,7 +401,7 @@ class WhisperCppTranscriptionService {
             const maxWait = 5000
             const startTime = Date.now()
             while (this.activeRequests > 0 && Date.now() - startTime < maxWait) {
-                await new Promise(resolve => setTimeout(resolve, 100))
+                await new Promise((resolve) => setTimeout(resolve, 100))
             }
         } catch (error) {
             console.error('[Whisper.cpp] Failed to stop transcription:', error)
@@ -332,36 +420,38 @@ class WhisperCppTranscriptionService {
     }
 
     /**
-     * Process a chunk asynchronously (allows parallel processing)
+     * Process a chunk asynchronously (offloads WAV encoding to worker)
      */
     private async processChunkAsync(
-        combined: Float32Array,
+        samples: Float32Array,
         nativeSampleRate: number,
         targetSampleRate: number,
         needsResampling: boolean,
         onResult: ResultCallback,
-        onError: ErrorCallback
+        onError: ErrorCallback,
     ): Promise<void> {
         try {
-            // Check audio level
-            const maxAmp = this.getMaxAmplitude(combined)
-            console.log('[Whisper.cpp] Audio level:', maxAmp.toFixed(4), '| Samples:', combined.length, '| Sample rate:', nativeSampleRate, needsResampling ? '(resampling...)' : '(no resampling)')
-
-            // Resample only if needed (when AudioContext couldn't be set to 16kHz)
-            const resampled = needsResampling
-                ? this.resample(combined, nativeSampleRate, targetSampleRate)
-                : combined
-
-            // Convert to WAV
-            const wavBlob = this.encodeWav(resampled, targetSampleRate)
-            console.log('[Whisper.cpp] Sending chunk:', {
-                nativeSamples: combined.length,
-                resampledSamples: resampled.length,
-                duration: (resampled.length / targetSampleRate).toFixed(2) + 's',
-                size: wavBlob.size,
+            const workerResult = await postToWavWorker({
+                type: 'encodeChunk',
+                samples,
+                nativeSampleRate,
+                targetSampleRate,
+                needsResampling,
             })
 
-            const result = await this.transcribeWav(wavBlob)
+            console.log('[Whisper.cpp] Worker returned chunk:', {
+                nativeSamples: workerResult.nativeSamples,
+                resampledSamples: workerResult.resampledSamples,
+                duration: workerResult.duration?.toFixed(2) + 's',
+                size: workerResult.wavBlob.size,
+                maxAmplitude: workerResult.maxAmplitude?.toFixed(4),
+            })
+
+            if ((workerResult.maxAmplitude ?? 0) < 0.01) {
+                console.warn('[Whisper.cpp] Audio appears to be silent or very quiet')
+            }
+
+            const result = await this.transcribeWav(workerResult.wavBlob)
             if (result?.text) {
                 onResult(result)
             }
@@ -549,167 +639,18 @@ class WhisperCppTranscriptionService {
     }
 
     /**
-     * Convert audio blob to WAV format (16kHz, 16-bit, mono)
+     * Convert audio blob to WAV format (offloaded to Web Worker)
      * whisper.cpp server expects WAV format, not webm/opus
      */
     private async convertToWav(audioBlob: Blob): Promise<Blob> {
-        let audioContext: AudioContext | null = null
         try {
-            // Create audio context - the sampleRate here is for output, not decoding
-            audioContext = new AudioContext()
-            const arrayBuffer = await audioBlob.arrayBuffer()
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
-
-            // Get the original sample rate and samples
-            const originalSampleRate = audioBuffer.sampleRate
-            const originalLength = audioBuffer.length
-
-            console.log('[Whisper.cpp] Decoded audio:', {
-                originalSampleRate,
-                originalLength,
-                duration: (originalLength / originalSampleRate).toFixed(2) + 's',
-                channels: audioBuffer.numberOfChannels,
-            })
-
-            // Get mono channel data (whisper expects mono)
-            const channelData = audioBuffer.numberOfChannels > 1
-                ? this.mixToMono(audioBuffer)
-                : audioBuffer.getChannelData(0)
-
-            // Check for silent audio
-            const maxAmplitude = this.getMaxAmplitude(channelData)
-            console.log('[Whisper.cpp] Max amplitude:', maxAmplitude.toFixed(4))
-
-            if (maxAmplitude < 0.01) {
-                console.warn('[Whisper.cpp] Audio appears to be silent or very quiet')
-            }
-
-            // Resample to 16kHz if needed
-            const targetSampleRate = 16000
-            let resampledData: Float32Array
-
-            if (originalSampleRate !== targetSampleRate) {
-                resampledData = this.resample(channelData, originalSampleRate, targetSampleRate)
-                console.log('[Whisper.cpp] Resampled to 16kHz:', resampledData.length, 'samples')
-            } else {
-                resampledData = channelData
-            }
-
-            // Convert to 16-bit PCM WAV
-            const wavBlob = this.encodeWav(resampledData, targetSampleRate)
-
-            await audioContext.close()
-            return wavBlob
+            const result = await postToWavWorker({ type: 'convertBlob', audioBlob })
+            return result.wavBlob
         } catch (error) {
-            console.error('[Whisper.cpp] Failed to convert audio to WAV:', error)
-            if (audioContext) {
-                await audioContext.close().catch(() => { })
-            }
-            throw new Error(`Failed to convert audio to WAV: ${error instanceof Error ? error.message : 'Unknown error'}`)
-        }
-    }
-
-    /**
-     * Get the maximum amplitude from audio samples
-     */
-    private getMaxAmplitude(samples: Float32Array): number {
-        let max = 0
-        for (let i = 0; i < samples.length; i++) {
-            const abs = Math.abs(samples[i])
-            if (abs > max) max = abs
-        }
-        return max
-    }
-
-    /**
-     * Resample audio data using cubic interpolation for better quality
-     * This reduces artifacts that can affect transcription accuracy
-     */
-    private resample(samples: Float32Array, fromRate: number, toRate: number): Float32Array {
-        const ratio = fromRate / toRate
-        const newLength = Math.round(samples.length / ratio)
-        const result = new Float32Array(newLength)
-
-        for (let i = 0; i < newLength; i++) {
-            const srcIndex = i * ratio
-            const srcIndexFloor = Math.floor(srcIndex)
-            const fraction = srcIndex - srcIndexFloor
-
-            // Cubic interpolation using 4-point Hermite
-            const y0 = samples[Math.max(0, srcIndexFloor - 1)]
-            const y1 = samples[srcIndexFloor]
-            const y2 = samples[Math.min(srcIndexFloor + 1, samples.length - 1)]
-            const y3 = samples[Math.min(srcIndexFloor + 2, samples.length - 1)]
-
-            // Hermite interpolation coefficients
-            const c0 = y1
-            const c1 = 0.5 * (y2 - y0)
-            const c2 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3
-            const c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2)
-
-            result[i] = ((c3 * fraction + c2) * fraction + c1) * fraction + c0
-        }
-
-        return result
-    }
-
-    /**
-     * Mix multiple channels to mono
-     */
-    private mixToMono(audioBuffer: AudioBuffer): Float32Array {
-        const length = audioBuffer.length
-        const result = new Float32Array(length)
-        const numChannels = audioBuffer.numberOfChannels
-
-        for (let i = 0; i < length; i++) {
-            let sum = 0
-            for (let channel = 0; channel < numChannels; channel++) {
-                sum += audioBuffer.getChannelData(channel)[i]
-            }
-            result[i] = sum / numChannels
-        }
-
-        return result
-    }
-
-    /**
-     * Encode Float32Array audio data to WAV Blob
-     */
-    private encodeWav(samples: Float32Array, sampleRate: number): Blob {
-        const buffer = new ArrayBuffer(44 + samples.length * 2)
-        const view = new DataView(buffer)
-
-        // WAV header
-        this.writeString(view, 0, 'RIFF')
-        view.setUint32(4, 36 + samples.length * 2, true)
-        this.writeString(view, 8, 'WAVE')
-        this.writeString(view, 12, 'fmt ')
-        view.setUint32(16, 16, true) // Subchunk1Size (16 for PCM)
-        view.setUint16(20, 1, true) // AudioFormat (1 for PCM)
-        view.setUint16(22, 1, true) // NumChannels (1 for mono)
-        view.setUint32(24, sampleRate, true) // SampleRate
-        view.setUint32(28, sampleRate * 2, true) // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
-        view.setUint16(32, 2, true) // BlockAlign (NumChannels * BitsPerSample/8)
-        view.setUint16(34, 16, true) // BitsPerSample
-        this.writeString(view, 36, 'data')
-        view.setUint32(40, samples.length * 2, true) // Subchunk2Size
-
-        // Write PCM samples
-        this.floatTo16BitPCM(view, 44, samples)
-
-        return new Blob([buffer], { type: 'audio/wav' })
-    }
-
-    private writeString(view: DataView, offset: number, str: string): void {
-        for (let i = 0; i < str.length; i++) {
-            view.setUint8(offset + i, str.charCodeAt(i))
-        }
-    }
-
-    private floatTo16BitPCM(view: DataView, offset: number, samples: Float32Array): void {
-        for (let i = 0; i < samples.length; i++) {
-            const s = Math.max(-1, Math.min(1, samples[i]))
-            view.setInt16(offset + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
+            console.error('[Whisper.cpp] Worker WAV conversion failed:', error)
+            throw new Error(
+                `Failed to convert audio to WAV: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            )
         }
     }
 
@@ -737,11 +678,11 @@ class WhisperCppTranscriptionService {
             this.mediaRecorder.onstop = null
         }
 
-        // Clean up AudioContext/ScriptProcessor (new approach)
-        if (this.scriptProcessor) {
-            this.scriptProcessor.disconnect()
-            this.scriptProcessor.onaudioprocess = null
-            this.scriptProcessor = null
+        // Clean up AudioContext/AudioWorklet
+        if (this.workletNode) {
+            this.workletNode.disconnect()
+            this.workletNode.port.onmessage = null
+            this.workletNode = null
         }
 
         if (this.audioContext && this.audioContext.state !== 'closed') {

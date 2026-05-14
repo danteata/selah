@@ -602,7 +602,7 @@ class DesktopWhisperTranscriptionService {
             const audioContext = new AudioContext({ sampleRate: 16000 });
             const source = audioContext.createMediaStreamSource(mediaStream);
 
-            // Create audio worklet for capturing PCM data
+            // Create audio worklet for capturing and encoding PCM data to WAV directly
             const workletBlob = new Blob(
                 [
                     `
@@ -610,24 +610,69 @@ class DesktopWhisperTranscriptionService {
                         constructor() {
                             super();
                             this.buffer = [];
-                            this.bufferSize = ${16000 * (chunkDurationMs / 1000)}; // Dynamic buffer size
+                            this.bufferSize = ${16000 * (chunkDurationMs / 1000)};
                         }
                         
                         process(inputs, outputs, parameters) {
                             const input = inputs[0];
                             if (input.length > 0) {
                                 const channelData = input[0];
+                                const copy = new Float32Array(channelData.length);
                                 for (let i = 0; i < channelData.length; i++) {
-                                    this.buffer.push(channelData[i]);
+                                    copy[i] = channelData[i];
                                 }
+                                this.buffer.push(copy);
                                 
-                                // Send buffer when full
                                 if (this.buffer.length >= this.bufferSize) {
-                                    this.port.postMessage({ buffer: new Float32Array(this.buffer) });
+                                    const totalSamples = this.buffer.reduce((sum, arr) => sum + arr.length, 0);
+                                    const combined = new Float32Array(totalSamples);
+                                    let offset = 0;
+                                    for (const chunk of this.buffer) {
+                                        combined.set(chunk, offset);
+                                        offset += chunk.length;
+                                    }
                                     this.buffer = [];
+                                    
+                                    // Encode to WAV in the worklet to avoid main-thread blocking
+                                    const wavBlob = this.encodeWav(combined, 16000);
+                                    this.port.postMessage({ wavBlob });
                                 }
                             }
                             return true;
+                        }
+                        
+                        encodeWav(samples, sampleRate) {
+                            const buffer = new ArrayBuffer(44 + samples.length * 2);
+                            const view = new DataView(buffer);
+                            
+                            const writeString = (offset, str) => {
+                                for (let i = 0; i < str.length; i++) {
+                                    view.setUint8(offset + i, str.charCodeAt(i));
+                                }
+                            };
+                            
+                            writeString(0, 'RIFF');
+                            view.setUint32(4, 36 + samples.length * 2, true);
+                            writeString(8, 'WAVE');
+                            writeString(12, 'fmt ');
+                            view.setUint32(16, 16, true);
+                            view.setUint16(20, 1, true);
+                            view.setUint16(22, 1, true);
+                            view.setUint32(24, sampleRate, true);
+                            view.setUint32(28, sampleRate * 2, true);
+                            view.setUint16(32, 2, true);
+                            view.setUint16(34, 16, true);
+                            writeString(36, 'data');
+                            view.setUint32(40, samples.length * 2, true);
+                            
+                            let offset = 44;
+                            for (let i = 0; i < samples.length; i++) {
+                                const s = Math.max(-1, Math.min(1, samples[i]));
+                                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+                                offset += 2;
+                            }
+                            
+                            return new Blob([buffer], { type: 'audio/wav' });
                         }
                     }
                     registerProcessor('audio-capture-processor', AudioCaptureProcessor);
@@ -643,13 +688,25 @@ class DesktopWhisperTranscriptionService {
             source.connect(workletNode);
             workletNode.connect(audioContext.destination);
 
-            // Handle audio chunks
+            // Handle audio chunks — WAV blob already encoded in the worklet
             workletNode.port.onmessage = async (event) => {
-                if (event.data.buffer) {
-                    const pcmData = event.data.buffer as Float32Array;
-                    await this.processWebChunk(pcmData, onResult, onError);
+                if (event.data.wavBlob) {
+                    await this.transcribeBlobWithRetry(event.data.wavBlob, `web-${Date.now()}`)
+                        .then((result) => {
+                            if (result && result.text.trim()) {
+                                onResult({
+                                    text: result.text.trim(),
+                                    language: result.language,
+                                    segments: result.segments,
+                                })
+                            }
+                        })
+                        .catch((error) => {
+                            console.error('Error processing web audio chunk:', error)
+                            onError(error instanceof Error ? error.message : 'Transcription error')
+                        })
                 }
-            };
+            }
 
             // Store references for cleanup
             this._webMediaStream = mediaStream;
@@ -670,72 +727,6 @@ class DesktopWhisperTranscriptionService {
     private _webMediaStream: MediaStream | null = null;
     private _webAudioContext: AudioContext | null = null;
     private _webWorkletNode: AudioWorkletNode | null = null;
-
-    /**
-     * Process a web audio chunk
-     */
-  private async processWebChunk(
-    pcmData: Float32Array,
-    onResult: ResultCallback,
-    onError: ErrorCallback
-  ): Promise<void> {
-    try {
-      // Convert Float32 PCM to WAV
-      const wavBlob = this.pcmToWav(pcmData);
-
-      const result = await this.transcribeBlobWithRetry(wavBlob, `web-${Date.now()}`);
-
-      if (result && result.text.trim()) {
-        onResult({
-          text: result.text.trim(),
-          language: result.language,
-          segments: result.segments,
-        });
-      }
-    } catch (error) {
-      console.error('Error processing web audio chunk:', error);
-      onError(error instanceof Error ? error.message : 'Transcription error');
-    }
-  }
-
-    /**
-     * Convert Float32 PCM to WAV Blob (for web audio fallback)
-     */
-    private pcmToWav(float32Array: Float32Array): Blob {
-        const buffer = new ArrayBuffer(44 + float32Array.length * 2);
-        const view = new DataView(buffer);
-
-        // WAV header
-        const writeString = (offset: number, string: string) => {
-            for (let i = 0; i < string.length; i++) {
-                view.setUint8(offset + i, string.charCodeAt(i));
-            }
-        };
-
-        writeString(0, 'RIFF');
-        view.setUint32(4, 36 + float32Array.length * 2, true);
-        writeString(8, 'WAVE');
-        writeString(12, 'fmt ');
-        view.setUint32(16, 16, true); // Subchunk1Size
-        view.setUint16(20, 1, true); // AudioFormat (PCM)
-        view.setUint16(22, 1, true); // NumChannels (mono)
-        view.setUint32(24, 16000, true); // SampleRate
-        view.setUint32(28, 32000, true); // ByteRate
-        view.setUint16(32, 2, true); // BlockAlign
-        view.setUint16(34, 16, true); // BitsPerSample
-        writeString(36, 'data');
-        view.setUint32(40, float32Array.length * 2, true);
-
-        // Convert Float32 to Int16
-        let offset = 44;
-        for (let i = 0; i < float32Array.length; i++) {
-            const sample = Math.max(-1, Math.min(1, float32Array[i]));
-            view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-            offset += 2;
-        }
-
-        return new Blob([buffer], { type: 'audio/wav' });
-    }
 
     /**
      * Stop transcription

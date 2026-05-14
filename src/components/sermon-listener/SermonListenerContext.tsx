@@ -25,7 +25,6 @@ export function SermonListenerProvider({ children }: { children: ReactNode }) {
 
     const sermonListener = useSermonListener({
         autoLookup: true,
-        autoDisplay: false,
         enableSemanticDetection: true,
         enableVoiceCommands: true,
     })
