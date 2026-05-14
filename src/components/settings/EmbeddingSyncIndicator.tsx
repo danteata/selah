@@ -5,12 +5,13 @@ import { embeddingSyncManager, type SyncStage } from '../../services/sermon-list
 const STAGE_LABELS: Record<SyncStage, string> = {
     idle: '',
     downloading: 'Downloading Bible data...',
-    'loading-model': 'Loading AI model...',
-    importing: 'Importing Bible data...',
-    generating: 'Generating embeddings...',
-    caching: 'Saving to cache...',
-    completed: 'Complete',
-    error: 'Error',
+    'loading-model': 'Preparing search engine...',
+    importing: 'Reading Bible text...',
+    generating: 'Teaching Selah about your Bible...',
+    upgrading: 'Fine-tuning for short verses...',
+    caching: 'Saving to your device...',
+    completed: 'Done!',
+    error: 'Something went wrong',
 }
 
 export function EmbeddingSyncIndicator() {

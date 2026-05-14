@@ -1,207 +1,143 @@
 /**
  * Local Embeddings Service
- * 
- * Provides client-side text embeddings using Transformers.js.
- * This enables FREE semantic verse detection without API calls.
- * 
+ *
+ * Provides client-side text embeddings using Transformers.js via a Web Worker.
+ * This keeps ONNX inference off the main thread so the UI stays responsive.
+ *
  * Architecture:
- * - Uses Xenova/all-MiniLM-L6-v2 model (22MB, quantized)
+ * - Worker loads Xenova/all-MiniLM-L6-v2 model (22MB, quantized)
  * - Generates 384-dimensional embeddings
  * - Works offline after initial model download
  * - Model is cached in browser storage
- * 
- * NOTE: Loads @xenova/transformers from CDN as an ES module to avoid Vite 
- * bundling issues with onnxruntime-web. The onnxruntime-web package has issues
- * when pre-bundled by Vite, causing "Cannot read properties of undefined
- * (reading 'registerBackend')" errors.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let embedder: any = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let loadingPromise: Promise<any> | null = null;
-
-// Model configuration
-const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
-const EMBEDDING_DIMENSIONS = 384;
-
-// CDN URL for Transformers.js
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-
 export interface EmbeddingResult {
-    embedding: number[];
-    dimensions: number;
+    embedding: number[]
+    dimensions: number
 }
 
 export interface VerseMatch {
-    reference: string;
-    book: string;
-    bookNumber: number;
-    chapter: number;
-    verse: number;
-    text: string;
-    score: number;
+    reference: string
+    book: string
+    bookNumber: number
+    chapter: number
+    verse: number
+    text: string
+    score: number
 }
 
-/**
- * Load Transformers.js from CDN as ES module to avoid Vite bundling issues.
- * This prevents the onnxruntime-web "registerBackend" error.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function loadTransformersFromCDN(): Promise<any> {
-    // Use ES module import from CDN
-    // This bypasses Vite's bundling entirely
-    const moduleUrl = `${TRANSFORMERS_CDN}/dist/transformers.min.js`;
+const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2'
+const EMBEDDING_DIMENSIONS = 384
 
-    // Dynamic import from absolute URL - Vite won't intercept this
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const module = await import(/* @vite-ignore */ moduleUrl) as any;
-    return module;
+// ---------------------------------------------------------------------------
+// Web Worker singleton
+// ---------------------------------------------------------------------------
+
+interface WorkerSuccessResponse {
+    id: number
+    embeddings: number[][]
+    dimensions: number
 }
 
-/**
- * Get or initialize the embedding pipeline.
- * Uses singleton pattern to avoid re-loading the model.
- * Loads Transformers.js from CDN to avoid Vite bundling issues.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getEmbedder(): Promise<any> {
-    if (embedder) {
-        return embedder;
+interface WorkerErrorResponse {
+    id: number
+    error: string
+}
+
+type WorkerResponse = WorkerSuccessResponse | WorkerErrorResponse
+
+function isErrorResponse(r: WorkerResponse): r is WorkerErrorResponse {
+    return 'error' in r
+}
+
+let workerInstance: Worker | null = null
+let nextRequestId = 0
+const pending = new Map<number, { resolve: (v: WorkerSuccessResponse) => void; reject: (e: Error) => void }>()
+
+function getWorker(): Worker {
+    if (workerInstance) return workerInstance
+
+    // Vite handles module workers automatically with this URL pattern
+    workerInstance = new Worker(new URL('./embedding.worker.ts', import.meta.url), { type: 'module' })
+
+    workerInstance.onmessage = (event: MessageEvent<WorkerResponse>) => {
+        const res = event.data
+        const handler = pending.get(res.id)
+        if (!handler) return
+        pending.delete(res.id)
+        if (isErrorResponse(res)) {
+            handler.reject(new Error(res.error))
+        } else {
+            handler.resolve(res)
+        }
     }
 
-    // If already loading, wait for it
-    if (loadingPromise) {
-        return loadingPromise;
+    workerInstance.onerror = (err) => {
+        console.error('[Embeddings] Worker error:', err)
+        // Reject all pending
+        for (const [, h] of pending) {
+            h.reject(new Error('Worker failed'))
+        }
+        pending.clear()
     }
 
-    // Start loading - use CDN to avoid bundling issues
-    loadingPromise = (async () => {
-        // Load Transformers.js from CDN
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const transformers = await loadTransformersFromCDN() as any;
-
-        // Configure Transformers.js for browser usage
-        transformers.env.allowLocalModels = false;
-        transformers.env.useBrowserCache = true;
-
-        const model = await transformers.pipeline('feature-extraction', MODEL_NAME, {
-            quantized: true, // Use quantized model for smaller size
-            progress_callback: (progress: { status: string; progress?: number }) => {
-                if (progress.status === 'progress' && progress.progress) {
-                    console.log(`[Embeddings] Loading model: ${Math.round(progress.progress)}%`);
-                }
-            },
-        });
-
-        return model;
-    })();
-
-    embedder = await loadingPromise;
-    loadingPromise = null;
-
-    return embedder;
+    return workerInstance
 }
 
+function postToWorker(texts: string[]): Promise<WorkerSuccessResponse> {
+    const worker = getWorker()
+    const id = ++nextRequestId
+    return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject })
+        worker.postMessage({ id, texts })
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 /**
- * Check if the embedding model is loaded and ready.
+ * Check if the embedding worker is alive.
  */
 export function isEmbedderReady(): boolean {
-    return embedder !== null;
+    return workerInstance !== null
 }
 
 /**
- * Get the embedding model loading status.
+ * Initialise the worker (triggers model download in the worker).
  */
 export async function initializeEmbedder(): Promise<{
-    ready: boolean;
-    dimensions: number;
-    modelName: string;
+    ready: boolean
+    dimensions: number
+    modelName: string
 }> {
     try {
-        await getEmbedder();
-        return {
-            ready: true,
-            dimensions: EMBEDDING_DIMENSIONS,
-            modelName: MODEL_NAME,
-        };
+        await postToWorker([]) // empty batch just warms up the model
+        return { ready: true, dimensions: EMBEDDING_DIMENSIONS, modelName: MODEL_NAME }
     } catch (error) {
-        console.error('[Embeddings] Failed to initialize embedder:', error);
-        return {
-            ready: false,
-            dimensions: 0,
-            modelName: MODEL_NAME,
-        };
+        console.error('[Embeddings] Failed to initialize worker:', error)
+        return { ready: false, dimensions: 0, modelName: MODEL_NAME }
     }
 }
 
 /**
  * Generate an embedding for a single text.
- * 
- * @param text - The text to embed
- * @returns The embedding vector (384 dimensions)
  */
 export async function embedText(text: string): Promise<EmbeddingResult> {
-    const model = await getEmbedder();
-
-    // Generate embedding - use type assertion for Transformers.js options
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await model(text, {
-        pooling: 'mean',
-        normalize: true,
-    } as any);
-
-    // Convert to regular array - result is a Tensor
-    const tensor = result as unknown as { data: Float32Array; dims: number[] };
-    const embedding = Array.from(tensor.data) as number[];
-
-    return {
-        embedding,
-        dimensions: embedding.length,
-    };
+    const res = await postToWorker([text])
+    const embedding = res.embeddings[0]
+    if (!embedding) throw new Error('Worker returned empty embedding')
+    return { embedding, dimensions: res.dimensions }
 }
 
 /**
  * Generate embeddings for multiple texts in batch.
- * Uses true batched inference (passing arrays to the model) for dramatically
- * better throughput — the ONNX runtime can parallelize across the batch.
- *
- * @param texts - Array of texts to embed
- * @returns Array of embedding vectors
  */
 export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
     if (texts.length === 0) return []
-
-    const model = await getEmbedder()
-
-    const INFERENCE_BATCH = 32
-    const allResults: EmbeddingResult[] = []
-
-    for (let i = 0; i < texts.length; i += INFERENCE_BATCH) {
-        const batch = texts.slice(i, i + INFERENCE_BATCH)
-
-        if (batch.length === 1) {
-            const result = await model(batch[0], { pooling: 'mean', normalize: true } as any)
-            const tensor = result as unknown as { data: Float32Array; dims: number[] }
-            allResults.push({ embedding: Array.from(tensor.data) as number[], dimensions: tensor.data.length })
-        } else {
-            const results = await model(batch, { pooling: 'mean', normalize: true } as any)
-            const batchTensor = results as unknown as { data: Float32Array; dims: number[] }
-            const dim = batchTensor.dims[batchTensor.dims.length - 1]
-
-            for (let j = 0; j < batch.length; j++) {
-                const start = j * dim
-                const embedding = Array.from(batchTensor.data.slice(start, start + dim)) as number[]
-                allResults.push({ embedding, dimensions: dim })
-            }
-        }
-
-        if (texts.length > 100) {
-            console.log(`[Embeddings] Processed ${Math.min(i + INFERENCE_BATCH, texts.length)}/${texts.length} texts`)
-        }
-    }
-
-    return allResults
+    const res = await postToWorker(texts)
+    return res.embeddings.map((emb) => ({ embedding: emb, dimensions: res.dimensions }))
 }
 
 /**
@@ -209,41 +145,32 @@ export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
  */
 export function cosineSimilarity(a: number[], b: number[]): number {
     if (a.length !== b.length) {
-        throw new Error(`Vector dimensions don't match: ${a.length} vs ${b.length}`);
+        throw new Error(`Vector dimensions don't match: ${a.length} vs ${b.length}`)
     }
 
-    let dotProduct = 0;
-    // Since vectors are already normalized by the embedder, 
-    // cosine similarity is just the dot product.
+    let dotProduct = 0
     for (let i = 0; i < a.length; i++) {
-        dotProduct += a[i] * b[i];
+        dotProduct += a[i] * b[i]
     }
-
-    return dotProduct;
+    return dotProduct
 }
 
 /**
  * Find the most similar verses from a pre-computed set.
- * This is a fallback for when Convex vector search is not available.
- * 
- * @param queryEmbedding - The embedding to search for
- * @param verseEmbeddings - Pre-computed verse embeddings to search through
- * @param threshold - Minimum similarity score (default 0.75)
- * @param limit - Maximum results to return (default 5)
  */
 export function findSimilarLocally(
     queryEmbedding: number[],
     verseEmbeddings: Array<{
-        reference: string;
-        book: string;
-        bookNumber: number;
-        chapter: number;
-        verse: number;
-        text: string;
-        embedding: number[];
+        reference: string
+        book: string
+        bookNumber: number
+        chapter: number
+        verse: number
+        text: string
+        embedding: number[]
     }>,
     threshold = 0.75,
-    limit = 5
+    limit = 5,
 ): VerseMatch[] {
     const scores = verseEmbeddings.map((v) => {
         const baseRef = v.reference.includes('__') ? v.reference.split('__')[0] : v.reference
@@ -252,11 +179,10 @@ export function findSimilarLocally(
             reference: baseRef,
             score: cosineSimilarity(queryEmbedding, v.embedding),
         }
-    });
+    })
 
-    scores.sort((a, b) => b.score - a.score);
+    scores.sort((a, b) => b.score - a.score)
 
-    // Deduplicate by reference, keeping best score per verse
     const bestPerRef = new Map<string, VerseMatch>()
     for (const s of scores) {
         if (s.score < threshold) continue
@@ -274,106 +200,76 @@ export function findSimilarLocally(
         }
     }
 
-    const topScores = [...bestPerRef.values()].slice(0, 3);
-
     return [...bestPerRef.values()]
         .sort((a, b) => b.score - a.score)
-        .slice(0, limit);
+        .slice(0, limit)
 }
 
 // ============================================================================
 // Verse Embedding Cache (IndexedDB)
 // ============================================================================
 
-const VERSE_CACHE_DB_NAME = 'selah-verse-embeddings';
-const VERSE_CACHE_STORE_NAME = 'embeddings';
-const VERSE_CACHE_VERSION = 1;
+const VERSE_CACHE_DB_NAME = 'selah-verse-embeddings'
+const VERSE_CACHE_STORE_NAME = 'embeddings'
+const VERSE_CACHE_VERSION = 1
 
 export interface CachedVerseEmbedding {
-    reference: string;
-    book: string;
-    bookNumber: number;
-    chapter: number;
-    verse: number;
-    text: string;
-    embedding: number[];
-    version: string;
-    cachedAt: number;
-    fragmentType?: string;
-    fragmentIndex?: number;
-    embeddingVersion?: string;
+    reference: string
+    book: string
+    bookNumber: number
+    chapter: number
+    verse: number
+    text: string
+    embedding: number[]
+    version: string
+    cachedAt: number
+    fragmentType?: string
+    fragmentIndex?: number
+    embeddingVersion?: string
 }
 
-/**
- * Open the IndexedDB for verse embedding cache.
- */
 async function openVerseCache(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(VERSE_CACHE_DB_NAME, VERSE_CACHE_VERSION);
-
-        request.onerror = () => reject(request.error);
-
-        request.onsuccess = () => resolve(request.result);
-
+        const request = indexedDB.open(VERSE_CACHE_DB_NAME, VERSE_CACHE_VERSION)
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => resolve(request.result)
         request.onupgradeneeded = (event) => {
-            const db = (event.target as IDBOpenDBRequest).result;
-
+            const db = (event.target as IDBOpenDBRequest).result
             if (!db.objectStoreNames.contains(VERSE_CACHE_STORE_NAME)) {
-                const store = db.createObjectStore(VERSE_CACHE_STORE_NAME, {
-                    keyPath: 'reference',
-                });
-                store.createIndex('by_book', 'book');
-                store.createIndex('by_version', 'version');
+                const store = db.createObjectStore(VERSE_CACHE_STORE_NAME, { keyPath: 'reference' })
+                store.createIndex('by_book', 'book')
+                store.createIndex('by_version', 'version')
             }
-        };
-    });
+        }
+    })
 }
 
-/**
- * Get cached verse embeddings from IndexedDB.
- */
-export async function getCachedVerseEmbeddings(
-    version?: string
-): Promise<CachedVerseEmbedding[]> {
+export async function getCachedVerseEmbeddings(version?: string): Promise<CachedVerseEmbedding[]> {
     try {
-        const db = await openVerseCache();
-        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly');
-        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
-
-        const request = version
-            ? store.index('by_version').getAll(version)
-            : store.getAll();
-
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly')
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME)
+        const request = version ? store.index('by_version').getAll(version) : store.getAll()
         return new Promise((resolve, reject) => {
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
+            request.onsuccess = () => resolve(request.result)
+            request.onerror = () => reject(request.error)
+        })
     } catch (error) {
-        console.error('[Embeddings] Failed to get cached embeddings:', error);
-        return [];
+        console.error('[Embeddings] Failed to get cached embeddings:', error)
+        return []
     }
 }
 
-/**
- * Cache verse embeddings in IndexedDB, writing in chunked transactions
- * to avoid blocking the main thread with huge writes.
- */
-export async function cacheVerseEmbeddings(
-    embeddings: CachedVerseEmbedding[],
-    chunkSize = 500
-): Promise<void> {
+export async function cacheVerseEmbeddings(embeddings: CachedVerseEmbedding[], chunkSize = 500): Promise<void> {
     if (embeddings.length === 0) return
-
     for (let i = 0; i < embeddings.length; i += chunkSize) {
         const chunk = embeddings.slice(i, i + chunkSize)
         const db = await openVerseCache()
         const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite')
         const store = tx.objectStore(VERSE_CACHE_STORE_NAME)
-
         for (const embedding of chunk) {
             store.put({ ...embedding, cachedAt: Date.now() })
         }
-
         await new Promise<void>((resolve, reject) => {
             tx.oncomplete = () => resolve()
             tx.onerror = () => reject(tx.error)
@@ -381,155 +277,133 @@ export async function cacheVerseEmbeddings(
     }
 }
 
-/**
- * Clear cached verse embeddings.
- */
 export async function clearCachedVerseEmbeddings(): Promise<void> {
     try {
-        const db = await openVerseCache();
-        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite');
-        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
-
-        store.clear();
-
-        return new Promise((resolve, reject) => {
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-        });
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite')
+        tx.objectStore(VERSE_CACHE_STORE_NAME).clear()
+        await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+        })
     } catch (error) {
-        console.error('[Embeddings] Failed to clear cache:', error);
+        console.error('[Embeddings] Failed to clear cache:', error)
     }
 }
 
-/**
- * Check if we have cached embeddings for a version.
- */
 export async function hasCachedEmbeddings(version: string): Promise<boolean> {
-    const cached = await getCachedVerseEmbeddings(version);
-    return cached.length > 0;
+    const cached = await getCachedVerseEmbeddings(version)
+    return cached.length > 0
 }
 
-/**
- * Clear cached embeddings for a specific version.
- */
 export async function clearCachedEmbeddingsForVersion(version: string): Promise<number> {
     try {
-        const db = await openVerseCache();
-        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite');
-        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
-        const index = store.index('by_version');
-
-        // Get all embeddings for this version
-        const request = index.openCursor(IDBKeyRange.only(version));
-        let deleted = 0;
-
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readwrite')
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME)
+        const index = store.index('by_version')
+        const request = index.openCursor(IDBKeyRange.only(version))
+        let deleted = 0
         return new Promise((resolve, reject) => {
             request.onsuccess = () => {
-                const cursor = request.result;
+                const cursor = request.result
                 if (cursor) {
-                    cursor.delete();
-                    deleted++;
-                    cursor.continue();
+                    cursor.delete()
+                    deleted++
+                    cursor.continue()
                 } else {
-                    resolve(deleted);
+                    resolve(deleted)
                 }
-            };
-            request.onerror = () => reject(request.error);
-        });
+            }
+            request.onerror = () => reject(request.error)
+        })
     } catch (error) {
-        console.error('[Embeddings] Failed to clear cached embeddings for version:', error);
-        return 0;
+        console.error('[Embeddings] Failed to clear cached embeddings for version:', error)
+        return 0
     }
 }
 
-/**
- * Get all Bible versions that have locally cached embeddings.
- */
 export async function getLocalCachedVersions(): Promise<string[]> {
     try {
-        const db = await openVerseCache();
-        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly');
-        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
-        const index = store.index('by_version');
-
-        const versions = new Set<string>();
-
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly')
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME)
+        const index = store.index('by_version')
+        const versions = new Set<string>()
         return new Promise((resolve, reject) => {
-            const request = index.openKeyCursor();
+            const request = index.openKeyCursor()
             request.onsuccess = () => {
-                const cursor = request.result;
+                const cursor = request.result
                 if (cursor) {
-                    versions.add(cursor.key as string);
-                    cursor.continue();
+                    versions.add(cursor.key as string)
+                    cursor.continue()
                 } else {
-                    resolve(Array.from(versions));
+                    resolve(Array.from(versions))
                 }
-            };
-            request.onerror = () => reject(request.error);
-        });
+            }
+            request.onerror = () => reject(request.error)
+        })
     } catch (error) {
-        console.error('[Embeddings] Failed to get cached versions:', error);
-        return [];
+        console.error('[Embeddings] Failed to get cached versions:', error)
+        return []
     }
 }
 
 export async function hasFragmentEmbeddings(version: string): Promise<boolean> {
     try {
-        const db = await openVerseCache();
-        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly');
-        const store = tx.objectStore(VERSE_CACHE_STORE_NAME);
-        const index = store.index('by_version');
-
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly')
+        const store = tx.objectStore(VERSE_CACHE_STORE_NAME)
+        const index = store.index('by_version')
         return new Promise((resolve, reject) => {
-            const request = index.openCursor(IDBKeyRange.only(version));
-            let checked = 0;
+            const request = index.openCursor(IDBKeyRange.only(version))
+            let checked = 0
             request.onsuccess = () => {
-                const cursor = request.result;
+                const cursor = request.result
                 if (cursor) {
-                    checked++;
-                    const row = cursor.value as CachedVerseEmbedding;
+                    checked++
+                    const row = cursor.value as CachedVerseEmbedding
                     if (row.fragmentType || row.reference.includes('__')) {
-                        resolve(true);
-                        return;
+                        resolve(true)
+                        return
                     }
                     if (checked < 20) {
-                        cursor.continue();
+                        cursor.continue()
                     } else {
-                        resolve(false);
+                        resolve(false)
                     }
                 } else {
-                    resolve(false);
+                    resolve(false)
                 }
-            };
-            request.onerror = () => reject(request.error);
-        });
+            }
+            request.onerror = () => reject(request.error)
+        })
     } catch (error) {
-        console.error('[Embeddings] Failed to check fragment embeddings:', error);
-        return false;
+        console.error('[Embeddings] Failed to check fragment embeddings:', error)
+        return false
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pre-warm helpers
+// ---------------------------------------------------------------------------
+
 let prewarmPromise: Promise<void> | null = null
-let prewarmedEmbeddings: Map<string, CachedVerseEmbedding[]> = new Map()
+const prewarmedEmbeddings = new Map<string, CachedVerseEmbedding[]>()
 
 export function prewarmSemanticSearch(): Promise<void> {
     if (prewarmPromise) return prewarmPromise
-
     prewarmPromise = (async () => {
         try {
-            const [, versions] = await Promise.all([
-                getEmbedder(),
-                getLocalCachedVersions(),
-            ])
+            const [, versions] = await Promise.all([initializeEmbedder(), getLocalCachedVersions()])
             if (versions.length > 0) {
                 const embeddings = await getCachedVerseEmbeddings(versions[0])
                 prewarmedEmbeddings.set(versions[0], embeddings)
             }
         } catch {
-            // Pre-warm is best-effort; failures are handled at search time
+            // Pre-warm is best-effort
         }
     })()
-
     return prewarmPromise
 }
 
@@ -553,4 +427,4 @@ export default {
     getLocalCachedVersions,
     prewarmSemanticSearch,
     getPrewarmedEmbeddings,
-};
+}

@@ -1,65 +1,35 @@
 # Selah — Agent Context
 
-## Collaboration Architecture (Hybrid Local-First)
+## Client-Side Embedding Architecture
 
-### Overview
-Multi-user real-time collaboration for live presentation control. Uses Convex subscriptions when online, falls back to Zustand + BroadcastChannel when offline. A single designated "operator" controls the projector; others are "contributors" (can queue slides) or "viewers" (watch only). Sessions support configurable collaboration modes: `strict`, `moderated`, or `open`.
+### Local Embeddings (`src/services/sermon-listener/localEmbeddings.ts`)
+- **Web Worker** (`embedding.worker.ts`) runs ONNX inference off the main thread so the UI stays responsive during batch embedding.
+- `embedText()` / `embedBatch()` post messages to the worker; the worker loads `Xenova/all-MiniLM-L6-v2` from the same CDN and returns embeddings.
+- Vite bundles the worker into a separate chunk (`dist/assets/embedding.worker-*.js`).
+- `isEmbedderReady()` checks whether the worker has been instantiated.
 
-### Tables
-| Table | Purpose |
-|---|---|
-| `liveSessions` | Per-schedule collaborative session. Fields: `scheduleId`, `operatorId`, `liveSlideId`, `operatorSlideIds`, `queue` (structured: `[{slideId, suggestedBy, suggestedAt}]`), `collaborationMode` (`strict` / `open` / `moderated`), `isBlank`, `activeOverlay`, `status` |
-| `presence` | Heartbeat-based online tracking. Fields: `userId`, `churchId`, `location`, `activeScheduleId`, `liveSessionId`, `sessionRole`, `lastSeen` |
-| `slides` | Now has `lockedBy` / `lockedAt` for edit locking (auto-expires after 5min) |
+### Embedding Sync Manager (`src/services/sermon-listener/embeddingSyncManager.ts`)
+- Central singleton that manages the full verse-embedding pipeline: download → model load → generate → cache.
+- `startSync(versionId, getUrl, downloadFn, withFragments)`
+  - `withFragments = false` (default): embeds **only full verse texts**. ~1–2 min for KJV.
+  - `withFragments = true`: embeds full verse **plus clause/window fragments**. ~3–5 min for KJV, ~3–4× more rows, better short-verse detection.
+- Yields the main thread (`await new Promise(r => setTimeout(r, 0))`) between batches so React can paint progress updates.
+- Flushes accumulated embeddings to IndexedDB every 5 batches (250 verses) to keep memory bounded.
 
-### Convex Functions
-| File | Key Functions |
-|---|---|
-| `convex/liveSessions.ts` | `startSession` (accepts `collaborationMode`), `endSession`, `joinSession`, `leaveSession`, `setLiveSlide` (operator or open-mode), `setOperatorSlides` (operator only), `addToQueue` (mode-aware: blocked in strict, appended in moderated, position-insertable in open), `removeFromQueue`, `acceptFromQueue` (operator only — moves from queue to operatorSlideIds), `reorderQueue` (operator only), `toggleBlank` (operator only), `setOverlay`, `transferOperator` |
-| `convex/presence.ts` | `heartbeat` (15s interval), `getPresenceByChurch`, `getPresenceBySession`, `leavePresence`, `cleanupStalePresence` |
-| `convex/slides.ts` | `lockSlide`, `unlockSlide`, `unlockExpiredLocks` |
-| `convex/schedules.ts` | `updateSchedule`/`deleteSchedule` now enforce `editorIds`; `addScheduleEditor`, `removeScheduleEditor` added |
+### UI / Controls
+- `BibleVersionSettings.tsx` — "Enable Search" seeds full-verse embeddings only (~1–2 min), then **auto-upgrades to fragments in the background** after a 500 ms pause so the user gets usable search quickly. "Upgrade" button lets users manually re-seed with fragments. "Refresh" preserves the current mode.
+- `LocalEmbeddingSync.tsx` — Checkbox toggle lets the user choose fragment mode before caching. Defaults to fast full-verse mode. Also auto-upgrades to fragments after the fast seed completes.
+- `useEmbeddingStatus.ts` — thin React hook that subscribes to the sync manager's reactive state Map. Exposes `upgradeToFragments()` for background enhancement.
 
-### Hooks
-| Hook | Purpose |
-|---|---|
-| `useLiveSession` | Bridges Zustand local state ↔ Convex shared session. Exposes `collaborationMode`, `isOpen`/`isStrict`/`isModerated` booleans. Optimistic local updates with rollback on failure. Syncs `operatorSlideIds` and structured `queue` from server with equality guards to prevent re-render thrash |
-| `usePresence` | 15s heartbeat, visibility-aware updates, auto-leave on unmount |
-| `useCollaborationToasts` | Watches `liveSessions` + `presence` subscriptions, shows `sonner` toasts for slide changes, queue suggestions, suggestion acceptance, and session events |
+### Auto-Upgrade Flow
+1. User clicks **Enable Search** / **Cache** (default `withFragments = false`).
+2. `startSync` completes in ~1–2 min, state shows `completed`, `hasEmbeddings = true`, `hasFragments = false`.
+3. After a 500 ms delay, `upgradeToFragments()` is triggered automatically.
+4. State switches to `upgrading`, progress resets, fragments are embedded **without clearing existing full-verse embeddings**.
+5. On finish, `hasFragments = true`, badge flips from **v1** → **v2**.
+6. If the user navigates away, the worker keeps running because the sync manager is a singleton outside React lifecycle.
 
-### UI Components
-| Component | Location |
-|---|---|
-| `LiveSessionControls` | Top bar — collaboration mode picker (Strict/Review/Open), "Start Session" button, "End" (operator), "Join" / "Watch" (contributors), operator handoff dropdown. Displays active mode badge during session |
-| `PresenceAvatars` | Top bar — avatar stack showing who's online with role badges |
-| `SlideCard` | Orange "Editing" badge when `lockedBy` is set. "Suggest to queue" button for connected contributors |
-| `LiveOutput` | Operator: prev/next advance synced to shared session, Accept/Dismiss on suggested queue items. Contributor in moderated: "Suggest" button. Contributor in open: prev/next directly advance the shared live slide |
-
-### Collaboration Modes
-| Mode | Contributor Nav Arrows | Contributor "Go Live" | Queue Behavior | Best For |
-|---|---|---|---|---|
-| `strict` | Disabled | ❌ | Only operator can add | Formal services |
-| `moderated` | Disabled (suggest instead) | ❌ | Contributors suggest → operator approves | Mid-size teams, rehearsals |
-| `open` | Enabled (changes live) | ✅ | Direct action, no approval gate | Informal, small teams |
-
-### Session Roles
-| Role | Abilities |
-|---|---|
-| `operator` | Start session, advance slides, blank screen, accept/reorder queue, transfer control, set collaboration mode |
-| `contributor` | Join session, suggest slides to queue (moderated), directly advance slides (open), view live feed |
-| `viewer` | Watch live feed only |
-
-### Key Decisions
-- **Configurable collaboration modes** let operators choose the right level of control per service
-- **Single operator model** prevents chaos during formal services (strict/moderated modes)
-- **Structured queue entries** (`{slideId, suggestedBy, suggestedAt}`) enable contributor attribution
-- **`operatorSlideIds`** persists the accepted slide order to Convex so it survives refresh/transfer
-- **Optimistic updates with rollback** ensure snappy UI while maintaining server consistency
-- **Per-schedule sessions** support simultaneous services (main + youth)
-- **Presence as separate table** (not embedded array) for proper Convex indexing
-- **Toast library: sonner** (`sonner` package installed)
-
-## Multi-Monitor / Live Output (Web + Desktop)
+### Multi-Monitor / Live Output (Web + Desktop)
 
 ### Architecture
 The live output system has **two code paths**: native (Tauri desktop) and web (browser Presentation API). Both are managed through `useNativeMultiMonitor`, which auto-detects the environment.

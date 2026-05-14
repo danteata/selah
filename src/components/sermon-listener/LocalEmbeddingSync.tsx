@@ -9,12 +9,13 @@ import { Check, Loader2, Download, Trash2, RefreshCw, Bell, BellOff } from 'luci
 const STAGE_LABELS: Record<SyncStage, string> = {
     idle: '',
     downloading: 'Downloading Bible data...',
-    'loading-model': 'Loading AI model...',
-    importing: 'Importing Bible data...',
-    generating: 'Generating embeddings...',
-    caching: 'Saving to cache...',
-    completed: 'Complete',
-    error: 'Error',
+    'loading-model': 'Preparing search engine...',
+    importing: 'Reading Bible text...',
+    generating: 'Teaching Selah about your Bible...',
+    upgrading: 'Fine-tuning for short verses...',
+    caching: 'Saving to your device...',
+    completed: 'Done!',
+    error: 'Something went wrong',
 }
 
 interface LocalEmbeddingSyncProps {
@@ -29,6 +30,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
         states: embeddingStatuses,
         checkAllStatuses,
         startSync,
+        upgradeToFragments,
         clearEmbeddings,
         isSyncing,
         modelLoading,
@@ -37,6 +39,8 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
 
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default')
     const [showSuccess, setShowSuccess] = useState<string | null>(null)
+
+    const [withFragments, setWithFragments] = useState(false)
 
     useEffect(() => {
         if (bibleVersions && bibleVersions.length > 0) {
@@ -62,24 +66,34 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
         }
     }, [notificationPermission])
 
-    const handleSeed = useCallback(async (versionId: string) => {
+    const handleSeed = useCallback(async (versionId: string, withFragments = false) => {
         const versionName = bibleVersions?.find(v => v.id === versionId)?.name ?? versionId
         try {
             const result = await startSync(versionId, async () => {
                 const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
                 return fileInfo?.url ?? null
-            })
+            }, undefined, withFragments)
             if (result.success) {
-                showNotification('Embedding Complete', `Successfully cached embeddings for ${versionName}`)
+                showNotification('Search ready', `You can now find verses in ${versionName}`)
                 setShowSuccess(versionId)
                 setTimeout(() => setShowSuccess(null), 2000)
+
+                // Auto-upgrade to fragments in the background after fast full-verse seed completes
+                if (!withFragments) {
+                    setTimeout(() => {
+                        upgradeToFragments(versionId, async () => {
+                            const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
+                            return fileInfo?.url ?? null
+                        })
+                    }, 500)
+                }
             } else if (!result.cancelled) {
-                showNotification('Embedding Failed', `Failed to cache embeddings for ${versionName}`)
+                showNotification('Setup failed', `Could not prepare ${versionName} for search`)
             }
         } catch {
-            showNotification('Embedding Failed', `Failed to cache embeddings for ${versionName}`)
+            showNotification('Setup failed', `Could not prepare ${versionName} for search`)
         }
-    }, [bibleVersions, startSync, convex, showNotification])
+    }, [bibleVersions, startSync, upgradeToFragments, convex, showNotification])
 
     const handleClear = useCallback(async (versionId: string) => {
         await clearEmbeddings(versionId)
@@ -96,17 +110,17 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
             {showSuccess && (
                 <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg shadow-lg animate-fade-in">
                     <Check className="w-4 h-4" />
-                    <span className="text-sm font-medium">Embeddings cached locally!</span>
+                    <span className="text-sm font-medium">Search index ready!</span>
                 </div>
             )}
 
             <div className="flex items-center justify-between">
                 <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                        Local Verse Embeddings
+                        Smart Verse Search
                     </h3>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Cache Bible verse embeddings locally for semantic detection (FREE, runs in browser)
+                        Teach Selah your Bible so it can find verses from the words you remember.
                     </p>
                 </div>
             </div>
@@ -133,10 +147,10 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                 <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
                     <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300">
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="text-sm font-medium">Embedding sync in progress</span>
+                        <span className="text-sm font-medium">Getting your Bible ready for search...</span>
                     </div>
                     <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
-                        You can navigate away — the sync will continue in the background.
+                        You can navigate away — this will continue in the background.
                     </p>
                 </div>
             )}
@@ -144,13 +158,13 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h4 className="font-medium text-gray-900 dark:text-white">Embedding Model</h4>
+                        <h4 className="font-medium text-gray-900 dark:text-white">Search Engine</h4>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
                             {modelReady || isEmbedderReady()
-                                ? 'Model loaded and ready'
+                                ? 'Ready to find verses'
                                 : modelLoading
-                                    ? 'Loading model...'
-                                    : 'Model not loaded — will load when needed'}
+                                    ? 'Warming up...'
+                                    : 'Will start when needed'}
                         </p>
                     </div>
                     {(modelReady || isEmbedderReady()) && (
@@ -164,13 +178,25 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
             {bibleVersions && bibleVersions.length > 0 && !embeddingStatuses.size && (
                 <div className="p-4 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
                     <p className="text-sm text-blue-800 dark:text-blue-300">
-                        <strong>Recommendation:</strong> Cache at least one Bible version (KJV recommended) to enable semantic verse detection.
+                        <strong>Tip:</strong> Save at least one Bible version (KJV recommended) so you can search verses by the words you remember.
                     </p>
+                    <div className="mt-3 flex items-center gap-2">
+                        <input
+                            id="fragments-toggle"
+                            type="checkbox"
+                            checked={withFragments}
+                            onChange={(e) => setWithFragments(e.target.checked)}
+                            className="w-4 h-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                        />
+                        <label htmlFor="fragments-toggle" className="text-sm text-blue-900 dark:text-blue-200 cursor-pointer">
+                            Also teach short phrases (slower, but helps with brief verses)
+                        </label>
+                    </div>
                     {bibleVersions.find(v => v.id.toLowerCase() === 'kjv') && (
                         <button
                             onClick={() => {
                                 const kjv = bibleVersions.find(v => v.id.toLowerCase() === 'kjv')
-                                if (kjv) handleSeed(kjv.id)
+                                if (kjv) handleSeed(kjv.id, withFragments)
                             }}
                             disabled={isSyncing}
                             className="mt-4 w-full px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2 transition-all shadow-sm"
@@ -199,7 +225,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                         {(version.verseCount ?? 31102).toLocaleString()} verses
                                         {status?.hasEmbeddings && status.embeddingCount > 0 && (
                                             <span className="ml-2 text-green-600 dark:text-green-400">
-                                                · {status.embeddingCount.toLocaleString()} embeddings cached
+                                                · {status.embeddingCount.toLocaleString()} rows saved
                                             </span>
                                         )}
                                     </p>
@@ -219,7 +245,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                     )}
                                     {!syncing && !status?.hasEmbeddings && (
                                         <button
-                                            onClick={() => handleSeed(version.id)}
+                                            onClick={() => handleSeed(version.id, withFragments)}
                                             disabled={isSyncing}
                                             className="px-3 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center gap-1 transition-all shadow-sm"
                                         >
@@ -230,7 +256,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                     {status?.hasEmbeddings && !syncing && (
                                         <>
                                             <button
-                                                onClick={() => handleSeed(version.id)}
+                                                onClick={() => handleSeed(version.id, withFragments)}
                                                 disabled={isSyncing}
                                                 className="px-3 py-1.5 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 flex items-center gap-1 transition-all shadow-sm"
                                             >
@@ -281,12 +307,13 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                 <h4 className="font-medium text-gray-900 dark:text-white mb-2">How it works</h4>
                 <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                    <li>· Embeddings are generated locally using Transformers.js (FREE)</li>
-                    <li>· Model: all-MiniLM-L6-v2 (22MB, 384 dimensions)</li>
-                    <li>· Processing time: ~5–10 minutes per Bible version</li>
-                    <li>· Enables semantic verse detection from paraphrases</li>
-                    <li>· Cached data is stored in your browser (IndexedDB)</li>
-                    <li>· Works offline after initial caching</li>
+                    <li>· The app learns your Bible version on your device (FREE)</li>
+                    <li>· Uses a small 22MB brain to understand verse meaning</li>
+                    <li>· Basic mode: ~1–2 minutes per Bible version</li>
+                    <li>· Thorough mode: ~3–5 minutes, better at finding short verses</li>
+                    <li>· Type what you remember and the app finds the verse</li>
+                    <li>· Data is saved to your browser for offline use</li>
+                    <li>· Works offline once set up</li>
                 </ul>
             </div>
 

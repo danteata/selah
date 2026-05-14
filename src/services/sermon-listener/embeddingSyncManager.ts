@@ -50,6 +50,7 @@ export type SyncStage =
     | 'loading-model'
     | 'importing'
     | 'generating'
+    | 'upgrading'
     | 'caching'
     | 'completed'
     | 'error'
@@ -193,6 +194,7 @@ class EmbeddingSyncManager {
         versionId: string,
         getBibleFileUrl: () => Promise<string | null>,
         downloadFn?: () => Promise<boolean>,
+        withFragments = false,
     ): Promise<SyncResult> {
         if (this.isSyncingVersion(versionId)) return { success: false, error: 'Sync already in progress' }
 
@@ -285,10 +287,15 @@ class EmbeddingSyncManager {
 
                 for (let j = 0; j < batch.length; j++) {
                     const verse = batch[j]
-                    const fragments = extractVerseFragments(verse.scripture)
-                    for (const frag of fragments) {
-                        allTexts.push(frag.text)
-                        fragmentMeta.push({ verseIdx: j, type: frag.type, fragmentIndex: frag.fragmentIndex })
+                    if (withFragments) {
+                        const fragments = extractVerseFragments(verse.scripture)
+                        for (const frag of fragments) {
+                            allTexts.push(frag.text)
+                            fragmentMeta.push({ verseIdx: j, type: frag.type, fragmentIndex: frag.fragmentIndex })
+                        }
+                    } else {
+                        allTexts.push(verse.scripture.trim())
+                        fragmentMeta.push({ verseIdx: j, type: 'full', fragmentIndex: 0 })
                     }
                 }
 
@@ -324,7 +331,7 @@ class EmbeddingSyncManager {
                 totalEmbedded += embeddings.length
                 batchIndex++
 
-            if (batchIndex % FLUSH_INTERVAL === 0) {
+                if (batchIndex % FLUSH_INTERVAL === 0) {
                     this.updateState(versionId, { stage: 'caching' })
                     await cacheVerseEmbeddings(batchAccumulator.map(e => ({
                         ...e,
@@ -342,6 +349,194 @@ class EmbeddingSyncManager {
                     progress: currentProgress,
                     eta,
                 })
+
+                // Yield the main thread so React can paint updates
+                if (i + BATCH_SIZE < verses.length) {
+                    await new Promise((r) => setTimeout(r, 0))
+                }
+            }
+
+            if (batchAccumulator.length > 0) {
+                this.updateState(versionId, { stage: 'caching' })
+                await cacheVerseEmbeddings(batchAccumulator.map(e => ({
+                    ...e,
+                    version: versionId,
+                    cachedAt: Date.now(),
+                })))
+            }
+
+            this.updateState(versionId, {
+                stage: 'completed',
+                progress: verses.length,
+                total: verses.length,
+                hasEmbeddings: true,
+                hasFragments: withFragments,
+                embeddingCount: totalEmbedded,
+                startedAt: null,
+                eta: null,
+                error: null,
+            })
+            return { success: true }
+        } catch (error) {
+            if (signal.aborted) {
+                this.updateState(versionId, { stage: 'idle', error: 'Cancelled', eta: null })
+                return { success: false, cancelled: true, error: 'Cancelled' }
+            } else {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+                this.updateState(versionId, {
+                    stage: 'error',
+                    error: errorMessage,
+                    eta: null,
+                })
+                return { success: false, error: errorMessage }
+            }
+        } finally {
+            if (this.isControllerCurrent(versionId, controller)) {
+                this.abortControllers.delete(versionId)
+            }
+        }
+    }
+
+    async upgradeToFragments(
+        versionId: string,
+        getBibleFileUrl: () => Promise<string | null>,
+    ): Promise<SyncResult> {
+        if (this.isSyncingVersion(versionId)) return { success: false, error: 'Sync already in progress' }
+        const hasFrags = await hasFragmentEmbeddings(versionId)
+        if (hasFrags) return { success: true }
+
+        const controller = new AbortController()
+        this.abortControllers.set(versionId, controller)
+        const signal = controller.signal
+        const startedAt = Date.now()
+
+        try {
+            this.updateState(versionId, { stage: 'upgrading', progress: 0, total: 0, startedAt, eta: null, error: null })
+
+            if (!isEmbedderReady()) {
+                this.modelLoading = true
+                const result = await initializeEmbedder()
+                this.modelReady = result.ready
+                this.modelLoading = false
+                if (!result.ready) throw new Error('Failed to load embedding model')
+            } else {
+                this.modelReady = true
+            }
+
+            if (signal.aborted) throw new Error('Sync cancelled')
+
+            const url = await getBibleFileUrl()
+            if (!url) throw new Error('Bible version file not found')
+
+            const response = await fetch(url)
+            if (!response.ok) throw new Error(`Failed to fetch Bible file: ${response.status}`)
+
+            const verses = await response.json() as Array<{
+                book: string
+                chapter: string
+                verse: string
+                scripture: string
+            }>
+            if (!verses || verses.length === 0) throw new Error('Bible version data is empty')
+
+            if (signal.aborted) throw new Error('Sync cancelled')
+
+            this.updateState(versionId, { stage: 'upgrading', total: verses.length })
+
+            const BATCH_SIZE = 50
+            const FLUSH_INTERVAL = 5
+            let batchAccumulator: Array<{
+                reference: string
+                book: string
+                bookNumber: number
+                chapter: number
+                verse: number
+                text: string
+                embedding: number[]
+            }> = []
+            let totalEmbedded = 0
+            let batchIndex = 0
+
+            for (let i = 0; i < verses.length; i += BATCH_SIZE) {
+                if (signal.aborted) throw new Error('Sync cancelled')
+
+                const batch = verses.slice(i, i + BATCH_SIZE)
+                const allTexts: string[] = []
+                const fragmentMeta: Array<{ verseIdx: number; type: string; fragmentIndex: number }> = []
+
+                for (let j = 0; j < batch.length; j++) {
+                    const verse = batch[j]
+                    const fragments = extractVerseFragments(verse.scripture)
+                    for (const frag of fragments) {
+                        allTexts.push(frag.text)
+                        fragmentMeta.push({ verseIdx: j, type: frag.type, fragmentIndex: frag.fragmentIndex })
+                    }
+                }
+
+                // Skip full-verse fragments — they are already cached. Only embed clause/window fragments.
+                const nonFullTexts: string[] = []
+                const nonFullMeta: Array<{ verseIdx: number; type: string; fragmentIndex: number }> = []
+                for (let k = 0; k < fragmentMeta.length; k++) {
+                    if (fragmentMeta[k].type !== 'full') {
+                        nonFullTexts.push(allTexts[k])
+                        nonFullMeta.push(fragmentMeta[k])
+                    }
+                }
+
+                if (nonFullTexts.length > 0) {
+                    const embeddings = await embedBatch(nonFullTexts)
+
+                    for (let metaIdx = 0; metaIdx < nonFullMeta.length; metaIdx++) {
+                        const meta = nonFullMeta[metaIdx]
+                        const verse = batch[meta.verseIdx]
+                        let bookNumber: number
+                        let bookName: string
+                        const parsedBook = parseInt(verse.book, 10)
+                        if (!isNaN(parsedBook)) {
+                            bookNumber = parsedBook
+                            bookName = NUMBER_TO_BOOK[bookNumber] || verse.book
+                        } else {
+                            bookNumber = BOOK_TO_NUMBER[verse.book] ?? 0
+                            bookName = verse.book
+                        }
+
+                        batchAccumulator.push({
+                            reference: `${bookName} ${verse.chapter}:${verse.verse}__${meta.type}_${meta.fragmentIndex}`,
+                            book: bookName,
+                            bookNumber,
+                            chapter: parseInt(verse.chapter, 10),
+                            verse: parseInt(verse.verse, 10),
+                            text: nonFullTexts[metaIdx],
+                            embedding: embeddings[metaIdx]?.embedding || [],
+                        })
+                    }
+                    totalEmbedded += embeddings.length
+                }
+
+                batchIndex++
+
+                if (batchIndex % FLUSH_INTERVAL === 0) {
+                    this.updateState(versionId, { stage: 'caching' })
+                    await cacheVerseEmbeddings(batchAccumulator.map(e => ({
+                        ...e,
+                        version: versionId,
+                        cachedAt: Date.now(),
+                    })))
+                    batchAccumulator = []
+                    this.updateState(versionId, { stage: 'upgrading' })
+                }
+
+                const currentProgress = Math.min(i + BATCH_SIZE, verses.length)
+                const eta = this.calculateEta(currentProgress, verses.length, startedAt)
+
+                this.updateState(versionId, {
+                    progress: currentProgress,
+                    eta,
+                })
+
+                if (i + BATCH_SIZE < verses.length) {
+                    await new Promise((r) => setTimeout(r, 0))
+                }
             }
 
             if (batchAccumulator.length > 0) {

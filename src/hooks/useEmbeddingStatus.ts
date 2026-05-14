@@ -29,8 +29,16 @@ export function useEmbeddingStatus() {
         versionId: string,
         getBibleFileUrl: () => Promise<string | null>,
         downloadFn?: () => Promise<boolean>,
+        withFragments?: boolean,
     ) => {
-        return embeddingSyncManager.startSync(versionId, getBibleFileUrl, downloadFn)
+        return embeddingSyncManager.startSync(versionId, getBibleFileUrl, downloadFn, withFragments)
+    }, [])
+
+    const upgradeToFragments = useCallback(async (
+        versionId: string,
+        getBibleFileUrl: () => Promise<string | null>,
+    ) => {
+        return embeddingSyncManager.upgradeToFragments(versionId, getBibleFileUrl)
     }, [])
 
     const cancelSync = useCallback((versionId?: string) => {
@@ -50,6 +58,7 @@ export function useEmbeddingStatus() {
         checkStatus,
         checkAllStatuses,
         startSync,
+        upgradeToFragments,
         cancelSync,
         clearEmbeddings,
         isSyncing,
