@@ -191,7 +191,7 @@ export function BibleVersionSettings() {
                                                     {version.id}
                                                 </span>
                                                 {embeddingStatus?.hasEmbeddings && !isVersionSyncing && (
-                                                    <span className="flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400">
+                                                    <span className="flex items-center gap-1 text-xs text-[var(--accent-teal)]">
                                                         <Search className="w-3 h-3" />
                                                         {embeddingStatus.hasFragments ? (
                                                             <span className="text-[10px] px-1 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded font-medium">v2</span>
@@ -211,7 +211,7 @@ export function BibleVersionSettings() {
                                             {statusesLoading ? (
                                                 <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
                                             ) : isVersionSyncing ? (
-                                                <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400">
+                                                <div className="flex items-center gap-2 text-[var(--accent-teal)]">
                                                     <Loader2 className="w-4 h-4 animate-spin" />
                                                     <span className="text-sm">
                                                         {progressPct != null ? `${progressPct}%` : STAGE_LABELS[stage] || 'Processing...'}
@@ -253,7 +253,7 @@ export function BibleVersionSettings() {
                                                         <button
                                                             onClick={() => handleEnableSearch(version.id)}
                                                             disabled={isSyncing}
-                                                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-purple-500 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 disabled:opacity-50 transition-colors"
+                                                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50 transition-colors"
                                                         >
                                                             <Search className="w-3.5 h-3.5" />
                                                             Enable Search
@@ -284,7 +284,7 @@ export function BibleVersionSettings() {
                                             </div>
                                             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
                                                 <div
-                                                    className="bg-purple-600 h-1.5 rounded-full transition-all"
+                                                    className="bg-[var(--accent-teal)] h-1.5 rounded-full transition-all"
                                                     style={{ width: `${progressPct ?? 0}%` }}
                                                 />
                                             </div>

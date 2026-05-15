@@ -48,11 +48,11 @@ export function EmbeddingSyncIndicator() {
 
     return (
         <div className="fixed bottom-4 right-4 z-40 animate-fade-in">
-            <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-purple-200 dark:border-purple-800 max-w-xs">
+            <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-[var(--accent-teal)]/30 max-w-xs">
                 <div className="flex-shrink-0">
                     <div className="relative">
-                        <Database className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                        <Loader2 className="w-3 h-3 text-purple-500 animate-spin absolute -top-1 -right-1" />
+                        <Database className="w-5 h-5 text-[var(--accent-teal)]" />
+                        <Loader2 className="w-3 h-3 text-[var(--accent-teal)] animate-spin absolute -top-1 -right-1" />
                     </div>
                 </div>
                 <div className="flex-1 min-w-0">
@@ -62,7 +62,7 @@ export function EmbeddingSyncIndicator() {
                     <div className="flex items-center gap-2 mt-1">
                         <div className="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                             <div
-                                className="h-full bg-purple-600 dark:bg-purple-400 rounded-full transition-all duration-300"
+                                className="h-full bg-[var(--accent-teal)] rounded-full transition-all duration-300"
                                 style={{ width: `${pct ?? 0}%` }}
                             />
                         </div>

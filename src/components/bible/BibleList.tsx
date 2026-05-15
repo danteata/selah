@@ -56,7 +56,8 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
     const setLiveSlide = useAppStore((s) => s.setLiveSlide)
     const defaultBibleVersion = useAppStore((s) => s.settings.defaultBibleVersion)
-    const { templates } = useTemplates()
+    const { templates, getTemplatesForSlideType } = useTemplates()
+    const bibleTemplates = getTemplatesForSlideType('bible')
 
     const {
         results: semanticResults,
@@ -70,7 +71,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     } = useSemanticVerseSearch({
         threshold: 0.35,
         limit: 8,
-        debounceMs: 400,
+        debounceMs: 250,
         minQueryLength: 3,
         version: selectedVersion || undefined,
     })
@@ -224,7 +225,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             autoSearchTimerRef.current = setTimeout(() => {
                 if (!navigatingRef.current) handleSearch()
             }, 500)
-            clearSemanticResults()
+            // Don't clear semantic results when regex matches — let both display
         } else if (trimmed.length >= 3 && hasEmbeddings && isEmbedderReady) {
             semanticSearch(trimmed)
         } else {
@@ -543,10 +544,10 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                         })}
 
                         {/* Template Selector */}
-                        {templates && templates.length > 0 && (
+                        {bibleTemplates && bibleTemplates.length > 0 && (
                             <div className="pt-3 mt-3 border-t border-[var(--border-subtle)]">
                                 <div className="flex flex-wrap gap-2">
-                                    {templates.slice(0, 5).map(template => (
+                                    {bibleTemplates.slice(0, 5).map(template => (
                                         <button key={template._id} onClick={() => setSelectedTemplate(selectedTemplate?._id === template._id ? null : template)} className={`px-3 py-1 text-xs rounded-full transition-colors ${selectedTemplate?._id === template._id ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)]'}`}>{template.name}</button>
                                     ))}
                                 </div>
@@ -555,9 +556,15 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </div>
                 )}
 
-                {isSemanticSearching && !loading && (
+                {isSemanticSearching && !loading && verseRows.length === 0 && (
                     <div className="flex items-center justify-center gap-2 py-4 text-xs text-[var(--text-muted)]">
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--accent-teal)]" /> Searching verses...
+                    </div>
+                )}
+
+                {isSemanticSearching && !loading && verseRows.length > 0 && (
+                    <div className="flex items-center gap-2 px-3 py-2 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-subtle)]">
+                        <Loader2 className="w-3 h-3 animate-spin text-[var(--accent-teal)]" /> Finding related verses...
                     </div>
                 )}
 
@@ -570,10 +577,15 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                             <p>Examples: John 3:16, Jn 3:16-18, Ps 23:1</p>
                             {hasEmbeddings && isEmbedderReady && <p className="text-[var(--accent-teal)] mt-2">Or search by meaning, e.g. &quot;God so loved the world&quot;</p>}
                             {hasEmbeddings && !isEmbedderReady && (
-                                <p className="text-[var(--accent-amber)] mt-2 flex items-center justify-center gap-1.5">
-                                    <Loader2 className="w-3 h-3 animate-spin" /> Warming up semantic search...
-                                </p>
-                            )}
+                            <p className="text-[var(--accent-amber)] mt-2 flex items-center justify-center gap-1.5">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Warming up semantic search...
+                            </p>
+                        )}
+                        {hasEmbeddings === null && (
+                            <p className="text-[var(--text-muted)] mt-2 flex items-center justify-center gap-1.5">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Checking semantic search availability...
+                            </p>
+                        )}
                         </div>
                     </div>
                 )}

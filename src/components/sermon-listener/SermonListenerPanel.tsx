@@ -403,7 +403,7 @@ function SermonListenerPanelInner({
             {(lastVoiceCommand || currentVerse) && (
                 <div className="flex items-center gap-1.5 flex-wrap">
                     {activeBibleVersion && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]">
                             {activeBibleVersion}
                         </span>
                     )}

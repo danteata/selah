@@ -75,7 +75,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     const categories = [
         { id: null, label: 'All', icon: Grid },
         { id: 'announcement', label: 'Announcement', color: 'bg-blue-500' },
-        { id: 'worship', label: 'Worship', color: 'bg-purple-500' },
+        { id: 'worship', label: 'Worship', color: 'bg-amber-500' },
         { id: 'sermon', label: 'Sermon', color: 'bg-amber-500' },
         { id: 'prayer', label: 'Prayer', color: 'bg-green-500' },
         { id: 'general', label: 'General', color: 'bg-gray-500' },
@@ -142,7 +142,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
         <div className={`${isInline ? 'h-full' : 'w-full max-w-5xl h-[85vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl'} flex flex-col overflow-hidden`}>
             {/* Header - Only show if not inline */}
             {!isInline && (
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-gradient-to-r from-primary-500/10 to-purple-500/10">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-gradient-to-r from-primary-500/10 to-amber-500/10">
                     <div className="flex items-center gap-3">
                         <Sparkles className="w-6 h-6 text-primary-600" />
                         <div>
@@ -282,7 +282,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                                             : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                                             }`}
                                     >
-                                        <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-primary-500/80 to-purple-600/80">
+                                        <div className="aspect-video flex items-center justify-center bg-gradient-to-br from-primary-500/80 to-amber-600/80">
                                             {template.thumbnail && (
                                                 <img src={template.thumbnail} className="w-full h-full object-cover absolute inset-0 opacity-40" />
                                             )}

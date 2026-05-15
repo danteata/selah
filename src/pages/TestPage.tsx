@@ -23,7 +23,7 @@ function TestPage() {
                 </button>
                 <button
                     onClick={() => navigate('/signup')}
-                    className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600"
+                    className="px-4 py-2 bg-[var(--accent-teal)] text-white rounded-md hover:brightness-110"
                 >
                     Go to Signup
                 </button>

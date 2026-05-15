@@ -144,12 +144,12 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
             )}
 
             {isSyncing && (
-                <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-                    <div className="flex items-center gap-2 text-purple-700 dark:text-purple-300">
+                <div className="p-3 bg-[var(--accent-teal)]/5 rounded-lg border border-[var(--accent-teal)]/30">
+                    <div className="flex items-center gap-2 text-[var(--accent-teal)]">
                         <Loader2 className="w-4 h-4 animate-spin" />
                         <span className="text-sm font-medium">Getting your Bible ready for search...</span>
                     </div>
-                    <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
+                    <p className="text-xs text-[var(--accent-teal)] mt-1">
                         You can navigate away — this will continue in the background.
                     </p>
                 </div>
@@ -238,7 +238,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                                         </span>
                                     )}
                                     {syncing && status && (
-                                        <span className="px-2 py-1 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 flex items-center gap-1">
+                                        <span className="px-2 py-1 text-xs font-medium rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 flex items-center gap-1">
                                             <Loader2 className="w-3 h-3 animate-spin" />
                                             {status.total > 0 ? `${Math.round((status.progress / status.total) * 100)}%` : STAGE_LABELS[stage] || 'Processing...'}
                                         </span>

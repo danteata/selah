@@ -376,7 +376,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                 {/* SongWords.db */}
                                 <div className="border border-gray-300 dark:border-gray-700 rounded-lg p-4">
                                     <div className="flex items-center gap-2 mb-2">
-                                        <FileStack className="w-5 h-5 text-purple-600" />
+                                        <FileStack className="w-5 h-5 text-[var(--accent-teal)]" />
                                         <span className="font-medium text-gray-700 dark:text-gray-300">
                                             SongWords.db
                                         </span>

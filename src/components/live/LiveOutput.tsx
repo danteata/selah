@@ -412,7 +412,7 @@ export function LiveOutput() {
                         </span>
                     )}
                     {ndiRunning && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-purple-500/20 text-purple-400 rounded-full border border-purple-500/30">
+                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/30">
                             NDI ACTIVE
                         </span>
                     )}
@@ -422,7 +422,7 @@ export function LiveOutput() {
                     {ndiAvailable && (
                         <button
                             onClick={ndiRunning ? () => ndiStop() : () => ndiStart()}
-                            className={`p-1.5 rounded transition-colors ${ndiRunning ? 'text-purple-400 bg-purple-400/10' : 'text-gray-400 hover:text-white'}`}
+                            className={`p-1.5 rounded transition-colors ${ndiRunning ? 'text-[var(--accent-teal)] bg-[var(--accent-teal)]/10' : 'text-gray-400 hover:text-white'}`}
                             title="NDI Output"
                         >
                             <Radio className="w-4 h-4" />

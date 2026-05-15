@@ -17,7 +17,7 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
 
     const categories = [
         { id: 'announcement', label: 'Announcement', color: 'bg-blue-500' },
-        { id: 'worship', label: 'Worship', color: 'bg-purple-500' },
+        { id: 'worship', label: 'Worship', color: 'bg-amber-500' },
         { id: 'sermon', label: 'Sermon', color: 'bg-amber-500' },
         { id: 'prayer', label: 'Prayer', color: 'bg-green-500' },
         { id: 'general', label: 'General', color: 'bg-gray-500' },

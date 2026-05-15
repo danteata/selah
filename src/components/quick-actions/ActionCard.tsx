@@ -59,7 +59,7 @@ export function ActionCard({ action, dataActionIndex, isFocused, onClick }: Acti
                 flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center
                 transition-colors duration-150
                 ${action.tier === 'teams'
-                    ? 'bg-purple-100/80 text-purple-500 dark:bg-purple-900/30 dark:text-purple-400'
+                    ? 'bg-amber-100/80 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
                     : 'bg-blue-100/80 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400'
                 }
             `}>
@@ -72,7 +72,7 @@ export function ActionCard({ action, dataActionIndex, isFocused, onClick }: Acti
                         {action.name}
                     </span>
                     {action.tier === 'teams' && (
-                        <span className="text-[9px] px-1.5 py-0.5 bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400 rounded-full font-semibold uppercase tracking-wider flex-shrink-0">
+                        <span className="text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 rounded-full font-semibold uppercase tracking-wider flex-shrink-0">
                             Pro
                         </span>
                     )}

@@ -96,7 +96,7 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
         closeLiveWindow,
         isPresentationApiAvailable,
         isScreenEnumerationAvailable,
-        flashMonitor: flashMonitorNative,
+        identifyScreen,
     } = useNativeMultiMonitor()
 
     const [localSelectedId, setLocalSelectedId] = useState<string | null>(null)
@@ -134,14 +134,10 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
     const handleFlashMonitor = async (monitor: MonitorInfo) => {
         if (flashingMonitorId) return
         setFlashingMonitorId(monitor.id)
-        const color = monitor.color || '#3B82F6'
-        if (isDesktop) {
-            await flashMonitorNative(color)
-        }
-        const channel = new BroadcastChannel('selah-monitor-flash')
-        channel.postMessage({ monitorId: monitor.id, color })
-        channel.close()
-        setTimeout(() => setFlashingMonitorId(null), 2500)
+        // Open a temporary identification window on the target screen.
+        // Works whether or not a live output is already present.
+        await identifyScreen(monitor.id)
+        setTimeout(() => setFlashingMonitorId(null), 3500)
     }
 
     const effectiveSelectedId = localSelectedId || selectedMonitorId
@@ -350,7 +346,7 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
                         {!isDesktop && isPresentationApiAvailable() && (
                             <button
                                 onClick={() => onSelect?.('presentation-api')}
-                                className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                                className="flex items-center justify-center gap-2 px-4 py-2 bg-[var(--accent-teal)]/80 text-white rounded-lg hover:bg-[var(--accent-teal)]"
                                 title="Present to external display"
                             >
                                 <Airplay className="w-4 h-4" />
@@ -365,6 +361,11 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
                     ? 'Connect an external display for projection'
                     : `Select a screen for live output`
                 }
+                {!isDesktop && !isPresentationApiAvailable() && !isScreenEnumerationAvailable() && (
+                    <span className="block mt-1 text-amber-600 dark:text-amber-400">
+                        Multi-monitor selection requires Chrome 100+ or the desktop app for reliable screen targeting.
+                    </span>
+                )}
             </p>
         </div>
     )

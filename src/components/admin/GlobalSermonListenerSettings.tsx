@@ -364,7 +364,7 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
                         onClick={() => !isLoadingProvider && handleProviderChange('elevenlabs')}
                         disabled={isLoadingProvider}
                         className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'elevenlabs'
-                            ? 'border-purple-500 bg-purple-500/10 dark:bg-purple-500/20'
+                            ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 dark:bg-[var(--accent-teal)]/20'
                             : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                             }`}
                     >
@@ -382,7 +382,7 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
                                     </span>
                                 )}
                                 {provider === 'elevenlabs' && (
-                                    <IconWrapper name="i-bx-check" className="text-purple-500" />
+                                    <IconWrapper name="i-bx-check" className="text-[var(--accent-teal)]" />
                                 )}
                             </div>
                         </div>
@@ -695,8 +695,8 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
                         />
                     </div>
 
-                    <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700">
-                        <p className="text-sm text-purple-800 dark:text-purple-300">
+                    <div className="p-3 rounded-lg bg-[var(--accent-teal)]/5 border border-[var(--accent-teal)]/20">
+                        <p className="text-sm text-[var(--accent-teal)]">
                             <strong>ElevenLabs Speech-to-Text:</strong> High-quality cloud transcription with word-level timestamps.
                             Get your API key from <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer" className="underline">elevenlabs.io</a>.
                         </p>

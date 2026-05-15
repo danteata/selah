@@ -19,7 +19,7 @@ const typeConfig: Record<string, { label: string; icon: LucideIcon; color: strin
     song: {
         label: 'Song',
         icon: Music,
-        color: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+        color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300',
     },
     text: {
         label: 'Text',
