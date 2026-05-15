@@ -1,18 +1,38 @@
 import { useState } from 'react'
-import { X, Save, Tag } from 'lucide-react'
+import { X, Save } from 'lucide-react'
 import type { Slide } from '../../types'
+import { generateThumbnail } from '../../utils/templateThumbnail'
+import type { SlideType } from '../../hooks/useTemplates'
 
 interface SaveAsTemplateModalProps {
     isOpen: boolean
     slide: Slide | null
     onClose: () => void
-    onSave: (name: string, category: string, description?: string) => void
+    onSave: (data: {
+        name: string
+        category: string
+        description?: string
+        thumbnail?: string
+        appliesTo?: SlideType[]
+    }) => void
 }
+
+const SLIDE_TYPES: { id: SlideType; label: string }[] = [
+    { id: 'bible', label: 'Bible' },
+    { id: 'song', label: 'Songs' },
+    { id: 'hymn', label: 'Hymns' },
+    { id: 'text', label: 'Text' },
+    { id: 'media', label: 'Media' },
+    { id: 'announcement', label: 'Announcements' },
+    { id: 'countdown', label: 'Countdowns' },
+    { id: 'any', label: 'Any Type' },
+]
 
 export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTemplateModalProps) {
     const [name, setName] = useState(slide?.name || '')
     const [category, setCategory] = useState<string>('general')
     const [description, setDescription] = useState('')
+    const [appliesTo, setAppliesTo] = useState<SlideType[]>(['any'])
     const [isSaving, setIsSaving] = useState(false)
 
     const categories = [
@@ -29,7 +49,25 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
 
         setIsSaving(true)
         try {
-            await onSave(name.trim(), category, description.trim() || undefined)
+            let thumbnail: string | undefined
+            const bgType = slide?.backgroundType || 'image'
+            const bg = slide?.background || ''
+
+            if (bgType === 'image' && bg) {
+                thumbnail = bg
+            } else if (bgType === 'gradient' || bgType === 'color') {
+                thumbnail = await generateThumbnail(bg, bgType, name)
+            } else if (bgType === 'video' && bg) {
+                thumbnail = await generateThumbnail(bg, 'image', name)
+            }
+
+            await onSave({
+                name: name.trim(),
+                category,
+                description: description.trim() || undefined,
+                thumbnail,
+                appliesTo,
+            })
             onClose()
         } finally {
             setIsSaving(false)
@@ -114,6 +152,45 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
                                 >
                                     <span className={`w-2 h-2 rounded-full ${cat.color}`} />
                                     {cat.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Applies To */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Applies To
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                            Which slide types can use this template?
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                            {SLIDE_TYPES.map((st) => (
+                                <button
+                                    key={st.id}
+                                    type="button"
+                                    onClick={() => {
+                                        if (st.id === 'any') {
+                                            setAppliesTo(['any'])
+                                        } else {
+                                            setAppliesTo(prev => {
+                                                const withoutAny = prev.filter(id => id !== 'any')
+                                                if (withoutAny.includes(st.id)) {
+                                                    const next = withoutAny.filter(id => id !== st.id)
+                                                    return next.length === 0 ? ['any'] : next
+                                                }
+                                                return [...withoutAny, st.id]
+                                            })
+                                        }
+                                    }}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                                        appliesTo.includes(st.id)
+                                            ? 'bg-[var(--accent-teal)] text-white'
+                                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                    }`}
+                                >
+                                    {st.label}
                                 </button>
                             ))}
                         </div>

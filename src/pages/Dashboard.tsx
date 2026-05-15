@@ -308,15 +308,16 @@ export default function Dashboard() {
     }
 
     // Handle saving a slide as a template
-    const handleSaveAsTemplate = async (name: string, category: string, description?: string) => {
+    const handleSaveAsTemplate = async (data: { name: string; category: string; description?: string; thumbnail?: string; appliesTo?: string[] }) => {
         if (!slideToSaveAsTemplate) return
 
         await createTemplate({
-            name,
-            category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
-            description,
+            name: data.name,
+            category: data.category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
+            description: data.description,
             slideId: slideToSaveAsTemplate,
-            thumbnail: slideToSaveAsTemplate.background,
+            thumbnail: data.thumbnail || slideToSaveAsTemplate.background,
+            appliesTo: data.appliesTo as any,
         })
 
         setShowSaveAsTemplate(false)

@@ -4,6 +4,7 @@ import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
 import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
 import { openFileDialog } from '../../utils/fileDialog'
 import { isDesktop } from '../../platform'
+import { generateThumbnail } from '../../utils/templateThumbnail'
 
 interface CreateTemplateModalProps {
     isOpen: boolean
@@ -258,6 +259,15 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
         setIsSaving(true)
         try {
+            let thumbnail: string | undefined
+            if (backgroundType === 'image' && background) {
+                thumbnail = background
+            } else if (backgroundType === 'gradient' || backgroundType === 'color') {
+                thumbnail = await generateThumbnail(background, backgroundType, content || name)
+            } else if (backgroundType === 'video' && background) {
+                thumbnail = await generateThumbnail(background, 'image', content || name)
+            }
+
             const slideData = {
                 type: 'text',
                 layout: 'full-text',
@@ -274,7 +284,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     slideId: JSON.stringify(slideData),
                     category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
                     appliesTo: appliesTo as any,
-                    thumbnail: backgroundType === 'image' ? background : undefined,
+                    thumbnail,
                     backgroundStorageId: backgroundStorageId || undefined,
                 })
             } else {
@@ -284,7 +294,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     slideId: JSON.stringify(slideData),
                     category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
                     appliesTo: appliesTo as any,
-                    thumbnail: backgroundType === 'image' ? background : undefined,
+                    thumbnail,
                     backgroundStorageId: backgroundStorageId || undefined,
                 })
             }
