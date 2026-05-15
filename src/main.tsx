@@ -43,9 +43,17 @@ window.addEventListener('error', (event: ErrorEvent) => {
     }
 }, true)
 
-// Pre-warm semantic search: load embeddings model + cache into memory in background
-// This fires before React mounts so the first search is instant
-prewarmSemanticSearch()
+// Pre-warm semantic search lazily after the UI is idle, not before React mounts.
+// This prevents the 22MB ONNX model download and large IndexedDB reads from
+// blocking the initial render and making the app unresponsive.
+const schedulePrewarm = () => {
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => prewarmSemanticSearch(), { timeout: 5000 })
+    } else {
+        setTimeout(() => prewarmSemanticSearch(), 3000)
+    }
+}
+schedulePrewarm()
 
 window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
     if (isConvexError(event.reason)) {

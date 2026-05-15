@@ -47,7 +47,7 @@ interface UseSemanticVerseSearchOptions {
     limit?: number
     /** Bible version to search in (optional) */
     version?: string
-    /** Debounce delay in ms (default 300) */
+    /** Debounce delay in ms (default 200) */
     debounceMs?: number
     /** Prefer local embeddings over remote (default true) */
     preferLocal?: boolean
@@ -87,7 +87,7 @@ export function useSemanticVerseSearch(
         threshold = 0.65,
         limit = 5,
         version,
-        debounceMs = 300,
+        debounceMs = 200,
         preferLocal = true,
         minQueryLength = 2,
     } = options
@@ -113,7 +113,9 @@ export function useSemanticVerseSearch(
     const localEmbeddingsCache = useRef<Awaited<ReturnType<typeof getCachedVerseEmbeddings>>>(null)
     const embeddingCache = useRef<Map<string, number[]>>(new Map())
 
-    // Check if embeddings are available (both local and remote)
+    // Check if embeddings are available — but defer the heavy IndexedDB load
+    // until the user actually searches. This prevents 30K+ rows being loaded
+    // into JS heap on mount, blocking the UI.
     useEffect(() => {
         const checkEmbeddings = async () => {
             const requestedVersion = version || 'KJV'
@@ -129,35 +131,35 @@ export function useSemanticVerseSearch(
                 return
             }
 
+            // Check if embeddings exist locally (cheap metadata check, not full load)
             let hasLocal = await hasCachedEmbeddings(requestedVersion)
             let workingVersion = requestedVersion
 
-                if (!hasLocal) {
-                    const cachedVersions = await getLocalCachedVersions()
-                    if (cachedVersions.length > 0) {
-                        // Also check pre-warmed for fallback versions
-                        for (const v of cachedVersions) {
-                            const pw = getPrewarmedEmbeddings(v)
-                            if (pw && pw.length > 0) {
-                                localEmbeddingsCache.current = pw
-                                workingVersion = v
-                                hasLocal = true
-                                break
-                            }
-                        }
-                        if (!hasLocal) {
-                            workingVersion = cachedVersions[0]
+            if (!hasLocal) {
+                const cachedVersions = await getLocalCachedVersions()
+                if (cachedVersions.length > 0) {
+                    // Also check pre-warmed for fallback versions
+                    for (const v of cachedVersions) {
+                        const pw = getPrewarmedEmbeddings(v)
+                        if (pw && pw.length > 0) {
+                            localEmbeddingsCache.current = pw
+                            workingVersion = v
                             hasLocal = true
+                            break
                         }
                     }
+                    if (!hasLocal) {
+                        workingVersion = cachedVersions[0]
+                        hasLocal = true
+                    }
                 }
+            }
 
             effectiveVersionRef.current = workingVersion
 
             if (hasLocal) {
-                // Load local embeddings into memory for faster search
-                const localEmbeddings = await getCachedVerseEmbeddings(workingVersion)
-                localEmbeddingsCache.current = localEmbeddings
+                // Don't load all embeddings into memory here — defer to first search.
+                // Just record that local embeddings are available.
                 setHasLocalEmbeddings(true)
                 setHasEmbeddings(true)
                 embeddingsAvailabilityCache.set(cacheKey, true)
@@ -205,9 +207,12 @@ export function useSemanticVerseSearch(
         }
     }, [isEmbedderReady, isLoadingEmbedder])
 
-    // Check if embedder is already ready on mount
+    // Check if embedder is already ready on mount — do NOT eagerly initialize
+    // here since prewarmSemanticSearch() already handles that via requestIdleCallback.
+    // The embedder will be initialized lazily on first search if still not ready.
     useEffect(() => {
-        setIsEmbedderReady(checkEmbedderReady())
+        const ready = checkEmbedderReady()
+        setIsEmbedderReady(ready)
     }, [])
 
     // Perform semantic search
@@ -263,6 +268,21 @@ export function useSemanticVerseSearch(
                         if (firstKey) embeddingCache.current.delete(firstKey)
                     }
                     embeddingCache.current.set(cacheKey, queryEmbedding)
+                }
+
+                if (abortController.signal.aborted) return
+
+                // Lazy-load embeddings from IndexedDB on first search if not yet in memory.
+                // This avoids loading 30K+ rows into JS heap on mount.
+                if (preferLocal && hasLocalEmbeddings && !localEmbeddingsCache.current) {
+                    const workingVersion = effectiveVersionRef.current || version || 'KJV'
+                    const prewarmed = getPrewarmedEmbeddings(workingVersion)
+                    if (prewarmed && prewarmed.length > 0) {
+                        localEmbeddingsCache.current = prewarmed
+                    } else {
+                        const localEmbeddings = await getCachedVerseEmbeddings(workingVersion)
+                        localEmbeddingsCache.current = localEmbeddings
+                    }
                 }
 
                 if (abortController.signal.aborted) return
