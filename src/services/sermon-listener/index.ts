@@ -54,3 +54,6 @@ export {
     getVersionDisplayName,
 } from './voiceCommandDetection'
 export type { VoiceCommand } from './voiceCommandDetection'
+
+export { filterHallucinations } from './hallucinationFilter'
+export type { HallucinationFilterResult } from './hallucinationFilter'

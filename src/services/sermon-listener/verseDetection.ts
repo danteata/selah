@@ -24,6 +24,10 @@ export interface DetectedVerse {
     isBestMatch?: boolean
     /** Detection type - how this verse was detected */
     detectionType?: 'regex' | 'semantic'
+    /** How many times this verse has been re-activated after initial detection */
+    retriggerCount?: number
+    /** Timestamp of the last activation (initial or re-trigger), used for cooldown */
+    lastActivatedAt?: number
 }
 
 // Book name mappings (common variations to standard names)
