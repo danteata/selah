@@ -20,6 +20,7 @@ import {
     getCachedVerseEmbeddings,
     hasCachedEmbeddings,
     findSimilarLocally,
+    prewarmSemanticSearch,
     type CachedVerseEmbedding,
 } from './localEmbeddings'
 import { BOOK_PATTERN } from './verseDetection'
@@ -200,38 +201,55 @@ export class SemanticVerseDetector {
                 this.convexClient = new ConvexHttpClient(convexUrl)
 
                 let hasEmbeddings = false
+                let convexError = false
                 try {
                     hasEmbeddings = await this.convexClient.query(api.verseEmbeddings.hasEmbeddings, {
                         version: this.config.version,
                     })
                 } catch (error) {
                     console.warn('[SemanticDetector] Could not check embedding stats, using local fallback')
+                    convexError = true
                     hasEmbeddings = false
-                }
-
-                if (!hasEmbeddings) {
-                    console.warn(
-                        '[SemanticDetector] No verse embeddings found in database. ' +
-                            'Run seeding first or use local fallback.',
-                    )
-                    this.useLocalFallback = true
                 }
 
                 const embedderStatus = await initializeEmbedder()
                 this.initialized = embedderStatus.ready
 
+                // Wait for prewarm to complete so local embeddings are available
+                try {
+                    await prewarmSemanticSearch()
+                } catch {
+                    // Prewarm failure is non-fatal — we'll try loading directly
+                }
+
+                // Check local embeddings (prewarm may have just loaded them)
                 let hasLocalCache = false
-                if (this.useLocalFallback) {
-                    if (this.config.version) {
-                        hasLocalCache = await hasCachedEmbeddings(this.config.version)
-                    }
-                    if (!hasLocalCache) {
-                        hasLocalCache = await hasCachedEmbeddings('KJV')
-                    }
-                    if (!hasLocalCache) {
-                        const allEmbeddings = await getCachedVerseEmbeddings()
-                        hasLocalCache = allEmbeddings.length > 0
-                    }
+                if (this.config.version) {
+                    hasLocalCache = await hasCachedEmbeddings(this.config.version)
+                }
+                if (!hasLocalCache) {
+                    hasLocalCache = await hasCachedEmbeddings('KJV')
+                }
+
+                if (!hasEmbeddings && !convexError) {
+                    console.warn(
+                        '[SemanticDetector] No verse embeddings found in database. ' +
+                            'Run seeding first or use local fallback.',
+                    )
+                }
+
+                // Prefer local embeddings when available — avoids sending every
+                // embedding vector to Convex during live transcription (~8-15
+                // action calls per search cycle = significant bandwidth).
+                if (hasLocalCache) {
+                    this.useLocalFallback = true
+                } else if (!hasEmbeddings || convexError) {
+                    this.useLocalFallback = true
+                }
+
+                // Only mark as "no embeddings" if both remote and local are empty
+                if (!hasEmbeddings && !hasLocalCache) {
+                    console.warn('[SemanticDetector] No embeddings available (remote or local). Semantic detection will be limited.')
                 }
 
                 return {
@@ -353,93 +371,89 @@ export class SemanticVerseDetector {
 
         if (dedupedSentences.length > 0) {
             try {
-                if (this.useLocalFallback && this.isVersionEmpty(this.config.version || 'ANY')) {
-                    // Skip — no embeddings
-                } else {
-                    // Build progressive enrichment attempts per sentence
-                    const searchItems: Array<{
-                        text: string
-                        sentenceIdx: number
-                        attempt: number
-                        wordCount: number
-                    }> = []
+                // Build progressive enrichment attempts per sentence
+                const searchItems: Array<{
+                    text: string
+                    sentenceIdx: number
+                    attempt: number
+                    wordCount: number
+                }> = []
 
-                    for (let i = 0; i < dedupedSentences.length; i++) {
-                        const sentence = dedupedSentences[i]
-                        const wordCount = sentence.split(/\s+/).length
+                for (let i = 0; i < dedupedSentences.length; i++) {
+                    const sentence = dedupedSentences[i]
+                    const wordCount = sentence.split(/\s+/).length
 
-                        searchItems.push({ text: sentence, sentenceIdx: i, attempt: 0, wordCount })
+                    searchItems.push({ text: sentence, sentenceIdx: i, attempt: 0, wordCount })
 
-                        if (wordCount <= SHORT_SENTENCE_WORD_LIMIT && MAX_PROGRESSIVE_RETRIES >= 1) {
-                            const prev = i > 0 ? dedupedSentences[i - 1] : ''
-                            if (prev) {
-                                searchItems.push({
-                                    text: `${prev} ${sentence}`,
-                                    sentenceIdx: i,
-                                    attempt: 1,
-                                    wordCount: wordCount + prev.split(/\s+/).length,
-                                })
-                            }
-                            const next = i < dedupedSentences.length - 1 ? dedupedSentences[i + 1] : ''
-                            if (next && MAX_PROGRESSIVE_RETRIES >= 2) {
-                                searchItems.push({
-                                    text: `${sentence} ${next}`,
-                                    sentenceIdx: i,
-                                    attempt: 2,
-                                    wordCount: wordCount + next.split(/\s+/).length,
-                                })
-                            }
+                    if (wordCount <= SHORT_SENTENCE_WORD_LIMIT && MAX_PROGRESSIVE_RETRIES >= 1) {
+                        const prev = i > 0 ? dedupedSentences[i - 1] : ''
+                        if (prev) {
+                            searchItems.push({
+                                text: `${prev} ${sentence}`,
+                                sentenceIdx: i,
+                                attempt: 1,
+                                wordCount: wordCount + prev.split(/\s+/).length,
+                            })
+                        }
+                        const next = i < dedupedSentences.length - 1 ? dedupedSentences[i + 1] : ''
+                        if (next && MAX_PROGRESSIVE_RETRIES >= 2) {
+                            searchItems.push({
+                                text: `${sentence} ${next}`,
+                                sentenceIdx: i,
+                                attempt: 2,
+                                wordCount: wordCount + next.split(/\s+/).length,
+                            })
                         }
                     }
+                }
 
-                    const textsToEmbed = searchItems.map((item) => item.text)
-                    const embeddingResults = await embedBatch(textsToEmbed)
+                const textsToEmbed = searchItems.map((item) => item.text)
+                const embeddingResults = await embedBatch(textsToEmbed)
 
-                    const thresholds = searchItems.map((item) => getDynamicThreshold(item.wordCount))
+                const thresholds = searchItems.map((item) => getDynamicThreshold(item.wordCount))
 
-                    const searchMethod = this.useLocalFallback
-                        ? (emb: number[], t: number) => this.searchLocally(emb, t)
-                        : this.convexClient
-                          ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
-                          : () => Promise.resolve([])
+                const searchMethod = this.useLocalFallback
+                    ? (emb: number[], t: number) => this.searchLocally(emb, t)
+                    : this.convexClient
+                      ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
+                      : () => Promise.resolve([])
 
-                    const searchPromises = embeddingResults.map((res, idx) =>
-                        searchMethod(res.embedding, thresholds[idx]),
+                const searchPromises = embeddingResults.map((res, idx) =>
+                    searchMethod(res.embedding, thresholds[idx]),
+                )
+                const searchResults = await Promise.allSettled(searchPromises)
+
+                const bestPerSentence = new Map<number, SemanticVerseMatch | null>()
+
+                for (let idx = 0; idx < searchResults.length; idx++) {
+                    const result = searchResults[idx]
+                    if (result.status !== 'fulfilled') continue
+                    const item = searchItems[idx]
+                    const sentenceIdx = item.sentenceIdx
+                    const wordCount = item.wordCount
+                    const dynamicThreshold = getDynamicThreshold(wordCount)
+                    const matches = result.value as SemanticVerseMatch[]
+
+                    const currentBest = bestPerSentence.get(sentenceIdx)
+                    if (currentBest !== undefined && currentBest !== null && item.attempt > 0) {
+                        continue
+                    }
+
+                    const validatedMatch = matches.find((m) =>
+                        m.score >= dynamicThreshold && validateSemanticMatch(item.text, m.text, wordCount),
                     )
-                    const searchResults = await Promise.allSettled(searchPromises)
 
-                    const bestPerSentence = new Map<number, SemanticVerseMatch | null>()
-
-                    for (let idx = 0; idx < searchResults.length; idx++) {
-                        const result = searchResults[idx]
-                        if (result.status !== 'fulfilled') continue
-                        const item = searchItems[idx]
-                        const sentenceIdx = item.sentenceIdx
-                        const wordCount = item.wordCount
-                        const dynamicThreshold = getDynamicThreshold(wordCount)
-                        const matches = result.value as SemanticVerseMatch[]
-
-                        const currentBest = bestPerSentence.get(sentenceIdx)
-                        if (currentBest !== undefined && currentBest !== null && item.attempt > 0) {
-                            continue
-                        }
-
-                        const validatedMatch = matches.find((m) =>
-                            m.score >= dynamicThreshold && validateSemanticMatch(item.text, m.text, wordCount),
-                        )
-
-                        if (validatedMatch) {
-                            if (!bestPerSentence.has(sentenceIdx) || bestPerSentence.get(sentenceIdx) === null) {
-                                bestPerSentence.set(sentenceIdx, validatedMatch)
-                            }
+                    if (validatedMatch) {
+                        if (!bestPerSentence.has(sentenceIdx) || bestPerSentence.get(sentenceIdx) === null) {
+                            bestPerSentence.set(sentenceIdx, validatedMatch)
                         }
                     }
+                }
 
-                    for (const match of bestPerSentence.values()) {
-                        if (match && !matchedReferences.has(match.reference)) {
-                            matchedReferences.add(match.reference)
-                            allMatches.push(match)
-                        }
+                for (const match of bestPerSentence.values()) {
+                    if (match && !matchedReferences.has(match.reference)) {
+                        matchedReferences.add(match.reference)
+                        allMatches.push(match)
                     }
                 }
             } catch (error) {
@@ -513,7 +527,8 @@ export class SemanticVerseDetector {
                 detectionType: 'semantic' as const,
             }))
         } catch (error) {
-            console.error('[SemanticDetector] Convex search failed:', error)
+            console.error('[SemanticDetector] Convex search failed, switching to local:', error)
+            this.useLocalFallback = true
             return this.searchLocally(embedding, threshold)
         }
     }
@@ -527,10 +542,8 @@ export class SemanticVerseDetector {
         let cached = this.inMemoryEmbeddings.get(version)
 
         if (!cached) {
-            if (this.isVersionEmpty(version)) {
-                return []
-            }
-
+            // Always attempt to load from IndexedDB — embeddings may have been
+            // seeded since the last check, or the prewarm may have finished.
             console.log('[SemanticDetector] Loading local embeddings for version:', version)
             cached = await getCachedVerseEmbeddings(this.config.version)
 
