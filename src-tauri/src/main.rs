@@ -47,6 +47,7 @@ use multi_monitor::{
     update_main_window_state,
     restore_main_window_state,
     is_desktop,
+    identify_monitor,
 };
 
 use ndi_output::{
@@ -346,6 +347,7 @@ pub fn run() {
             update_main_window_state,
             restore_main_window_state,
             is_desktop,
+            identify_monitor,
             ndi_is_available,
             ndi_get_state,
             ndi_start_output,

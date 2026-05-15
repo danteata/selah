@@ -131,6 +131,7 @@ class MultiMonitorService {
 
         const params = new URLSearchParams()
         if (currentSlideId) params.set('slide', currentSlideId)
+        params.set('monitorId', screen.id)
         if (screen.color) params.set('monitorColor', screen.color)
         if (screen.name) params.set('monitorName', screen.name)
         const url = params.toString() ? `${liveViewUrl}?${params.toString()}` : liveViewUrl
@@ -174,6 +175,50 @@ class MultiMonitorService {
         }
 
         return liveWindow
+    }
+
+    /**
+     * Open a temporary identification window on a specific screen.
+     * Shows a colored border + "This is {screenName}" overlay for a few seconds,
+     * then auto-closes. Works whether or not a live output is already present.
+     */
+    async identifyScreen(screen: ScreenInfo): Promise<void> {
+        const safeColor = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(screen.color || '')
+            ? (screen.color as string)
+            : '#3B82F6'
+        const name = this.escapeHtml(screen.name || 'Display')
+
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${name}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{width:100vw;height:100vh;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif;box-shadow:inset 0 0 0 24px ${safeColor}}.badge{padding:24px 48px;border-radius:16px;background:${safeColor}22;border:4px solid ${safeColor};color:${safeColor};text-align:center;animation:pulse 1s ease-in-out infinite alternate}.badge h1{font-size:clamp(2rem,4vw,4rem);margin-bottom:8px}.badge p{font-size:clamp(1rem,2vw,1.5rem);opacity:.9}@keyframes pulse{from{transform:scale(1);opacity:1}to{transform:scale(1.05);opacity:.8}}</style></head><body><div class="badge"><h1>${name}</h1><p>This is your ${name}</p></div><script>setTimeout(()=>window.close(),3000);</script></body></html>`
+
+        const windowFeatures = [
+            `width=${screen.width}`,
+            `height=${screen.height}`,
+            `left=${screen.left}`,
+            `top=${screen.top}`,
+            'menubar=no',
+            'toolbar=no',
+            'location=no',
+            'status=no',
+            'resizable=no',
+        ].join(',')
+
+        // Open the popup synchronously (preserves user gesture),
+        // then write identification content into it.
+        const popup = window.open('', `selah-identify-${screen.id}`, windowFeatures)
+        if (popup) {
+            popup.document.open()
+            popup.document.write(html)
+            popup.document.close()
+        }
+    }
+
+    private escapeHtml(value: string): string {
+        return value
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;')
     }
 
     /**
@@ -306,3 +351,5 @@ export const subscribeToMultiMonitor = (listener: Listener) =>
     multiMonitorService.subscribe(listener)
 export const broadcastSlideUpdate = (slideId: string) =>
     multiMonitorService.broadcastSlideUpdate(slideId)
+export const identifyScreen = (screen: ScreenInfo) =>
+    multiMonitorService.identifyScreen(screen)
