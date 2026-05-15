@@ -195,6 +195,7 @@ export function ContextPanel() {
             background: templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             backgroundType: templateSlide?.backgroundType || 'gradient',
             backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId || null,
+            localFilePath: templateSlide?.localFilePath || undefined,
         }
         appendActiveSlide(slide)
     }

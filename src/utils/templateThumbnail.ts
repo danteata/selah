@@ -33,7 +33,7 @@ function drawBackgroundToCanvas(
             return
         }
 
-        if (backgroundType === 'image' || backgroundType === 'video') {
+        if (backgroundType === 'image') {
             const img = new Image()
             img.crossOrigin = 'anonymous'
             img.onload = () => {
@@ -46,6 +46,39 @@ function drawBackgroundToCanvas(
                 resolve()
             }
             img.src = background
+            return
+        }
+
+        if (backgroundType === 'video') {
+            const video = document.createElement('video')
+            video.crossOrigin = 'anonymous'
+            video.muted = true
+            video.preload = 'metadata'
+            let resolved = false
+            const finish = (success: boolean) => {
+                if (resolved) return
+                resolved = true
+                if (success) {
+                    try {
+                        ctx.drawImage(video, 0, 0, width, height)
+                    } catch {
+                        ctx.fillStyle = '#1a1a2e'
+                        ctx.fillRect(0, 0, width, height)
+                    }
+                } else {
+                    ctx.fillStyle = '#1a1a2e'
+                    ctx.fillRect(0, 0, width, height)
+                }
+                video.remove()
+                resolve()
+            }
+            video.onloadeddata = () => {
+                video.currentTime = 0
+            }
+            video.onseeked = () => finish(true)
+            video.onerror = () => finish(false)
+            setTimeout(() => finish(false), 5000)
+            video.src = background
             return
         }
 

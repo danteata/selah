@@ -5,6 +5,16 @@ import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
 import { openFileDialog } from '../../utils/fileDialog'
 import { isDesktop } from '../../platform'
 import { generateThumbnail } from '../../utils/templateThumbnail'
+import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
+
+async function getConvertFileSrc(): Promise<((filePath: string) => string) | null> {
+    try {
+        const { convertFileSrc } = await import('@tauri-apps/api/core')
+        return convertFileSrc
+    } catch {
+        return null
+    }
+}
 
 interface CreateTemplateModalProps {
     isOpen: boolean
@@ -14,6 +24,7 @@ interface CreateTemplateModalProps {
 
 export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: CreateTemplateModalProps) {
     const { createTemplate, updateTemplate, generateUploadUrl } = useTemplates()
+    const { isOffline } = useConvexConnection()
     const [name, setName] = useState('')
     const [category, setCategory] = useState<string>('general')
     const [appliesTo, setAppliesTo] = useState<string[]>(['any'])
@@ -26,6 +37,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const [isSaving, setIsSaving] = useState(false)
     const [isUploading, setIsUploading] = useState(false)
     const [backgroundStorageId, setBackgroundStorageId] = useState<string | null>(null)
+    const [localFilePath, setLocalFilePath] = useState<string | null>(null)
 
     const isEditing = !!editingTemplate
 
@@ -75,7 +87,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setDescription(editingTemplate.description || '')
 
                 // Parse slideId to get content and background
-                let slideData: { contents?: string[]; background?: string; backgroundType?: 'image' | 'gradient' | 'color' } | null = null
+                let slideData: { contents?: string[]; background?: string; backgroundType?: 'image' | 'gradient' | 'color'; localFilePath?: string } | null = null
                 if (typeof editingTemplate.slideId === 'string') {
                     try {
                         slideData = JSON.parse(editingTemplate.slideId)
@@ -91,6 +103,19 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setBackgroundType(slideData?.backgroundType || 'image')
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
+                setLocalFilePath(slideData?.localFilePath || null)
+            } else {
+                // Reset form for new template
+                setName('')
+                setCategory('general')
+                setAppliesTo(['any'])
+                setDescription('')
+                setContent('')
+                setBackgroundType('image')
+                setBackground(DEFAULT_BACKGROUNDS.general.background)
+                setCustomImageUrl('')
+                setCustomColor('#667eea')
+                setLocalFilePath(null)
             } else {
                 // Reset form for new template
                 setName('')
@@ -125,48 +150,74 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
     const handleFileUploadClick = async () => {
         try {
-            const files = await openFileDialog({
-                multiple: false,
-                accept: 'image/*',
-            });
+            if (isDesktop()) {
+                const { open } = await import('@tauri-apps/plugin-dialog')
 
-            if (!files || files.length === 0) return;
-            const file = files[0];
+                const selected = await open({
+                    multiple: false,
+                    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp'] }],
+                })
 
-            // Validate file type
-            if (!file.type.startsWith('image/')) {
-                alert('Please upload an image file')
-                return
-            }
+                if (!selected) return
 
-            // Validate file size (max 10MB)
-            if (file.size > 10 * 1024 * 1024) {
-                alert('Image must be less than 10MB')
-                return
-            }
+                const filePath = typeof selected === 'string' ? selected : selected as string
 
-            setIsUploading(true)
-            try {
-                // Convert to base64 for storage
-                const reader = new FileReader()
-                reader.onload = (event) => {
-                    const result = event.target?.result as string
-                    setBackground(result)
-                    setCustomImageUrl('') // Clear URL input when file is uploaded
-                    setIsUploading(false)
+                const convertFileSrc = await getConvertFileSrc()
+                if (!convertFileSrc) {
+                    console.error('Tauri asset protocol not available')
+                    const files = await openFileDialog({ multiple: false, accept: 'image/*' })
+                    if (files && files.length > 0) {
+                        readFileAsDataUrl(files[0])
+                    }
+                    return
                 }
-                reader.onerror = () => {
-                    alert('Failed to read file')
-                    setIsUploading(false)
+
+                const assetUrl = convertFileSrc(filePath)
+                setBackground(assetUrl)
+                setLocalFilePath(filePath)
+                setCustomImageUrl('')
+                setBackgroundStorageId(null)
+            } else {
+                const files = await openFileDialog({
+                    multiple: false,
+                    accept: 'image/*',
+                })
+
+                if (!files || files.length === 0) return
+                const file = files[0]
+
+                if (!file.type.startsWith('image/')) {
+                    alert('Please upload an image file')
+                    return
                 }
-                reader.readAsDataURL(file)
-            } catch (error) {
-                alert('Failed to process image')
-                setIsUploading(false)
+
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('Image must be less than 10MB')
+                    return
+                }
+
+                setIsUploading(true)
+                readFileAsDataUrl(file)
             }
         } catch (error) {
-            console.error('Image upload failed:', error);
+            console.error('Image upload failed:', error)
+            setIsUploading(false)
         }
+    }
+
+    const readFileAsDataUrl = (file: File) => {
+        const reader = new FileReader()
+        reader.onload = (event) => {
+            const result = event.target?.result as string
+            setBackground(result)
+            setCustomImageUrl('')
+            setIsUploading(false)
+        }
+        reader.onerror = () => {
+            alert('Failed to read file')
+            setIsUploading(false)
+        }
+        reader.readAsDataURL(file)
     }
 
     const handleVideoUploadClick = async () => {
@@ -183,21 +234,17 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
                 const filePath = typeof selected === 'string' ? selected : selected as string
 
-                const tauriInternals = (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
-                const convertFileSrc = tauriInternals && typeof tauriInternals === 'object' && 'convertFileSrc' in tauriInternals
-                    ? (tauriInternals as { convertFileSrc: (p: string) => string }).convertFileSrc
-                    : null
-
+                const convertFileSrc = await getConvertFileSrc()
                 if (!convertFileSrc) {
                     console.error('Tauri asset protocol not available')
                     alert('Local video playback is not available in this environment.')
                     return
                 }
 
-                const localUrl = convertFileSrc(filePath)
-
+                const assetUrl = convertFileSrc(filePath)
                 setBackgroundType('video')
-                setBackground(localUrl)
+                setBackground(assetUrl)
+                setLocalFilePath(filePath)
                 setBackgroundStorageId(null)
                 setCustomImageUrl('')
             } else {
@@ -221,6 +268,15 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
                 setIsUploading(true)
                 try {
+                    if (isOffline) {
+                        const blobUrl = URL.createObjectURL(file)
+                        setBackgroundType('video')
+                        setBackground(blobUrl)
+                        setCustomImageUrl('')
+                        setIsUploading(false)
+                        return
+                    }
+
                     const uploadUrl = await generateUploadUrl()
 
                     const response = await fetch(uploadUrl, {
@@ -243,7 +299,13 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     setCustomImageUrl('')
                 } catch (error) {
                     console.error('Video upload error:', error)
-                    alert('Failed to upload video. Please try again.')
+                    if (isOffline) {
+                        const blobUrl = URL.createObjectURL(file)
+                        setBackgroundType('video')
+                        setBackground(blobUrl)
+                    } else {
+                        alert('Failed to upload video. Please try again.')
+                    }
                 } finally {
                     setIsUploading(false)
                 }
@@ -261,11 +323,17 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
         try {
             let thumbnail: string | undefined
             if (backgroundType === 'image' && background) {
-                thumbnail = background
+                if (localFilePath) {
+                    thumbnail = await generateThumbnail(background, 'image', content || name)
+                } else if (background.startsWith('data:')) {
+                    thumbnail = background
+                } else {
+                    thumbnail = background
+                }
             } else if (backgroundType === 'gradient' || backgroundType === 'color') {
                 thumbnail = await generateThumbnail(background, backgroundType, content || name)
             } else if (backgroundType === 'video' && background) {
-                thumbnail = await generateThumbnail(background, 'image', content || name)
+                thumbnail = await generateThumbnail(background, 'video', content || name)
             }
 
             const slideData = {
@@ -275,6 +343,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 background,
                 backgroundType,
                 backgroundStorageId,
+                localFilePath: localFilePath || undefined,
             }
 
             if (isEditing && editingTemplate) {

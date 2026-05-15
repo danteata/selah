@@ -39,6 +39,7 @@ function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, d
         tempSlide.backgroundType = templateSlide.backgroundType || defaultBgType
         tempSlide.backgroundStorageId = templateSlide.backgroundStorageId || null
         tempSlide.backgroundVideoKey = templateSlide.backgroundVideoKey || null
+        tempSlide.localFilePath = templateSlide.localFilePath || undefined
         if (templateSlide.slideStyle) {
             tempSlide.slideStyle = { ...tempSlide.slideStyle, ...templateSlide.slideStyle }
         }

@@ -97,6 +97,7 @@ export interface Slide {
     background?: string
     backgroundVideoKey?: string | null
     backgroundStorageId?: string | null
+    localFilePath?: string
     title?: string
     songId?: string
     hasChorus?: boolean
