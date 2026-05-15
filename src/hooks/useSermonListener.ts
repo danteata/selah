@@ -16,8 +16,7 @@ import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
 import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
-import {
-    detectVerses,
+import { detectVerses,
     verseToLabel,
     getSemanticDetector,
     resetSemanticDetector,
@@ -30,6 +29,7 @@ import {
 import type { VoiceCommand } from '../services/sermon-listener/voiceCommandDetection'
 import type { DetectedVerse } from '../services/sermon-listener'
 import type { Scripture, BibleVersion } from '../types'
+import { filterHallucinations } from '../services/sermon-listener/hallucinationFilter'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
 const SERMON_LIVE_STATE_STORAGE_KEY = 'sermon-listener:live-state'
@@ -277,6 +277,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const activeBibleVersionRef = useRef(activeBibleVersion)
     const currentVerseRef = useRef<DetectedVerse | null>(currentVerse)
     const currentScriptureRef = useRef<Scripture | null>(null)
+    const prewarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const providerReadyRef = useRef(false)
     const [lastVoiceCommand, setLastVoiceCommand] = useState<VoiceCommand | null>(null)
     const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
 
@@ -293,6 +295,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Track detected verse references to prevent duplicates in the list
     const detectedRefsRef = useRef<Set<string>>(new Set())
+
+    // Cooldown map for re-triggering already-detected verses (reference → last activated timestamp)
+    const reactivationCooldownRef = useRef<Map<string, number>>(new Map())
+    const REACTIVATION_COOLDOWN_MS = 30_000 // 30 seconds
 
     // Debounce timer for interim transcript processing
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -503,8 +509,16 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         currentScriptureRef.current = currentScripture
     }, [currentScripture])
 
-    // Check support on mount and when settings change, and eagerly init provider
     useEffect(() => {
+        providerReadyRef.current = providerReady
+    }, [providerReady])
+
+    // Check provider availability on mount and when key settings change.
+    // Provider initialization is staggered: availability check runs immediately,
+    // full init is deferred 8 seconds after idle so the UI stays responsive.
+    useEffect(() => {
+        let cancelled = false
+
         const checkSupport = async () => {
             // Skip if global settings are still loading
             if (isGlobalSettingsLoading) {
@@ -519,10 +533,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             })
 
             const available = await unifiedTranscriptionService.isProviderAvailable(targetProvider)
+            if (cancelled) return
             console.log('[useSermonListener] Provider available:', targetProvider, available)
 
             if (!available && (targetProvider === 'whisper' || targetProvider === 'whisper-cpp' || targetProvider === 'desktop-whisper')) {
                 const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
+                if (cancelled) return
                 if (webSpeechAvailable) {
                     setProvider('web-speech')
                     setIsSupported(true)
@@ -537,121 +553,121 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             setProvider(targetProvider)
             setIsSupported(available)
 
-            // Eagerly initialize the provider so it's ready when the user clicks Start
-            if (available && (targetProvider !== 'web-speech')) {
-                setIsInitializingProvider(true)
-                try {
-                    console.log('[useSermonListener] Eagerly initializing provider:', targetProvider)
-                    const success = await unifiedTranscriptionService.setProvider(targetProvider, {
-                        language: language.split('-')[0],
-                        whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
-                        whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
-                        whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
-                        whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
-                        whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
-                        whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
-                        fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
-                        fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
-                        fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-                        fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
-                        fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
-                        useVAD: globalSettings?.sermonListener_useVAD,
-                        elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
-                        elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
-                        elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
-                        onProgress: (progress: number) => {
-                            setModelLoadingProgress(progress)
-                        },
-                        onStatusChange: (status: TranscriptionStatus) => {
-                            const statusText = typeof status?.error === 'string' ? status.error : status?.provider || ''
-                            console.log('[useSermonListener] Provider init status:', statusText)
-                        },
-                    })
-                    setProviderReady(success)
-                    if (!success) {
-                        console.warn('[useSermonListener] Eager provider initialization failed')
-                    }
-                } catch (err) {
-                    console.error('[useSermonListener] Eager provider init error:', err)
-                } finally {
-                    setIsInitializingProvider(false)
-                }
-            } else if (available) {
+            // Web-speech needs no init; mark ready immediately
+            if (available && targetProvider === 'web-speech') {
                 setProviderReady(true)
+            } else if (!available) {
+                setProviderReady(false)
+            }
+
+            // Stagger the heavy provider init: wait 8s after the UI has settled,
+            // then initialize in the background so it's likely ready before use.
+            // If the user clicks Start before this runs, start() will init instead.
+            if (available && targetProvider !== 'web-speech') {
+                if (prewarmTimerRef.current) {
+                    clearTimeout(prewarmTimerRef.current)
+                }
+                const prewarmDelay = 8000
+                const providerAtSchedule = targetProvider
+                prewarmTimerRef.current = setTimeout(async () => {
+                    if (cancelled || providerReadyRef.current || provider !== providerAtSchedule) return
+                    setIsInitializingProvider(true)
+                    try {
+                        console.log('[useSermonListener] Background prewarming provider:', providerAtSchedule)
+                        const success = await unifiedTranscriptionService.setProvider(providerAtSchedule, {
+                            language: language.split('-')[0],
+                            whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
+                            whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
+                            whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
+                            whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
+                            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
+                            whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
+                            fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
+                            fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
+                            fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+                            fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
+                            fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+                            useVAD: globalSettings?.sermonListener_useVAD,
+                            elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
+                            elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
+                            elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
+                            onProgress: (progress: number) => {
+                                if (!cancelled) setModelLoadingProgress(progress)
+                            },
+                            onStatusChange: (status: TranscriptionStatus) => {
+                                if (!cancelled) {
+                                    const statusText = typeof status?.error === 'string' ? status.error : status?.provider || ''
+                                    console.log('[useSermonListener] Prewarm status:', statusText)
+                                }
+                            },
+                        })
+                        if (!cancelled) {
+                            setProviderReady(success)
+                            if (!success) {
+                                console.warn('[useSermonListener] Background provider prewarm failed')
+                            }
+                        }
+                    } catch (err) {
+                        if (!cancelled) {
+                            console.error('[useSermonListener] Background provider prewarm error:', err)
+                        }
+                    } finally {
+                        if (!cancelled) {
+                            setIsInitializingProvider(false)
+                        }
+                    }
+                }, prewarmDelay)
             }
         }
         checkSupport()
+        return () => {
+            cancelled = true
+            if (prewarmTimerRef.current) {
+                clearTimeout(prewarmTimerRef.current)
+                prewarmTimerRef.current = null
+            }
+        }
     }, [
         targetProvider,
         globalProvider,
         providerOverride,
         isGlobalSettingsLoading,
         language,
-        globalSettings?.sermonListener_whisperModel,
-        globalSettings?.sermonListener_whisperEndpoint,
-        globalSettings?.sermonListener_whisperApiKey,
-        globalSettings?.sermonListener_whisperChunkDurationMs,
-        globalSettings?.sermonListener_whisperCppEndpoint,
-        globalSettings?.sermonListener_whisperCppChunkDurationMs,
-        globalSettings?.sermonListener_fasterWhisperEndpoint,
-        globalSettings?.sermonListener_fasterWhisperModel,
-        globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-        globalSettings?.sermonListener_fasterWhisperAudioCaptureMode,
-        globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
-        globalSettings?.sermonListener_useVAD,
-        globalSettings?.sermonListener_elevenLabsApiKey,
-        globalSettings?.sermonListener_elevenLabsModelId,
-        globalSettings?.sermonListener_elevenLabsChunkDurationMs,
+        provider,
     ])
 
-    // Initialize semantic detector
-    useEffect(() => {
+    // Initialize semantic detector lazily — only when the user starts listening.
+    // This avoids blocking the UI on mount with Convex queries and embedder loading.
+    const initSemanticDetector = useCallback(async () => {
         if (!enableSemanticDetection) return
 
-        const initDetector = async () => {
-            try {
-                const convexUrl = import.meta.env.VITE_CONVEX_URL
-                if (!convexUrl) {
-                    console.warn('[SemanticDetector] No Convex URL found, semantic detection disabled')
-                    return
-                }
-
-                // Get the actual version ID from the bible versions list
-                // The defaultBibleVersion might be the name (e.g., 'KJV') but we need the ID
-                const versions = bibleVersions as BibleVersion[]
-                const versionEntry = versions?.find(
-                    (v) => v.name === defaultBibleVersion || v.id === defaultBibleVersion
-                )
-                const versionId = versionEntry?.id || defaultBibleVersion
-
-                console.log('[SemanticDetector] Bible versions in store:', versions?.map(v => v.id + '/' + v.name))
-                console.log('[SemanticDetector] Using version:', versionId, '(default:', defaultBibleVersion, ')')
-
-                const detector = getSemanticDetector({
-                    enabled: true,
-                    version: versionId,
-                })
-
-                const result = await detector.initialize(convexUrl)
-
-                if (result.ready) {
-                    semanticDetectorRef.current = detector
-                    setSemanticDetectorReady(true)
-                    console.log('[SemanticDetector] Initialized successfully')
-                } else {
-                    console.warn('[SemanticDetector] Initialization failed:', result.error)
-                }
-            } catch (error) {
-                console.error('[SemanticDetector] Initialization error:', error)
-            }
+        const convexUrl = import.meta.env.VITE_CONVEX_URL
+        if (!convexUrl) {
+            console.warn('[SemanticDetector] No Convex URL found, semantic detection disabled')
+            return
         }
 
-        initDetector()
+        const versions = bibleVersions as BibleVersion[]
+        const versionEntry = versions?.find(
+            (v) => v.name === defaultBibleVersion || v.id === defaultBibleVersion
+        )
+        const versionId = versionEntry?.id || defaultBibleVersion
 
-        return () => {
-            resetSemanticDetector()
-            semanticDetectorRef.current = null
-            setSemanticDetectorReady(false)
+        console.log('[SemanticDetector] Using version:', versionId, '(default:', defaultBibleVersion, ')')
+
+        const detector = getSemanticDetector({
+            enabled: true,
+            version: versionId,
+        })
+
+        const result = await detector.initialize(convexUrl)
+
+        if (result.ready) {
+            semanticDetectorRef.current = detector
+            setSemanticDetectorReady(true)
+            console.log('[SemanticDetector] Initialized successfully')
+        } else {
+            console.warn('[SemanticDetector] Initialization failed:', result.error)
         }
     }, [enableSemanticDetection, defaultBibleVersion, bibleVersions])
 
@@ -938,9 +954,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         // Strip voice commands from transcript before running verse detection
         const commandsForStripping = enableVoiceCommands ? detectVoiceCommands(text) : []
-        const cleanText = commandsForStripping.length > 0
+        let cleanText = commandsForStripping.length > 0
             ? stripCommandsFromTranscript(text, commandsForStripping)
             : text
+
+        // Filter hallucination patterns before verse detection
+        const hallucinationResult = filterHallucinations(cleanText)
+        if (hallucinationResult.hadHallucination) {
+            console.log('[SermonListener] Filtered hallucination:', {
+                repetitionsRemoved: hallucinationResult.repetitionsRemoved,
+                fillersRemoved: hallucinationResult.fillersRemoved,
+                confidence: hallucinationResult.confidence,
+            })
+            cleanText = hallucinationResult.cleanedText
+        }
 
         const regexDetectionIdAtStart = regexVerseDetectionRef.current
         const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
@@ -993,8 +1020,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // If we found new regex verses, also re-activate any previously detected verses
         // that were mentioned again — the most recently mentioned verse becomes current
         if (hasRegexVerses) {
-            setDetectedVerses(prev => dedupeVerses([...prev, ...limitedQueryVerses]))
-            const latestVerse = limitedQueryVerses[0]
+            const now = Date.now()
+            const versesWithTimestamp = limitedQueryVerses.map(v => ({
+                ...v,
+                lastActivatedAt: now,
+                retriggerCount: 0,
+            }))
+            for (const v of versesWithTimestamp) {
+                reactivationCooldownRef.current.set(v.reference, now)
+            }
+            setDetectedVerses(prev => dedupeVerses([...prev, ...versesWithTimestamp]))
+            const latestVerse = versesWithTimestamp[0]
             setCurrentVerse(latestVerse)
 
             // Auto-lookup if enabled
@@ -1020,16 +1056,30 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const reActivatedRef = reActivatedRefs[0]
             const existing = detectedVerses.find(v => v.reference === reActivatedRef)
             if (existing) {
-                setCurrentVerse(existing)
-                if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
-                    lookupVerse(existing).then(scripture => {
-                        optionsRef.current.onVerseDetected?.(existing, scripture)
-                        if (autoDisplay && scripture) {
-                            const slide = createBibleSlide(scripture)
-                            appendActiveSlide(slide)
-                            setLiveSlide(slide.id)
-                        }
-                    })
+                const now = Date.now()
+                const lastActivated = reactivationCooldownRef.current.get(reActivatedRef) || 0
+                const isOffCooldown = now - lastActivated >= REACTIVATION_COOLDOWN_MS
+
+                setCurrentVerse({
+                    ...existing,
+                    retriggerCount: (existing.retriggerCount || 0) + 1,
+                    lastActivatedAt: now,
+                })
+
+                if (isOffCooldown) {
+                    reactivationCooldownRef.current.set(reActivatedRef, now)
+                    if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
+                        lookupVerse(existing).then(scripture => {
+                            optionsRef.current.onVerseDetected?.(existing, scripture)
+                            if (autoDisplay && scripture) {
+                                const slide = createBibleSlide(scripture)
+                                appendActiveSlide(slide)
+                                setLiveSlide(slide.id)
+                            }
+                        })
+                    } else {
+                        optionsRef.current.onVerseDetected?.(existing, null)
+                    }
                 }
             }
         }
@@ -1115,12 +1165,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 }
 
                 if (limitedSemanticVerses.length > 0) {
-                    setDetectedVerses(prev => dedupeVerses([...prev, ...limitedSemanticVerses]))
+                    const now = Date.now()
+                    const versesWithTimestamp = limitedSemanticVerses.map(v => ({
+                        ...v,
+                        lastActivatedAt: now,
+                        retriggerCount: 0,
+                    }))
+                    for (const v of versesWithTimestamp) {
+                        reactivationCooldownRef.current.set(v.reference, now)
+                    }
+                    setDetectedVerses(prev => dedupeVerses([...prev, ...versesWithTimestamp]))
 
                     // Only update current verse if no regex verses were found AND
                     // no newer regex detection has happened since this search started
                     if (!hasRegexVerses && !isStale) {
-                        const bestSemanticVerse = limitedSemanticVerses[0]
+                        const bestSemanticVerse = versesWithTimestamp[0]
                         setCurrentVerse(bestSemanticVerse)
 
                         if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
@@ -1143,16 +1202,28 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     const reActivatedRef = semanticReActivatedRefs[0]
                     const existing = detectedVerses.find(v => v.reference === reActivatedRef)
                     if (existing) {
-                        setCurrentVerse(existing)
-                        if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
-                            lookupVerse(existing).then(scripture => {
-                                optionsRef.current.onVerseDetected?.(existing, scripture)
-                                if (autoDisplay && scripture) {
-                                    const slide = createBibleSlide(scripture)
-                                    appendActiveSlide(slide)
-                                    setLiveSlide(slide.id)
-                                }
-                            })
+                        const now = Date.now()
+                        const lastActivated = reactivationCooldownRef.current.get(reActivatedRef) || 0
+                        const isOffCooldown = now - lastActivated >= REACTIVATION_COOLDOWN_MS
+
+                        setCurrentVerse({
+                            ...existing,
+                            retriggerCount: (existing.retriggerCount || 0) + 1,
+                            lastActivatedAt: now,
+                        })
+
+                        if (isOffCooldown) {
+                            reactivationCooldownRef.current.set(reActivatedRef, now)
+                            if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
+                                lookupVerse(existing).then(scripture => {
+                                    optionsRef.current.onVerseDetected?.(existing, scripture)
+                                    if (autoDisplay && scripture) {
+                                        const slide = createBibleSlide(scripture)
+                                        appendActiveSlide(slide)
+                                        setLiveSlide(slide.id)
+                                    }
+                                })
+                            }
                         }
                     }
                 }
@@ -1242,6 +1313,60 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         if (isListening) {
             console.warn('Already listening')
             return false
+        }
+
+        // Lazily initialize the provider when the user starts listening.
+        // This avoids blocking the UI for 60s on app startup.
+        if (!providerReady && provider !== 'web-speech') {
+            setIsInitializingProvider(true)
+            try {
+                console.log('[useSermonListener] Initializing provider on first use:', provider)
+                const initSuccess = await unifiedTranscriptionService.setProvider(provider, {
+                    language: language.split('-')[0],
+                    whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
+                    whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
+                    whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
+                    whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
+                    whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
+                    whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
+                    fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
+                    fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
+                    fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
+                    fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
+                    fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
+                    useVAD: globalSettings?.sermonListener_useVAD,
+                    elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
+                    elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
+                    elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
+                    onProgress: (progress: number) => {
+                        setModelLoadingProgress(progress)
+                    },
+                    onStatusChange: (status: TranscriptionStatus) => {
+                        const statusText = typeof status?.error === 'string' ? status.error : status?.provider || ''
+                        console.log('[useSermonListener] Provider init status:', statusText)
+                    },
+                })
+                setProviderReady(initSuccess)
+                if (!initSuccess) {
+                    setError('Failed to initialize transcription provider')
+                    setIsInitializingProvider(false)
+                    return false
+                }
+            } catch (err) {
+                console.error('[useSermonListener] Provider init error:', err)
+                setError('Failed to initialize transcription provider')
+                setIsInitializingProvider(false)
+                return false
+            } finally {
+                setIsInitializingProvider(false)
+            }
+        }
+
+        // Initialize semantic detector on first use if not already ready
+        if (!semanticDetectorReady) {
+            initSemanticDetector().catch(err => {
+                console.warn('[useSermonListener] Semantic detector init failed:', err)
+            })
         }
 
         console.log('[useSermonListener] Starting transcription with provider:', provider, {
@@ -1351,6 +1476,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [
         isSupported,
         isListening,
+        providerReady,
+        provider,
         language,
         onError,
         onTranscriptUpdate,
@@ -1377,6 +1504,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         globalSettings?.sermonListener_elevenLabsApiKey,
         globalSettings?.sermonListener_elevenLabsModelId,
         globalSettings?.sermonListener_elevenLabsChunkDurationMs,
+        semanticDetectorReady,
+        initSemanticDetector,
     ])
 
     // Keep ref in sync so processTranscript can call start without TDZ issues

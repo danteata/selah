@@ -404,6 +404,10 @@ export interface AppSettings {
         /** Selected microphone device ID (browser deviceId or native device name) */
         selectedMicrophoneId?: string
     }
+    /** Default collaboration mode for live sessions */
+    defaultCollaborationMode?: 'strict' | 'moderated' | 'open'
+    /** Dark mode preference */
+    isDarkMode?: boolean
 }
 
 // ==================== App State Types ====================
