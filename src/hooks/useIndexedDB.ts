@@ -7,6 +7,7 @@ export interface LocalTemplate {
     description?: string
     slideId: string
     category: string
+    appliesTo?: string[]
     thumbnail?: string
     backgroundStorageId?: string
     createdBy?: string

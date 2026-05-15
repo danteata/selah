@@ -188,7 +188,7 @@ class DesktopWhisperTranscriptionService {
         this.config.onProgress?.(0.5);
         this.config.onStatus?.('Whisper server started, waiting for model to load...');
 
-        const maxAttempts = 60;
+        const maxAttempts = 15;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             const available = await isDesktopWhisperAvailable();
             if (available) {
@@ -205,8 +205,8 @@ class DesktopWhisperTranscriptionService {
             this.config.onProgress?.(0.5 + (attempt / maxAttempts) * 0.5);
         }
 
-        this.config.onStatus?.('Whisper server not responding after 60 seconds');
-        console.error('[DesktopWhisper] Server failed to start within 60 seconds');
+        this.config.onStatus?.('Whisper server not responding after 15 seconds');
+        console.error('[DesktopWhisper] Server failed to start within 15 seconds');
         return false;
     }
 

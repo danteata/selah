@@ -291,9 +291,36 @@ export async function clearCachedVerseEmbeddings(): Promise<void> {
     }
 }
 
+export async function countCachedEmbeddings(version: string): Promise<number> {
+    try {
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly')
+        const index = tx.objectStore(VERSE_CACHE_STORE_NAME).index('by_version')
+        return new Promise((resolve, reject) => {
+            const request = index.count(IDBKeyRange.only(version))
+            request.onsuccess = () => resolve(request.result)
+            request.onerror = () => reject(request.error)
+        })
+    } catch (error) {
+        console.error('[Embeddings] Failed to count cached embeddings:', error)
+        return 0
+    }
+}
+
 export async function hasCachedEmbeddings(version: string): Promise<boolean> {
-    const cached = await getCachedVerseEmbeddings(version)
-    return cached.length > 0
+    try {
+        const db = await openVerseCache()
+        const tx = db.transaction(VERSE_CACHE_STORE_NAME, 'readonly')
+        const index = tx.objectStore(VERSE_CACHE_STORE_NAME).index('by_version')
+        return new Promise((resolve, reject) => {
+            const request = index.openKeyCursor(IDBKeyRange.only(version))
+            request.onsuccess = () => resolve(request.result !== null)
+            request.onerror = () => reject(request.error)
+        })
+    } catch (error) {
+        console.error('[Embeddings] Failed to check cached embeddings:', error)
+        return false
+    }
 }
 
 export async function clearCachedEmbeddingsForVersion(version: string): Promise<number> {

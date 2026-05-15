@@ -5,6 +5,7 @@ import {
     cacheVerseEmbeddings,
     hasCachedEmbeddings,
     hasFragmentEmbeddings,
+    countCachedEmbeddings,
     getCachedVerseEmbeddings,
     clearCachedEmbeddingsForVersion,
 } from './localEmbeddings'
@@ -145,11 +146,11 @@ class EmbeddingSyncManager {
     }
 
     async checkStatus(versionId: string): Promise<VersionSyncState> {
-        const [hasEmb, hasFrags] = await Promise.all([
+        const [hasEmb, hasFrags, count] = await Promise.all([
             hasCachedEmbeddings(versionId),
             hasFragmentEmbeddings(versionId),
+            countCachedEmbeddings(versionId),
         ])
-        const cached = hasEmb ? await getCachedVerseEmbeddings(versionId) : []
         const existing = this.states.get(versionId)
         const isMidSync = existing && existing.stage !== 'idle' && existing.stage !== 'completed' && existing.stage !== 'error'
 
@@ -158,12 +159,12 @@ class EmbeddingSyncManager {
             stage: isMidSync ? existing.stage : 'idle',
             progress: isMidSync ? existing.progress : 0,
             total: isMidSync ? existing.total : 0,
-            startedAt: isMidSync ? existing.startedAt : null,
+            startedAt: isMidSync ? existing.startAt : null,
             eta: isMidSync ? existing.eta : null,
             error: isMidSync ? existing.error : null,
             hasEmbeddings: hasEmb,
             hasFragments: hasFrags,
-            embeddingCount: cached.length,
+            embeddingCount: count,
         }
         this.states.set(versionId, state)
         this.notify()
