@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { X, Search, Grid, List, Plus, Sparkles, FileText, Heart, Clock, Check, Trash2, Loader2, AlertCircle, RefreshCw, Edit2, Star, LayoutTemplate } from 'lucide-react'
+import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate } from 'lucide-react'
 import { useTemplates, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
 import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
@@ -178,18 +178,16 @@ interface TemplateBrowserProps {
     isOpen?: boolean
     onClose?: () => void
     onSelect: (template: TemplateItem) => void
-    onCreateCustom?: () => boolean
     isInline?: boolean
     slideType?: SlideType
 }
 
-export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCustom, isInline = false, slideType }: TemplateBrowserProps) {
+export function TemplateBrowser({ isOpen = true, onClose, onSelect, isInline = false, slideType }: TemplateBrowserProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
     const [deletingId, setDeletingId] = useState<string | null>(null)
-    const [showNoSlideMessage, setShowNoSlideMessage] = useState(false)
     const [isResetting, setIsResetting] = useState(false)
     const [showCreateModal, setShowCreateModal] = useState(false)
     const [editingTemplate, setEditingTemplate] = useState<TemplateItem | null>(null)
@@ -197,7 +195,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     const [favoritingId, setFavoritingId] = useState<string | null>(null)
 
     const { templates, isLoading, deleteTemplate, toggleFavorite, seedDefaultTemplates, resetDefaultTemplates, getTemplatesForSlideType } = useTemplates()
-    const { isSignedIn, userId } = useAuth()
+    const { isSignedIn } = useAuth()
     const isAuthenticated = isSignedIn ?? false
 
     useEffect(() => {
@@ -221,7 +219,6 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
             setSelectedTemplate(null)
             setSearchQuery('')
             setSelectedCategory(null)
-            setShowNoSlideMessage(false)
         }
     }, [isOpen, isInline])
 
@@ -288,7 +285,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     }
 
     const filteredTemplates = useMemo(() => {
-        let source = slideType ? getTemplatesForSlideType(slideType) : (templates || [])
+        const source = slideType ? getTemplatesForSlideType(slideType) : (templates || [])
         return source.filter((t) => {
             if (showFavorites && !t.favoritedBy?.length) return false
             if (selectedCategory && t.category !== selectedCategory) return false
@@ -382,20 +379,21 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                         </button>
                     </div>
 
-                    {!isInline && (
-                        <div className="pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
+                    <div className="pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
+                        {!isInline && (
                             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
                                 Your Templates
                             </p>
-                            <button
-                                onClick={() => setShowCreateModal(true)}
-                                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors"
-                            >
-                                <Plus className="w-4 h-4" />
-                                Create Custom
-                            </button>
-                        </div>
-                    )}
+                        )}
+                        <button
+                            onClick={() => setShowCreateModal(true)}
+                            className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors ${isInline ? 'p-2 justify-center' : 'px-3 py-2'}`}
+                            title="Create Custom Template"
+                        >
+                            <Plus className="w-4 h-4" />
+                            {!isInline && 'Create Custom'}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Main Content */}
@@ -525,7 +523,19 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
         </div>
     )
 
-    if (isInline) return content
+    if (isInline) return (
+        <>
+            {content}
+            <CreateTemplateModal
+                isOpen={showCreateModal}
+                onClose={() => {
+                    setShowCreateModal(false)
+                    setEditingTemplate(null)
+                }}
+                editingTemplate={editingTemplate}
+            />
+        </>
+    )
 
     return (
         <>
