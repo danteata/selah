@@ -44,6 +44,7 @@
                 "default"
             ]
         },
+        "macOSPrivateApi": true,
         "windows": [
             {
                 "title": "Selah - Church Presentation Software",

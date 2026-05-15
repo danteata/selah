@@ -437,15 +437,24 @@ class NativeMultiMonitorService {
     }
 
     /**
-     * Flash a color on the live window to identify which monitor it's on
+     * Open a temporary identification window on a specific monitor using
+     * Tauri's native window management. The Rust backend creates a
+     * WebviewWindow positioned on the correct monitor with the
+     * identification HTML built into a data: URL.
      */
-    async flashMonitor(color: string): Promise<void> {
+    async identifyMonitor(monitor: MonitorInfo): Promise<void> {
         if (!await this.isDesktop()) return
 
+        const color = monitor.color || '#3B82F6'
+
         try {
-            await this.tauriApis!.emit('monitor-flash', { color })
+            await this.tauriApis!.invoke('identify_monitor', {
+                monitorId: monitor.id,
+                color,
+                name: monitor.name || 'Display',
+            })
         } catch (e) {
-            console.error('Failed to emit monitor flash:', e)
+            console.error('Failed to identify monitor:', e)
         }
     }
 }
@@ -476,4 +485,4 @@ export const saveWindowState = (state: WindowState) =>
 export const updateMainWindowState = () => nativeMultiMonitorService.updateMainWindowState()
 export const restoreMainWindowState = () => nativeMultiMonitorService.restoreMainWindowState()
 export const isDesktop = () => nativeMultiMonitorService.isDesktop()
-export const flashMonitor = (color: string) => nativeMultiMonitorService.flashMonitor(color)
+export const identifyMonitor = (monitor: MonitorInfo) => nativeMultiMonitorService.identifyMonitor(monitor)

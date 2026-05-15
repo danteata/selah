@@ -32,7 +32,7 @@ vi.mock('../../services/native-multi-monitor', () => ({
         closeLiveWindow: vi.fn().mockResolvedValue(undefined),
     },
     getMonitorColor: vi.fn((_: number) => '#3B82F6'),
-    flashMonitor: vi.fn().mockResolvedValue(undefined),
+    identifyMonitor: vi.fn().mockResolvedValue(undefined),
     type: {},
 }))
 

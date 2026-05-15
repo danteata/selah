@@ -9,7 +9,6 @@ import { useFileUrl } from '../hooks/useTemplates'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 
 const STORAGE_KEY = 'selah-live-state'
-const FLASH_DURATION_MS = 2000
 
 interface LiveState {
     slides: Slide[]
@@ -32,6 +31,7 @@ export default function LiveView() {
     const [isDesktop, setIsDesktop] = useState(false)
 
     const [flashColor, setFlashColor] = useState<string | null>(null)
+    const monitorId = searchParams.get('monitorId') || null
     const monitorColor = searchParams.get('monitorColor') || null
     const monitorName = searchParams.get('monitorName') || null
 
@@ -100,18 +100,9 @@ export default function LiveView() {
                     setCurrentSlideId('')
                 })
 
-                // Listen for monitor identification flash
-                const unlistenFlash = await nativeMultiMonitorService.onLiveWindowEvent<{
-                    color: string
-                }>('monitor-flash', (payload) => {
-                    setFlashColor(payload.color)
-                    setTimeout(() => setFlashColor(null), FLASH_DURATION_MS)
-                })
-
                 return () => {
                     unlistenSlide()
                     unlistenClear()
-                    unlistenFlash()
                 }
             }
             return () => { }
@@ -145,11 +136,14 @@ export default function LiveView() {
             }
         }
 
+        // Listen for monitor identification flashes (web mode)
         const flashChannel = new BroadcastChannel('selah-monitor-flash')
         flashChannel.onmessage = (event) => {
-            if (event.data?.color) {
-                setFlashColor(event.data.color)
-                setTimeout(() => setFlashColor(null), FLASH_DURATION_MS)
+            const { color, monitorId: targetMonitorId } = event.data || {}
+            if (targetMonitorId && monitorId && targetMonitorId !== monitorId) return
+            if (color) {
+                setFlashColor(color)
+                setTimeout(() => setFlashColor(null), 2000)
             }
         }
 
@@ -186,7 +180,7 @@ export default function LiveView() {
             flashChannel.close()
             window.removeEventListener('storage', handleStorageChange)
         }
-    }, [isSessionMode, currentSlideId])
+    }, [isSessionMode, currentSlideId, monitorId])
 
     const resolvedSlides = useMemo(() => {
         if (isSessionMode) {
@@ -359,18 +353,6 @@ export default function LiveView() {
                         <p className="text-green-400 text-sm mt-4">Running in native desktop mode</p>
                     )}
                 </div>
-
-                {flashColor && (
-                    <div
-                        className="absolute inset-0 z-50 flex items-center justify-center animate-pulse"
-                        style={{ backgroundColor: flashColor + '33' }}
-                    >
-                        <div
-                            className="w-24 h-24 rounded-full border-4"
-                            style={{ borderColor: flashColor, backgroundColor: flashColor + '22' }}
-                        />
-                    </div>
-                )}
 
                 {monitorColor && monitorName && (
                     <div

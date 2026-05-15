@@ -6,6 +6,7 @@
 
 use tauri::{State, AppHandle, Manager};
 use std::sync::Arc;
+use base64::Engine;
 
 use super::types::*;
 use super::state::MultiMonitorState;
@@ -214,4 +215,83 @@ pub async fn restore_main_window_state(
 #[tauri::command]
 pub async fn is_desktop() -> Result<bool, MultiMonitorError> {
     Ok(true)
+}
+
+/// Open a temporary identification window on a specific monitor.
+/// Shows a colored border with the monitor name and auto-closes after 3 seconds.
+#[tauri::command]
+pub async fn identify_monitor(
+    app: AppHandle,
+    state: State<'_, Arc<MultiMonitorState>>,
+    monitor_id: String,
+    color: String,
+    name: String,
+) -> Result<(), MultiMonitorError> {
+    let monitor = state.get_monitor_by_id(&monitor_id).ok_or_else(|| MultiMonitorError {
+        code: "MONITOR_NOT_FOUND".to_string(),
+        message: format!("Monitor {} not found", monitor_id),
+    })?;
+
+    let label = "selah-identify";
+
+    // Close any existing identification window
+    if let Some(existing) = app.get_webview_window(label) {
+        let _ = existing.close();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+
+    // Build HTML and encode as base64 data: URL — avoids the race condition
+    // where eval() runs before about:blank has loaded (black screen).
+    // Uses a transparent background so the desktop shows through, with a
+    // translucent overlay and centered label card.
+    let html = format!(
+        "<html><head><meta charset=\"utf-8\"><style>*{{margin:0;padding:0;box-sizing:border-box}}body{{width:100vw;height:100vh;overflow:hidden;background:transparent;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif}}.overlay{{position:fixed;inset:0;background:{color}18;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}}.card{{position:relative;z-index:1;padding:32px 56px;border-radius:20px;background:{color}1A;border:3px solid {color}88;text-align:center;animation:pulse 1.2s ease-in-out infinite alternate;box-shadow:0 0 40px {color}44}}h1{{font-size:clamp(2rem,4vw,4rem);margin:0 0 8px 0;color:#fff;text-shadow:0 2px 8px {color}}}p{{font-size:clamp(1rem,2vw,1.5rem);opacity:0.9;color:#fff;text-shadow:0 1px 4px {color};margin:0}}@keyframes pulse{{from{{transform:scale(1);opacity:1;box-shadow:0 0 40px {color}44}}to{{transform:scale(1.04);opacity:0.85;box-shadow:0 0 60px {color}66}}}}</style></head><body><div class=\"overlay\"></div><div class=\"card\"><h1>{name}</h1><p>This is your {name}</p></div></body></html>",
+        name = name.replace('\'', "\\'"),
+        color = color.replace('\'', "\\'")
+    );
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(html.as_bytes());
+    let data_url = format!("data:text/html;base64,{}", b64);
+    let webview_url = tauri::WebviewUrl::External(data_url.parse().unwrap());
+
+    // Use transparent background so the underlying desktop shows through.
+    // The HTML itself provides a translucent color overlay via backdrop-filter.
+    let window = tauri::WebviewWindowBuilder::new(&app, label, webview_url)
+        .title("Identify")
+        .inner_size(800.0, 600.0)
+        .position(monitor.position_x as f64, monitor.position_y as f64)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .focused(false)
+        .visible(false)
+        .transparent(true)
+        .build()
+        .map_err(|e| MultiMonitorError {
+            code: "WINDOW_CREATE_FAILED".to_string(),
+            message: format!("Failed to create identification window: {}", e),
+        })?;
+
+    // Position on the correct monitor using physical coordinates
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: monitor.position_x,
+        y: monitor.position_y,
+    }));
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: monitor.width,
+        height: monitor.height,
+    }));
+    let _ = window.show();
+
+    // Auto-close after 3.5 seconds
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(3500));
+        if let Some(w) = app_handle.get_webview_window(label) {
+            let _ = w.close();
+        }
+    });
+
+    Ok(())
 }

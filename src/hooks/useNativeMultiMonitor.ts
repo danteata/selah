@@ -14,12 +14,13 @@ import {
     type LiveWindowConfig,
     type WindowState,
     getMonitorColor,
-    flashMonitor as flashMonitorService,
+    identifyMonitor as identifyMonitorService,
 } from '../services/native-multi-monitor'
 import {
     multiMonitorService,
     type ScreenInfo,
     type MultiMonitorState,
+    identifyScreen as identifyScreenWeb,
 } from '../services/multi-monitor'
 
 export interface UseNativeMultiMonitorReturn {
@@ -39,7 +40,7 @@ export interface UseNativeMultiMonitorReturn {
     moveToMonitor: (monitorId: string) => Promise<void>
     sendSlideToLive: (slideId: string, slideData?: Record<string, unknown>) => Promise<void>
     clearLiveOutput: (mode?: 'clear' | 'black' | 'logo') => Promise<void>
-    flashMonitor: (color: string) => Promise<void>
+    identifyScreen: (monitorId: string) => Promise<void>
 
     // Window state persistence
     getWindowState: () => Promise<WindowState>
@@ -56,6 +57,28 @@ export interface UseNativeMultiMonitorReturn {
     getBestScreen: () => MonitorInfo | ScreenInfo | null
     isPresentationApiAvailable: () => boolean
     isScreenEnumerationAvailable: () => boolean
+}
+
+const SELECTED_MONITOR_KEY = 'selah-selected-monitor'
+
+function loadPersistedMonitorId(): string | null {
+    try {
+        return localStorage.getItem(SELECTED_MONITOR_KEY)
+    } catch {
+        return null
+    }
+}
+
+function persistMonitorId(id: string | null): void {
+    try {
+        if (id) {
+            localStorage.setItem(SELECTED_MONITOR_KEY, id)
+        } else {
+            localStorage.removeItem(SELECTED_MONITOR_KEY)
+        }
+    } catch {
+        // localStorage unavailable
+    }
 }
 
 export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
@@ -91,9 +114,10 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     const state = await nativeMultiMonitorService.getLiveWindowState()
                     setLiveWindowState(state)
 
-                    // Get current monitor
+                    // Get current monitor, or restore persisted selection
                     const currentMonitor = await nativeMultiMonitorService.getCurrentLiveMonitor()
-                    setSelectedMonitorId(currentMonitor)
+                    const restored = currentMonitor || loadPersistedMonitorId()
+                    setSelectedMonitorId(restored)
                 } else {
                     // Subscribe to web state changes
                     const unsubscribe = multiMonitorService.subscribe(setWebState)
@@ -113,6 +137,12 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                             color: getMonitorColor(idx),
                         }))
                         setMonitors(mappedMonitors)
+
+                        // Restore persisted monitor selection in web mode
+                        const persisted = loadPersistedMonitorId()
+                        if (persisted && mappedMonitors.some(m => m.id === persisted)) {
+                            setSelectedMonitorId(persisted)
+                        }
                     } catch {
                         // Screen detection may not be available (e.g. no Presentation API)
                     }
@@ -152,6 +182,11 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
             if (isDesktop) {
                 const monitorList = await nativeMultiMonitorService.getMonitors()
                 setMonitors(monitorList)
+                // Restore persisted selection if still valid
+                const persisted = loadPersistedMonitorId()
+                if (persisted && monitorList.some(m => m.id === persisted)) {
+                    setSelectedMonitorId(persisted)
+                }
                 return monitorList
             } else {
                 const screens = await multiMonitorService.detectScreens()
@@ -167,6 +202,11 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     color: getMonitorColor(idx),
                 }))
                 setMonitors(mapped)
+                // Restore persisted selection if still valid
+                const persisted = loadPersistedMonitorId()
+                if (persisted && mapped.some(m => m.id === persisted)) {
+                    setSelectedMonitorId(persisted)
+                }
                 return mapped
             }
         } finally {
@@ -181,6 +221,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
             setLiveWindowState(config?.fullscreen !== false ? 'Fullscreen' : 'Open')
             if (config?.monitor_id) {
                 setSelectedMonitorId(config.monitor_id)
+                persistMonitorId(config.monitor_id)
             }
         } else {
             // Web fallback: start Presentation API or open popup window
@@ -195,6 +236,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 if (win) {
                     setLiveWindowState('Open')
                     setSelectedMonitorId(config.monitor_id)
+                    persistMonitorId(config.monitor_id)
                 }
             } else {
                 // Use Presentation API or best available screen
@@ -238,6 +280,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         if (isDesktop) {
             await nativeMultiMonitorService.moveLiveToMonitor(monitorId)
             setSelectedMonitorId(monitorId)
+            persistMonitorId(monitorId)
         }
     }, [isDesktop])
 
@@ -257,12 +300,43 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         }
     }, [isDesktop])
 
-    // Flash monitor identification
-    const flashMonitor = useCallback(async (color: string) => {
-        if (isDesktop) {
-            await flashMonitorService(color)
+    // Identify a specific monitor by opening an identification window
+    // on the target monitor (desktop) or popup (web).
+    const identifyScreen = useCallback(async (monitorId: string) => {
+        const monitor = monitors.find(m => m.id === monitorId)
+        if (!monitor) {
+            console.error('[useNativeMultiMonitor] Monitor not found for identification:', monitorId)
+            return
         }
-    }, [isDesktop])
+
+        if (isDesktop) {
+            // Desktop: use Tauri WebviewWindow to open a temporary
+            // identification window positioned on the correct monitor.
+            await identifyMonitorService(monitor)
+            return
+        }
+
+        // Web: open a popup window on the target screen + broadcast
+        // to any existing live windows
+        try {
+            const channel = new BroadcastChannel('selah-monitor-flash')
+            channel.postMessage({ monitorId, color: monitor.color || '#3B82F6' })
+            channel.close()
+        } catch { /* ignore */ }
+
+        const screenInfo: ScreenInfo = {
+            id: monitor.id,
+            name: monitor.name,
+            width: monitor.width,
+            height: monitor.height,
+            left: monitor.position_x,
+            top: monitor.position_y,
+            isPrimary: monitor.is_primary,
+            isExternal: !monitor.is_primary,
+            color: monitor.color,
+        }
+        await identifyScreenWeb(screenInfo)
+    }, [isDesktop, monitors])
 
     // Window state persistence
     const getWindowState = useCallback(() => nativeMultiMonitorService.getWindowState(), [])
@@ -355,7 +429,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         moveToMonitor,
         sendSlideToLive,
         clearLiveOutput,
-        flashMonitor,
+        identifyScreen,
 
         // Window state persistence
         getWindowState,
