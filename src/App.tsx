@@ -15,6 +15,18 @@ import TestPage from './pages/TestPage'
 import { isDesktop } from './platform'
 import { ConvexConnectionProvider, useConvexConnection } from './providers/ConvexConnectionProvider'
 import { ConvexErrorBoundary } from './components/offline/ConvexErrorBoundary'
+import { useAppStore } from './store/appStore'
+
+function useDarkModeSync() {
+    const isDarkMode = useAppStore((s) => s.settings.isDarkMode)
+    useEffect(() => {
+        if (isDarkMode) {
+            document.documentElement.classList.add('dark')
+        } else {
+            document.documentElement.classList.remove('dark')
+        }
+    }, [isDarkMode])
+}
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL!
 const queryClient = new QueryClient()
@@ -56,6 +68,7 @@ function JoinChurchRoute() {
 
 function AppRoutes() {
     const { isOffline } = useConvexConnection()
+    useDarkModeSync()
 
     if (isOffline) {
         return (
