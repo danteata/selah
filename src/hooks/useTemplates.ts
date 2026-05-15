@@ -10,12 +10,15 @@ import {
     type LocalTemplate,
 } from './useIndexedDB'
 
+export type SlideType = 'bible' | 'song' | 'hymn' | 'text' | 'media' | 'announcement' | 'countdown' | 'any'
+
 export type TemplateItem = {
     _id: string
     name: string
     description?: string
     slideId: string | unknown
     category: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+    appliesTo?: SlideType[]
     thumbnail?: string
     createdBy?: string
     favoritedBy?: string[]
@@ -33,6 +36,7 @@ export type UseTemplatesReturn = {
         description?: string
         slideId: string | unknown
         category: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        appliesTo?: SlideType[]
         thumbnail?: string
         backgroundStorageId?: string
     }) => Promise<string>
@@ -41,6 +45,7 @@ export type UseTemplatesReturn = {
         description?: string
         slideId?: string | unknown
         category?: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        appliesTo?: SlideType[]
         thumbnail?: string
         backgroundStorageId?: string
     }) => Promise<string>
@@ -50,6 +55,7 @@ export type UseTemplatesReturn = {
     getFileUrl: (storageId: string | null) => string | null
     seedDefaultTemplates: () => Promise<{ seeded: boolean; count?: number; message?: string }>
     resetDefaultTemplates: () => Promise<{ seeded: boolean; count?: number; message?: string }>
+    getTemplatesForSlideType: (slideType: SlideType) => TemplateItem[]
 }
 
 function localTemplateToTemplateItem(local: LocalTemplate): TemplateItem {
@@ -59,6 +65,7 @@ function localTemplateToTemplateItem(local: LocalTemplate): TemplateItem {
         description: local.description,
         slideId: local.slideId,
         category: local.category as TemplateItem['category'],
+        appliesTo: local.appliesTo as SlideType[] || undefined,
         thumbnail: local.thumbnail,
         createdBy: local.createdBy,
         favoritedBy: local.favoritedBy,
@@ -113,6 +120,7 @@ export function useTemplates(): UseTemplatesReturn {
         description?: string
         slideId: string | unknown
         category: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        appliesTo?: SlideType[]
         thumbnail?: string
         backgroundStorageId?: string
     }): Promise<string> => {
@@ -125,6 +133,7 @@ export function useTemplates(): UseTemplatesReturn {
                 description: data.description,
                 slideId: typeof data.slideId === 'string' ? data.slideId : JSON.stringify(data.slideId),
                 category: data.category,
+                appliesTo: data.appliesTo,
                 thumbnail: data.thumbnail,
                 backgroundStorageId: data.backgroundStorageId,
                 createdBy: 'local',
@@ -143,32 +152,42 @@ export function useTemplates(): UseTemplatesReturn {
             description: data.description,
             slideId: data.slideId,
             category: data.category,
+            appliesTo: data.appliesTo,
             thumbnail: data.thumbnail,
-            backgroundStorageId: data.backgroundStorageId
+            backgroundStorageId: data.backgroundStorageId,
         })
     }
 
-    const updateTemplate = async (
-        templateId: string,
-        updates: {
-            name?: string
-            description?: string
-            slideId?: string | unknown
-            category?: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
-            thumbnail?: string
-            backgroundStorageId?: string
-        }
-    ): Promise<string> => {
-        if (isOffline && templateId.startsWith('local_')) {
-            await updateLocalTemplateFromDB(templateId, {
-                ...updates,
-                slideId: updates.slideId ? (typeof updates.slideId === 'string' ? updates.slideId : JSON.stringify(updates.slideId)) : undefined,
+    const updateTemplate = async (templateId: string, updates: {
+        name?: string
+        description?: string
+        slideId?: string | unknown
+        category?: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        appliesTo?: SlideType[]
+        thumbnail?: string
+        backgroundStorageId?: string
+    }): Promise<string> => {
+        if (templateId.startsWith('local_')) {
+            const local = await updateLocalTemplateFromDB(templateId, {
+                name: updates.name,
+                description: updates.description,
+                slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : undefined,
+                category: updates.category,
+                appliesTo: updates.appliesTo,
+                thumbnail: updates.thumbnail,
+                backgroundStorageId: updates.backgroundStorageId,
             })
-            await refreshLocalTemplates()
-            return templateId
+            if (local) {
+                await refreshLocalTemplates()
+                return local.id
+            }
+            throw new Error('Template not found')
         }
 
-        return await updateTemplateMutation({ templateId, updates })
+        return await updateTemplateMutation({
+            templateId,
+            ...updates,
+        })
     }
 
     const deleteTemplate = async (templateId: string): Promise<boolean> => {
@@ -212,6 +231,14 @@ export function useTemplates(): UseTemplatesReturn {
         return await resetDefaultTemplatesMutation({})
     }
 
+    const getTemplatesForSlideType = (slideType: SlideType): TemplateItem[] => {
+        const all = effectiveTemplates || []
+        return all.filter(t => {
+            const applies = t.appliesTo || ['any']
+            return applies.includes('any') || applies.includes(slideType)
+        })
+    }
+
     return {
         templates: effectiveTemplates,
         customTemplates,
@@ -223,6 +250,7 @@ export function useTemplates(): UseTemplatesReturn {
         generateUploadUrl,
         getFileUrl,
         seedDefaultTemplates,
-        resetDefaultTemplates
+        resetDefaultTemplates,
+        getTemplatesForSlideType,
     }
 }

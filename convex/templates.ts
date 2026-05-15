@@ -122,6 +122,16 @@ export const createTemplate = mutation({
             v.literal("prayer"),
             v.literal("general")
         ),
+        appliesTo: v.optional(v.array(v.union(
+            v.literal("bible"),
+            v.literal("song"),
+            v.literal("hymn"),
+            v.literal("text"),
+            v.literal("media"),
+            v.literal("announcement"),
+            v.literal("countdown"),
+            v.literal("any")
+        ))),
         thumbnail: v.optional(v.string()),
         backgroundStorageId: v.optional(v.string()), // Storage ID for video/image files
     },
@@ -147,6 +157,7 @@ export const createTemplate = mutation({
             slideId: args.slideId,
             createdBy: user._id!,
             category: args.category,
+            appliesTo: args.appliesTo,
             thumbnail: args.thumbnail,
             backgroundStorageId: args.backgroundStorageId,
             createdAt: now,
@@ -172,6 +183,16 @@ export const updateTemplate = mutation({
                 v.literal("prayer"),
                 v.literal("general")
             )),
+            appliesTo: v.optional(v.array(v.union(
+                v.literal("bible"),
+                v.literal("song"),
+                v.literal("hymn"),
+                v.literal("text"),
+                v.literal("media"),
+                v.literal("announcement"),
+                v.literal("countdown"),
+                v.literal("any")
+            ))),
             thumbnail: v.optional(v.string()),
             backgroundStorageId: v.optional(v.string()),
         }),

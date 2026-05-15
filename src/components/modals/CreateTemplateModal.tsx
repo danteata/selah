@@ -15,6 +15,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const { createTemplate, updateTemplate, generateUploadUrl } = useTemplates()
     const [name, setName] = useState('')
     const [category, setCategory] = useState<string>('general')
+    const [appliesTo, setAppliesTo] = useState<string[]>(['any'])
     const [description, setDescription] = useState('')
     const [content, setContent] = useState('')
     const [backgroundType, setBackgroundType] = useState<'image' | 'gradient' | 'color' | 'video'>('image')
@@ -29,10 +30,21 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
     const categories = [
         { id: 'announcement', label: 'Announcement', color: 'bg-blue-500' },
-        { id: 'worship', label: 'Worship', color: 'bg-purple-500' },
+        { id: 'worship', label: 'Worship', color: 'bg-amber-500' },
         { id: 'sermon', label: 'Sermon', color: 'bg-amber-500' },
         { id: 'prayer', label: 'Prayer', color: 'bg-green-500' },
         { id: 'general', label: 'General', color: 'bg-gray-500' },
+    ]
+
+    const slideTypes = [
+        { id: 'bible', label: 'Bible Verses' },
+        { id: 'song', label: 'Songs' },
+        { id: 'hymn', label: 'Hymns' },
+        { id: 'text', label: 'Text Slides' },
+        { id: 'media', label: 'Media' },
+        { id: 'announcement', label: 'Announcements' },
+        { id: 'countdown', label: 'Countdowns' },
+        { id: 'any', label: 'Any Type' },
     ]
 
     const gradientOptions = [
@@ -58,6 +70,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 // Populate form with existing template data
                 setName(editingTemplate.name)
                 setCategory(editingTemplate.category)
+                setAppliesTo((editingTemplate.appliesTo || ['any']) as string[])
                 setDescription(editingTemplate.description || '')
 
                 // Parse slideId to get content and background
@@ -260,6 +273,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     description: description.trim() || undefined,
                     slideId: JSON.stringify(slideData),
                     category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
+                    appliesTo: appliesTo as any,
                     thumbnail: backgroundType === 'image' ? background : undefined,
                     backgroundStorageId: backgroundStorageId || undefined,
                 })
@@ -269,6 +283,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     description: description.trim() || undefined,
                     slideId: JSON.stringify(slideData),
                     category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
+                    appliesTo: appliesTo as any,
                     thumbnail: backgroundType === 'image' ? background : undefined,
                     backgroundStorageId: backgroundStorageId || undefined,
                 })
@@ -291,7 +306,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
         >
             <div className="w-full max-w-2xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden flex flex-col">
                 {/* Header */}
-                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 bg-gradient-to-r from-primary-500/10 to-purple-500/10">
+                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 bg-gradient-to-r from-primary-500/10 to-amber-500/10">
                     <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
                         <Save className="w-5 h-5 text-primary-600" />
                     </div>
@@ -601,6 +616,45 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                     >
                                         <span className={`w-2 h-2 rounded-full ${cat.color}`} />
                                         {cat.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Applies To — which slide types this template is for */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Applies To
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                                Which slide types can use this template?
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                                {slideTypes.map((st) => (
+                                    <button
+                                        key={st.id}
+                                        type="button"
+                                        onClick={() => {
+                                            if (st.id === 'any') {
+                                                setAppliesTo(['any'])
+                                            } else {
+                                                setAppliesTo(prev => {
+                                                    const withoutAny = prev.filter(id => id !== 'any')
+                                                    if (withoutAny.includes(st.id)) {
+                                                        const next = withoutAny.filter(id => id !== st.id)
+                                                        return next.length === 0 ? ['any'] : next
+                                                    }
+                                                    return [...withoutAny, st.id]
+                                                })
+                                            }
+                                        }}
+                                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                                            appliesTo.includes(st.id)
+                                                ? 'bg-[var(--accent-teal)] text-white'
+                                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                            }`}
+                                    >
+                                        {st.label}
                                     </button>
                                 ))}
                             </div>

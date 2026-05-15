@@ -231,6 +231,17 @@ export default defineSchema({
             v.literal("prayer"),
             v.literal("general")
         ),
+        // Which slide types this template can be applied to
+        appliesTo: v.optional(v.array(v.union(
+            v.literal("bible"),
+            v.literal("song"),
+            v.literal("hymn"),
+            v.literal("text"),
+            v.literal("media"),
+            v.literal("announcement"),
+            v.literal("countdown"),
+            v.literal("any")
+        ))),
         thumbnail: v.optional(v.string()),
         createdAt: v.string(),
         updatedAt: v.string(),
