@@ -68,6 +68,7 @@ interface UseLiveSessionReturn {
     toggleBlank: (isBlank: boolean) => Promise<void>
     setOverlay: (overlay?: string, alertId?: string) => Promise<void>
     transferOperator: (newOperatorId: string) => Promise<void>
+    updateCollaborationMode: (mode: CollaborationMode) => Promise<void>
 }
 
 export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
@@ -128,6 +129,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const toggleBlankMutation = useMutation(api.liveSessions.toggleBlank)
     const setOverlayMutation = useMutation(api.liveSessions.setOverlay)
     const transferOperatorMutation = useMutation(api.liveSessions.transferOperator)
+    const updateCollaborationModeMutation = useMutation(api.liveSessions.updateCollaborationMode)
     const syncScheduleSlidesMutation = useMutation(api.slides.syncScheduleSlides)
     const upsertScheduleSlideMutation = useMutation(api.slides.upsertScheduleSlide)
 
@@ -559,6 +561,22 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, transferOperatorMutation])
 
+    const handleUpdateCollaborationMode = useCallback(async (mode: CollaborationMode) => {
+        if (!resolvedSessionId || !isConvexConnected || isOffline) return
+
+        if (sessionRole !== 'operator') {
+            console.warn('[useLiveSession] Only the operator can change collaboration mode')
+            return
+        }
+
+        try {
+            await updateCollaborationModeMutation({ sessionId: resolvedSessionId, collaborationMode: mode })
+            setCollaborationMode(mode)
+        } catch (err) {
+            console.error('[useLiveSession] Failed to update collaboration mode:', err)
+        }
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, updateCollaborationModeMutation])
+
     // Auto-sync operator's slide order to Convex when it changes locally
     useEffect(() => {
         if (!resolvedSessionId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
@@ -627,6 +645,26 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         return () => clearTimeout(timeoutId)
     }, [activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, syncScheduleSlidesMutation])
 
+    // Reconnection recovery: reconcile session state when Convex reconnects
+    const prevConnectedRef = useRef(isConvexConnected)
+    useEffect(() => {
+        const wasDisconnected = !prevConnectedRef.current
+        prevConnectedRef.current = isConvexConnected
+
+        if (isConvexConnected && !isOffline && resolvedSessionId && wasDisconnected) {
+            if (pendingQueueSlideIdsRef.current.length > 0) {
+                const pendingIds = [...pendingQueueSlideIdsRef.current]
+                pendingQueueSlideIdsRef.current = []
+                if (sessionRole !== 'operator') {
+                    addToQueueMutation({ sessionId: resolvedSessionId, slideIds: pendingIds })
+                        .catch(err => {
+                            console.error('[useLiveSession] Failed to replay pending queue on reconnect:', err)
+                        })
+                }
+            }
+        }
+    }, [isConvexConnected, isOffline, resolvedSessionId, sessionRole])
+
     return {
         sessionId: resolvedSessionId,
         sessionScheduleId,
@@ -654,5 +692,6 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         toggleBlank: handleToggleBlank,
         setOverlay: handleSetOverlay,
         transferOperator: handleTransferOperator,
+        updateCollaborationMode: handleUpdateCollaborationMode,
     }
 }

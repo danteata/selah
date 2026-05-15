@@ -532,6 +532,39 @@ export const transferOperator = mutation({
     },
 });
 
+export const updateCollaborationMode = mutation({
+    args: {
+        sessionId: v.id("liveSessions"),
+        collaborationMode: v.union(
+            v.literal("strict"),
+            v.literal("moderated"),
+            v.literal("open"),
+        ),
+    },
+    handler: async (ctx, args) => {
+        const user = await getAuthenticatedUser(ctx);
+
+        const session = await ctx.db.get(args.sessionId);
+        if (!session || session.status !== "active") {
+            throw new Error("No active session found");
+        }
+
+        const isOperator = session.operatorId === user._id;
+        const isAdmin = user.role === "superadmin" || user.role === "admin";
+
+        if (!isOperator && !isAdmin) {
+            throw new Error("Only the operator or an admin can change collaboration mode");
+        }
+
+        await ctx.db.patch(args.sessionId, {
+            collaborationMode: args.collaborationMode,
+            updatedAt: new Date().toISOString(),
+        });
+
+        return true;
+    },
+});
+
 export const joinSession = mutation({
     args: {
         sessionId: v.id("liveSessions"),

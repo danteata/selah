@@ -1,14 +1,14 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useMutation, useQuery } from 'convex/react'
-import { Radio, StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight, Lock, Unlock, MessageSquare } from 'lucide-react'
+import { StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight, Lock, Unlock, MessageSquare } from 'lucide-react'
 import { api } from '../../../convex/_generated/api'
 import type { Id } from '../../../convex/_generated/dataModel'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useSchedules } from '../../hooks/useSchedules'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { selectDiscoveredSession } from '../../hooks/liveSessionUtils'
+import { useAppStore } from '../../store/appStore'
 
-type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
 
 const MODE_INFO: Record<CollaborationMode, { label: string; description: string; icon: typeof Lock }> = {
@@ -36,11 +36,12 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const { isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
     const { activeSchedule, schedules, setActiveSchedule } = useSchedules()
+    const defaultCollaborationMode = useAppStore((s) => s.settings.defaultCollaborationMode) || 'moderated'
 
     const [isStarting, setIsStarting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [showTransferMenu, setShowTransferMenu] = useState(false)
-    const [collabMode, setCollabMode] = useState<CollaborationMode>('moderated')
+    const [collabMode, setCollabMode] = useState<CollaborationMode>(defaultCollaborationMode)
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
@@ -78,6 +79,21 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const joinSession = useMutation(api.liveSessions.joinSession)
     const leaveSession = useMutation(api.liveSessions.leaveSession)
     const transferOperator = useMutation(api.liveSessions.transferOperator)
+    const updateCollabMode = useMutation(api.liveSessions.updateCollaborationMode)
+
+    const isOperatorSession = effectiveSession?.operatorId === currentUser?._id
+
+    const handleUpdateCollabMode = useCallback(async (mode: CollaborationMode) => {
+        if (!effectiveSession?._id || !isOperatorSession || isOffline) return
+        try {
+            await updateCollabMode({
+                sessionId: effectiveSession._id as Id<'liveSessions'>,
+                collaborationMode: mode,
+            })
+        } catch (err) {
+            console.error('[LiveSessionControls] Failed to update collaboration mode:', err)
+        }
+    }, [effectiveSession?._id, isOperatorSession, isOffline, updateCollabMode])
 
     const handleStartSession = async () => {
         if (!activeSchedule?._id || !churchId || isOffline) return
@@ -180,7 +196,16 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                         </div>
                     )}
                     {effectiveSession.collaborationMode && (
-                        <span className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600/70 dark:text-emerald-400/70" title={MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.description}>
+                        <span
+                            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600/70 dark:text-emerald-400/70 cursor-pointer hover:bg-emerald-500/20 transition-colors"
+                            title={isOperatorSession ? 'Click to change collaboration mode' : MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.description}
+                            onClick={isOperatorSession ? () => {
+                                const modes: CollaborationMode[] = ['strict', 'moderated', 'open']
+                                const currentIdx = modes.indexOf(effectiveSession.collaborationMode as CollaborationMode)
+                                const nextMode = modes[(currentIdx + 1) % modes.length]
+                                handleUpdateCollabMode(nextMode)
+                            } : undefined}
+                        >
                             {(() => { const ModeIcon = MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.icon; return ModeIcon ? <ModeIcon className="w-2.5 h-2.5" /> : null })()}
                             {MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.label}
                         </span>
