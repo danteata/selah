@@ -115,6 +115,8 @@ const defaultSettings: AppSettings = {
     liveOutputMonitorId: null,
     transitionInterval: 0.7,
     alertLimit: 5,
+    defaultCollaborationMode: 'moderated',
+    isDarkMode: false,
 }
 
 const initialModalState: ModalState = {

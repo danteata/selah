@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Sun, Moon, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
@@ -197,13 +197,14 @@ function DisplaySettings({
     }
 }) {
     const setLiveOutputMonitorId = useAppStore((state) => state.setLiveOutputMonitorId)
+    const setAppSettings = useAppStore((state) => state.setAppSettings)
     const savedMonitorId = useAppStore((state) => state.settings.liveOutputMonitorId)
     const {
         monitors,
         isLoading: monitorsLoading,
         isDesktop,
         detectMonitors,
-        flashMonitor,
+        identifyScreen,
     } = useNativeMultiMonitor()
     const {
         isAvailable: ndiAvailable,
@@ -218,15 +219,17 @@ function DisplaySettings({
 
     const selectedMonitorId = localMonitorId ?? savedMonitorId
 
-    const handleIdentify = useCallback(async (monitorId: string, color: string) => {
+    const handleIdentify = useCallback(async (monitorId: string) => {
         if (flashingId) return
         setFlashingId(monitorId)
-        await flashMonitor(color)
-        const channel = new BroadcastChannel('selah-monitor-flash')
-        channel.postMessage({ monitorId, color })
-        channel.close()
-        setTimeout(() => setFlashingId(null), 2500)
-    }, [flashMonitor, flashingId])
+        try {
+            await identifyScreen(monitorId)
+            setTimeout(() => setFlashingId(null), 3500)
+        } catch (error) {
+            console.error('[SettingsModal] Failed to identify monitor:', error)
+            setFlashingId(null)
+        }
+    }, [identifyScreen, flashingId])
 
     const fonts = [
         'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat',
@@ -304,7 +307,7 @@ function DisplaySettings({
                                         </span>
                                     )}
                                     <button
-                                        onClick={(e) => { e.stopPropagation(); handleIdentify(monitor.id, color) }}
+                                        onClick={(e) => { e.stopPropagation(); handleIdentify(monitor.id) }}
                                         disabled={isFlashing}
                                         className="p-1.5 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
                                         title={`Identify ${monitor.name}`}
@@ -341,17 +344,16 @@ function DisplaySettings({
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Default Font
                 </label>
-                <select
+                <SettingsSelect
                     value={settings.defaultFont || 'Inter'}
-                    onChange={(e) => onUpdate.setDefaultFont(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]"
+                    onChange={(v) => onUpdate.setDefaultFont(v)}
                 >
                     {fonts.map((font) => (
                         <option key={font} value={font} style={{ fontFamily: font }}>
                             {font}
                         </option>
                     ))}
-                </select>
+                </SettingsSelect>
             </div>
 
             {/* Lines Per Slide */}
@@ -407,13 +409,46 @@ function DisplaySettings({
                 </div>
                 <button
                     onClick={() => onUpdate.setAnimations(!settings.animations)}
-                    className={`relative w-12 h-6 rounded-full transition-all ${settings.animations ? 'bg-[var(--accent-teal)] shadow-sm' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${settings.animations ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
                     <span
-                        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${settings.animations ? 'translate-x-7' : 'translate-x-1'
-                            }`}
+                        className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
+                        style={{ transform: settings.animations ? 'translateX(28px)' : 'translateX(0)' }}
                     />
                 </button>
+            </div>
+
+            {/* Collaboration Mode */}
+            <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Default Collaboration Mode
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    Default collaboration mode when starting a live session. Can be changed per session.
+                </p>
+                <div className="flex gap-2">
+                    {(['strict', 'moderated', 'open'] as const).map((mode) => (
+                        <button
+                            key={mode}
+                            onClick={() => setAppSettings({
+                                ...settings,
+                                defaultCollaborationMode: mode,
+                            })}
+                            className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
+                                (settings.defaultCollaborationMode || 'moderated') === mode
+                                    ? 'bg-[var(--accent-teal)] text-white'
+                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--accent-teal)]/10'
+                            }`}
+                        >
+                            {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                        </button>
+                    ))}
+                </div>
+                <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                    {(settings.defaultCollaborationMode || 'moderated') === 'strict' && 'Only the operator can control slides.'}
+                    {(settings.defaultCollaborationMode || 'moderated') === 'moderated' && 'Suggestions need operator approval.'}
+                    {(settings.defaultCollaborationMode || 'moderated') === 'open' && 'All team members can advance slides.'}
+                </div>
             </div>
 
             {/* NDI Output */}
@@ -433,7 +468,7 @@ function DisplaySettings({
                             <button
                                 onClick={ndiStop}
                                 disabled={ndiLoading}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50"
                             >
                                 <RadioTower className="w-3.5 h-3.5" />
                                 <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
@@ -456,7 +491,7 @@ function DisplaySettings({
                         {isDesktop ? (
                             <>
                                 <p>NDI SDK not detected on this system.</p>
-                                <p className="mt-1">Install <a href="https://ndi.video/type/developer/" target="_blank" rel="noreferrer" className="text-purple-600 hover:underline">NDI Tools</a> (includes the SDK runtime) and restart the app.</p>
+                                <p className="mt-1">Install <a href="https://ndi.video/type/developer/" target="_blank" rel="noreferrer" className="text-[var(--accent-teal)] hover:underline">NDI Tools</a> (includes the SDK runtime) and restart the app.</p>
                                 {!(window as any).__TAURI_INTERNALS__ && (
                                     <p className="mt-1">Rebuild with <code className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-[10px]">cargo build --features ndi</code> to enable NDI support.</p>
                                 )}
@@ -488,6 +523,25 @@ function DisplaySettings({
                     </div>
                 )}
             </div>
+        </div>
+    )
+}
+
+function SettingsSelect({ value, onChange, children }: {
+    value: string
+    onChange: (value: string) => void
+    children: React.ReactNode
+}) {
+    return (
+        <div className="relative">
+            <select
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className="w-full pl-3 pr-8 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white appearance-none focus:outline-none focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent cursor-pointer"
+            >
+                {children}
+            </select>
+            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
         </div>
     )
 }
@@ -536,18 +590,19 @@ function BackgroundSettings() {
                                     : 'Using default background'}
                             </p>
                         </div>
-                        <select
-                            value={settings.defaultTemplates?.scripture || ''}
-                            onChange={(e) => setDefaultTemplate('scripture', e.target.value || null)}
-                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        >
-                            <option value="">Use Default Background</option>
-                            {templates?.map(template => (
-                                <option key={template._id} value={template._id}>
-                                    {template.name}
-                                </option>
-                            ))}
-                        </select>
+                        <div className="w-48">
+                            <SettingsSelect
+                                value={settings.defaultTemplates?.scripture || ''}
+                                onChange={(v) => setDefaultTemplate('scripture', v || null)}
+                            >
+                                <option value="">Use Default Background</option>
+                                {templates?.map(template => (
+                                    <option key={template._id} value={template._id}>
+                                        {template.name}
+                                    </option>
+                                ))}
+                            </SettingsSelect>
+                        </div>
                     </div>
 
                     {/* Hymn Template Selector */}
@@ -562,18 +617,19 @@ function BackgroundSettings() {
                                     : 'Using default background'}
                             </p>
                         </div>
-                        <select
-                            value={settings.defaultTemplates?.hymn || ''}
-                            onChange={(e) => setDefaultTemplate('hymn', e.target.value || null)}
-                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        >
-                            <option value="">Use Default Background</option>
-                            {templates?.map(template => (
-                                <option key={template._id} value={template._id}>
-                                    {template.name}
-                                </option>
-                            ))}
-                        </select>
+                        <div className="w-48">
+                            <SettingsSelect
+                                value={settings.defaultTemplates?.hymn || ''}
+                                onChange={(v) => setDefaultTemplate('hymn', v || null)}
+                            >
+                                <option value="">Use Default Background</option>
+                                {templates?.map(template => (
+                                    <option key={template._id} value={template._id}>
+                                        {template.name}
+                                    </option>
+                                ))}
+                            </SettingsSelect>
+                        </div>
                     </div>
 
                     {/* Song Template Selector */}
@@ -588,18 +644,19 @@ function BackgroundSettings() {
                                     : 'Using default background'}
                             </p>
                         </div>
-                        <select
-                            value={settings.defaultTemplates?.song || ''}
-                            onChange={(e) => setDefaultTemplate('song', e.target.value || null)}
-                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        >
-                            <option value="">Use Default Background</option>
-                            {templates?.map(template => (
-                                <option key={template._id} value={template._id}>
-                                    {template.name}
-                                </option>
-                            ))}
-                        </select>
+                        <div className="w-48">
+                            <SettingsSelect
+                                value={settings.defaultTemplates?.song || ''}
+                                onChange={(v) => setDefaultTemplate('song', v || null)}
+                            >
+                                <option value="">Use Default Background</option>
+                                {templates?.map(template => (
+                                    <option key={template._id} value={template._id}>
+                                        {template.name}
+                                    </option>
+                                ))}
+                            </SettingsSelect>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -660,11 +717,11 @@ function BibleSettings({
                 </div>
                 <button
                     onClick={() => onUpdate.setFootnotes(!settings.footnotes)}
-                    className={`relative w-12 h-6 rounded-full transition-all ${settings.footnotes ? 'bg-[var(--accent-teal)] shadow-sm' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${settings.footnotes ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
                     <span
-                        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${settings.footnotes ? 'translate-x-7' : 'translate-x-1'
-                            }`}
+                        className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
+                        style={{ transform: settings.footnotes ? 'translateX(28px)' : 'translateX(0)' }}
                     />
                 </button>
             </div>
