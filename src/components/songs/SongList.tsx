@@ -3,6 +3,8 @@ import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide
 import { useSong, useSongs, useSlideCreation } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { AddSongModal } from './AddSongModal'
+import { TemplateSelector } from '../templates/TemplateSelector'
+import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
 import type { Song } from '../../types'
 
 interface SongListProps {
@@ -16,6 +18,7 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
     const [songToEdit, setSongToEdit] = useState<Song | null>(null)
     const [isAddModalOpen, setIsAddModalOpen] = useState(false)
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+    const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
 
     const { songs, loading: songsLoading, searchSongs, deleteSong, parseSongLyrics } = useSongs()
     const { getSong } = useSong()
@@ -38,7 +41,7 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
             console.log('Verses parsed:', songWithVerses?.verses)
 
             if (songWithVerses) {
-                const slides = createSongSlides(songWithVerses as any)
+                const slides = createSongSlides(songWithVerses as any, { template: selectedTemplate })
                 console.log('Created slides count:', slides.length)
                 slides.forEach(slide => {
                     appendActiveSlide(slide)
@@ -221,7 +224,14 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                             </div>
                         </div>
 
-                        <div className="flex justify-end gap-2 mt-4">
+                            {/* Template Selector */}
+                            <TemplateSelector
+                                slideType="song"
+                                selectedTemplate={selectedTemplate}
+                                onSelect={setSelectedTemplate}
+                            />
+
+                            <div className="flex justify-end gap-2 mt-4">
                             <button
                                 onClick={() => setSelectedSong(null)}
                                 className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"

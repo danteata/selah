@@ -214,7 +214,7 @@ export function useTemplates(): UseTemplatesReturn {
 
     const getFileUrl = (storageId: string | null): string | null => {
         if (!storageId) return null
-        return null
+        return `${import.meta.env.VITE_CONVEX_URL}/api/storage/${storageId}`
     }
 
     const seedDefaultTemplates = async (): Promise<{ seeded: boolean; count?: number; message?: string }> => {

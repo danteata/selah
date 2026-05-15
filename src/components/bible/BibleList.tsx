@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
+import { TemplateSelector } from '../templates/TemplateSelector'
 import type { Scripture, BibleVerse } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
@@ -544,15 +545,11 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                         })}
 
                         {/* Template Selector */}
-                        {bibleTemplates && bibleTemplates.length > 0 && (
-                            <div className="pt-3 mt-3 border-t border-[var(--border-subtle)]">
-                                <div className="flex flex-wrap gap-2">
-                                    {bibleTemplates.slice(0, 5).map(template => (
-                                        <button key={template._id} onClick={() => setSelectedTemplate(selectedTemplate?._id === template._id ? null : template)} className={`px-3 py-1 text-xs rounded-full transition-colors ${selectedTemplate?._id === template._id ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)]'}`}>{template.name}</button>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
+                        <TemplateSelector
+                            slideType="bible"
+                            selectedTemplate={selectedTemplate}
+                            onSelect={setSelectedTemplate}
+                        />
                     </div>
                 )}
 

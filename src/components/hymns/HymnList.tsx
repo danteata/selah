@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { Search, X, ChevronLeft, Music } from 'lucide-react'
 import { useHymn, useSlideCreation } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
+import { TemplateSelector } from '../templates/TemplateSelector'
+import { type TemplateItem } from '../../hooks/useTemplates'
 import type { Hymn } from '../../types'
 
 interface HymnListProps {
@@ -15,6 +17,7 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
     const [filteredHymns, setFilteredHymns] = useState<Hymn[]>([])
     const [selectedHymn, setSelectedHymn] = useState<Hymn | null>(null)
     const [loading, setLoading] = useState(true)
+    const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
 
     const { getAllHymns } = useHymn()
     const { createHymnSlides } = useSlideCreation()
@@ -47,7 +50,7 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
 
     const handleCreateSlides = useCallback(() => {
         if (selectedHymn) {
-            const slides = createHymnSlides(selectedHymn as any)
+            const slides = createHymnSlides(selectedHymn as any, { template: selectedTemplate })
             slides.forEach(slide => {
                 appendActiveSlide(slide)
             })
@@ -170,6 +173,13 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                             )}
                         </div>
                     </div>
+
+                    {/* Template Selector */}
+                    <TemplateSelector
+                        slideType="hymn"
+                        selectedTemplate={selectedTemplate}
+                        onSelect={setSelectedTemplate}
+                    />
 
                     <div className="flex justify-end gap-2 mt-4">
                         <button
