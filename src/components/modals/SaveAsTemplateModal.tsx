@@ -3,6 +3,7 @@ import { X, Save } from 'lucide-react'
 import type { Slide } from '../../types'
 import { generateThumbnail } from '../../utils/templateThumbnail'
 import type { SlideType } from '../../hooks/useTemplates'
+import { useLocalBackground } from '../../hooks/useLocalBackground'
 
 interface SaveAsTemplateModalProps {
     isOpen: boolean
@@ -21,6 +22,8 @@ const SLIDE_TYPES: { id: SlideType; label: string }[] = [
     { id: 'bible', label: 'Bible' },
     { id: 'song', label: 'Songs' },
     { id: 'hymn', label: 'Hymns' },
+    { id: 'sermon', label: 'Sermon' },
+    { id: 'prayer', label: 'Prayer' },
     { id: 'text', label: 'Text' },
     { id: 'media', label: 'Media' },
     { id: 'announcement', label: 'Announcements' },
@@ -34,6 +37,7 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
     const [description, setDescription] = useState('')
     const [appliesTo, setAppliesTo] = useState<SlideType[]>(['any'])
     const [isSaving, setIsSaving] = useState(false)
+    const resolvedBg = useLocalBackground(slide?.background, slide?.localFilePath)
 
     const categories = [
         { id: 'announcement', label: 'Announcement', color: 'bg-blue-500' },
@@ -110,7 +114,7 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
                         <div
                             className="w-full h-full flex items-center justify-center p-4 text-center"
                             style={{
-                                background: slide.background || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                background: resolvedBg || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                             }}
                         >
                             <span className="text-white text-sm font-medium truncate">
@@ -175,7 +179,7 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
                                             setAppliesTo(['any'])
                                         } else {
                                             setAppliesTo(prev => {
-                                                const withoutAny = prev.filter(id => id !== 'any')
+                                                const withoutAny = prev.filter(id => id !== 'any') as SlideType[]
                                                 if (withoutAny.includes(st.id)) {
                                                     const next = withoutAny.filter(id => id !== st.id)
                                                     return next.length === 0 ? ['any'] : next

@@ -4,12 +4,12 @@ import { useTemplates, type TemplateItem, type SlideType } from '../../hooks/use
 import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
 
-const CATEGORY_CONFIG: Record<string, { label: string; color: string; bgClass: string; dotClass: string }> = {
-    announcement: { label: 'Announcement', color: '#3B82F6', bgClass: 'bg-blue-500/15 text-blue-700 dark:text-blue-300', dotClass: 'bg-blue-500' },
-    worship: { label: 'Worship', color: '#F59E0B', bgClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300', dotClass: 'bg-amber-500' },
-    sermon: { label: 'Sermon', color: '#F97316', bgClass: 'bg-orange-500/15 text-orange-700 dark:text-orange-300', dotClass: 'bg-orange-500' },
-    prayer: { label: 'Prayer', color: '#10B981', bgClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300', dotClass: 'bg-emerald-500' },
-    general: { label: 'General', color: '#6B7280', bgClass: 'bg-gray-500/15 text-gray-700 dark:text-gray-300', dotClass: 'bg-gray-500' },
+const CATEGORY_CONFIG: Record<string, { label: string; abbr: string; color: string; bgClass: string; dotClass: string }> = {
+    announcement: { label: 'Announcement', abbr: 'A', color: '#3B82F6', bgClass: 'bg-blue-500/15 text-blue-700 dark:text-blue-300', dotClass: 'bg-blue-500' },
+    worship: { label: 'Worship', abbr: 'W', color: '#F59E0B', bgClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300', dotClass: 'bg-amber-500' },
+    sermon: { label: 'Sermon', abbr: 'S', color: '#F97316', bgClass: 'bg-orange-500/15 text-orange-700 dark:text-orange-300', dotClass: 'bg-orange-500' },
+    prayer: { label: 'Prayer', abbr: 'P', color: '#10B981', bgClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300', dotClass: 'bg-emerald-500' },
+    general: { label: 'General', abbr: 'G', color: '#6B7280', bgClass: 'bg-gray-500/15 text-gray-700 dark:text-gray-300', dotClass: 'bg-gray-500' },
 }
 
 const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
@@ -19,6 +19,8 @@ const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     text: 'Text',
     media: 'Media',
     announcement: 'Announcement',
+    sermon: 'Sermon',
+    prayer: 'Prayer',
     countdown: 'Countdown',
     any: 'Any',
 }
@@ -178,11 +180,12 @@ interface TemplateBrowserProps {
     isOpen?: boolean
     onClose?: () => void
     onSelect: (template: TemplateItem) => void
+    onCreateCustom?: () => boolean | void
     isInline?: boolean
     slideType?: SlideType
 }
 
-export function TemplateBrowser({ isOpen = true, onClose, onSelect, isInline = false, slideType }: TemplateBrowserProps) {
+export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCustom, isInline = false, slideType }: TemplateBrowserProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -238,11 +241,13 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, isInline = f
     }, [isOpen, onClose, isInline])
 
     const categories = [
-        { id: null, label: 'All', icon: Grid },
+        { id: null, label: 'All', icon: Grid, color: null, abbr: null },
         ...Object.entries(CATEGORY_CONFIG).map(([id, cfg]) => ({
             id,
             label: cfg.label,
             color: cfg.dotClass,
+            abbr: cfg.abbr,
+            icon: null,
         })),
     ]
 
@@ -339,19 +344,21 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, isInline = f
                             key={cat.id || 'all'}
                             onClick={() => setSelectedCategory(cat.id)}
                             className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
-                                isInline ? 'p-2 justify-center' : 'px-3 py-2'
+                                isInline ? 'p-1.5 justify-center flex-col gap-0.5' : 'px-3 py-2'
                             } ${selectedCategory === cat.id
                                 ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                             }`}
                             title={cat.label}
                         >
-                            {cat.color ? (
-                                <span className={`w-3 h-3 rounded-full ${cat.color} flex-shrink-0`} />
+                            {cat.abbr ? (
+                                <span className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${cat.color}`}>
+                                    {cat.abbr}
+                                </span>
                             ) : cat.icon ? (
-                                <cat.icon className="w-4 h-4 flex-shrink-0" />
+                                <cat.icon className={`w-4 h-4 flex-shrink-0 ${isInline ? '' : ''}`} />
                             ) : null}
-                            {!isInline && <span>{cat.label}</span>}
+                            <span className={isInline ? 'text-[9px] leading-tight truncate w-full text-center' : ''}>{cat.label}</span>
                             {!isInline && cat.id && filteredTemplates.filter(t => t.category === cat.id).length > 0 && (
                                 <span className="ml-auto text-[10px] text-gray-400">{filteredTemplates.filter(t => t.category === cat.id).length}</span>
                             )}
@@ -386,7 +393,14 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, isInline = f
                             </p>
                         )}
                         <button
-                            onClick={() => setShowCreateModal(true)}
+                            onClick={() => {
+                                if (onCreateCustom) {
+                                    const handled = onCreateCustom()
+                                    if (handled) onClose?.()
+                                } else {
+                                    setShowCreateModal(true)
+                                }
+                            }}
                             className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors ${isInline ? 'p-2 justify-center' : 'px-3 py-2'}`}
                             title="Create Custom Template"
                         >

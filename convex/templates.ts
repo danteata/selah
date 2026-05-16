@@ -56,7 +56,7 @@ const DEFAULT_BACKGROUNDS = {
     },
     prayer: {
         backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1508962924756-ee9b9f294d52?q=80&w=1740',
+        background: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=1740',
     },
     general: {
         backgroundType: 'image' as const,

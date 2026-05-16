@@ -6,6 +6,7 @@ import { openFileDialog } from '../../utils/fileDialog'
 import { isDesktop } from '../../platform'
 import { generateThumbnail } from '../../utils/templateThumbnail'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
+import { useLocalBackground } from '../../hooks/useLocalBackground'
 
 async function getConvertFileSrc(): Promise<((filePath: string) => string) | null> {
     try {
@@ -40,6 +41,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const [localFilePath, setLocalFilePath] = useState<string | null>(null)
 
     const isEditing = !!editingTemplate
+
+    const resolvedBackground = useLocalBackground(background, localFilePath ?? undefined)
 
     const categories = [
         { id: 'announcement', label: 'Announcement', color: 'bg-blue-500' },
@@ -116,16 +119,6 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
                 setLocalFilePath(null)
-            } else {
-                // Reset form for new template
-                setName('')
-                setCategory('general')
-                setDescription('')
-                setContent('')
-                setBackgroundType('image')
-                setBackground(DEFAULT_BACKGROUNDS.general.background)
-                setCustomImageUrl('')
-                setCustomColor('#667eea')
             }
         }
     }, [isOpen, editingTemplate])
@@ -340,7 +333,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 type: 'text',
                 layout: 'full-text',
                 contents: content ? [content] : ['Your content here'],
-                background,
+                background: resolvedBackground || background,
                 backgroundType,
                 backgroundStorageId,
                 localFilePath: localFilePath || undefined,
@@ -410,9 +403,9 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     <div className="p-4 space-y-4">
                         {/* Preview */}
                         <div className="aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center text-gray-400 relative">
-                            {backgroundType === 'video' && background ? (
+                            {backgroundType === 'video' && resolvedBackground ? (
                                 <video
-                                    src={background}
+                                    src={resolvedBackground}
                                     className="absolute inset-0 w-full h-full object-cover"
                                     autoPlay
                                     loop
@@ -423,7 +416,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 <div
                                     className="w-full h-full flex items-center justify-center p-4 text-center"
                                     style={{
-                                        background: background,
+                                        background: resolvedBackground,
                                         backgroundSize: 'cover',
                                         backgroundPosition: 'center',
                                     }}
@@ -605,10 +598,10 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 </div>
 
                                 {/* Video Preview */}
-                                {background && backgroundType === 'video' && (
+                                {resolvedBackground && backgroundType === 'video' && (
                                     <div className="relative rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
                                         <video
-                                            src={background}
+                                            src={resolvedBackground}
                                             className="w-full aspect-video object-cover"
                                             autoPlay
                                             loop

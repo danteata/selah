@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { useAppStore } from '../store/appStore'
+import { resolveLocalUrl } from './useLocalBackground'
 import type {
     Slide,
     Scripture,
@@ -35,7 +36,7 @@ function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, d
     }
 
     if (templateSlide) {
-        tempSlide.background = templateSlide.background || defaultBg
+        tempSlide.background = resolveLocalUrl(templateSlide.background || defaultBg, templateSlide.localFilePath) || defaultBg
         tempSlide.backgroundType = templateSlide.backgroundType || defaultBgType
         tempSlide.backgroundStorageId = templateSlide.backgroundStorageId || null
         tempSlide.backgroundVideoKey = templateSlide.backgroundVideoKey || null
@@ -194,6 +195,8 @@ export function useSlideCreation() {
         let templateToUse: TemplateItem | null = null
         if (options?.template) {
             templateToUse = options.template
+        } else if (settings.defaultTemplates?.text && templates) {
+            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.text) || null
         }
 
         applyTemplateToSlide(

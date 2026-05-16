@@ -11,7 +11,7 @@ import { SongMigrationWizard } from '../admin/SongMigrationWizard'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 
-type SettingsTab = 'display' | 'background' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
+type SettingsTab = 'display' | 'templates' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -60,7 +60,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
 
     const tabs = [
         { id: 'display' as const, label: 'Display', icon: Monitor },
-        { id: 'background' as const, label: 'Background', icon: Palette },
+        { id: 'templates' as const, label: 'Templates', icon: Palette },
         { id: 'bible' as const, label: 'Bible', icon: Book },
         { id: 'migration' as const, label: 'Import Songs', icon: Upload },
         { id: 'sermon-listener' as const, label: 'Sermon Listener', icon: Mic },
@@ -157,7 +157,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 }}
                             />
                         )}
-                        {activeTab === 'background' && <BackgroundSettings />}
+                        {activeTab === 'templates' && <TemplatesSettings />}
                         {activeTab === 'bible' && (
                             <BibleSettings
                                 settings={settings}
@@ -546,148 +546,94 @@ function SettingsSelect({ value, onChange, children }: {
     )
 }
 
-// Background Settings Tab
-function BackgroundSettings() {
-    const setDefaultSlideBackground = useAppStore((state) => state.setDefaultSlideBackground)
+// Templates Settings Tab
+function TemplatesSettings() {
     const setDefaultTemplate = useAppStore((state) => state.setDefaultTemplate)
     const settings = useAppStore((state) => state.settings)
-    const { templates } = useTemplates()
+    const { templates, getTemplatesForSlideType } = useTemplates()
 
-    const backgroundTypes = [
-        { id: 'scripture', label: 'Scripture', color: 'from-[var(--accent-teal)] to-[var(--accent-teal)]/80' },
-        { id: 'song', label: 'Song', color: 'from-[var(--accent-teal)] to-[var(--accent-teal)]/80' },
-        { id: 'hymn', label: 'Hymn', color: 'from-[var(--accent-teal)] to-[var(--accent-teal)]/80' },
-        { id: 'custom', label: 'Custom', color: 'from-gray-600 to-gray-800' },
+    const templateCategories: { key: 'scripture' | 'hymn' | 'song' | 'text' | 'sermon' | 'announcement' | 'prayer' | 'countdown'; label: string; slideType: string }[] = [
+        { key: 'scripture', label: 'Scripture', slideType: 'bible' },
+        { key: 'song', label: 'Songs', slideType: 'song' },
+        { key: 'hymn', label: 'Hymns', slideType: 'hymn' },
+        { key: 'sermon', label: 'Sermon', slideType: 'sermon' },
+        { key: 'announcement', label: 'Announcements', slideType: 'announcement' },
+        { key: 'prayer', label: 'Prayer', slideType: 'prayer' },
+        { key: 'text', label: 'Text / General', slideType: 'text' },
+        { key: 'countdown', label: 'Countdown', slideType: 'countdown' },
     ]
 
-    // Get template name by ID
     const getTemplateName = (templateId: string | null | undefined) => {
         if (!templateId) return null
         return templates?.find(t => t._id === templateId)?.name || null
     }
 
+    const getFilteredTemplates = (slideType: string) => {
+        if (!templates) return []
+        return getTemplatesForSlideType(slideType as any)
+    }
+
     return (
         <div className="space-y-6">
-            {/* Default Templates Section */}
-            <div className="space-y-4">
-                <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+            <div>
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1">
                     Default Templates
                 </h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Choose a template to use automatically when creating new slides.
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                    Choose a template to use automatically when creating new slides for each category.
                 </p>
-
-                <div className="space-y-3">
-                    {/* Scripture Template Selector */}
-                    <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                        <div>
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                Scripture Template
-                            </label>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                {settings.defaultTemplates?.scripture
-                                    ? `Using: ${getTemplateName(settings.defaultTemplates.scripture)}`
-                                    : 'Using default background'}
-                            </p>
-                        </div>
-                        <div className="w-48">
-                            <SettingsSelect
-                                value={settings.defaultTemplates?.scripture || ''}
-                                onChange={(v) => setDefaultTemplate('scripture', v || null)}
-                            >
-                                <option value="">Use Default Background</option>
-                                {templates?.map(template => (
-                                    <option key={template._id} value={template._id}>
-                                        {template.name}
-                                    </option>
-                                ))}
-                            </SettingsSelect>
-                        </div>
-                    </div>
-
-                    {/* Hymn Template Selector */}
-                    <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                        <div>
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                Hymn Template
-                            </label>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                {settings.defaultTemplates?.hymn
-                                    ? `Using: ${getTemplateName(settings.defaultTemplates.hymn)}`
-                                    : 'Using default background'}
-                            </p>
-                        </div>
-                        <div className="w-48">
-                            <SettingsSelect
-                                value={settings.defaultTemplates?.hymn || ''}
-                                onChange={(v) => setDefaultTemplate('hymn', v || null)}
-                            >
-                                <option value="">Use Default Background</option>
-                                {templates?.map(template => (
-                                    <option key={template._id} value={template._id}>
-                                        {template.name}
-                                    </option>
-                                ))}
-                            </SettingsSelect>
-                        </div>
-                    </div>
-
-                    {/* Song Template Selector */}
-                    <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                        <div>
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                Song Template
-                            </label>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                {settings.defaultTemplates?.song
-                                    ? `Using: ${getTemplateName(settings.defaultTemplates.song)}`
-                                    : 'Using default background'}
-                            </p>
-                        </div>
-                        <div className="w-48">
-                            <SettingsSelect
-                                value={settings.defaultTemplates?.song || ''}
-                                onChange={(v) => setDefaultTemplate('song', v || null)}
-                            >
-                                <option value="">Use Default Background</option>
-                                {templates?.map(template => (
-                                    <option key={template._id} value={template._id}>
-                                        {template.name}
-                                    </option>
-                                ))}
-                            </SettingsSelect>
-                        </div>
-                    </div>
-                </div>
             </div>
 
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
-                    Default Backgrounds
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Set default backgrounds for different slide types.
-                </p>
+            <div className="space-y-3">
+                {templateCategories.map(({ key, label, slideType }) => {
+                    const selectedId = settings.defaultTemplates?.[key] || ''
+                    const filteredTemplates = getFilteredTemplates(slideType)
 
-                <div className="grid grid-cols-2 gap-4">
-                    {backgroundTypes.map((type) => (
-                        <div
-                            key={type.id}
-                            className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
-                        >
-                            <div className={`h-24 bg-gradient-to-br ${type.color}`} />
-                            <div className="p-3 bg-white dark:bg-gray-800">
-                                <h4 className="text-sm font-medium text-gray-900 dark:text-white">
-                                    {type.label}
-                                </h4>
-                                <button className="mt-2 text-xs text-[var(--accent-teal)] hover:underline">
-                                    Change Background
-                                </button>
+                    return (
+                        <div key={key} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                            <div className="min-w-0 flex-1 mr-3">
+                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    {label}
+                                </label>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                    {selectedId
+                                        ? `Using: ${getTemplateName(selectedId)}`
+                                        : 'Using default background'}
+                                </p>
+                            </div>
+                            <div className="w-48 flex-shrink-0">
+                                <SettingsSelect
+                                    value={selectedId}
+                                    onChange={(v) => setDefaultTemplate(key, v || null)}
+                                >
+                                    <option value="">Default</option>
+                                    {filteredTemplates.length > 0 ? (
+                                        filteredTemplates.map(template => (
+                                            <option key={template._id} value={template._id}>
+                                                {template.name}
+                                            </option>
+                                        ))
+                                    ) : (
+                                        templates?.map(template => (
+                                            <option key={template._id} value={template._id}>
+                                                {template.name}
+                                            </option>
+                                        ))
+                                    )}
+                                </SettingsSelect>
                             </div>
                         </div>
-                    ))}
-                </div>
+                    )
+                })}
             </div>
+
+            {templates && templates.length === 0 && (
+                <div className="text-center py-6 text-gray-500 dark:text-gray-400">
+                    <Palette className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No templates yet.</p>
+                    <p className="text-xs mt-1">Create templates from the slide panel to see them here.</p>
+                </div>
+            )}
         </div>
     )
 }

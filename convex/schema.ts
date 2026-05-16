@@ -236,6 +236,8 @@ export default defineSchema({
             v.literal("bible"),
             v.literal("song"),
             v.literal("hymn"),
+            v.literal("sermon"),
+            v.literal("prayer"),
             v.literal("text"),
             v.literal("media"),
             v.literal("announcement"),

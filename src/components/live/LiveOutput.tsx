@@ -6,6 +6,7 @@ import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { useLiveSession } from '../../hooks'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
+import { useLocalBackground } from '../../hooks/useLocalBackground'
 import type { Slide, Scripture, Countdown } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
@@ -133,21 +134,25 @@ export function LiveOutput() {
     const currentIndex = useMemo(() => {
         return liveOutputSlides.findIndex(slide => slide.id === liveSlideId)
     }, [liveOutputSlides, liveSlideId])
-    const nextSlideStorageId = liveOutputSlides[currentIndex + 1]?.backgroundStorageId || null
+    const nextSlide = liveOutputSlides[currentIndex + 1]
+    const nextSlideStorageId = nextSlide?.backgroundStorageId || null
 
     // Get file URL for live slide and next slide backgrounds (hooks must be at top level)
     const liveSlideFileUrl = useFileUrl(liveSlide?.backgroundStorageId || null)
     const nextSlideFileUrl = useFileUrl(nextSlideStorageId)
 
+    // Resolve local file paths on desktop
+    const liveSlideLocalBg = useLocalBackground(liveSlide?.background, liveSlide?.localFilePath)
+    const nextSlideLocalBg = useLocalBackground(nextSlide?.background, nextSlide?.localFilePath)
+
     // Determine the background URL for live slide
-    const liveSlideBackground = liveSlideFileUrl || liveSlide?.background
+    const liveSlideBackground = liveSlideFileUrl || liveSlideLocalBg
     const isLiveSlideVideo = liveSlide?.backgroundType === 'video' && liveSlideBackground
 
-    const nextSlide = liveOutputSlides[currentIndex + 1]
     const prevSlide = liveOutputSlides[currentIndex - 1]
 
     // Determine the background URL for next slide preview
-    const nextSlideBackground = nextSlideFileUrl || nextSlide?.background
+    const nextSlideBackground = nextSlideFileUrl || nextSlideLocalBg
     const isNextSlideVideo = nextSlide?.backgroundType === 'video' && nextSlideBackground
     const liveHtml = liveSlide
         ? (liveSlide.type === 'bible' && liveSlide.contents[1]

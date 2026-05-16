@@ -347,6 +347,10 @@ export interface AppSettings {
         hymn?: string | null
         song?: string | null
         text?: string | null
+        sermon?: string | null
+        announcement?: string | null
+        prayer?: string | null
+        countdown?: string | null
     }
     // Sermon Listener Settings
     sermonListener?: {

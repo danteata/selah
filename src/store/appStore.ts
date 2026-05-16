@@ -241,7 +241,7 @@ interface AppStore extends AppState {
     setActiveAdvert: (advert: Advert | null) => void
     setDefaultSlideBackgrounds: () => void
     setDefaultSlideBackground: (type: string, background: string, backgroundVideoKey?: string | null) => void
-    setDefaultTemplate: (slideType: 'scripture' | 'hymn' | 'song' | 'text', templateId: string | null) => void
+    setDefaultTemplate: (slideType: 'scripture' | 'hymn' | 'song' | 'text' | 'sermon' | 'announcement' | 'prayer' | 'countdown', templateId: string | null) => void
     signOut: () => void
     // Schedule CRUD
     createSchedule: (name: string) => void

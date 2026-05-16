@@ -2,6 +2,7 @@ import { Trash2, Copy, Bookmark, Pencil, Radio, Play, Zap, Lightbulb } from 'luc
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
 import { useFileUrl } from '../../hooks/useTemplates'
+import { useLocalBackground } from '../../hooks/useLocalBackground'
 
 interface SlideCardProps {
     slide: Slide
@@ -39,8 +40,11 @@ export function SlideCard({
     // Get file URL if slide has a backgroundStorageId
     const fileUrl = useFileUrl(slide.backgroundStorageId || null)
 
+    // Resolve local file paths on desktop
+    const localBg = useLocalBackground(slide.background, slide.localFilePath)
+
     // Determine the background to use
-    const backgroundUrl = fileUrl || slide.background
+    const backgroundUrl = fileUrl || localBg
 
     // Check if this is a video background
     const isVideoBackground = slide.backgroundType === 'video' && backgroundUrl

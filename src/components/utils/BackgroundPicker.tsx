@@ -1,12 +1,27 @@
 import { useState } from 'react'
-import { Check, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Check, Loader2, ChevronDown, ChevronUp, ImagePlus, Film } from 'lucide-react'
 import { useTemplates } from '../../hooks/useTemplates'
+import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { pickLocalBackgroundAsset } from '../../utils/pickBackgroundAsset'
 
 export interface BackgroundSelection {
     background: string
     backgroundType: string
     backgroundStorageId?: string | null
+    /** Original filesystem path on desktop (Tauri). Required to re-resolve asset URLs across sessions. */
+    localFilePath?: string
     label?: string
+}
+
+function isMediaUrl(url: string): boolean {
+    if (!url) return false
+    return (
+        url.startsWith('http://') ||
+        url.startsWith('https://') ||
+        url.startsWith('data:') ||
+        url.startsWith('blob:') ||
+        url.startsWith('asset://')
+    )
 }
 
 interface BackgroundPickerProps {
@@ -50,10 +65,31 @@ function extractTemplateBackground(template: { thumbnail?: string; slideId: unkn
 
 export function BackgroundPicker({ value, onChange, previewChildren }: BackgroundPickerProps) {
     const [showTemplates, setShowTemplates] = useState(false)
+    const [isUploading, setIsUploading] = useState<null | 'image' | 'video'>(null)
     const { templates, isLoading } = useTemplates()
+
+    // Resolve local file paths on desktop so the preview is loadable
+    const previewUrl = useLocalBackground(value.background, value.localFilePath)
 
     const isSelected = (sel: BackgroundSelection) =>
         sel.background === value.background && sel.backgroundType === value.backgroundType
+
+    const handlePickLocal = async (kind: 'image' | 'video') => {
+        setIsUploading(kind)
+        try {
+            const picked = await pickLocalBackgroundAsset(kind)
+            if (!picked) return
+            onChange({
+                background: picked.background,
+                backgroundType: picked.backgroundType,
+                localFilePath: picked.localFilePath,
+                backgroundStorageId: null,
+                label: picked.name,
+            })
+        } finally {
+            setIsUploading(null)
+        }
+    }
 
     return (
         <div className="space-y-3">
@@ -165,21 +201,68 @@ export function BackgroundPicker({ value, onChange, previewChildren }: Backgroun
                 )}
             </div>
 
+            {/* Upload from device */}
+            <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Upload from device</p>
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={() => handlePickLocal('image')}
+                        disabled={isUploading !== null}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors disabled:opacity-50"
+                    >
+                        {isUploading === 'image' ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                            <ImagePlus className="w-3.5 h-3.5" />
+                        )}
+                        Image
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => handlePickLocal('video')}
+                        disabled={isUploading !== null}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors disabled:opacity-50"
+                    >
+                        {isUploading === 'video' ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                            <Film className="w-3.5 h-3.5" />
+                        )}
+                        Video
+                    </button>
+                </div>
+            </div>
+
             {/* Preview strip */}
             <div
                 className="h-16 rounded-lg flex flex-col items-center justify-center overflow-hidden relative"
-                style={{ background: value.background }}
+                style={{
+                    background: value.backgroundType === 'gradient' || value.backgroundType === 'color'
+                        ? value.background
+                        : '#0a0a0a',
+                }}
             >
-                {value.backgroundType === 'image' && value.background.startsWith('http') && (
+                {value.backgroundType === 'video' && previewUrl && (
+                    <video
+                        src={previewUrl}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                    />
+                )}
+                {value.backgroundType === 'image' && previewUrl && isMediaUrl(previewUrl) && (
                     <img
-                        src={value.background}
+                        src={previewUrl}
                         alt="background"
                         className="absolute inset-0 w-full h-full object-cover"
                     />
                 )}
                 <div className="relative z-10 text-center">
                     {previewChildren ?? (
-                        <span className="text-white/80 text-xs">{value.label || 'Preview'}</span>
+                        <span className="text-white/80 text-xs drop-shadow">{value.label || 'Preview'}</span>
                     )}
                 </div>
             </div>

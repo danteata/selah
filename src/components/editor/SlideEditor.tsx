@@ -8,6 +8,7 @@ import { useAppStore } from '../../store/appStore'
 import type { Slide, SlideStyle } from '../../types'
 import { TipTapEditor } from './TipTapEditor'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
+import { useLocalBackground } from '../../hooks/useLocalBackground'
 
 interface SlideEditorProps {
     slide: Slide | null
@@ -22,6 +23,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
     const settings = useAppStore((state) => state.settings)
+    const resolvedBg = useLocalBackground(editedSlide?.background, editedSlide?.localFilePath)
 
     useEffect(() => {
         if (slide) {
@@ -87,6 +89,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
             background: selection.background,
             backgroundType: selection.backgroundType,
             backgroundStorageId: selection.backgroundStorageId,
+            localFilePath: selection.localFilePath,
         })
     }
 
@@ -238,6 +241,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                                         background: editedSlide.background || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                                         backgroundType: editedSlide.backgroundType || 'gradient',
                                         backgroundStorageId: editedSlide.backgroundStorageId,
+                                        localFilePath: editedSlide.localFilePath,
                                     }}
                                     onChange={handleBackgroundChange}
                                 />
@@ -252,15 +256,34 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                         </div>
                         <div className="flex-1 flex items-center justify-center p-6">
                             <div
-                                className="w-full max-w-lg aspect-video rounded-lg shadow-xl overflow-hidden flex items-center justify-center p-8"
+                                className="w-full max-w-lg aspect-video rounded-lg shadow-xl overflow-hidden relative flex items-center justify-center p-8"
                                 style={{
-                                    background: editedSlide.background || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                    background: editedSlide.backgroundType === 'video' || editedSlide.backgroundType === 'image'
+                                        ? '#0a0a0a'
+                                        : (resolvedBg || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'),
                                     fontFamily: editedSlide.slideStyle?.font || settings.defaultFont,
                                     textAlign: (editedSlide.slideStyle?.alignment as any) || 'center',
                                 }}
                             >
+                                {editedSlide.backgroundType === 'video' && resolvedBg && (
+                                    <video
+                                        src={resolvedBg}
+                                        className="absolute inset-0 w-full h-full object-cover"
+                                        autoPlay
+                                        loop
+                                        muted
+                                        playsInline
+                                    />
+                                )}
+                                {editedSlide.backgroundType === 'image' && resolvedBg && (
+                                    <img
+                                        src={resolvedBg}
+                                        alt=""
+                                        className="absolute inset-0 w-full h-full object-cover"
+                                    />
+                                )}
                                 <div
-                                    className="text-white tiptap-preview"
+                                    className="relative z-10 text-white tiptap-preview drop-shadow-lg"
                                     style={{
                                         fontSize: `${(editedSlide.slideStyle?.fontSizePercent || 100) / 100 * 1.5}rem`,
                                     }}

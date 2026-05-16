@@ -6,6 +6,7 @@ import { useAuth } from '@clerk/clerk-react'
 import { api } from '../../convex/_generated/api'
 import type { Slide, Countdown } from '../types'
 import { useFileUrl } from '../hooks/useTemplates'
+import { useLocalBackground } from '../hooks/useLocalBackground'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 
 const STORAGE_KEY = 'selah-live-state'
@@ -198,8 +199,11 @@ export default function LiveView() {
     // Get file URL if slide has a backgroundStorageId
     const fileUrl = useFileUrl(slide?.backgroundStorageId || null)
 
+    // Resolve local file paths on desktop
+    const localBg = useLocalBackground(slide?.background, slide?.localFilePath)
+
     // Determine the background to use
-    const backgroundUrl = fileUrl || slide?.background
+    const backgroundUrl = fileUrl || localBg
     const isVideoBackground = slide?.backgroundType === 'video' && backgroundUrl
 
     const settings = liveState?.settings || {

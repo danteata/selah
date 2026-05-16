@@ -9,6 +9,8 @@ const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     text: 'Text',
     media: 'Media',
     announcement: 'Announcement',
+    sermon: 'Sermon',
+    prayer: 'Prayer',
     countdown: 'Countdown',
     any: 'Any',
 }

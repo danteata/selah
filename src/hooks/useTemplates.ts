@@ -10,7 +10,7 @@ import {
     type LocalTemplate,
 } from './useIndexedDB'
 
-export type SlideType = 'bible' | 'song' | 'hymn' | 'text' | 'media' | 'announcement' | 'countdown' | 'any'
+export type SlideType = 'bible' | 'song' | 'hymn' | 'text' | 'media' | 'announcement' | 'sermon' | 'prayer' | 'countdown' | 'any'
 
 export type TemplateItem = {
     _id: string

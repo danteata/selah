@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { Shield, Database, Book, X, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates } from '../hooks'
+import { resolveLocalUrl } from '../hooks/useLocalBackground'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
 import { SlideEditor } from '../components/editor/SlideEditor'
@@ -285,12 +286,13 @@ export default function Dashboard() {
             userId: '',
             churchId: '',
             scheduleId: activeSchedule?._id || '',
-            background: templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            background: resolveLocalUrl(templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', templateSlide?.localFilePath),
             backgroundType: templateSlide?.backgroundType || 'gradient',
             backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId,
-        }
-        appendActiveSlide(slide)
-        closeModal('templateBrowser')
+            localFilePath: templateSlide?.localFilePath || undefined,
+        };
+        appendActiveSlide(slide);
+        closeModal('templateBrowser');
     }
 
     // Handle creating custom template from current slide
@@ -344,6 +346,7 @@ export default function Dashboard() {
             background: countdownData.background,
             backgroundType: countdownData.backgroundType,
             backgroundStorageId: countdownData.backgroundStorageId ?? null,
+            localFilePath: countdownData.localFilePath,
             data: {
                 id: countdownData.id,
                 time: timeString,

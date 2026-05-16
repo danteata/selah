@@ -8,6 +8,7 @@ import { useAppStore } from '../../store/appStore'
 import type { NavSection, SplitPanelMode } from '../../types/studio'
 import type { Slide, Countdown } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
+import { resolveLocalUrl } from '../../hooks/useLocalBackground'
 
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
@@ -182,6 +183,9 @@ export function ContextPanel() {
             templateSlide = template.slideId as Partial<Slide>
         }
 
+        const rawBg = templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+        const resolvedBg = resolveLocalUrl(rawBg, templateSlide?.localFilePath)
+
         const slide: Slide = {
             id: `slide_${Date.now()}`,
             index: 0,
@@ -192,7 +196,7 @@ export function ContextPanel() {
             userId: '',
             churchId: '',
             scheduleId: activeSchedule?._id || '',
-            background: templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            background: resolvedBg,
             backgroundType: templateSlide?.backgroundType || 'gradient',
             backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId || null,
             localFilePath: templateSlide?.localFilePath || undefined,
@@ -200,7 +204,7 @@ export function ContextPanel() {
         appendActiveSlide(slide)
     }
 
-    const handleCountdownCreate = (countdownData: { id: string; title: string; hours: number; minutes: number; seconds: number; background: string; backgroundType: string; backgroundStorageId?: string | null }) => {
+    const handleCountdownCreate = (countdownData: { id: string; title: string; hours: number; minutes: number; seconds: number; background: string; backgroundType: string; backgroundStorageId?: string | null; localFilePath?: string }) => {
         const timeString = `${String(countdownData.hours).padStart(2, '0')}:${String(countdownData.minutes).padStart(2, '0')}:${String(countdownData.seconds).padStart(2, '0')}`
         const isEditing = editingSlide?.id === countdownData.id
 
@@ -217,6 +221,7 @@ export function ContextPanel() {
             background: countdownData.background,
             backgroundType: countdownData.backgroundType,
             backgroundStorageId: countdownData.backgroundStorageId ?? null,
+            localFilePath: countdownData.localFilePath,
             data: {
                 id: countdownData.id,
                 time: timeString,
