@@ -52,7 +52,31 @@ function isErrorResponse(r: WorkerResponse): r is WorkerErrorResponse {
 
 let workerInstance: Worker | null = null
 let nextRequestId = 0
+let setupPromise: Promise<void> | null = null
 const pending = new Map<number, { resolve: (v: WorkerSuccessResponse) => void; reject: (e: Error) => void }>()
+
+/**
+ * On desktop, resolve the bundled MiniLM model directory to an asset:// URL
+ * the worker can fetch from. The Tauri asset protocol is already enabled
+ * (see tauri.conf.json) and scoped to `**`. Returns null on web/dev contexts
+ * so the worker keeps using the HuggingFace Hub.
+ */
+async function resolveLocalModelPath(): Promise<string | null> {
+    try {
+        // Lazy-load Tauri APIs so the worker bundle stays usable on web.
+        if (typeof window === 'undefined' || !('__TAURI__' in window)) return null
+        const [{ resourceDir }, { convertFileSrc }] = await Promise.all([
+            import('@tauri-apps/api/path'),
+            import('@tauri-apps/api/core'),
+        ])
+        const root = await resourceDir()
+        const sep = root.endsWith('/') || root.endsWith('\\') ? '' : '/'
+        const modelsDir = `${root}${sep}assets/embedding-models/`
+        return convertFileSrc(modelsDir)
+    } catch {
+        return null
+    }
+}
 
 function getWorker(): Worker {
     if (workerInstance) return workerInstance
@@ -84,12 +108,38 @@ function getWorker(): Worker {
     return workerInstance
 }
 
+/**
+ * Send the one-time setup message to the worker, configuring it to load the
+ * model from the bundled Tauri resource on desktop. The promise is cached so
+ * concurrent embed calls don't race the configuration.
+ */
+function ensureWorkerSetup(): Promise<void> {
+    if (setupPromise) return setupPromise
+    setupPromise = (async () => {
+        const worker = getWorker()
+        const localModelPath = await resolveLocalModelPath()
+        // Even on web we send a setup message so the worker isn't ambiguous
+        // about which mode it's in. Null path => fall back to HF Hub.
+        const id = ++nextRequestId
+        await new Promise<void>((resolve, reject) => {
+            pending.set(id, {
+                resolve: () => resolve(),
+                reject,
+            })
+            worker.postMessage({ id, setup: { localModelPath } })
+        })
+    })()
+    return setupPromise
+}
+
 function postToWorker(texts: string[]): Promise<WorkerSuccessResponse> {
-    const worker = getWorker()
-    const id = ++nextRequestId
-    return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject })
-        worker.postMessage({ id, texts })
+    return ensureWorkerSetup().then(() => {
+        const worker = getWorker()
+        const id = ++nextRequestId
+        return new Promise((resolve, reject) => {
+            pending.set(id, { resolve, reject })
+            worker.postMessage({ id, texts })
+        })
     })
 }
 

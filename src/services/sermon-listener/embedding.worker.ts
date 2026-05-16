@@ -4,6 +4,11 @@
  * Runs ONNX inference off the main thread so the UI stays responsive
  * while generating verse embeddings. Uses Transformers.js loaded from
  * the same CDN the main thread uses.
+ *
+ * The first message sent to the worker may be a `{ setup }` payload from
+ * `localEmbeddings.ts` that tells the worker to use a locally-bundled model
+ * (via Tauri's `asset://` protocol) instead of the HuggingFace Hub. On web
+ * we keep the CDN/Hub fallback so the experience is identical.
  */
 
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1'
@@ -12,17 +17,37 @@ const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let embedder: any = null
 let loadPromise: Promise<void> | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let transformersModule: any = null
+let localModelPath: string | null = null
+
+async function loadTransformers() {
+  if (transformersModule) return transformersModule
+  const moduleUrl = `${TRANSFORMERS_CDN}/dist/transformers.min.js`
+  transformersModule = await import(/* @vite-ignore */ moduleUrl)
+  return transformersModule
+}
 
 async function loadEmbedder(): Promise<void> {
   if (embedder) return
   if (loadPromise) return loadPromise
 
   loadPromise = (async () => {
-    const moduleUrl = `${TRANSFORMERS_CDN}/dist/transformers.min.js`
-    // @ts-expect-error dynamic CDN import
-    const transformers = await import(/* @vite-ignore */ moduleUrl)
-    transformers.env.allowLocalModels = false
-    transformers.env.useBrowserCache = true
+    const transformers = await loadTransformers()
+    if (localModelPath) {
+      // Desktop: read the quantized ONNX + tokenizer from the bundled Tauri
+      // resource via the asset protocol. No network round-trip at any point.
+      transformers.env.allowLocalModels = true
+      transformers.env.localModelPath = localModelPath
+      transformers.env.allowRemoteModels = false
+      transformers.env.useBrowserCache = false
+    } else {
+      // Web / dev fallback: let transformers.js fetch from HuggingFace Hub
+      // and cache the weights in the browser's storage.
+      transformers.env.allowLocalModels = false
+      transformers.env.allowRemoteModels = true
+      transformers.env.useBrowserCache = true
+    }
     embedder = await transformers.pipeline('feature-extraction', MODEL_NAME, {
       quantized: true,
     })
@@ -32,9 +57,20 @@ async function loadEmbedder(): Promise<void> {
   loadPromise = null
 }
 
-interface WorkerRequest {
+interface WorkerSetupRequest {
+  id: number
+  setup: { localModelPath?: string | null }
+}
+
+interface WorkerEmbedRequest {
   id: number
   texts: string[]
+}
+
+type WorkerRequest = WorkerSetupRequest | WorkerEmbedRequest
+
+function isSetupRequest(req: WorkerRequest): req is WorkerSetupRequest {
+  return 'setup' in req
 }
 
 interface WorkerSuccessResponse {
@@ -49,9 +85,21 @@ interface WorkerErrorResponse {
 }
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-  const { id, texts } = event.data
+  const req = event.data
+  const { id } = req
 
   try {
+    if (isSetupRequest(req)) {
+      // Configure once; resolves immediately so the main thread can proceed
+      // to the next embedBatch call which will trigger the actual load.
+      if (req.setup.localModelPath) {
+        localModelPath = req.setup.localModelPath
+      }
+      self.postMessage({ id, embeddings: [], dimensions: 0 })
+      return
+    }
+
+    const texts = req.texts
     await loadEmbedder()
 
     const INFERENCE_BATCH = 32

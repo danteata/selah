@@ -1,4 +1,8 @@
 /**
+ * @deprecated Cloud transcription via ElevenLabs is no longer the canonical path;
+ * the bundled `desktop-whisper` sidecar handles transcription locally.
+ */
+/**
  * ElevenLabs Speech-to-Text Transcription Service
  *
  * This service provides chunked audio transcription using MediaRecorder

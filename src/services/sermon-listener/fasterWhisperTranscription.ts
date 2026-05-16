@@ -1,4 +1,8 @@
 /**
+ * @deprecated Replaced by the bundled `desktop-whisper` sidecar (which itself
+ * runs faster-whisper inside Tauri). This standalone web client is kept only
+ * for backward compatibility with stored admin settings.
+ *
  * Faster-Whisper Transcription Service
  *
  * Uses faster-whisper (CTranslate2-based) for 2-4x faster transcription

@@ -1,4 +1,10 @@
 /**
+ * @deprecated Replaced by the bundled `desktop-whisper` sidecar. This module is
+ * kept for backward compatibility with old admin settings only; do not extend
+ * it. Will be removed once the global settings UI drops the unused provider
+ * options.
+ */
+/**
  * Whisper-style Transcription Service
  *
  * This service provides chunked audio transcription using MediaRecorder

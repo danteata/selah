@@ -6,7 +6,7 @@ mod multi_monitor;
 mod ndi_output;
 
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_shell::ShellExt;
 
 use audio_capture::{
@@ -189,16 +189,27 @@ async fn run_whisper_server(
 
     let client = reqwest::Client::new();
     let health_url = format!("http://127.0.0.1:{}/health", WHISPER_SERVER_PORT);
+    let endpoint = format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT);
 
-    for attempt in 0..15 {
+    for attempt in 0..30 {
         if let Ok(response) = client.get(&health_url).timeout(std::time::Duration::from_secs(1)).send().await {
             if response.status().is_success() {
-                println!("Whisper server is ready!");
-                return Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT));
+                if let Ok(body) = response.json::<serde_json::Value>().await {
+                    let model_loaded = body.get("model_loaded").and_then(|v| v.as_bool()).unwrap_or(false);
+                    if model_loaded {
+                        println!("Whisper server is ready (model loaded)!");
+                        let _ = app.emit("whisper-server://ready", serde_json::json!({
+                            "endpoint": endpoint,
+                            "model": body.get("model").cloned().unwrap_or(serde_json::json!(null)),
+                        }));
+                        return Ok(endpoint);
+                    }
+                }
             }
         }
-        println!("Waiting for whisper server... attempt {}", attempt + 1);
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        if attempt < 29 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
     }
 
     let pid_guard = state.child_pid.lock().unwrap();
@@ -207,9 +218,29 @@ async fn run_whisper_server(
 
     if still_running {
         println!("Whisper server process is running but not responding on port {}", WHISPER_SERVER_PORT);
-        Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT))
+        let _ = app.emit("whisper-server://ready", serde_json::json!({
+            "endpoint": endpoint,
+            "degraded": true,
+        }));
+        Ok(endpoint)
     } else {
+        let _ = app.emit("whisper-server://error", serde_json::json!({
+            "error": "sidecar exited before becoming ready",
+        }));
         Err("Whisper server process exited - check logs for errors".to_string())
+    }
+}
+
+fn kill_whisper_pid(pid: u32) {
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        let _ = Command::new("kill").args([&pid.to_string()]).spawn();
+    }
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).spawn();
     }
 }
 
@@ -226,26 +257,20 @@ async fn stop_whisper_server(
     state: tauri::State<'_, WhisperServerState>,
 ) -> Result<(), String> {
     let mut pid_guard = state.child_pid.lock().unwrap();
-    
     if let Some(pid) = pid_guard.take() {
-        #[cfg(unix)]
-        {
-            use std::process::Command;
-            let _ = Command::new("kill")
-                .args([&pid.to_string()])
-                .spawn();
-        }
-        #[cfg(windows)]
-        {
-            use std::process::Command;
-            let _ = Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/F"])
-                .spawn();
-        }
+        kill_whisper_pid(pid);
         println!("Whisper server stopped (PID: {})", pid);
     }
-    
     Ok(())
+}
+
+fn shutdown_whisper_sidecar(state: &WhisperServerState) {
+    if let Ok(mut guard) = state.child_pid.lock() {
+        if let Some(pid) = guard.take() {
+            kill_whisper_pid(pid);
+            println!("[Shutdown] Whisper sidecar killed (PID: {})", pid);
+        }
+    }
 }
 
 #[tauri::command]
@@ -362,7 +387,20 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             prewarm_whisper_server(app_handle, whisper_child_pid_for_prewarm.clone(), whisper_pid_for_prewarm.clone());
-            
+
+            // Ensure the sidecar is terminated when the main window closes,
+            // so we don't leak a 300MB Python process on app quit.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle_for_close = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, WindowEvent::Destroyed | WindowEvent::CloseRequested { .. }) {
+                        if let Some(state) = handle_for_close.try_state::<WhisperServerState>() {
+                            shutdown_whisper_sidecar(&state);
+                        }
+                    }
+                });
+            }
+
             #[cfg(debug_assertions)]
             {
                 let window = app.get_webview_window("main").unwrap();

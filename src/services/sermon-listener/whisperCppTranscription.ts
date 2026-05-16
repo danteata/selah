@@ -1,4 +1,7 @@
 /**
+ * @deprecated Replaced by the bundled `desktop-whisper` sidecar. Kept only for
+ * backward compatibility with stored admin settings.
+ *
  * Whisper.cpp Local Transcription Service
  *
  * This provider sends microphone chunks to a local whisper.cpp server endpoint.

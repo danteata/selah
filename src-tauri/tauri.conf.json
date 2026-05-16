@@ -18,7 +18,8 @@
         ],
         "resources": [
             "assets/*",
-            "assets/whisper-models/**/*"
+            "assets/whisper-models/**/*",
+            "assets/embedding-models/**/*"
         ],
         "icon": [
             "icons/32x32.png",

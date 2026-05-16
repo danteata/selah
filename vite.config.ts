@@ -41,12 +41,37 @@ export default defineConfig({
     // Note: @xenova/transformers is loaded from CDN, not bundled
     exclude: ['onnxruntime-web'],
   },
+  esbuild: {
+    // Strip console.log + debugger statements from production builds. Keep
+    // console.warn and console.error so genuine problems still surface in the
+    // wild. This removes ~140 chatty log calls from the sermon listener's
+    // hot path alone.
+    drop: process.env.NODE_ENV === 'production' ? ['debugger'] : [],
+    pure: process.env.NODE_ENV === 'production' ? ['console.log', 'console.debug', 'console.info'] : [],
+  },
   build: {
     // Ensure WASM files are handled correctly
     target: 'esnext',
     commonjsOptions: {
       transformMixedEsModules: true,
     },
+    // Split heavy vendor libraries into their own chunks so a Selah patch
+    // release doesn't re-download Convex/Clerk/Tiptap. Each chunk is cached
+    // independently by the browser/Tauri webview.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react': ['react', 'react-dom', 'react-router-dom'],
+          'convex': ['convex/react', 'convex/browser'],
+          'clerk': ['@clerk/clerk-react'],
+          'tiptap': ['@tiptap/react', '@tiptap/starter-kit'],
+          'icons': ['lucide-react'],
+          'query': ['@tanstack/react-query'],
+        },
+      },
+    },
+    // Slightly bigger chunk-size warning ceiling; we already split the big libs.
+    chunkSizeWarningLimit: 800,
   },
   // Configure WASM file serving
   assetsInclude: ['**/*.wasm'],

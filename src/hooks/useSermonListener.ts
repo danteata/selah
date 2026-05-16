@@ -16,6 +16,7 @@ import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
 import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
+import { subscribeWhisperReadiness } from '../services/sermon-listener/whisperReadiness'
 import { detectVerses,
     verseToLabel,
     getSemanticDetector,
@@ -277,7 +278,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const activeBibleVersionRef = useRef(activeBibleVersion)
     const currentVerseRef = useRef<DetectedVerse | null>(currentVerse)
     const currentScriptureRef = useRef<Scripture | null>(null)
-    const prewarmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const providerReadyRef = useRef(false)
     const [lastVoiceCommand, setLastVoiceCommand] = useState<VoiceCommand | null>(null)
     const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
@@ -488,13 +488,19 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Semantic detector ref
     const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
+    // Persist live state to localStorage so a refresh restores the sermon in
+    // progress. Debounced because transcript updates fire on every token —
+    // serializing 30+ KB of JSON on every keystroke pegs the main thread.
     useEffect(() => {
-        writeLiveState({
-            transcript,
-            detectedVerses,
-            currentVerse,
-            activeBibleVersion,
-        })
+        const timer = setTimeout(() => {
+            writeLiveState({
+                transcript,
+                detectedVerses,
+                currentVerse,
+                activeBibleVersion,
+            })
+        }, 400)
+        return () => clearTimeout(timer)
     }, [transcript, detectedVerses, currentVerse, activeBibleVersion])
 
     useEffect(() => {
@@ -513,39 +519,29 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         providerReadyRef.current = providerReady
     }, [providerReady])
 
-    // Check provider availability on mount and when key settings change.
-    // Provider initialization is staggered: availability check runs immediately,
-    // full init is deferred 8 seconds after idle so the UI stays responsive.
+    // Check provider availability and configure the unified service. The heavy
+    // model load is no longer staggered behind an 8s timer; instead we listen
+    // to the Tauri `whisper-server://ready` event emitted by the Rust
+    // prewarm task. If the sidecar is already hot when we mount (very common
+    // on warm boots) the event replay marks `providerReady` instantly.
     useEffect(() => {
+        if (isGlobalSettingsLoading) return
         let cancelled = false
 
-        const checkSupport = async () => {
-            // Skip if global settings are still loading
-            if (isGlobalSettingsLoading) {
-                console.log('[useSermonListener] Waiting for global settings to load...')
-                return
-            }
-
-            console.log('[useSermonListener] Checking provider availability:', {
-                targetProvider,
-                globalProvider,
-                providerOverride,
-            })
-
+        const initialize = async () => {
             const available = await unifiedTranscriptionService.isProviderAvailable(targetProvider)
             if (cancelled) return
-            console.log('[useSermonListener] Provider available:', targetProvider, available)
 
-            if (!available && (targetProvider === 'whisper' || targetProvider === 'whisper-cpp' || targetProvider === 'desktop-whisper')) {
+            // Cross-platform fallback to web-speech if the chosen native provider
+            // isn't available (e.g. running the desktop bundle in dev without the sidecar).
+            if (!available && targetProvider === 'desktop-whisper') {
                 const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
                 if (cancelled) return
                 if (webSpeechAvailable) {
                     setProvider('web-speech')
                     setIsSupported(true)
                     setProviderReady(true)
-                    const sourceProvider = targetProvider === 'whisper-cpp' ? 'Whisper.cpp' : targetProvider === 'desktop-whisper' ? 'Desktop Whisper' : 'Whisper'
-                    setError(`${sourceProvider} is not available. Falling back to Web Speech API.`)
-                    console.warn('[useSermonListener] Falling back to Web Speech API')
+                    setError('Desktop Whisper unavailable. Falling back to Web Speech API.')
                     return
                 }
             }
@@ -553,87 +549,67 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             setProvider(targetProvider)
             setIsSupported(available)
 
-            // Web-speech needs no init; mark ready immediately
-            if (available && targetProvider === 'web-speech') {
-                setProviderReady(true)
-            } else if (!available) {
+            if (!available) {
                 setProviderReady(false)
+                return
             }
 
-            // Stagger the heavy provider init: wait 8s after the UI has settled,
-            // then initialize in the background so it's likely ready before use.
-            // If the user clicks Start before this runs, start() will init instead.
-            if (available && targetProvider !== 'web-speech') {
-                if (prewarmTimerRef.current) {
-                    clearTimeout(prewarmTimerRef.current)
-                }
-                const prewarmDelay = 8000
-                const providerAtSchedule = targetProvider
-                prewarmTimerRef.current = setTimeout(async () => {
-                    if (cancelled || providerReadyRef.current || provider !== providerAtSchedule) return
-                    setIsInitializingProvider(true)
-                    try {
-                        console.log('[useSermonListener] Background prewarming provider:', providerAtSchedule)
-                        const success = await unifiedTranscriptionService.setProvider(providerAtSchedule, {
-                            language: language.split('-')[0],
-                            whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
-                            whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
-                            whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
-                            whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
-                            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
-                            whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
-                            fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
-                            fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
-                            fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-                            fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
-                            fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
-                            useVAD: globalSettings?.sermonListener_useVAD,
-                            elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
-                            elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
-                            elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
-                            onProgress: (progress: number) => {
-                                if (!cancelled) setModelLoadingProgress(progress)
-                            },
-                            onStatusChange: (status: TranscriptionStatus) => {
-                                if (!cancelled) {
-                                    const statusText = typeof status?.error === 'string' ? status.error : status?.provider || ''
-                                    console.log('[useSermonListener] Prewarm status:', statusText)
-                                }
-                            },
-                        })
-                        if (!cancelled) {
-                            setProviderReady(success)
-                            if (!success) {
-                                console.warn('[useSermonListener] Background provider prewarm failed')
-                            }
-                        }
-                    } catch (err) {
-                        if (!cancelled) {
-                            console.error('[useSermonListener] Background provider prewarm error:', err)
-                        }
-                    } finally {
-                        if (!cancelled) {
-                            setIsInitializingProvider(false)
-                        }
-                    }
-                }, prewarmDelay)
+            // Web speech needs no model load; mark ready immediately.
+            if (targetProvider === 'web-speech') {
+                setProviderReady(true)
+                return
+            }
+
+            // Configure the unified transcription service with the chosen provider.
+            // For desktop-whisper this resolves quickly because the Rust prewarm
+            // already spawned the sidecar; we just hand it the endpoint.
+            setIsInitializingProvider(true)
+            try {
+                await unifiedTranscriptionService.setProvider(targetProvider, {
+                    language: language.split('-')[0],
+                    useVAD: globalSettings?.sermonListener_useVAD,
+                    onProgress: (progress: number) => {
+                        if (!cancelled) setModelLoadingProgress(progress)
+                    },
+                    onStatusChange: (_status: TranscriptionStatus) => {
+                        /* no-op; readiness comes from the Tauri event */
+                    },
+                })
+                // For desktop-whisper we wait for the Rust readiness event
+                // (subscribed below) before flipping providerReady. The
+                // web-speech branch returned earlier and never reaches here.
+            } catch (err) {
+                if (!cancelled) console.error('[useSermonListener] provider init failed:', err)
+            } finally {
+                if (!cancelled) setIsInitializingProvider(false)
             }
         }
-        checkSupport()
+
+        initialize()
+
+        // Subscribe to the Rust readiness event. The bridge replays its current
+        // state synchronously, so if the sidecar is already up we flip ready
+        // immediately without waiting for the next emission.
+        const unsubscribe = subscribeWhisperReadiness((state) => {
+            if (cancelled) return
+            if (targetProvider !== 'desktop-whisper') return
+            if (state.ready) {
+                setProviderReady(true)
+                setError(null)
+            } else if (state.error) {
+                setError(`Desktop Whisper: ${state.error}`)
+            }
+        })
+
         return () => {
             cancelled = true
-            if (prewarmTimerRef.current) {
-                clearTimeout(prewarmTimerRef.current)
-                prewarmTimerRef.current = null
-            }
+            unsubscribe()
         }
     }, [
         targetProvider,
-        globalProvider,
-        providerOverride,
         isGlobalSettingsLoading,
         language,
-        provider,
+        globalSettings?.sermonListener_useVAD,
     ])
 
     // Initialize semantic detector lazily — only when the user starts listening.
