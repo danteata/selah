@@ -19,7 +19,9 @@
         "resources": [
             "assets/*",
             "assets/whisper-models/**/*",
-            "assets/embedding-models/**/*"
+            "assets/embedding-models/**/*",
+            "assets/embedding-packs/**/*",
+            "assets/whisper-server/**/*"
         ],
         "icon": [
             "icons/32x32.png",
@@ -40,7 +42,16 @@
     },
     "app": {
         "security": {
-            "csp": null,
+            "csp": {
+                "default-src": "'self' asset: https:",
+                "script-src": "'self'",
+                "style-src": "'self' 'unsafe-inline'",
+                "img-src": "'self' asset: https: data: blob:",
+                "font-src": "'self' asset: https:",
+                "connect-src": "'self' https: wss: http://127.0.0.1:17493",
+                "media-src": "'self' https: blob:",
+                "worker-src": "'self' blob:"
+            },
             "assetProtocol": {
                 "enable": true,
                 "scope": [
