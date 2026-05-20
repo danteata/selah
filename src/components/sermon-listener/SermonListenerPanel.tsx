@@ -10,6 +10,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSermonListener, type UseSermonListenerReturn } from '../../hooks/useSermonListener'
 import { useSermonListenerContext } from './SermonListenerContext'
+import { SermonListenerWizard, isSermonListenerWizardComplete } from './SermonListenerWizard'
 import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
@@ -68,6 +69,7 @@ function SermonListenerPanelInner({
     const [showOnlyBestMatches, setShowOnlyBestMatches] = useState(true)
     const [autoSaveTranscriptId, setAutoSaveTranscriptId] = useState<string | null>(null)
     const [sermonNotes, setSermonNotes] = useState('')
+    const [showWizard, setShowWizard] = useState(!isSermonListenerWizardComplete())
     const transcriptRef = useRef<HTMLDivElement>(null)
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
@@ -213,7 +215,7 @@ function SermonListenerPanelInner({
 
     const displayTranscripts = activeSchedule?._id ? scheduleTranscripts : transcripts
 
-    if (isInitializingProvider || isSupported === null || (!providerReady && isSupported)) {
+    if (isInitializingProvider || isSupported === null) {
         return (
             <div className={`flex flex-col h-full items-center justify-center gap-2 ${compact ? 'p-3' : 'p-6'} text-center text-gray-500 dark:text-gray-400`}>
                 <Loader2 className="w-5 h-5 animate-spin text-[var(--accent-teal)]" />
@@ -228,22 +230,9 @@ function SermonListenerPanelInner({
     }
 
     if (isSupported === false) {
-        const unsupportedMessage = (() => {
-            switch (provider) {
-                case 'whisper':
-                    return 'Whisper API provider is not configured. Add a transcription endpoint in settings, or switch to Web Speech API.'
-                case 'whisper-cpp':
-                    return 'Whisper.cpp provider is not configured. Set a local whisper.cpp endpoint in settings, or switch to Web Speech API.'
-                case 'faster-whisper':
-                    return 'Faster-Whisper provider is not configured. Set a Faster-Whisper endpoint in settings, or switch to Web Speech API.'
-                case 'elevenlabs':
-                    return 'ElevenLabs provider is not configured. Add an ElevenLabs API key in settings, or switch to Web Speech API.'
-                case 'desktop-whisper':
-                    return 'Desktop Whisper is only available in the desktop app. Please use the desktop version of Selah or switch to another provider.'
-                default:
-                    return "Your browser doesn't support the Web Speech API. Please try Chrome, Edge, or Safari."
-            }
-        })()
+        const unsupportedMessage = provider === 'desktop-whisper'
+            ? 'Local transcription is only available in the desktop app. Please use the desktop version of Selah.'
+            : "Your browser doesn't support speech recognition. Please try Chrome, Edge, or Safari."
 
         return (
             <div className="p-4 rounded-lg bg-gray-100 dark:bg-gray-800">
@@ -262,6 +251,9 @@ function SermonListenerPanelInner({
 
     return (
         <div className={`flex flex-col h-full ${compact ? 'gap-2' : 'gap-3'}`}>
+            {showWizard && (
+                <SermonListenerWizard onComplete={() => setShowWizard(false)} />
+            )}
             {/* Header with controls - compact inline layout */}
             <div className={`flex items-center gap-2 ${compact ? 'p-1.5' : 'p-2'} rounded-lg bg-gray-100 dark:bg-gray-800 ${isSpeechDetected ? 'ring-2 ring-green-500/50 animate-[speech-glow_1s_ease-in-out_infinite]' : ''}`}>
                 <div className={`relative flex-shrink-0 ${isListening ? 'animate-pulse' : ''}`}>
@@ -299,7 +291,7 @@ function SermonListenerPanelInner({
 
                 <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium truncate text-gray-700 dark:text-gray-300">
-                        {isListening ? 'Listening...' : 'Sermon Listener'}
+                        {isListening ? 'Listening...' : isInitializingProvider ? 'Loading model...' : (provider !== 'web-speech' && !providerReady && isSupported) ? 'Starting transcription...' : 'Sermon Listener'}
                     </p>
                     {activeSchedule && (
                         <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
@@ -339,12 +331,15 @@ function SermonListenerPanelInner({
                 {/* Start/Stop button */}
                 <button
                     onClick={isListening ? stop : start}
+                    disabled={!isListening && (isInitializingProvider || (provider !== 'web-speech' && !providerReady))}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-all shadow-sm flex-shrink-0 ${isListening
                         ? 'bg-red-500 hover:bg-red-600 text-white'
-                        : 'bg-[var(--accent-teal)] hover:brightness-110 text-white'
-                        }`}
+                        : isInitializingProvider || (provider !== 'web-speech' && !providerReady)
+                            ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-wait'
+                            : 'bg-[var(--accent-teal)] hover:brightness-110 text-white'
+                    }`}
                 >
-                    {isListening ? 'Stop' : 'Start'}
+                    {isListening ? 'Stop' : isInitializingProvider ? 'Loading model...' : (provider !== 'web-speech' && !providerReady) ? 'Starting...' : 'Start'}
                 </button>
             </div>
 

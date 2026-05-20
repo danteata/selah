@@ -6,6 +6,8 @@ export interface AudioInputDevice {
     id: string
     label: string
     isDefault: boolean
+    /** Native device name for Tauri audio capture (different from browser deviceId) */
+    nativeName?: string
 }
 
 export function useAudioDevices() {
@@ -33,18 +35,11 @@ export function useAudioDevices() {
         }
     }, [])
 
-    const enumerateNativeDevices = useCallback(async (): Promise<AudioInputDevice[]> => {
+    const enumerateNativeDevices = useCallback(async (): Promise<AudioDeviceInfo[]> => {
         if (!isTauriAvailable()) return []
 
         try {
-            const nativeDevices = await listAudioDevices()
-            return nativeDevices
-                .filter(d => d.device_type === 'Input')
-                .map(d => ({
-                    id: d.name,
-                    label: d.name,
-                    isDefault: d.is_default,
-                }))
+            return await listAudioDevices()
         } catch {
             return []
         }
@@ -55,17 +50,48 @@ export function useAudioDevices() {
         setError(null)
 
         try {
-            let deviceList: AudioInputDevice[]
+            let browserDevices: AudioInputDevice[] = []
 
             if (isDesktop()) {
                 const native = await enumerateNativeDevices()
-                const browser = await enumerateBrowserDevices()
-                deviceList = native.length > 0 ? native : browser
+                browserDevices = await enumerateBrowserDevices()
+
+                if (native.length > 0 && browserDevices.length > 0) {
+                    // Merge: use browser deviceId (for getUserMedia) but prefer native labels.
+                    // Match by label substring since native names are often longer.
+                    const nativeInputs = native.filter(d => d.device_type === 'Input')
+                    browserDevices = browserDevices.map(bd => {
+                        const nativeMatch = nativeInputs.find(nd =>
+                            bd.label.includes(nd.name) || nd.name.includes(bd.label)
+                        )
+                        if (nativeMatch) {
+                            return {
+                                ...bd,
+                                label: nativeMatch.name,
+                                nativeName: nativeMatch.name,
+                                isDefault: nativeMatch.is_default,
+                            }
+                        }
+                        return bd
+                    })
+                }
+                // If browser enumeration failed but native succeeded, use native names as IDs
+                // (these only work for Tauri audio capture, not getUserMedia)
+                if (browserDevices.length === 0 && native.length > 0) {
+                    browserDevices = native
+                        .filter(d => d.device_type === 'Input')
+                        .map(d => ({
+                            id: d.name,
+                            label: d.name,
+                            isDefault: d.is_default,
+                            nativeName: d.name,
+                        }))
+                }
             } else {
-                deviceList = await enumerateBrowserDevices()
+                browserDevices = await enumerateBrowserDevices()
             }
 
-            setDevices(deviceList)
+            setDevices(browserDevices)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to enumerate devices')
             setDevices([])

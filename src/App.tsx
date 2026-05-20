@@ -88,15 +88,15 @@ function AppRoutes() {
             <>
                 <Suspense fallback={<RouteFallback />}>
                     <Routes>
-                        <Route path="/live" element={<LiveView />} />
-                        <Route path="/landing" element={<Landing />} />
-                        <Route path="/login" element={<LoginPage />} />
-                        <Route path="/signup" element={<SignupPage />} />
-                        <Route path="/test" element={<TestPage />} />
-                        <Route path="/join/:code" element={<JoinChurchRoute />} />
+                        <Route path="/live" element={<RouteErrorBoundary name="live"><LiveView /></RouteErrorBoundary>} />
+                        <Route path="/landing" element={<RouteErrorBoundary name="landing"><Landing /></RouteErrorBoundary>} />
+                        <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
+                        <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
+                        <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
+                        <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
                         <Route
                             path="/"
-                            element={<OfflineApp />}
+                            element={<RouteErrorBoundary name="home"><OfflineApp /></RouteErrorBoundary>}
                         />
                     </Routes>
                 </Suspense>
@@ -109,23 +109,25 @@ function AppRoutes() {
         <>
             <Suspense fallback={<RouteFallback />}>
                 <Routes>
-                    <Route path="/live" element={<LiveView />} />
-                    <Route path="/landing" element={<Landing />} />
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="/signup" element={<SignupPage />} />
-                    <Route path="/test" element={<TestPage />} />
-                    <Route path="/join/:code" element={<JoinChurchRoute />} />
+                    <Route path="/live" element={<RouteErrorBoundary name="live"><LiveView /></RouteErrorBoundary>} />
+                    <Route path="/landing" element={<RouteErrorBoundary name="landing"><Landing /></RouteErrorBoundary>} />
+                    <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
+                    <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
+                    <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
+                    <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
                     <Route
                         path="/"
                         element={
-                            <>
-                                <SignedIn>
-                                    <Dashboard />
-                                </SignedIn>
-                                <SignedOut>
-                                    {isDesktop() ? <DesktopWelcome /> : <Navigate to="/landing" replace />}
-                                </SignedOut>
-                            </>
+                            <RouteErrorBoundary name="dashboard">
+                                <>
+                                    <SignedIn>
+                                        <Dashboard />
+                                    </SignedIn>
+                                    <SignedOut>
+                                        {isDesktop() ? <DesktopWelcome /> : <Navigate to="/landing" replace />}
+                                    </SignedOut>
+                                </>
+                            </RouteErrorBoundary>
                         }
                     />
                 </Routes>

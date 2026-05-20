@@ -1,10 +1,25 @@
 import { useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Radio, Mic, PanelRight, Keyboard, Monitor } from 'lucide-react'
+import { Radio, Mic, PanelRight, Keyboard, Monitor, Search, Wifi, WifiOff } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { SlideChip } from '../slides/SlideChip'
 import { OfflineIndicator } from '../offline/OfflineIndicator'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
+import { useEmbeddingStatus } from '../../hooks/useEmbeddingStatus'
+
+type StatusLevel = 'ready' | 'loading' | 'error' | 'off'
+
+function StatusDot({ level }: { level: StatusLevel }) {
+    const colors: Record<StatusLevel, string> = {
+        ready: 'bg-emerald-400',
+        loading: 'bg-amber-400 animate-pulse',
+        error: 'bg-red-400',
+        off: 'bg-gray-400',
+    }
+    return (
+        <span className={`inline-block w-1.5 h-1.5 rounded-full ${colors[level]}`} />
+    )
+}
 
 export function StatusBar() {
     const activeSlides = useAppStore((s) => s.activeSlides)
@@ -14,6 +29,24 @@ export function StatusBar() {
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
     const toggleContextPanel = useAppStore((s) => s.toggleContextPanel)
     const sermonListener = useSermonListenerContext()
+    const embeddingStatus = useEmbeddingStatus()
+
+    // Determine status levels for each subsystem
+    const liveStatus: StatusLevel = liveSlideId ? 'ready' : 'off'
+    const sermonStatus: StatusLevel = sermonListener?.isListening
+        ? 'ready'
+        : sermonListener?.isInitializingProvider
+            ? 'loading'
+            : sermonListener?.error
+                ? 'error'
+                : 'off'
+    const searchStatus: StatusLevel = embeddingStatus?.stage === 'completed'
+        ? 'ready'
+        : embeddingStatus?.stage === 'generating' || embeddingStatus?.stage === 'importing'
+            ? 'loading'
+            : embeddingStatus?.stage === 'error'
+                ? 'error'
+                : 'off'
 
     // Get live slide info
     const liveSlide = useMemo(() => {
@@ -55,35 +88,45 @@ export function StatusBar() {
                 )}
             </div>
 
-            {/* Center — Sermon listener mini-status */}
-            <button
-                onClick={() => {
-                    if (activeNavSection === 'sermon') {
-                        setActiveNavSection(null)
-                    } else {
-                        setActiveNavSection('sermon')
-                    }
-                }}
-                className={`
-                    flex items-center gap-1.5 px-2 py-0.5 rounded transition-colors
-                    ${sermonListener?.isListening
-                        ? 'bg-red-500/10 text-red-500'
-                        : activeNavSection === 'sermon'
-                            ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)]'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
-                    }
-                `}
-                title={sermonListener?.isListening && activeNavSection !== 'sermon' ? 'Sermon Listener — Recording in background (click to show)' : 'Toggle Sermon Listener'}
-            >
-                {sermonListener?.isListening && (
-                    <span className="relative flex h-1.5 w-1.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-60" />
-                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
-                    </span>
-                )}
-                <Mic className="w-3 h-3" />
-                <span>{sermonListener?.isListening ? (activeNavSection === 'sermon' ? 'Recording' : 'Background') : 'Sermon'}</span>
-            </button>
+            {/* Center — Subsystem status pills */}
+            <div className="flex items-center gap-3">
+                {/* Sermon listener mini-status */}
+                <button
+                    onClick={() => {
+                        if (activeNavSection === 'sermon') {
+                            setActiveNavSection(null)
+                        } else {
+                            setActiveNavSection('sermon')
+                        }
+                    }}
+                    className={`
+                        flex items-center gap-1.5 px-2 py-0.5 rounded transition-colors
+                        ${sermonListener?.isListening
+                            ? 'bg-red-500/10 text-red-500'
+                            : activeNavSection === 'sermon'
+                                ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)]'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
+                        }
+                    `}
+                    title={sermonListener?.isListening && activeNavSection !== 'sermon' ? 'Sermon Listener — Recording in background (click to show)' : 'Toggle Sermon Listener'}
+                >
+                    {sermonListener?.isListening && (
+                        <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-60" />
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                        </span>
+                    )}
+                    <Mic className="w-3 h-3" />
+                    <span>{sermonListener?.isListening ? (activeNavSection === 'sermon' ? 'Recording' : 'Background') : 'Sermon'}</span>
+                </button>
+
+                {/* Search status indicator */}
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded transition-colors text-[var(--text-muted)]" title={searchStatus === 'ready' ? 'Search ready' : searchStatus === 'loading' ? 'Building search index...' : 'Search not cached'}>
+                    <StatusDot level={searchStatus} />
+                    <Search className="w-3 h-3" />
+                    <span>{searchStatus === 'ready' ? 'Search' : searchStatus === 'loading' ? 'Indexing' : 'Search'}</span>
+                </div>
+            </div>
 
             {/* Right — Controls */}
             <div className="flex items-center gap-2">

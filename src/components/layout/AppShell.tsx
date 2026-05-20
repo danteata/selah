@@ -5,6 +5,7 @@ import { StatusBar } from './StatusBar'
 import { ContextPanel } from './ContextPanel'
 import { QuickBibleBar } from '../bible/QuickBibleBar'
 import { SermonListenerProvider } from '../sermon-listener/SermonListenerContext'
+import { ListeningChip } from '../sermon-listener/ListeningChip'
 import { useAppStore } from '../../store/appStore'
 import type { Schedule } from '../../types'
 
@@ -95,6 +96,9 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
 
             {/* Quick Bible Bar overlay */}
             <QuickBibleBar />
+
+            {/* Floating chip when listener is recording in background */}
+            <ListeningChip />
 
             {/* Status Bar */}
             <StatusBar />
