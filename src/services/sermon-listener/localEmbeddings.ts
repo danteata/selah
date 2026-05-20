@@ -207,6 +207,8 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 
 /**
  * Find the most similar verses from a pre-computed set.
+ * @deprecated Use `searchVerseEmbeddings()` from `verseEmbeddingStore` instead —
+ * the similarity worker runs off-thread and uses packed Float32Array for performance.
  */
 export function findSimilarLocally(
     queryEmbedding: number[],
@@ -261,7 +263,8 @@ export function findSimilarLocally(
 
 const VERSE_CACHE_DB_NAME = 'selah-verse-embeddings'
 const VERSE_CACHE_STORE_NAME = 'embeddings'
-const VERSE_CACHE_VERSION = 1
+const SYNC_PROGRESS_STORE_NAME = 'sync-progress'
+const VERSE_CACHE_VERSION = 2
 
 export interface CachedVerseEmbedding {
     reference: string
@@ -278,17 +281,29 @@ export interface CachedVerseEmbedding {
     embeddingVersion?: string
 }
 
+export interface SyncProgressRecord {
+    versionId: string
+    lastVerseIndex: number
+    totalVerses: number
+    withFragments: boolean
+    startedAt: number
+    updatedAt: number
+}
+
 async function openVerseCache(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(VERSE_CACHE_DB_NAME, VERSE_CACHE_VERSION)
         request.onerror = () => reject(request.error)
         request.onsuccess = () => resolve(request.result)
         request.onupgradeneeded = (event) => {
-            const db = (event.target as IDBOpenDBRequest).result
+            const db = (event.target as IDBOpenDbRequest).result
             if (!db.objectStoreNames.contains(VERSE_CACHE_STORE_NAME)) {
                 const store = db.createObjectStore(VERSE_CACHE_STORE_NAME, { keyPath: 'reference' })
                 store.createIndex('by_book', 'book')
                 store.createIndex('by_version', 'version')
+            }
+            if (!db.objectStoreNames.contains(SYNC_PROGRESS_STORE_NAME)) {
+                db.createObjectStore(SYNC_PROGRESS_STORE_NAME, { keyPath: 'versionId' })
             }
         }
     })
@@ -462,17 +477,93 @@ export async function hasFragmentEmbeddings(version: string): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Sync progress persistence
+// ---------------------------------------------------------------------------
+
+export async function getSyncProgress(versionId: string): Promise<SyncProgressRecord | null> {
+    try {
+        const db = await openVerseCache()
+        const tx = db.transaction(SYNC_PROGRESS_STORE_NAME, 'readonly')
+        const store = tx.objectStore(SYNC_PROGRESS_STORE_NAME)
+        const request = store.get(versionId)
+        return new Promise((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result ?? null)
+            request.onerror = () => reject(request.error)
+        })
+    } catch {
+        return null
+    }
+}
+
+export async function saveSyncProgress(record: SyncProgressRecord): Promise<void> {
+    try {
+        const db = await openVerseCache()
+        const tx = db.transaction(SYNC_PROGRESS_STORE_NAME, 'readwrite')
+        const store = tx.objectStore(SYNC_PROGRESS_STORE_NAME)
+        store.put({ ...record, updatedAt: Date.now() })
+        await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+        })
+    } catch {
+        // Best-effort persistence
+    }
+}
+
+export async function clearSyncProgress(versionId: string): Promise<void> {
+    try {
+        const db = await openVerseCache()
+        const tx = db.transaction(SYNC_PROGRESS_STORE_NAME, 'readwrite')
+        const store = tx.objectStore(SYNC_PROGRESS_STORE_NAME)
+        store.delete(versionId)
+        await new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+        })
+    } catch {
+        // Best-effort
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Pre-warm helpers
 // ---------------------------------------------------------------------------
 
 let prewarmPromise: Promise<void> | null = null
 const prewarmedEmbeddings = new Map<string, CachedVerseEmbedding[]>()
 
+/**
+ * Versions for which the runtime pack loader will attempt to load a
+ * prebuilt pack from disk before falling back to IndexedDB. KJV is the
+ * canonical one we ship; operators with extra versions can extend this
+ * list (or call `tryLoadEmbeddingPack` directly).
+ */
+const PACK_PRELOAD_VERSIONS = ['KJV'] as const
+
 export function prewarmSemanticSearch(): Promise<void> {
     if (prewarmPromise) return prewarmPromise
     prewarmPromise = (async () => {
         try {
+            // Kick off model load + cached-version probe in parallel.
             const [, versions] = await Promise.all([initializeEmbedder(), getLocalCachedVersions()])
+
+            // Try the prebuilt pack first — on desktop this is an O(load-time)
+            // memory-map of a Float32Array, which is much faster than
+            // walking IndexedDB row-by-row and rebuilding number[] buffers.
+            // Failure to load the pack is silent; we always have the IDB path.
+            for (const version of PACK_PRELOAD_VERSIONS) {
+                try {
+                    const { tryLoadEmbeddingPack } = await import('./embeddingPackLoader')
+                    const result = await tryLoadEmbeddingPack(version)
+                    if (result.ok) {
+                        console.log(`[Embeddings] Loaded prebuilt pack for ${version} (${result.count} verses)`)
+                        return // Pack is now in the worker; no need to read IDB.
+                    }
+                } catch {
+                    // Pack loader is best-effort.
+                }
+            }
+
             if (versions.length > 0) {
                 const embeddings = await getCachedVerseEmbeddings(versions[0])
                 prewarmedEmbeddings.set(versions[0], embeddings)
@@ -502,6 +593,9 @@ export default {
     hasCachedEmbeddings,
     hasFragmentEmbeddings,
     getLocalCachedVersions,
+    getSyncProgress,
+    saveSyncProgress,
+    clearSyncProgress,
     prewarmSemanticSearch,
     getPrewarmedEmbeddings,
 }

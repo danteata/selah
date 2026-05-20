@@ -8,6 +8,9 @@ import {
     countCachedEmbeddings,
     getCachedVerseEmbeddings,
     clearCachedEmbeddingsForVersion,
+    getSyncProgress,
+    saveSyncProgress,
+    clearSyncProgress,
 } from './localEmbeddings'
 import { extractVerseFragments } from '../../lib/extractVerseFragments'
 
@@ -159,7 +162,7 @@ class EmbeddingSyncManager {
             stage: isMidSync ? existing.stage : 'idle',
             progress: isMidSync ? existing.progress : 0,
             total: isMidSync ? existing.total : 0,
-            startedAt: isMidSync ? existing.startAt : null,
+            startedAt: isMidSync ? existing.startedAt : null,
             eta: isMidSync ? existing.eta : null,
             error: isMidSync ? existing.error : null,
             hasEmbeddings: hasEmb,
@@ -256,13 +259,24 @@ class EmbeddingSyncManager {
             }>
             if (!verses || verses.length === 0) throw new Error('Bible version data is empty')
 
-            await clearCachedEmbeddingsForVersion(versionId)
+            // Check for resumable progress before clearing
+            const savedProgress = await getSyncProgress(versionId)
+            let resumeFrom = 0
+            if (savedProgress && savedProgress.withFragments === withFragments) {
+                resumeFrom = savedProgress.lastVerseIndex
+            }
+
+            // Only clear if starting fresh (not resuming)
+            if (resumeFrom === 0) {
+                await clearCachedEmbeddingsForVersion(versionId)
+            }
 
             if (signal.aborted) throw new Error('Sync cancelled')
 
             this.updateState(versionId, {
                 stage: 'generating',
                 total: verses.length,
+                progress: resumeFrom,
             })
 
             const BATCH_SIZE = 50
@@ -279,7 +293,12 @@ class EmbeddingSyncManager {
             let totalEmbedded = 0
             let batchIndex = 0
 
-            for (let i = 0; i < verses.length; i += BATCH_SIZE) {
+            if (resumeFrom > 0) {
+                const existing = await getCachedVerseEmbeddings(versionId)
+                totalEmbedded = existing.length
+            }
+
+            for (let i = resumeFrom; i < verses.length; i += BATCH_SIZE) {
                 if (signal.aborted) throw new Error('Sync cancelled')
 
                 const batch = verses.slice(i, i + BATCH_SIZE)
@@ -340,6 +359,14 @@ class EmbeddingSyncManager {
                         cachedAt: Date.now(),
                     })))
                     batchAccumulator = []
+                    await saveSyncProgress({
+                        versionId,
+                        lastVerseIndex: Math.min(i + BATCH_SIZE, verses.length),
+                        totalVerses: verses.length,
+                        withFragments,
+                        startedAt,
+                        updatedAt: Date.now(),
+                    })
                     this.updateState(versionId, { stage: 'generating' })
                 }
 
@@ -365,6 +392,8 @@ class EmbeddingSyncManager {
                     cachedAt: Date.now(),
                 })))
             }
+
+            await clearSyncProgress(versionId)
 
             this.updateState(versionId, {
                 stage: 'completed',
@@ -524,6 +553,14 @@ class EmbeddingSyncManager {
                         cachedAt: Date.now(),
                     })))
                     batchAccumulator = []
+                    await saveSyncProgress({
+                        versionId,
+                        lastVerseIndex: Math.min(i + BATCH_SIZE, verses.length),
+                        totalVerses: verses.length,
+                        withFragments: true,
+                        startedAt,
+                        updatedAt: Date.now(),
+                    })
                     this.updateState(versionId, { stage: 'upgrading' })
                 }
 
@@ -548,6 +585,8 @@ class EmbeddingSyncManager {
                     cachedAt: Date.now(),
                 })))
             }
+
+            await clearSyncProgress(versionId)
 
             this.updateState(versionId, {
                 stage: 'completed',
@@ -593,6 +632,7 @@ class EmbeddingSyncManager {
 
     async clearEmbeddings(versionId: string) {
         await clearCachedEmbeddingsForVersion(versionId)
+        await clearSyncProgress(versionId)
         this.updateState(versionId, {
             hasEmbeddings: false,
             embeddingCount: 0,
