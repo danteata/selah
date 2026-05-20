@@ -9,18 +9,8 @@ export {
     NUMBER_TO_BOOK,
 } from './verseDetection'
 export type { DetectedVerse } from './verseDetection'
-export { whisperTranscriptionService } from './whisperTranscription'
-export type { WhisperConfig, WhisperTranscriptionResult } from './whisperTranscription'
-export { whisperCppTranscriptionService } from './whisperCppTranscription'
-export type { WhisperCppConfig, WhisperCppTranscriptionResult } from './whisperCppTranscription'
-export { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
-export type { FasterWhisperConfig, FasterWhisperTranscriptionResult } from './fasterWhisperTranscription'
-export { elevenLabsTranscriptionService } from './elevenLabsTranscription'
-export type { ElevenLabsConfig, ElevenLabsTranscriptionResult } from './elevenLabsTranscription'
 export { desktopWhisperTranscriptionService } from './desktopWhisperTranscription'
 export type { DesktopWhisperTranscriptionConfig, DesktopWhisperTranscriptionResult } from './desktopWhisperTranscription'
-export { vadTranscriptionService } from './vadTranscriptionService'
-export type { VADTranscriptionConfig, VADUtterance } from './vadTranscriptionService'
 export { unifiedTranscriptionService } from './unifiedTranscription'
 export type { TranscriptionProvider, UnifiedTranscriptionOptions, TranscriptionStatus } from './unifiedTranscription'
 
@@ -31,14 +21,24 @@ export {
     embedText,
     embedBatch,
     cosineSimilarity,
-    findSimilarLocally,
     getCachedVerseEmbeddings,
     cacheVerseEmbeddings,
-    clearCachedVerseEmbeddings,
+    clearCachedVerseEmbeddings as clearCachedEmbeddings,
     hasCachedEmbeddings,
     getLocalCachedVersions,
 } from './localEmbeddings'
-export type { EmbeddingResult, VerseMatch, CachedVerseEmbedding } from './localEmbeddings'
+export type { EmbeddingResult, VerseMatch, CachedVerseEmbedding, SyncProgressRecord } from './localEmbeddings'
+
+// Packed Float32Array verse embedding store + worker-backed similarity search
+export {
+    loadFromCached as loadVerseEmbeddingStore,
+    loadFromPackedBuffer as loadVerseEmbeddingPack,
+    searchVerseEmbeddings,
+    getLoadedIndex as getLoadedVerseIndex,
+    clearIndex as clearVerseEmbeddingIndex,
+    pingWorker as pingVerseEmbeddingWorker,
+} from './verseEmbeddingStore'
+export type { VerseMeta as VerseEmbeddingMeta } from './verseEmbeddingStore'
 
 // Semantic verse detection
 export {

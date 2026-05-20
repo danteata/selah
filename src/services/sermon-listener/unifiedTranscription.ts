@@ -1,22 +1,20 @@
 /**
  * Unified Transcription Service
- * 
- * Provides a unified interface for speech transcription that can switch between
- * Web Speech API, Whisper.cpp, Faster-Whisper, and ElevenLabs based on user settings.
- * 
- * VAD (Voice Activity Detection) can be enabled as an option with Faster-Whisper
- * for smart chunking that eliminates word cutoffs at boundaries.
+ *
+ * Provides a unified interface for speech transcription that switches between
+ * Web Speech API (browser) and Desktop Whisper (bundled sidecar) based on
+ * user settings.
+ *
+ * Legacy providers (whisper, whisper-cpp, faster-whisper, elevenlabs) have
+ * been removed from the union type and init/switch paths. The deprecated
+ * service files are still in the repo for reference but are no longer
+ * imported, so they can be tree-shaken out of the bundle.
  */
 
 import { speechRecognitionService } from './speechRecognition'
-import { whisperTranscriptionService } from './whisperTranscription'
-import { whisperCppTranscriptionService } from './whisperCppTranscription'
-import { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
-import { elevenLabsTranscriptionService } from './elevenLabsTranscription'
-import { vadTranscriptionService } from './vadTranscriptionService'
 import { desktopWhisperTranscriptionService } from './desktopWhisperTranscription'
 
-export type TranscriptionProvider = 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs' | 'desktop-whisper'
+export type TranscriptionProvider = 'web-speech' | 'desktop-whisper'
 
 export interface UnifiedTranscriptionOptions {
   provider?: TranscriptionProvider
@@ -38,33 +36,8 @@ export interface UnifiedTranscriptionOptions {
   onSpeechEnd?: () => void
   /** Called with audio level (0-1) for visualization */
   onAudioLevel?: (level: number) => void
-  // Whisper-specific options
-  whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
-  whisperEndpoint?: string
-  whisperApiKey?: string
-  whisperChunkDurationMs?: number
-  whisperCppEndpoint?: string
-  whisperCppChunkDurationMs?: number
-  // Faster-Whisper options
-  fasterWhisperEndpoint?: string
-  fasterWhisperModel?: 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3'
-  fasterWhisperChunkDurationMs?: number
-  /** Audio capture mode: 'browser-wav' (encode in browser) or 'server-decode' (send webm to server) */
-  fasterWhisperAudioCaptureMode?: 'browser-wav' | 'server-decode'
-  /** Disable browser audio processing for server-decode mode */
-  fasterWhisperDisableBrowserProcessing?: boolean
-  /** Enable VAD for smart chunking with faster-whisper */
+  /** Enable VAD for smart chunking with desktop-whisper */
   useVAD?: boolean
-  // VAD-specific options (used when useVAD is true)
-  vadPositiveSpeechThreshold?: number
-  vadNegativeSpeechThreshold?: number
-  vadMinSpeechFrames?: number
-  vadPreSpeechPadFrames?: number
-  vadRedemptionFrames?: number
-  // ElevenLabs-specific options
-  elevenLabsApiKey?: string
-  elevenLabsModelId?: string
-  elevenLabsChunkDurationMs?: number
   /** Initial prompt to bias transcription vocabulary (prevents offensive word hallucination) */
   initialPrompt?: string
   onProgress?: (progress: number) => void
@@ -81,8 +54,8 @@ export interface TranscriptionStatus {
 
 /**
  * Unified Transcription Service
- * 
- * Switches between Web Speech API, Whisper.cpp, Faster-Whisper, VAD, and ElevenLabs based on settings
+ *
+ * Switches between Web Speech API and Desktop Whisper based on settings.
  */
 class UnifiedTranscriptionService {
     private currentProvider: TranscriptionProvider = 'web-speech'
@@ -91,11 +64,6 @@ class UnifiedTranscriptionService {
     private isLoading = false
     private error: string | null = null
     private options: UnifiedTranscriptionOptions = {}
-    private whisperInitialized = false
-    private whisperCppInitialized = false
-    private fasterWhisperInitialized = false
-    private vadInitialized = false
-    private elevenLabsInitialized = false
     private desktopWhisperInitialized = false
 
     /**
@@ -105,26 +73,11 @@ class UnifiedTranscriptionService {
         switch (provider) {
             case 'web-speech':
                 return speechRecognitionService.isSupported()
-            case 'whisper':
-                return whisperTranscriptionService.isConfigured()
-            case 'whisper-cpp':
-                return whisperCppTranscriptionService.isConfigured()
-            case 'faster-whisper':
-                return fasterWhisperTranscriptionService.isConfigured()
-            case 'elevenlabs':
-                return elevenLabsTranscriptionService.isConfigured()
             case 'desktop-whisper':
                 return desktopWhisperTranscriptionService.isConfigured()
             default:
                 return false
         }
-    }
-
-    /**
-     * Check if VAD is available (for use with faster-whisper)
-     */
-    async isVADAvailable(): Promise<boolean> {
-        return vadTranscriptionService.isConfigured()
     }
 
     /**
@@ -137,17 +90,9 @@ class UnifiedTranscriptionService {
             isReady: this.isReady,
             isLoading: this.isLoading,
             error: this.error,
-            modelLoaded: this.currentProvider === 'whisper'
-                ? this.whisperInitialized
-                : this.currentProvider === 'whisper-cpp'
-                    ? this.whisperCppInitialized
-                    : this.currentProvider === 'faster-whisper'
-                        ? this.fasterWhisperInitialized
-                        : this.currentProvider === 'elevenlabs'
-                            ? this.elevenLabsInitialized
-                            : this.currentProvider === 'desktop-whisper'
-                                ? this.desktopWhisperInitialized
-                                : undefined,
+            modelLoaded: this.currentProvider === 'desktop-whisper'
+                ? this.desktopWhisperInitialized
+                : undefined,
         }
     }
 
@@ -162,121 +107,18 @@ class UnifiedTranscriptionService {
         this.currentProvider = provider
         this.options = { ...this.options, ...options }
 
-        // Initialize Whisper provider
-        if (provider === 'whisper') {
+        if (provider === 'desktop-whisper') {
             this.isLoading = true
             this.options.onStatusChange?.(this.getStatus())
 
-            const initialized = await whisperTranscriptionService.init({
+            const initialized = await desktopWhisperTranscriptionService.init({
                 language: options?.language || 'en',
-                endpoint: options?.whisperEndpoint,
-                apiKey: options?.whisperApiKey,
-                model: this.getWhisperModelName(options?.whisperModel || 'base'),
-                chunkDurationMs: options?.whisperChunkDurationMs,
+                useVAD: options?.useVAD,
+                initialPrompt: options?.initialPrompt,
+                microphoneDeviceId: options?.microphoneDeviceId,
                 onProgress: options?.onProgress,
-                onStatus: (status) => console.log('[Whisper]', status),
+                onStatus: (status) => console.log('[DesktopWhisper]', status),
             })
-
-            this.whisperInitialized = initialized
-            this.isLoading = false
-            this.isReady = initialized
-
-            if (!initialized) {
-                this.error = 'Failed to initialize Whisper'
-                this.options.onStatusChange?.(this.getStatus())
-                return false
-            }
-        }
-
-  if (provider === 'whisper-cpp') {
-    this.isLoading = true
-    this.options.onStatusChange?.(this.getStatus())
-
-    const initialized = await whisperCppTranscriptionService.init({
-      language: options?.language || 'en',
-      endpoint: options?.whisperCppEndpoint,
-      chunkDurationMs: options?.whisperCppChunkDurationMs,
-      initialPrompt: options?.initialPrompt,
-      onProgress: options?.onProgress,
-      onStatus: (status) => console.log('[Whisper.cpp]', status),
-    })
-
-            this.whisperCppInitialized = initialized
-            this.isLoading = false
-            this.isReady = initialized
-
-            if (!initialized) {
-                this.error = 'Failed to initialize Whisper.cpp'
-                this.options.onStatusChange?.(this.getStatus())
-                return false
-            }
-        }
-
-  if (provider === 'faster-whisper') {
-    this.isLoading = true
-    this.options.onStatusChange?.(this.getStatus())
-
-    const initialized = await fasterWhisperTranscriptionService.init({
-      language: options?.language || 'en',
-      endpoint: options?.fasterWhisperEndpoint,
-      model: options?.fasterWhisperModel,
-      chunkDurationMs: options?.fasterWhisperChunkDurationMs,
-      audioCaptureMode: options?.fasterWhisperAudioCaptureMode,
-      disableBrowserAudioProcessing: options?.fasterWhisperDisableBrowserProcessing,
-      initialPrompt: options?.initialPrompt,
-      onProgress: options?.onProgress,
-      onStatus: (status) => console.log('[FasterWhisper]', status),
-    })
-
-            this.fasterWhisperInitialized = initialized
-            this.isLoading = false
-            this.isReady = initialized
-
-            if (!initialized) {
-                this.error = 'Failed to initialize Faster-Whisper'
-                this.options.onStatusChange?.(this.getStatus())
-                return false
-            }
-        }
-
-  if (provider === 'elevenlabs') {
-    this.isLoading = true
-    this.options.onStatusChange?.(this.getStatus())
-
-    const initialized = await elevenLabsTranscriptionService.init({
-      language: options?.language || 'en',
-      apiKey: options?.elevenLabsApiKey,
-      modelId: options?.elevenLabsModelId,
-      chunkDurationMs: options?.elevenLabsChunkDurationMs,
-      initialPrompt: options?.initialPrompt,
-      onProgress: options?.onProgress,
-      onStatus: (status) => console.log('[ElevenLabs]', status),
-    })
-
-            this.elevenLabsInitialized = initialized
-            this.isLoading = false
-            this.isReady = initialized
-
-            if (!initialized) {
-                this.error = 'Failed to initialize ElevenLabs'
-                this.options.onStatusChange?.(this.getStatus())
-                return false
-            }
-        }
-
-  if (provider === 'desktop-whisper') {
-    this.isLoading = true
-    this.options.onStatusChange?.(this.getStatus())
-
-    const initialized = await desktopWhisperTranscriptionService.init({
-      language: options?.language || 'en',
-      model: options?.fasterWhisperModel,
-      useVAD: options?.useVAD,
-      chunkDurationMs: options?.fasterWhisperChunkDurationMs,
-      initialPrompt: options?.initialPrompt,
-      onProgress: options?.onProgress,
-      onStatus: (status) => console.log('[DesktopWhisper]', status),
-    })
 
             this.desktopWhisperInitialized = initialized
             this.isLoading = false
@@ -298,28 +140,9 @@ class UnifiedTranscriptionService {
 
         this.isReady = provider === 'web-speech'
             ? speechRecognitionService.isSupported()
-            : provider === 'whisper'
-                ? this.whisperInitialized
-                : provider === 'whisper-cpp'
-                    ? this.whisperCppInitialized
-                    : provider === 'faster-whisper'
-                        ? this.fasterWhisperInitialized
-                        : provider === 'elevenlabs'
-                            ? this.elevenLabsInitialized
-                            : this.desktopWhisperInitialized
+            : this.desktopWhisperInitialized
         this.options.onStatusChange?.(this.getStatus())
         return true
-    }
-
-    /**
-     * Map size aliases to OpenAI-compatible model names
-     */
-    private getWhisperModelName(model: 'tiny' | 'base' | 'small' | 'medium'): string {
-        // Keep existing setting options stable while mapping them to widely-supported API model names.
-        if (model === 'tiny') return 'whisper-1'
-        if (model === 'small') return 'whisper-1'
-        if (model === 'medium') return 'whisper-1'
-        return 'whisper-1'
     }
 
     /**
@@ -335,15 +158,8 @@ class UnifiedTranscriptionService {
             this.options = { ...this.options, ...options }
         }
 
-        console.log('[UnifiedTranscription] Starting with options:', {
-            requestedProvider: options?.provider,
-            currentProvider: this.currentProvider,
-            whisperCppEndpoint: options?.whisperCppEndpoint,
-        })
-
         // Switch provider if specified
         if (options?.provider && options.provider !== this.currentProvider) {
-            console.log('[UnifiedTranscription] Switching provider from', this.currentProvider, 'to', options.provider)
             const switched = await this.setProvider(options.provider, options)
             if (!switched) return false
         }
@@ -355,19 +171,10 @@ class UnifiedTranscriptionService {
             if (this.currentProvider === 'web-speech') {
                 return await this.startWebSpeech()
             }
-            if (this.currentProvider === 'whisper') {
-                return await this.startWhisper()
-            }
-            if (this.currentProvider === 'whisper-cpp') {
-                return await this.startWhisperCpp()
-            }
-            if (this.currentProvider === 'faster-whisper') {
-                return await this.startFasterWhisper()
-            }
             if (this.currentProvider === 'desktop-whisper') {
                 return await this.startDesktopWhisper()
             }
-            return await this.startElevenLabs()
+            return false
         } catch (err) {
             this.error = err instanceof Error ? err.message : 'Failed to start transcription'
             this.options.onStatusChange?.(this.getStatus())
@@ -408,209 +215,17 @@ class UnifiedTranscriptionService {
     }
 
     /**
-     * Start Whisper transcription
-     * Note: Whisper works differently - it processes audio chunks
-     */
-    private async startWhisper(): Promise<boolean> {
-        if (!this.whisperInitialized) {
-            const initialized = await whisperTranscriptionService.init({
-                language: this.options.language || 'en',
-                endpoint: this.options.whisperEndpoint,
-                apiKey: this.options.whisperApiKey,
-                model: this.getWhisperModelName(this.options.whisperModel || 'base'),
-                chunkDurationMs: this.options.whisperChunkDurationMs,
-                microphoneDeviceId: this.options.microphoneDeviceId,
-                onProgress: this.options.onProgress,
-            })
-            if (!initialized) {
-                this.error = 'Whisper transcription is not configured. Set a transcription endpoint first.'
-                return false
-            }
-            this.whisperInitialized = true
-        }
-
-        const started = await whisperTranscriptionService.startRealtimeTranscription(
-            (result) => {
-                this.options.onResult?.(result.text, true, undefined)
-            },
-            (error) => {
-                this.error = error
-                this.isListening = false
-                this.options.onError?.(error)
-                this.options.onStatusChange?.(this.getStatus())
-            },
-            this.options.whisperChunkDurationMs
-        )
-
-        if (!started) {
-            this.error = 'Failed to start Whisper transcription stream'
-            this.options.onStatusChange?.(this.getStatus())
-            return false
-        }
-
-        this.isListening = true
-        this.options.onStart?.()
-        this.options.onStatusChange?.(this.getStatus())
-        return true
-    }
-
-    /**
-     * Start whisper.cpp local transcription
-     */
-  private async startWhisperCpp(): Promise<boolean> {
-    if (!this.whisperCppInitialized) {
-      const initialized = await whisperCppTranscriptionService.init({
-        language: this.options.language || 'en',
-        endpoint: this.options.whisperCppEndpoint,
-        chunkDurationMs: this.options.whisperCppChunkDurationMs,
-        initialPrompt: this.options.initialPrompt,
-        microphoneDeviceId: this.options.microphoneDeviceId,
-        onProgress: this.options.onProgress,
-      })
-            if (!initialized) {
-                this.error = 'Whisper.cpp provider is not configured correctly.'
-                return false
-            }
-            this.whisperCppInitialized = true
-        }
-
-        const started = await whisperCppTranscriptionService.startRealtimeTranscription(
-            (result) => {
-                this.options.onResult?.(result.text, true, undefined)
-            },
-            (error) => {
-                this.error = error
-                this.isListening = false
-                this.options.onError?.(error)
-                this.options.onStatusChange?.(this.getStatus())
-            },
-            this.options.whisperCppChunkDurationMs
-        )
-
-        if (!started) {
-            this.error = 'Failed to start Whisper.cpp transcription stream'
-            this.options.onStatusChange?.(this.getStatus())
-            return false
-        }
-
-        this.isListening = true
-        this.options.onStart?.()
-        this.options.onStatusChange?.(this.getStatus())
-        return true
-    }
-
-    /**
-     * Start Faster-Whisper transcription (CTranslate2-based, 2-4x faster)
-     * If useVAD is enabled, uses VAD for smart chunking instead of fixed intervals
-     */
-  private async startFasterWhisper(): Promise<boolean> {
-    // If VAD is enabled, use VAD-based transcription
-    if (this.options.useVAD) {
-      return await this.startVAD()
-    }
-
-    if (!this.fasterWhisperInitialized) {
-      const initialized = await fasterWhisperTranscriptionService.init({
-        language: this.options.language || 'en',
-        endpoint: this.options.fasterWhisperEndpoint,
-        model: this.options.fasterWhisperModel,
-        chunkDurationMs: this.options.fasterWhisperChunkDurationMs,
-        audioCaptureMode: this.options.fasterWhisperAudioCaptureMode,
-        disableBrowserAudioProcessing: this.options.fasterWhisperDisableBrowserProcessing,
-        initialPrompt: this.options.initialPrompt,
-        microphoneDeviceId: this.options.microphoneDeviceId,
-        onProgress: this.options.onProgress,
-      })
-      if (!initialized) {
-        this.error = 'Faster-Whisper provider is not configured correctly.'
-        return false
-      }
-      this.fasterWhisperInitialized = true
-    }
-
-        const started = await fasterWhisperTranscriptionService.startRealtimeTranscription(
-            (result) => {
-                this.options.onResult?.(result.text, true, undefined)
-            },
-            (error) => {
-                this.error = error
-                this.isListening = false
-                this.options.onError?.(error)
-                this.options.onStatusChange?.(this.getStatus())
-            },
-            this.options.fasterWhisperChunkDurationMs
-        )
-
-        if (!started) {
-            this.error = 'Failed to start Faster-Whisper transcription stream'
-            this.options.onStatusChange?.(this.getStatus())
-            return false
-        }
-
-        this.isListening = true
-        this.options.onStart?.()
-        this.options.onStatusChange?.(this.getStatus())
-        return true
-    }
-
-    /**
-     * Start ElevenLabs transcription
-     */
-  private async startElevenLabs(): Promise<boolean> {
-    if (!this.elevenLabsInitialized) {
-      const initialized = await elevenLabsTranscriptionService.init({
-        language: this.options.language || 'en',
-        apiKey: this.options.elevenLabsApiKey,
-        modelId: this.options.elevenLabsModelId,
-        chunkDurationMs: this.options.elevenLabsChunkDurationMs,
-        initialPrompt: this.options.initialPrompt,
-        microphoneDeviceId: this.options.microphoneDeviceId,
-        onProgress: this.options.onProgress,
-      })
-            if (!initialized) {
-                this.error = 'ElevenLabs provider is not configured correctly. Set ELEVENLABS_API_KEY.'
-                return false
-            }
-            this.elevenLabsInitialized = true
-        }
-
-        const started = await elevenLabsTranscriptionService.startRealtimeTranscription(
-            (result) => {
-                this.options.onResult?.(result.text, true, undefined)
-            },
-            (error) => {
-                this.error = error
-                this.isListening = false
-                this.options.onError?.(error)
-                this.options.onStatusChange?.(this.getStatus())
-            },
-            this.options.elevenLabsChunkDurationMs
-        )
-
-        if (!started) {
-            this.error = 'Failed to start ElevenLabs transcription stream'
-            this.options.onStatusChange?.(this.getStatus())
-            return false
-        }
-
-        this.isListening = true
-        this.options.onStart?.()
-        this.options.onStatusChange?.(this.getStatus())
-        return true
-    }
-
-    /**
      * Start Desktop Whisper transcription (bundled faster-whisper in Tauri)
      */
     private async startDesktopWhisper(): Promise<boolean> {
-    if (!this.desktopWhisperInitialized) {
-      const initialized = await desktopWhisperTranscriptionService.init({
-        language: this.options.language || 'en',
-        model: this.options.fasterWhisperModel,
-        initialPrompt: this.options.initialPrompt,
-        microphoneDeviceId: this.options.microphoneDeviceId,
-        onProgress: this.options.onProgress,
-      })
+        if (!this.desktopWhisperInitialized) {
+            const initialized = await desktopWhisperTranscriptionService.init({
+                language: this.options.language || 'en',
+                useVAD: this.options.useVAD,
+                initialPrompt: this.options.initialPrompt,
+                microphoneDeviceId: this.options.microphoneDeviceId,
+                onProgress: this.options.onProgress,
+            })
             if (!initialized) {
                 this.error = 'Desktop Whisper is only available in the desktop app.'
                 return false
@@ -645,61 +260,6 @@ class UnifiedTranscriptionService {
     }
 
     /**
-     * Start VAD-based transcription
-     * Uses browser VAD to detect speech boundaries, then sends complete utterances
-     */
-  private async startVAD(): Promise<boolean> {
-    if (!this.vadInitialized) {
-      const initialized = await vadTranscriptionService.init({
-        language: this.options.language || 'en',
-        endpoint: this.options.fasterWhisperEndpoint,
-        model: this.options.fasterWhisperModel,
-        initialPrompt: this.options.initialPrompt,
-        microphoneDeviceId: this.options.microphoneDeviceId,
-        positiveSpeechThreshold: this.options.vadPositiveSpeechThreshold,
-        negativeSpeechThreshold: this.options.vadNegativeSpeechThreshold,
-        minSpeechFrames: this.options.vadMinSpeechFrames,
-        preSpeechPadFrames: this.options.vadPreSpeechPadFrames,
-        redemptionFrames: this.options.vadRedemptionFrames,
-        onSpeechStart: () => {
-          this.options.onSpeechStart?.()
-        },
-        onSpeechEnd: () => {
-          this.options.onSpeechEnd?.()
-        },
-      })
-            if (!initialized) {
-                this.error = 'VAD provider is not configured correctly.'
-                return false
-            }
-            this.vadInitialized = true
-        }
-
-        const started = await vadTranscriptionService.startRealtimeTranscription(
-            (result) => {
-                this.options.onResult?.(result.text, true, undefined)
-            },
-            (error) => {
-                this.error = error
-                this.isListening = false
-                this.options.onError?.(error)
-                this.options.onStatusChange?.(this.getStatus())
-            }
-        )
-
-        if (!started) {
-            this.error = 'Failed to start VAD transcription stream'
-            this.options.onStatusChange?.(this.getStatus())
-            return false
-        }
-
-        this.isListening = true
-        this.options.onStart?.()
-        this.options.onStatusChange?.(this.getStatus())
-        return true
-    }
-
-    /**
      * Stop transcription
      */
     async stop(): Promise<void> {
@@ -707,19 +267,6 @@ class UnifiedTranscriptionService {
 
         if (this.currentProvider === 'web-speech') {
             speechRecognitionService.stop()
-        } else if (this.currentProvider === 'whisper') {
-            await whisperTranscriptionService.stopRealtimeTranscription()
-        } else if (this.currentProvider === 'whisper-cpp') {
-            await whisperCppTranscriptionService.stopRealtimeTranscription()
-        } else if (this.currentProvider === 'faster-whisper') {
-            // Check if VAD is being used with faster-whisper
-            if (this.options.useVAD) {
-                await vadTranscriptionService.stop()
-            } else {
-                await fasterWhisperTranscriptionService.stopRealtimeTranscription()
-            }
-        } else if (this.currentProvider === 'elevenlabs') {
-            await elevenLabsTranscriptionService.stopRealtimeTranscription()
         } else if (this.currentProvider === 'desktop-whisper') {
             await desktopWhisperTranscriptionService.stop()
         }
@@ -738,19 +285,10 @@ class UnifiedTranscriptionService {
 
     /**
      * Get the active media stream from the current provider (for audio visualization)
-     * Returns null for web-speech and VAD (they manage streams internally)
+     * Returns null for web-speech (manages streams internally)
      */
     getMediaStream(): MediaStream | null {
         switch (this.currentProvider) {
-            case 'whisper':
-                return whisperTranscriptionService.getMediaStream()
-            case 'whisper-cpp':
-                return whisperCppTranscriptionService.getMediaStream()
-            case 'faster-whisper':
-                if (this.options.useVAD) return null
-                return fasterWhisperTranscriptionService.getMediaStream()
-            case 'elevenlabs':
-                return elevenLabsTranscriptionService.getMediaStream()
             case 'desktop-whisper':
                 return desktopWhisperTranscriptionService.getMediaStream()
             default:

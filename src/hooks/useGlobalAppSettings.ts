@@ -8,26 +8,7 @@ import { useState, useEffect } from 'react'
 export interface GlobalAppSettings {
     _id?: string
     sermonListener_transcriptionProvider?: string
-    sermonListener_whisperModel?: string
-    sermonListener_whisperEndpoint?: string
-    sermonListener_whisperApiKey?: string
-    sermonListener_whisperChunkDurationMs?: number
-    sermonListener_whisperCppEndpoint?: string
-    sermonListener_whisperCppChunkDurationMs?: number
-    sermonListener_fasterWhisperEndpoint?: string
-    sermonListener_fasterWhisperModel?: string
-    sermonListener_fasterWhisperChunkDurationMs?: number
-    sermonListener_fasterWhisperAudioCaptureMode?: string
-    sermonListener_fasterWhisperDisableBrowserProcessing?: boolean
     sermonListener_useVAD?: boolean
-    sermonListener_vadPositiveSpeechThreshold?: number
-    sermonListener_vadNegativeSpeechThreshold?: number
-    sermonListener_vadMinSpeechFrames?: number
-    sermonListener_vadPreSpeechPadFrames?: number
-    sermonListener_vadRedemptionFrames?: number
-    sermonListener_elevenLabsApiKey?: string
-    sermonListener_elevenLabsModelId?: string
-    sermonListener_elevenLabsChunkDurationMs?: number
     sermonListener_defaultLanguage?: string
     exists?: boolean
 }

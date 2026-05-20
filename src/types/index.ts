@@ -356,48 +356,10 @@ export interface AppSettings {
     sermonListener?: {
         /** Enable sermon listener feature */
         enabled?: boolean
-        /** Transcription provider: 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs' */
-        transcriptionProvider?: 'web-speech' | 'whisper' | 'whisper-cpp' | 'faster-whisper' | 'elevenlabs'
-        /** Whisper model size: 'tiny' | 'base' | 'small' | 'medium' */
-        whisperModel?: 'tiny' | 'base' | 'small' | 'medium'
-        /** Optional server endpoint for chunked transcription */
-        whisperEndpoint?: string
-        /** Optional API key for OpenAI-compatible endpoint */
-        whisperApiKey?: string
-        /** Chunk size in milliseconds for realtime transcription */
-        whisperChunkDurationMs?: number
-        /** Local whisper.cpp server endpoint */
-        whisperCppEndpoint?: string
-        /** Chunk size for whisper.cpp local transcription */
-        whisperCppChunkDurationMs?: number
-        /** Faster-Whisper server endpoint (CTranslate2-based, 2-4x faster) */
-        fasterWhisperEndpoint?: string
-        /** Faster-Whisper model */
-        fasterWhisperModel?: 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3'
-        /** Chunk size for faster-whisper transcription */
-        fasterWhisperChunkDurationMs?: number
-        /** Audio capture mode: 'browser-wav' (encode in browser) or 'server-decode' (send webm to server) */
-        fasterWhisperAudioCaptureMode?: 'browser-wav' | 'server-decode'
-        /** Disable browser audio processing (noise suppression, AGC) for server-decode mode */
-        fasterWhisperDisableBrowserProcessing?: boolean
-        /** Enable VAD (Voice Activity Detection) for smart chunking - works with faster-whisper */
+        /** Transcription provider: 'web-speech' | 'desktop-whisper' */
+        transcriptionProvider?: 'web-speech' | 'desktop-whisper'
+        /** Enable VAD (Voice Activity Detection) for smart chunking - works with desktop-whisper */
         useVAD?: boolean
-        /** VAD positive speech threshold (0-1) */
-        vadPositiveSpeechThreshold?: number
-        /** VAD negative speech threshold (0-1) */
-        vadNegativeSpeechThreshold?: number
-        /** VAD minimum speech frames */
-        vadMinSpeechFrames?: number
-        /** VAD pre-speech padding frames */
-        vadPreSpeechPadFrames?: number
-        /** VAD redemption frames (silence before cutting) */
-        vadRedemptionFrames?: number
-        /** ElevenLabs API key */
-        elevenLabsApiKey?: string
-        /** ElevenLabs model ID */
-        elevenLabsModelId?: string
-        /** Chunk size for ElevenLabs transcription */
-        elevenLabsChunkDurationMs?: number
         /** Auto-display detected verses */
         autoDisplay?: boolean
         /** Auto-lookup detected verses */
