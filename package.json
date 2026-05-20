@@ -17,6 +17,7 @@
     "tauri:build": "tauri build",
     "desktop:prebuild": "./scripts/ensure-whisper-binary.sh && ./scripts/download-embedding-model.sh",
     "download-embedding-model": "./scripts/download-embedding-model.sh",
+    "build-embedding-pack": "node scripts/build-embedding-pack.mjs",
     "desktop:dev": "npm run desktop:prebuild && tauri dev",
     "desktop:dev:ndi": "npm run desktop:prebuild && tauri dev -- --features ndi",
     "desktop:build": "tauri build",

@@ -22,10 +22,14 @@ import {
     initializeEmbedder,
     getCachedVerseEmbeddings,
     hasCachedEmbeddings,
-    findSimilarLocally,
     getLocalCachedVersions,
     getPrewarmedEmbeddings,
 } from '../services/sermon-listener/localEmbeddings'
+import {
+    loadFromCached as loadVerseStore,
+    getLoadedIndex,
+    searchVerseEmbeddings,
+} from '../services/sermon-listener/verseEmbeddingStore'
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
 import { getDynamicThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
 
@@ -272,16 +276,22 @@ export function useSemanticVerseSearch(
 
                 if (abortController.signal.aborted) return
 
-                // Lazy-load embeddings from IndexedDB on first search if not yet in memory.
-                // This avoids loading 30K+ rows into JS heap on mount.
-                if (preferLocal && hasLocalEmbeddings && !localEmbeddingsCache.current) {
-                    const workingVersion = effectiveVersionRef.current || version || 'KJV'
-                    const prewarmed = getPrewarmedEmbeddings(workingVersion)
-                    if (prewarmed && prewarmed.length > 0) {
-                        localEmbeddingsCache.current = prewarmed
-                    } else {
-                        const localEmbeddings = await getCachedVerseEmbeddings(workingVersion)
-                        localEmbeddingsCache.current = localEmbeddings
+                // Lazy-load embeddings into the packed-Float32Array worker
+                // store on the first local search. The worker keeps the
+                // index; the main thread retains only metadata-light state.
+                const workingVersion = effectiveVersionRef.current || version || 'KJV'
+                if (preferLocal && hasLocalEmbeddings) {
+                    const loaded = getLoadedIndex()
+                    if (!loaded || loaded.version !== workingVersion) {
+                        let rows = getPrewarmedEmbeddings(workingVersion)
+                        if (!rows || rows.length === 0) {
+                            rows = await getCachedVerseEmbeddings(workingVersion)
+                        }
+                        if (rows && rows.length > 0) {
+                            loadVerseStore(workingVersion, rows)
+                            // Release our reference; the worker owns it now.
+                            rows = []
+                        }
                     }
                 }
 
@@ -290,14 +300,14 @@ export function useSemanticVerseSearch(
                 let searchResults: SemanticVerseResult[] = []
 
                 // Prefer local search if available
-                if (preferLocal && hasLocalEmbeddings && localEmbeddingsCache.current) {
-                    const localResults = findSimilarLocally(
+                const loadedIdx = getLoadedIndex()
+                if (preferLocal && hasLocalEmbeddings && loadedIdx) {
+                    const localResults = await searchVerseEmbeddings(
                         queryEmbedding,
-                        localEmbeddingsCache.current,
                         dynamicThreshold,
-                        limit
+                        limit,
                     )
-                    searchResults = localResults.map(r => {
+                    searchResults = localResults.map((r) => {
                         // Determine book number - could be in bookNumber field or book field (as string or number)
                         let bookNum = r.bookNumber
 

@@ -19,10 +19,13 @@ import {
     isEmbedderReady,
     getCachedVerseEmbeddings,
     hasCachedEmbeddings,
-    findSimilarLocally,
     prewarmSemanticSearch,
-    type CachedVerseEmbedding,
 } from './localEmbeddings'
+import {
+    loadFromCached as loadVerseStore,
+    searchVerseEmbeddings,
+    getLoadedIndex,
+} from './verseEmbeddingStore'
 import { BOOK_PATTERN } from './verseDetection'
 import { getDynamicThreshold, validateSemanticMatch } from '../../lib/semanticRetrievalPolicy'
 
@@ -161,7 +164,6 @@ export class SemanticVerseDetector {
     private textBuffer = ''
     private initialized = false
     private useLocalFallback = false
-    private inMemoryEmbeddings = new Map<string, CachedVerseEmbedding[]>()
     private emptyVersions = new Map<string, number>()
     private lastProcessedLength = 0
     private initializingPromise: Promise<unknown> | null = null
@@ -534,18 +536,22 @@ export class SemanticVerseDetector {
     }
 
     /**
-     * Search using local similarity calculation.
+     * Search using local similarity calculation. Uses the packed Float32Array
+     * worker store; the first call for a given version loads embeddings from
+     * IndexedDB and hands a transferred buffer to the worker, after which
+     * subsequent searches are zero-allocation message round-trips.
      */
     private async searchLocally(embedding: number[], threshold?: number): Promise<SemanticVerseMatch[]> {
         const version = this.config.version || 'ANY'
 
-        let cached = this.inMemoryEmbeddings.get(version)
-
-        if (!cached) {
-            // Always attempt to load from IndexedDB — embeddings may have been
-            // seeded since the last check, or the prewarm may have finished.
+        // Reuse the worker's loaded index if it already matches this version;
+        // otherwise pull from IndexedDB once and hand off to the worker. The
+        // worker owns the only Float32Array; we drop our embedding references
+        // immediately afterwards so V8 can reclaim ~95 MB of heap.
+        const loaded = getLoadedIndex()
+        if (!loaded || loaded.version !== version) {
             console.log('[SemanticDetector] Loading local embeddings for version:', version)
-            cached = await getCachedVerseEmbeddings(this.config.version)
+            let cached = await getCachedVerseEmbeddings(this.config.version)
 
             if (cached.length === 0) {
                 if (version !== 'ANY') {
@@ -562,10 +568,21 @@ export class SemanticVerseDetector {
                 }
             }
 
-            this.inMemoryEmbeddings.set(version, cached)
+            const ok = loadVerseStore(version, cached)
+            // Allow the entire `cached` array (and its 95 MB of inner number[]
+            // buffers) to be garbage-collected. The worker now owns the data.
+            cached = []
+            if (!ok) {
+                console.warn('[SemanticDetector] Failed to load embeddings into worker store')
+                return []
+            }
         }
 
-        const matches = findSimilarLocally(embedding, cached, threshold ?? 0.38, this.config.limit)
+        const matches = await searchVerseEmbeddings(
+            embedding,
+            threshold ?? 0.38,
+            this.config.limit,
+        )
 
         return matches.map((m) => ({
             reference: m.reference,
