@@ -1,11 +1,12 @@
 #!/bin/bash
 # Build script for creating standalone whisper-server executables
-# This creates platform-specific binaries for the Tauri sidecar (externalBin).
+# Uses PyInstaller --onedir for fast startup (no /tmp extraction, no Gatekeeper tax).
+# The output directory is copied to src-tauri/assets/whisper-server/ for Tauri bundling.
 #
 # Binaries must follow Tauri's naming convention:
 #   selah-whisper-server-{target-triple}
 #
-# And be placed in src-tauri/binaries/ for the externalBin config to find them.
+# And be placed in src-tauri/assets/whisper-server/ for resource bundling.
 
 set -e
 
@@ -40,6 +41,7 @@ case "$OS" in
         ;;
 esac
 
+BINARY_NAME="selah-whisper-server-${TARGET_TRIPLE}"
 echo "Building whisper-server for $TARGET_TRIPLE..."
 echo "Output directory: $OUTPUT_DIR"
 
@@ -53,23 +55,35 @@ pip install --upgrade pip
 pip install pyinstaller
 pip install -r "${SCRIPT_DIR}/requirements.txt"
 
-# Build with PyInstaller — output goes directly into binaries/ (Tauri sidecar location)
+# Build with --onedir for fast startup (no /tmp extraction on macOS)
 pyinstaller \
-    --onefile \
-    --name "selah-whisper-server-${TARGET_TRIPLE}" \
+    --onedir \
+    --name "$BINARY_NAME" \
     --distpath "$OUTPUT_DIR" \
     --workpath "${SCRIPT_DIR}/.build" \
     --specpath "${SCRIPT_DIR}" \
     --clean \
     "${SCRIPT_DIR}/whisper-server.py"
 
-# Cleanup
+# Copy the --onedir output to Tauri assets for resource bundling
+ASSETS_DIR="${SCRIPT_DIR}/../src-tauri/assets/whisper-server"
+rm -rf "$ASSETS_DIR"
+mkdir -p "$ASSETS_DIR"
+cp -R "${OUTPUT_DIR}/${BINARY_NAME}/" "$ASSETS_DIR/"
+
+# Also copy the main binary to the binaries/ directory for the prebuild check
+# and Tauri sidecar resolution. This is just the main executable, not the
+# full --onedir output (which goes to assets/).
+cp "${ASSETS_DIR}/${BINARY_NAME}" "${SCRIPT_DIR}/${BINARY_NAME}"
+
+# Cleanup build artifacts (but not the binaries/ copy)
 rm -rf "${SCRIPT_DIR}/.build"
-rm -rf "${SCRIPT_DIR}/selah-whisper-server-${TARGET_TRIPLE}.spec"
+rm -rf "${SCRIPT_DIR}/${BINARY_NAME}.spec"
+rm -rf "${OUTPUT_DIR}/${BINARY_NAME}"
 deactivate
 rm -rf "$VENV_DIR"
 
 echo ""
 echo "Build complete!"
-echo "Binary: ${OUTPUT_DIR}/selah-whisper-server-${TARGET_TRIPLE}"
-ls -la "$OUTPUT_DIR"/selah-whisper-server-*
+echo "Binary: ${ASSETS_DIR}/${BINARY_NAME}"
+ls -la "${ASSETS_DIR}/${BINARY_NAME}"

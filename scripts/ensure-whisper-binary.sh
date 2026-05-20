@@ -50,9 +50,19 @@ if [[ "$TARGET_TRIPLE" == *"-windows-"* ]]; then
 fi
 
 BINARY_PATH="${BINARIES_DIR}/${BINARY_NAME}"
+# Also check the --onedir output in assets/whisper-server/
+ASSETS_BINARY_PATH="${SCRIPT_DIR}/../src-tauri/assets/whisper-server/${BINARY_NAME}"
 
 if [ -f "$BINARY_PATH" ]; then
     echo "✓ Whisper sidecar binary exists: ${BINARY_NAME}"
+    exit 0
+fi
+
+if [ -f "$ASSETS_BINARY_PATH" ]; then
+    echo "✓ Whisper sidecar binary exists in assets: ${BINARY_NAME}"
+    # Also copy to binaries/ for the prebuild check
+    cp "$ASSETS_BINARY_PATH" "$BINARY_PATH"
+    echo "  Copied to binaries/ for prebuild check"
     exit 0
 fi
 
@@ -70,5 +80,6 @@ if [ -f "$BINARY_PATH" ]; then
     echo "✓ Whisper sidecar binary built successfully: ${BINARY_NAME}"
 else
     echo "ERROR: Build completed but binary not found at ${BINARY_PATH}"
+    echo "  Also checked: ${ASSETS_BINARY_PATH}"
     exit 1
 fi
