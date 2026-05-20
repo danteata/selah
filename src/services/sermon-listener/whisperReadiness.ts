@@ -1,35 +1,11 @@
-/**
- * Whisper Sidecar Readiness Bridge
- *
- * Subscribes once to the Tauri `whisper-server://ready` event emitted from
- * `src-tauri/src/main.rs` and re-exposes it as a small reactive API.
- *
- * The Rust side eagerly launches the bundled `selah-whisper-server` sidecar
- * at app boot via `prewarm_whisper_server()`, then emits `whisper-server://ready`
- * with `{ endpoint, model? }` once `/health` returns `model_loaded: true`.
- *
- * Without this bridge, the React side had to wait 8 s and then poll the HTTP
- * endpoint itself. With this bridge, `providerReady` flips the moment the
- * model is hot, typically < 3 s after launch.
- *
- * On web (non-Tauri) builds this is a no-op and `isReady()` always returns
- * `false` so the existing fallback paths (web-speech) keep working.
- */
-
 import { isDesktop } from '../../platform'
 
 type Listener = (state: WhisperReadiness) => void
 
 export interface WhisperReadiness {
-    /** Whether the sidecar `/health` endpoint reported `model_loaded: true`. */
     ready: boolean
-    /** HTTP endpoint of the sidecar (typically `http://127.0.0.1:17493`). */
     endpoint: string | null
-    /** Last reported model name, when available. */
     model: string | null
-    /** Whether the sidecar started but never confirmed model load (still polling). */
-    degraded: boolean
-    /** Last error reported by the sidecar (e.g. failed to spawn). */
     error: string | null
 }
 
@@ -37,7 +13,6 @@ const INITIAL_STATE: WhisperReadiness = {
     ready: false,
     endpoint: null,
     model: null,
-    degraded: false,
     error: null,
 }
 
@@ -50,6 +25,19 @@ function notify() {
     for (const fn of listeners) fn(snapshot)
 }
 
+async function checkWhisperReadyViaRust(): Promise<boolean> {
+    try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const result = await invoke<{ ready: boolean; model?: string }>('check_whisper_ready')
+        if (result.model && !state.model) {
+            state = { ...state, model: result.model }
+        }
+        return result.ready === true
+    } catch {
+        return false
+    }
+}
+
 async function ensureSubscribed(): Promise<void> {
     if (subscribed) return
     if (!isDesktop()) return
@@ -57,16 +45,16 @@ async function ensureSubscribed(): Promise<void> {
     try {
         const { listen } = await import('@tauri-apps/api/event')
 
-        await listen<{ endpoint?: string; model?: string; degraded?: boolean }>(
+        await listen<{ endpoint?: string; model?: string; elapsed_ms?: number }>(
             'whisper-server://ready',
             (event) => {
                 const payload = event.payload || {}
+                console.log('[WhisperReadiness] ready event:', payload)
                 state = {
                     ...state,
-                    ready: !payload.degraded,
+                    ready: true,
                     endpoint: payload.endpoint ?? state.endpoint,
                     model: typeof payload.model === 'string' ? payload.model : state.model,
-                    degraded: Boolean(payload.degraded),
                     error: null,
                 }
                 notify()
@@ -77,13 +65,22 @@ async function ensureSubscribed(): Promise<void> {
             state = {
                 ...state,
                 ready: false,
-                degraded: false,
                 error: event.payload?.error || 'whisper sidecar error',
             }
             notify()
         })
+
+        // One-shot check — in case the Tauri event was already emitted
+        // before we subscribed (race condition). Uses the Rust-side cache
+        // (no HTTP) so this is instant.
+        if (!state.ready) {
+            const ready = await checkWhisperReadyViaRust()
+            if (ready) {
+                state = { ...state, ready: true, endpoint: 'http://127.0.0.1:17493', error: null }
+                notify()
+            }
+        }
     } catch {
-        // listen() will fail in non-Tauri contexts; we silently ignore.
         subscribed = false
     }
 }
@@ -96,18 +93,34 @@ export function getWhisperReadiness(): WhisperReadiness {
 export function subscribeWhisperReadiness(fn: Listener): () => void {
     void ensureSubscribed()
     listeners.add(fn)
-    // Replay current state so late subscribers don't miss a `ready` event.
     fn({ ...state })
     return () => {
         listeners.delete(fn)
     }
 }
 
-/**
- * Test-only reset. Not exported for production use.
- */
 export function __resetWhisperReadiness(): void {
     state = { ...INITIAL_STATE }
     subscribed = false
     listeners.clear()
+}
+
+export async function setSermonListenerEnabled(enabled: boolean): Promise<boolean> {
+    if (!isDesktop()) return false
+    try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        return await invoke<boolean>('set_sermon_listener_enabled', { enabled })
+    } catch {
+        return false
+    }
+}
+
+export async function getSermonListenerEnabled(): Promise<boolean> {
+    if (!isDesktop()) return true
+    try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        return await invoke<boolean>('get_sermon_listener_enabled')
+    } catch {
+        return true
+    }
 }

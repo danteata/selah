@@ -12,7 +12,6 @@ import {
     stopDesktopWhisperServer,
     transcribeWithDesktopWhisper,
     getDesktopWhisperStatus,
-    isDesktopWhisperAvailable,
     type DesktopWhisperConfig,
     type DesktopWhisperResult,
     type WhisperServerStatus,
@@ -100,6 +99,10 @@ type ErrorCallback = (error: string) => void;
  * Manages the bundled whisper server in Tauri desktop app
  * with VAD-based audio capture for superior quality.
  */
+
+// Module-level promise to deduplicate concurrent init() calls (e.g. React StrictMode)
+let initPromise: Promise<boolean> | null = null
+
 class DesktopWhisperTranscriptionService {
     private isInitialized = false;
     private isRecording = false;
@@ -141,13 +144,34 @@ class DesktopWhisperTranscriptionService {
     async init(config: DesktopWhisperTranscriptionConfig = {}): Promise<boolean> {
         if (!this.checkDesktop()) return false;
 
+        if (this.isInitialized) {
+            console.log('[DesktopWhisper] Already initialized, skipping duplicate init');
+            this.config.onProgress?.(1);
+            this.config.onStatus?.('Ready');
+            return true;
+        }
+
+        // Deduplicate concurrent init() calls (React StrictMode calls effects twice)
+        if (initPromise) {
+            console.log('[DesktopWhisper] Init already in progress, awaiting existing promise');
+            return initPromise;
+        }
+
+        initPromise = this._doInit(config);
+        try {
+            return await initPromise;
+        } finally {
+            initPromise = null;
+        }
+    }
+
+    private async _doInit(config: DesktopWhisperTranscriptionConfig = {}): Promise<boolean> {
         this.config = { ...config };
-        this.useVAD = config.useVAD !== false; // Default to true
-        this.useNativeCapture = config.useNativeAudio !== false; // Fallback for non-VAD mode
+        this.useVAD = config.useVAD !== false;
+        this.useNativeCapture = config.useNativeAudio !== false;
 
         this.config.onStatus?.('Initializing desktop whisper service...');
 
-        // Load VAD scripts if using VAD mode
         if (this.useVAD) {
             this.config.onStatus?.('Loading VAD library...');
             const vadLoaded = await this.loadVADScripts();
@@ -157,7 +181,6 @@ class DesktopWhisperTranscriptionService {
             }
         }
 
-        // Check if native audio capture is available (for fallback)
         if (!this.useVAD && this.useNativeCapture) {
             const nativeAvailable = await isNativeAudioCaptureAvailable();
             if (!nativeAvailable) {
@@ -166,57 +189,56 @@ class DesktopWhisperTranscriptionService {
             }
         }
 
-        // Start the whisper server
         this.config.onStatus?.('Starting whisper server...');
         this.config.onProgress?.(0.2);
 
-        // Note: Server-side VAD is disabled because the silero_vad_v6.onnx model
-        // is not bundled with the PyInstaller executable. The frontend uses its own
-        // WASM-based VAD for audio chunking at speech pauses.
-        const endpoint = await startDesktopWhisperServer({
-            model: config.model || 'base.en',
-            language: config.language,
-            vadFilter: false, // Always disable server-side VAD (model not bundled)
-            hotwords: config.hotwords,
-        });
-
-        if (!endpoint) {
-            this.config.onStatus?.('Failed to start whisper server');
-            return false;
+        let endpoint: string | null = null;
+        try {
+            endpoint = await startDesktopWhisperServer({
+                model: config.model || 'base.en',
+                language: config.language,
+                vadFilter: false,
+                hotwords: config.hotwords,
+            });
+        } catch (err) {
+            console.warn('[DesktopWhisper] startDesktopWhisperServer threw, server may already be running from prewarm:', err);
         }
 
-        this.config.onProgress?.(0.5);
-        this.config.onStatus?.('Whisper server started, waiting for model to load...');
-
-        const maxAttempts = 15;
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            const available = await isDesktopWhisperAvailable();
-            if (available) {
-                this.isInitialized = true;
-                this.config.onProgress?.(1);
-                this.config.onStatus?.('Ready');
-                console.log('[DesktopWhisper] Server is ready after', attempt + 1, 'attempts');
-                return true;
-            }
-            if (attempt % 10 === 0 && attempt > 0) {
-                console.log(`[DesktopWhisper] Still waiting for server... attempt ${attempt + 1}/${maxAttempts}`);
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.config.onProgress?.(0.5 + (attempt / maxAttempts) * 0.5);
+        if (endpoint) {
+            console.log('[DesktopWhisper] Server endpoint:', endpoint);
+        } else {
+            console.log('[DesktopWhisper] No endpoint from invoke — server may already be running from prewarm');
         }
 
-        this.config.onStatus?.('Whisper server not responding after 15 seconds');
-        console.error('[DesktopWhisper] Server failed to start within 15 seconds');
-        return false;
+        this.isInitialized = true;
+        this.config.onProgress?.(0.6);
+        this.config.onStatus?.('Server starting, will be ready shortly...');
+        console.log('[DesktopWhisper] Init complete, waiting for readiness event');
+        return true;
     }
 
     /**
      * Load VAD library scripts dynamically
      */
     private async loadVADScripts(): Promise<boolean> {
-        // Already loaded
         if (this.vadLoaded && window.vad?.MicVAD && window.vad?.utils) {
             return true;
+        }
+
+        // Skip if loader script is already in the DOM
+        if (document.querySelector('script[src="/vad-loader.js"]')) {
+            let attempts = 0;
+            const maxAttempts = 50;
+            while (attempts < maxAttempts) {
+                if (window.vad?.MicVAD && window.vad?.utils) {
+                    this.vadLoaded = true;
+                    return true;
+                }
+                attempts++;
+                await new Promise(r => setTimeout(r, 100));
+            }
+            console.error('[DesktopWhisper] Timeout waiting for existing VAD loader');
+            return false;
         }
 
         return new Promise((resolve) => {

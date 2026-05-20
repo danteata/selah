@@ -246,6 +246,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [transcript, setTranscript] = useState(() => readLiveState()?.transcript || '')
     const [interimTranscript, setInterimTranscript] = useState('')
     const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>(() => readLiveState()?.detectedVerses || [])
+    const detectedVersesRef = useRef<DetectedVerse[]>(detectedVerses)
     const [currentVerse, setCurrentVerse] = useState<DetectedVerse | null>(() => readLiveState()?.currentVerse || null)
     const [currentScripture, setCurrentScripture] = useState<Scripture | null>(null)
     const [error, setError] = useState<string | null>(null)
@@ -342,12 +343,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             let stream = unifiedTranscriptionService.getMediaStream()
 
             if (!stream) {
+                const audioConstraints: boolean | MediaTrackConstraints = sermonSettings?.selectedMicrophoneId
+                    ? { deviceId: { exact: sermonSettings.selectedMicrophoneId }, echoCancellation: { ideal: true }, noiseSuppression: { ideal: true } }
+                    : true
                 try {
-                    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
                     audioStreamRef.current = stream
-                } catch {
-                    console.warn('[useSermonListener] Could not acquire audio stream for analyser')
-                    return
+                } catch (err) {
+                    if (err instanceof OverconstrainedError && sermonSettings?.selectedMicrophoneId) {
+                        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                        audioStreamRef.current = stream
+                    } else {
+                        console.warn('[useSermonListener] Could not acquire audio stream for analyser')
+                        return
+                    }
                 }
             }
 
@@ -375,7 +384,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } catch (e) {
             console.warn('[useSermonListener] Could not start audio analyser:', e)
         }
-    }, [])
+    }, [sermonSettings?.selectedMicrophoneId])
 
     const stopAudioAnalyser = useCallback(() => {
         if (audioLevelRafRef.current != null) {
@@ -516,6 +525,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [currentScripture])
 
     useEffect(() => {
+        detectedVersesRef.current = detectedVerses
+    }, [detectedVerses])
+
+    useEffect(() => {
         providerReadyRef.current = providerReady
     }, [providerReady])
 
@@ -524,8 +537,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // to the Tauri `whisper-server://ready` event emitted by the Rust
     // prewarm task. If the sidecar is already hot when we mount (very common
     // on warm boots) the event replay marks `providerReady` instantly.
+    //
+    // We proceed even while global settings are loading so the UI doesn't
+    // hang forever if Convex is unreachable. The provider defaults are safe.
     useEffect(() => {
-        if (isGlobalSettingsLoading) return
         let cancelled = false
 
         const initialize = async () => {
@@ -607,7 +622,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
     }, [
         targetProvider,
-        isGlobalSettingsLoading,
         language,
         globalSettings?.sermonListener_useVAD,
     ])
@@ -1030,7 +1044,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } else if (hasReActivated) {
             // No new verses, but a previously detected verse was mentioned again — re-activate it
             const reActivatedRef = reActivatedRefs[0]
-            const existing = detectedVerses.find(v => v.reference === reActivatedRef)
+            const existing = detectedVersesRef.current.find(v => v.reference === reActivatedRef)
             if (existing) {
                 const now = Date.now()
                 const lastActivated = reactivationCooldownRef.current.get(reActivatedRef) || 0
@@ -1176,7 +1190,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 // Re-activate previously detected semantic verses as current
                 if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0 && !isStale) {
                     const reActivatedRef = semanticReActivatedRefs[0]
-                    const existing = detectedVerses.find(v => v.reference === reActivatedRef)
+                    const existing = detectedVersesRef.current.find(v => v.reference === reActivatedRef)
                     if (existing) {
                         const now = Date.now()
                         const lastActivated = reactivationCooldownRef.current.get(reActivatedRef) || 0
@@ -1209,7 +1223,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setIsSemanticSearching(false)
             })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, semanticDetectorReady, enableVoiceCommands, currentVerse, currentScripture, onVoiceCommand, dedupeVerses, detectedVerses, applyBibleVersionChange])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, semanticDetectorReady, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange])
 
     /**
      * Set transcription provider
@@ -1227,21 +1241,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // Use global settings for provider configuration
         const success = await unifiedTranscriptionService.setProvider(newProvider, {
             language: language.split('-')[0],
-            whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
-            whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
-            whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
-            whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
-            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
-            whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
-            fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
-            fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
-            fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-            fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
-            fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
             useVAD: globalSettings?.sermonListener_useVAD,
-            elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
-            elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
-            elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
             onProgress: setModelLoadingProgress,
         })
 
@@ -1258,21 +1258,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [
         isListening,
         language,
-        globalSettings?.sermonListener_whisperApiKey,
-        globalSettings?.sermonListener_whisperChunkDurationMs,
-        globalSettings?.sermonListener_whisperCppChunkDurationMs,
-        globalSettings?.sermonListener_whisperCppEndpoint,
-        globalSettings?.sermonListener_whisperEndpoint,
-        globalSettings?.sermonListener_whisperModel,
-        globalSettings?.sermonListener_fasterWhisperEndpoint,
-        globalSettings?.sermonListener_fasterWhisperModel,
-        globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-        globalSettings?.sermonListener_fasterWhisperAudioCaptureMode,
-        globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
         globalSettings?.sermonListener_useVAD,
-        globalSettings?.sermonListener_elevenLabsApiKey,
-        globalSettings?.sermonListener_elevenLabsModelId,
-        globalSettings?.sermonListener_elevenLabsChunkDurationMs,
     ])
 
     /**
@@ -1296,41 +1282,22 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         if (!providerReady && provider !== 'web-speech') {
             setIsInitializingProvider(true)
             try {
-                console.log('[useSermonListener] Initializing provider on first use:', provider)
-                const initSuccess = await unifiedTranscriptionService.setProvider(provider, {
-                    language: language.split('-')[0],
-                    whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
-                    whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
-                    whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
-                    whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
-                    whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
-                    whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
-                    fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
-                    fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
-                    fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-                    fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
-                    fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
-                    useVAD: globalSettings?.sermonListener_useVAD,
-                    elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
-                    elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
-                    elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
-                    onProgress: (progress: number) => {
-                        setModelLoadingProgress(progress)
-                    },
-                    onStatusChange: (status: TranscriptionStatus) => {
-                        const statusText = typeof status?.error === 'string' ? status.error : status?.provider || ''
-                        console.log('[useSermonListener] Provider init status:', statusText)
-                    },
-                })
-                setProviderReady(initSuccess)
-                if (!initSuccess) {
-                    setError('Failed to initialize transcription provider')
+                console.log('[useSermonListener] Provider not ready yet, checking via Rust:', provider)
+                // Use Rust-side health check which CAN reach localhost even when
+                // the browser can't (macOS WKWebView limitation).
+                const { invoke } = await import('@tauri-apps/api/core')
+                const result = await invoke<{ ready: boolean }>('check_whisper_ready')
+                if (result.ready) {
+                    console.log('[useSermonListener] Whisper server is available (Rust check), marking ready')
+                    setProviderReady(true)
+                    setError(null)
+                } else {
+                    console.log('[useSermonListener] Whisper server not ready yet, will auto-detect')
                     setIsInitializingProvider(false)
                     return false
                 }
             } catch (err) {
-                console.error('[useSermonListener] Provider init error:', err)
-                setError('Failed to initialize transcription provider')
+                console.error('[useSermonListener] Provider availability check error:', err)
                 setIsInitializingProvider(false)
                 return false
             } finally {
@@ -1345,12 +1312,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             })
         }
 
-        console.log('[useSermonListener] Starting transcription with provider:', provider, {
-            globalProvider: globalSettings?.sermonListener_transcriptionProvider,
-            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
-        })
+        console.log('[useSermonListener] Starting transcription with provider:', provider)
 
-        // Configure transcription using global settings
         const success = await unifiedTranscriptionService.start({
             provider,
             language,
@@ -1358,21 +1321,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             microphoneDeviceId: sermonSettings?.selectedMicrophoneId,
             continuous: true,
             interimResults: true,
-            whisperModel: (globalSettings?.sermonListener_whisperModel || 'base') as 'tiny' | 'base' | 'small' | 'medium',
-            whisperEndpoint: globalSettings?.sermonListener_whisperEndpoint,
-            whisperApiKey: globalSettings?.sermonListener_whisperApiKey,
-            whisperChunkDurationMs: globalSettings?.sermonListener_whisperChunkDurationMs,
-            whisperCppEndpoint: globalSettings?.sermonListener_whisperCppEndpoint,
-            whisperCppChunkDurationMs: globalSettings?.sermonListener_whisperCppChunkDurationMs,
-            fasterWhisperEndpoint: globalSettings?.sermonListener_fasterWhisperEndpoint,
-            fasterWhisperModel: globalSettings?.sermonListener_fasterWhisperModel as 'tiny' | 'tiny.en' | 'base' | 'base.en' | 'small' | 'small.en' | 'medium' | 'medium.en' | 'large-v1' | 'large-v2' | 'large-v3' | 'distil-large-v3' | undefined,
-            fasterWhisperChunkDurationMs: globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-            fasterWhisperAudioCaptureMode: globalSettings?.sermonListener_fasterWhisperAudioCaptureMode as 'browser-wav' | 'server-decode' | undefined,
-            fasterWhisperDisableBrowserProcessing: globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
             useVAD: globalSettings?.sermonListener_useVAD,
-            elevenLabsApiKey: globalSettings?.sermonListener_elevenLabsApiKey,
-            elevenLabsModelId: globalSettings?.sermonListener_elevenLabsModelId,
-            elevenLabsChunkDurationMs: globalSettings?.sermonListener_elevenLabsChunkDurationMs,
             onStart: () => {
                 setIsListening(true)
                 setError(null)
@@ -1465,21 +1414,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         sermonSettings?.captureSource,
         sermonSettings?.selectedMicrophoneId,
         globalSettings?.sermonListener_transcriptionProvider,
-        globalSettings?.sermonListener_whisperApiKey,
-        globalSettings?.sermonListener_whisperChunkDurationMs,
-        globalSettings?.sermonListener_whisperCppChunkDurationMs,
-        globalSettings?.sermonListener_whisperCppEndpoint,
-        globalSettings?.sermonListener_whisperEndpoint,
-        globalSettings?.sermonListener_whisperModel,
-        globalSettings?.sermonListener_fasterWhisperEndpoint,
-        globalSettings?.sermonListener_fasterWhisperModel,
-        globalSettings?.sermonListener_fasterWhisperChunkDurationMs,
-        globalSettings?.sermonListener_fasterWhisperAudioCaptureMode,
-        globalSettings?.sermonListener_fasterWhisperDisableBrowserProcessing,
         globalSettings?.sermonListener_useVAD,
-        globalSettings?.sermonListener_elevenLabsApiKey,
-        globalSettings?.sermonListener_elevenLabsModelId,
-        globalSettings?.sermonListener_elevenLabsChunkDurationMs,
         semanticDetectorReady,
         initSemanticDetector,
     ])
