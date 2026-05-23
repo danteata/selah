@@ -11,6 +11,118 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, W
 use super::state::{MultiMonitorState, LIVE_WINDOW_LABEL};
 use super::types::*;
 
+/// Generate a human-readable display name.
+/// Primary → "Built-in Display", external → "External Display N".
+pub fn humanize_display_name(is_primary: bool, external_index: u32) -> String {
+    if is_primary {
+        "Built-in Display".to_string()
+    } else {
+        format!("External Display {}", external_index)
+    }
+}
+
+/// Generate a stable ID from the raw monitor name and position.
+/// Uses the raw name (lowercased, spaces replaced with hyphens) plus
+/// the position to produce a unique identifier that survives reboots.
+pub fn generate_stable_id(raw_name: &str, position_x: i32, position_y: i32) -> String {
+    if !raw_name.is_empty() {
+        format!(
+            "{}-{}x{}",
+            raw_name.to_lowercase().replace(' ', "-"),
+            position_x,
+            position_y
+        )
+    } else {
+        format!("monitor-{}x{}", position_x, position_y)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_humanize_primary_display() {
+        assert_eq!(humanize_display_name(true, 0), "Built-in Display");
+    }
+
+    #[test]
+    fn test_humanize_external_displays() {
+        assert_eq!(humanize_display_name(false, 1), "External Display 1");
+        assert_eq!(humanize_display_name(false, 2), "External Display 2");
+        assert_eq!(humanize_display_name(false, 3), "External Display 3");
+    }
+
+    #[test]
+    fn test_stable_id_with_raw_name() {
+        assert_eq!(
+            generate_stable_id("Monitor #14090", 1920, 0),
+            "monitor-#14090-1920x0"
+        );
+    }
+
+    #[test]
+    fn test_stable_id_with_empty_name() {
+        assert_eq!(generate_stable_id("", 0, 0), "monitor-0x0");
+        assert_eq!(generate_stable_id("", 2560, 1440), "monitor-2560x1440");
+    }
+
+    #[test]
+    fn test_stable_id_lowercases_raw_name() {
+        assert_eq!(
+            generate_stable_id("DELL U2723QE", 1920, 0),
+            "dell-u2723qe-1920x0"
+        );
+    }
+
+    #[test]
+    fn test_stable_id_replaces_spaces_with_hyphens() {
+        assert_eq!(
+            generate_stable_id("Built In Display", 0, 0),
+            "built-in-display-0x0"
+        );
+    }
+
+    #[test]
+    fn test_stable_id_negative_position() {
+        assert_eq!(
+            generate_stable_id("Left Monitor", -1920, 0),
+            "left-monitor--1920x0"
+        );
+    }
+
+    #[test]
+    fn test_stable_id_uniqueness_different_positions() {
+        let id1 = generate_stable_id("Monitor", 0, 0);
+        let id2 = generate_stable_id("Monitor", 1920, 0);
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_multi_monitor_naming_sequence() {
+        let cases = vec![
+            (true, 0, "Built-in Display"),
+            (false, 1, "External Display 1"),
+            (false, 2, "External Display 2"),
+        ];
+        for (is_primary, idx, expected) in cases {
+            assert_eq!(humanize_display_name(is_primary, idx), expected);
+        }
+    }
+
+    #[test]
+    fn test_stable_id_preserves_special_chars_in_raw_name() {
+        assert_eq!(
+            generate_stable_id("Monitor #14090", 1920, 0),
+            "monitor-#14090-1920x0"
+        );
+        assert_eq!(
+            generate_stable_id("Dell-U2723QE", 0, 0),
+            "dell-u2723qe-0x0"
+        );
+    }
+}
+
 impl MultiMonitorState {
     /// Get all available monitors with stable IDs
     pub fn get_available_monitors(&self) -> Vec<MonitorInfo> {
@@ -20,34 +132,45 @@ impl MultiMonitorState {
                 let available = app.available_monitors().unwrap_or_default();
                 let primary = app.primary_monitor().unwrap_or_default();
 
-                return available
+                // First pass: determine which monitors are primary so we can
+                // assign human-readable names without double-borrowing.
+                let primary_pos = primary.as_ref().map(|p| p.position());
+
+                let items: Vec<_> = available
                     .into_iter()
-                    .enumerate()
-                    .map(|(idx, monitor)| {
+                    .map(|monitor| {
                         let position = monitor.position();
-                        let size = monitor.size();
-                        let name = monitor
+                        let raw_name = monitor
                             .name()
                             .map(|s| s.to_string())
-                            .unwrap_or(format!("Monitor {}", idx + 1));
+                            .unwrap_or_default();
+                        let is_primary = primary_pos
+                            .map(|pp| pp == position)
+                            .unwrap_or(position.x == 0 && position.y == 0);
+                        (monitor, raw_name, is_primary)
+                    })
+                    .collect();
 
-                        // Use name + position as a stable ID since enumeration order can change
-                        let stable_id = format!(
-                            "{}-{}x{}",
-                            name.to_lowercase().replace(' ', "-"),
-                            position.x,
-                            position.y
-                        );
+                // Second pass: assign human-readable display names
+                let mut external_count = 0u32;
+                let results: Vec<MonitorInfo> = items
+                    .into_iter()
+                    .map(|(monitor, raw_name, is_primary)| {
+                        let position = monitor.position();
+                        let size = monitor.size();
 
-                        // Check if this is the primary monitor by comparing position
-                        let is_primary = primary
-                            .as_ref()
-                            .map(|p| p.position() == position)
-                            .unwrap_or(idx == 0);
+                        let external_idx = if !is_primary {
+                            external_count += 1;
+                            external_count
+                        } else {
+                            0
+                        };
+                        let display_name = humanize_display_name(is_primary, external_idx);
+                        let stable_id = generate_stable_id(&raw_name, position.x, position.y);
 
                         MonitorInfo {
                             id: stable_id,
-                            name,
+                            name: display_name,
                             width: size.width,
                             height: size.height,
                             position_x: position.x,
@@ -58,6 +181,8 @@ impl MultiMonitorState {
                         }
                     })
                     .collect();
+
+                return results;
             }
         }
 
