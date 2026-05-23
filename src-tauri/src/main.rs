@@ -242,19 +242,24 @@ async fn run_whisper_server(
         (resource_dir.clone(), true) // placeholder path, won't be used
     };
 
+    // If we have a bundled model, pass its path as --model instead of
+    // --model-path. Older PyInstaller builds may not recognise --model-path
+    // (it was added later to whisper-server.py), but faster-whisper's
+    // WhisperModel() accepts a local directory path for --model just fine
+    // (it falls through the model_map lookup and goes straight to the
+    // CTranslate2 loader).
+    let effective_model = resolve_bundled_model_path(&app)
+        .unwrap_or_else(|| model_arg.clone());
+
     let (mut rx, child_pid) = if using_sidecar_fallback {
         let mut sidecar_cmd = app.shell().sidecar("selah-whisper-server")
             .map_err(|e| format!("Failed to create whisper server sidecar: {}", e))?;
-        sidecar_cmd = sidecar_cmd.args(["--port", &WHISPER_SERVER_PORT.to_string(), "--model", &model_arg]);
+        sidecar_cmd = sidecar_cmd.args(["--port", &WHISPER_SERVER_PORT.to_string(), "--model", &effective_model]);
         // Set cwd to assets/whisper-server/ so PyInstaller _internal/ is found
         let sidecar_cwd = resource_dir.join("assets").join("whisper-server");
         if sidecar_cwd.exists() {
             sidecar_cmd = sidecar_cmd.current_dir(&sidecar_cwd);
             println!("[whisper-server] Sidecar cwd: {}", sidecar_cwd.display());
-        }
-        if let Some(bundled_path) = resolve_bundled_model_path(&app) {
-            println!("Using bundled model path: {}", bundled_path);
-            sidecar_cmd = sidecar_cmd.args(["--model-path", &bundled_path]);
         }
         let (rx, child) = sidecar_cmd.spawn()
             .map_err(|e| format!("Failed to spawn whisper server sidecar: {}", e))?;
@@ -264,13 +269,9 @@ async fn run_whisper_server(
         // Set the current directory to the binary's parent directory.
         let exe_dir = whisper_exe.parent().unwrap_or_else(|| std::path::Path::new("."));
         let mut cmd = app.shell().command(&whisper_exe)
-            .args(["--port", &WHISPER_SERVER_PORT.to_string(), "--model", &model_arg])
+            .args(["--port", &WHISPER_SERVER_PORT.to_string(), "--model", &effective_model])
             .env("PYTHONUNBUFFERED", "1")
             .current_dir(exe_dir);
-        if let Some(bundled_path) = resolve_bundled_model_path(&app) {
-            println!("Using bundled model path: {}", bundled_path);
-            cmd = cmd.args(["--model-path", &bundled_path]);
-        }
         let (rx, child) = cmd.spawn()
             .map_err(|e| format!("Failed to spawn whisper server: {}", e))?;
         (rx, child.pid())
