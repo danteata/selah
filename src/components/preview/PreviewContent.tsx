@@ -19,6 +19,7 @@ export function PreviewContent() {
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
     const setActiveSlides = useAppStore((state) => state.setActiveSlides)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const setLiveSlide = useAppStore((state) => state.setLiveSlide)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const bulkSelectMode = useAppStore((state) => state.bulkSelectMode)
     const selectedSlideIds = useAppStore((state) => state.selectedSlideIds)
@@ -43,6 +44,14 @@ export function PreviewContent() {
         sessionScheduleId,
     } = useLiveSession()
     const slidesGridRef = useRef<HTMLDivElement>(null)
+    const activeSlideRef = useRef<HTMLDivElement>(null)
+
+    // Auto-scroll to active slide when it changes
+    useEffect(() => {
+        if (activeSlide && activeSlideRef.current) {
+            activeSlideRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        }
+    }, [activeSlide?.id])
 
     // Derive slides from store - single source of truth
     // Show slides that match the active schedule, or slides without a schedule if no active schedule
@@ -105,6 +114,21 @@ export function PreviewContent() {
         })
         clearSelectedSlides()
     }, [selectedSlideIds, slides, removeActiveSlide, clearSelectedSlides])
+
+    const handleClearQueue = useCallback(() => {
+        if (slides.length === 0) return
+        if (!confirm(`Clear ${slides.length} slide${slides.length === 1 ? '' : 's'} from this queue?`)) return
+
+        const slideIdsToClear = new Set(slides.map((slide) => slide.id))
+        const remainingSlides = activeSlides.filter((slide) => !slideIdsToClear.has(slide.id))
+
+        setActiveSlides(remainingSlides)
+        if (liveSlideId && slideIdsToClear.has(liveSlideId)) {
+            setLiveSlide('')
+        }
+        clearSelectedSlides()
+        setActiveSlide(undefined)
+    }, [slides, activeSlides, setActiveSlides, liveSlideId, setLiveSlide, clearSelectedSlides])
 
     // Check if all slides are selected
     const allSelected = slides.length > 0 && selectedSlideIds.length === slides.length
@@ -305,19 +329,22 @@ export function PreviewContent() {
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
             {/* Header - Compact */}
-            <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/30">
+            <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/20">
                 <div className="flex items-center gap-2">
                     <Rows3 className="w-4 h-4 text-[var(--accent-teal)]" />
                     <h2 className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">
                         Slide Queue
                     </h2>
+                    <span className="text-[10px] font-medium text-[var(--text-muted)] tabular-nums">
+                        {slides.length}
+                    </span>
                 </div>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={toggleBulkSelectMode}
                         className={`p-1.5 rounded-lg transition-all ${
-                            bulkSelectMode 
-                                ? 'bg-[var(--accent-amber)]/10 text-[var(--accent-amber)]' 
+                            bulkSelectMode
+                                ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                         }`}
                         title="Bulk Select"
@@ -333,18 +360,28 @@ export function PreviewContent() {
                             <Trash2 className="w-4 h-4" />
                         </button>
                     )}
+                    {slides.length > 0 && (
+                        <button
+                            onClick={handleClearQueue}
+                            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/10 rounded-lg transition-colors"
+                            title="Clear slide queue"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
             </div>
 
             {/* Slides List - High Density Vertical */}
             <div
                 ref={slidesGridRef}
-                className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar"
+                className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 custom-scrollbar"
             >
                 {slides.length > 0 ? (
-                    slides.map((slide, index) => (
+                    slides.map((slide) => (
                         <SlideCard
                             key={slide.id}
+                            ref={activeSlide?.id === slide.id ? activeSlideRef : undefined}
                             slide={slide}
                             isActive={activeSlide?.id === slide.id}
                             isLive={liveSlideId === slide.id}
@@ -358,6 +395,7 @@ export function PreviewContent() {
                             isSaved={isInLibrary(slide.id)}
                             onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
                             onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
+                            isStickyActive={activeSlide?.id === slide.id}
                         />
                     ))
                 ) : (

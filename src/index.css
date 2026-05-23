@@ -588,7 +588,10 @@ h6 {
     width: 100vw;
     overflow: hidden;
     position: relative;
-    background-color: var(--bg-primary);
+    background:
+        radial-gradient(circle at 50% 18%, rgba(13, 148, 136, 0.10), transparent 34%),
+        radial-gradient(circle at 92% 12%, rgba(217, 119, 6, 0.07), transparent 24%),
+        linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-primary) 45%, var(--bg-tertiary) 100%);
 }
 
 /* Top Bar */
@@ -653,7 +656,7 @@ h6 {
 .studio-context-panel {
     flex-shrink: 0;
     width: var(--panel-width, 320px);
-    background-color: var(--bg-secondary);
+    background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
     border-left: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
@@ -684,6 +687,7 @@ h6 {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background: color-mix(in srgb, var(--bg-secondary) 74%, transparent);
 }
 
 /* Live preview area (right side of workspace) */
@@ -693,24 +697,45 @@ h6 {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 12px;
+    padding: 10px 12px 12px;
+    background:
+        radial-gradient(circle at 38% 22%, rgba(13, 148, 136, 0.09), transparent 32%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
 }
 
 /* Live preview monitor — maintains 16:9 aspect ratio */
 .studio-live-monitor {
     width: 100%;
     aspect-ratio: 16 / 9;
-    max-height: 60vh;
-    border-radius: 8px;
+    max-height: 54vh;
+    border-radius: 12px;
     overflow: hidden;
     position: relative;
     background-color: #1f2937;
-    box-shadow: var(--shadow-lg);
-    transition: box-shadow 0.4s ease;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+        0 24px 80px rgba(0, 0, 0, 0.35),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+    transition: box-shadow 0.4s ease, border-color 0.4s ease;
 }
 
 .studio-live-monitor.is-live {
-    box-shadow: 0 0 0 2px #16a34a, 0 0 24px rgba(22,163,74,0.2);
+    border-color: rgba(22, 163, 74, 0.8);
+    box-shadow:
+        0 0 0 1px rgba(22, 163, 74, 0.85),
+        0 0 28px rgba(22, 163, 74, 0.22),
+        0 26px 90px rgba(0, 0, 0, 0.42),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.studio-output-sidecar {
+    opacity: 0.88;
+    transition: opacity 160ms ease-out;
+}
+
+.studio-output-sidecar:hover,
+.studio-output-sidecar:focus-within {
+    opacity: 1;
 }
 
 /* Floating context panel */

@@ -1,4 +1,5 @@
-import { Trash2, Copy, Bookmark, Pencil, Radio, Play, Zap, Lightbulb } from 'lucide-react'
+import { forwardRef } from 'react'
+import { Trash2, Copy, Bookmark, Pencil, Zap, Lightbulb } from 'lucide-react'
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
 import { useFileUrl } from '../../hooks/useTemplates'
@@ -10,6 +11,7 @@ interface SlideCardProps {
     isLive?: boolean
     isSelected?: boolean
     selectable?: boolean
+    isStickyActive?: boolean
     onClick: () => void
     onDuplicate: () => void
     onDelete: () => void
@@ -21,12 +23,13 @@ interface SlideCardProps {
     lockedBy?: string
 }
 
-export function SlideCard({
+export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     slide,
     isActive = false,
     isLive = false,
     isSelected = false,
     selectable = false,
+    isStickyActive = false,
     onClick,
     onDuplicate,
     onDelete,
@@ -36,7 +39,7 @@ export function SlideCard({
     onGoLive,
     onSuggestToQueue,
     lockedBy,
-}: SlideCardProps) {
+}: SlideCardProps, ref) => {
     // Get file URL if slide has a backgroundStorageId
     const fileUrl = useFileUrl(slide.backgroundStorageId || null)
 
@@ -54,21 +57,27 @@ export function SlideCard({
 
     return (
         <div
+            ref={ref}
             onClick={onClick}
             className={`
-        relative group cursor-pointer rounded-lg border-2 transition-all overflow-hidden
+        relative group flex-shrink-0 cursor-pointer rounded-xl border transition-all overflow-hidden
+        ${isStickyActive ? 'sticky top-0 z-10 bg-[var(--bg-secondary)]' : ''}
         ${isLive
-                    ? 'border-red-500 ring-2 ring-red-200 dark:ring-red-900'
+                    ? 'border-red-500/45 bg-red-500/[0.03] shadow-lg shadow-red-500/10'
                     : isActive
-                        ? 'border-primary-500 ring-2 ring-primary-200 dark:ring-primary-900'
-                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                        ? 'border-[var(--accent-teal)]/45 bg-[var(--accent-teal)]/[0.04] shadow-lg shadow-[var(--accent-teal)]/10'
+                        : 'border-[var(--border-subtle)] hover:border-[var(--border-emphasis)] bg-[var(--bg-secondary)]/70 hover:bg-[var(--bg-secondary)]'
                 }
-        ${isSelected ? 'bg-primary-50 dark:bg-primary-900/20' : 'bg-white dark:bg-gray-800'}
+        ${isSelected ? 'ring-1 ring-[var(--accent-teal)]/35' : ''}
       `}
         >
+            {(isLive || isActive) && (
+                <div className={`absolute inset-y-0 left-0 z-20 w-1 ${isLive ? 'bg-red-500' : 'bg-[var(--accent-teal)]'}`} />
+            )}
+
             {/* Live indicator */}
             {isLive && (
-                <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-xs font-medium rounded-full">
+                <div className="absolute top-2 left-2 z-30 flex items-center gap-1 px-2 py-0.5 bg-red-500 text-white text-[10px] font-bold uppercase tracking-wider rounded-full shadow-lg shadow-red-500/20">
                     <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
                     LIVE
                 </div>
@@ -156,7 +165,7 @@ export function SlideCard({
                 {onGoLive && !isLive && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onGoLive(); }}
-                        className="absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all transform scale-90 group-hover:scale-100"
+                        className="absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all transform scale-90 group-hover:scale-100"
                         title="Send to Live"
                     >
                         <Zap className="w-4 h-4" />
@@ -176,7 +185,7 @@ export function SlideCard({
             {/* Slide info and actions */}
             <div className="p-3">
                 <div className="flex items-center justify-between">
-                    <h4 className="font-medium text-sm text-gray-900 dark:text-white truncate flex-1">
+                    <h4 className="font-semibold text-sm text-[var(--text-primary)] truncate flex-1">
                         {slide.name}
                     </h4>
                     {selectable && (
@@ -200,48 +209,49 @@ export function SlideCard({
                                 {slide.verseLabel} {slide.totalVerses > 1 && `(${slide.verseIndex! + 1}/${slide.totalVerses})`}
                             </span>
                         )}
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <span className="text-xs text-[var(--text-muted)] tabular-nums">
                             #{slide.index + 1}
                         </span>
                     </div>
 
-                    {/* Action buttons - always visible in the info section */}
-                    <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                    {/* Keep actions discoverable; hover/focus raises their emphasis. */}
+                    <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                         {onEdit && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                                className="p-1.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                                className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
                                 title="Edit"
                             >
-                                <Pencil className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                                <Pencil className="w-3.5 h-3.5 text-[var(--text-tertiary)] hover:text-[var(--accent-teal)]" />
                             </button>
                         )}
                         {onSaveToLibrary && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onSaveToLibrary(); }}
-                                className="p-1.5 rounded hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
+                                className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
                                 title={isSaved ? 'Already in Library' : 'Save to Library'}
                             >
-                                <Bookmark className={`w-3.5 h-3.5 ${isSaved ? 'text-primary-600 dark:text-primary-400' : 'text-gray-600 dark:text-gray-400'}`} />
+                                <Bookmark className={`w-3.5 h-3.5 ${isSaved ? 'text-[var(--accent-teal)]' : 'text-[var(--text-tertiary)]'}`} />
                             </button>
                         )}
                         <button
                             onClick={(e) => { e.stopPropagation(); onDuplicate(); }}
-                            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                            className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
                             title="Duplicate"
                         >
-                            <Copy className="w-3.5 h-3.5 text-gray-600 dark:text-gray-400" />
+                            <Copy className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
                         </button>
                         <button
                             onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                            className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                            className="p-1.5 rounded hover:bg-red-500/10 transition-colors"
                             title="Delete"
                         >
-                            <Trash2 className="w-3.5 h-3.5 text-red-500 dark:text-red-400" />
+                            <Trash2 className="w-3.5 h-3.5 text-red-500/75" />
                         </button>
                     </div>
                 </div>
             </div>
         </div>
     )
-}
+})
+SlideCard.displayName = 'SlideCard'
