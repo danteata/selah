@@ -9,6 +9,7 @@ export interface VoiceCommand {
     versionName?: string
     offset?: number
     verseRef?: string
+    targetVerse?: number
 }
 
 const AVAILABLE_VERSIONS: Array<{ id: string; names: string[] }> = (() => {
@@ -91,8 +92,10 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
 
     if (commands.length === 0) {
         const standalonePatterns = [
-            /(?:let'?s? |let us |we should |can you |please )?(?:use|switch to|change to|go to|turn to|read from) (?:the )?(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i,
+            /(?:let'?s? |let us |we should |can you |please )?(?:use|switch to|change to|go to|turn to|read from|pull up|bring up|open) (?:the )?(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i,
             /(?:read|show|display) (?:that |it |this )?(?:in|from|using|with) (?:the )?(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i,
+            /(?:give me|get me|i want|i need|i'd like|load|make it|set (?:it )?to) (?:the )?(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i,
+            /(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b\s*(?:please|now|if you will|if you would)/i,
         ]
 
         for (const pattern of standalonePatterns) {
@@ -121,7 +124,7 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
             for (const name of v.names) {
                 if (name.length >= 3 && lower.includes(name)) {
                     const beforeText = lower.substring(0, lower.indexOf(name))
-                    const actionWords = ['switch', 'change', 'use', 'go', 'turn', 'read', 'show', 'display', 'look']
+                    const actionWords = ['switch', 'change', 'use', 'go', 'turn', 'read', 'show', 'display', 'look', 'give me', 'get me', 'pull up', 'bring up', 'open', 'see', 'try', 'need', 'want', 'like', 'make it', 'set to', 'please']
                     const hasActionContext = actionWords.some(w => beforeText.includes(w))
                     if (hasActionContext) {
                         const version = (bibleVersionObjects as BibleVersion[]).find(bv => bv.id === v.id)
@@ -213,6 +216,63 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
     return commands
 }
 
+const WRITTEN_NUMBERS: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+    sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+}
+
+function parseVerseNumber(text: string): number | null {
+    // Try digit first (e.g. "verse 15")
+    const digitMatch = text.match(/\b(\d{1,3})\b/)
+    if (digitMatch) {
+        const n = parseInt(digitMatch[1], 10)
+        if (n >= 1 && n <= 150) return n
+    }
+    // Try written number (e.g. "verse three")
+    const lower = text.toLowerCase()
+    for (const [word, num] of Object.entries(WRITTEN_NUMBERS)) {
+        if (lower.includes(word)) return num
+    }
+    return null
+}
+
+function detectGoToVerseCommands(text: string): VoiceCommand[] {
+    const commands: VoiceCommand[] = []
+    const lower = text.toLowerCase()
+
+    // "verse 15", "verse three", "go to verse 15", "jump to verse 15",
+    // "show verse 15", "read verse 15", "take me to verse 15"
+    const patterns = [
+        /\b(?:go to|jump to|take me to|show|read|display|present)\s+(?:verse\s+)?(\d{1,3}|[a-z]+)\b/i,
+        /\bverse\s+(\d{1,3}|[a-z]+)\b/i,
+    ]
+
+    let lastMatch: { raw: string; numStr: string } | null = null
+    for (const pattern of patterns) {
+        const regex = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+        let m: RegExpExecArray | null
+        while ((m = regex.exec(text)) !== null) {
+            lastMatch = { raw: m[0].trim(), numStr: m[1] }
+        }
+    }
+
+    if (lastMatch) {
+        const targetVerse = parseVerseNumber(lastMatch.numStr)
+        if (targetVerse) {
+            commands.push({
+                type: 'go_to_verse',
+                raw: lastMatch.raw,
+                confidence: 'high',
+                targetVerse,
+            })
+        }
+    }
+
+    return commands
+}
+
 function detectControlCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
     const lower = text.toLowerCase()
@@ -239,7 +299,7 @@ function detectControlCommands(text: string): VoiceCommand[] {
 const COMMAND_KEYWORDS = [
     'version', 'switch', 'change', 'use the', 'next verse', 'previous verse',
     'go to next', 'go back', 'display', 'show that', 'put up', 'go live',
-    'stop listening', 'start listening'
+    'stop listening', 'start listening', 'verse'
 ]
 
 function hasCommandIntent(text: string): boolean {
@@ -257,6 +317,7 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
     const allCommands: VoiceCommand[] = [
         ...detectVersionChangeCommands(recentText),
         ...detectNavigationCommands(recentText),
+        ...detectGoToVerseCommands(recentText),
         ...detectControlCommands(recentText),
     ]
 
