@@ -305,14 +305,16 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
     const identifyScreen = useCallback(async (monitorId: string) => {
         const monitor = monitors.find(m => m.id === monitorId)
         if (!monitor) {
-            console.error('[useNativeMultiMonitor] Monitor not found for identification:', monitorId)
+            console.error('[useNativeMultiMonitor] Monitor not found for identification:', monitorId, 'Available monitors:', monitors.map(m => m.id))
             return
         }
 
         if (isDesktop) {
-            // Desktop: use Tauri WebviewWindow to open a temporary
-            // identification window positioned on the correct monitor.
-            await identifyMonitorService(monitor)
+            try {
+                await identifyMonitorService(monitor)
+            } catch (err) {
+                console.error('[useNativeMultiMonitor] identify_monitor command failed:', err)
+            }
             return
         }
 

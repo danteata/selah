@@ -6,7 +6,6 @@
 
 use tauri::{State, AppHandle, Manager};
 use std::sync::Arc;
-use base64::Engine;
 
 use super::types::*;
 use super::state::MultiMonitorState;
@@ -240,22 +239,18 @@ pub async fn identify_monitor(
         std::thread::sleep(std::time::Duration::from_millis(150));
     }
 
-    // Build HTML and encode as base64 data: URL — avoids the race condition
-    // where eval() runs before about:blank has loaded (black screen).
-    // Uses a transparent background so the desktop shows through, with a
-    // translucent overlay and centered label card.
-    let html = format!(
-        "<html><head><meta charset=\"utf-8\"><style>*{{margin:0;padding:0;box-sizing:border-box}}body{{width:100vw;height:100vh;overflow:hidden;background:transparent;display:flex;align-items:center;justify-content:center;font-family:system-ui,-apple-system,sans-serif}}.overlay{{position:fixed;inset:0;background:{color}18;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}}.card{{position:relative;z-index:1;padding:32px 56px;border-radius:20px;background:{color}1A;border:3px solid {color}88;text-align:center;animation:pulse 1.2s ease-in-out infinite alternate;box-shadow:0 0 40px {color}44}}h1{{font-size:clamp(2rem,4vw,4rem);margin:0 0 8px 0;color:#fff;text-shadow:0 2px 8px {color}}}p{{font-size:clamp(1rem,2vw,1.5rem);opacity:0.9;color:#fff;text-shadow:0 1px 4px {color};margin:0}}@keyframes pulse{{from{{transform:scale(1);opacity:1;box-shadow:0 0 40px {color}44}}to{{transform:scale(1.04);opacity:0.85;box-shadow:0 0 60px {color}66}}}}</style></head><body><div class=\"overlay\"></div><div class=\"card\"><h1>{name}</h1><p>This is your {name}</p></div></body></html>",
-        name = name.replace('\'', "\\'"),
-        color = color.replace('\'', "\\'")
-    );
+    // Navigate to identify.html served from the app's origin (avoids
+    // data: URL blank-window bug on macOS/WKWebView). Color and name
+    // are sent via a Tauri event after the window loads so no URL-encoding
+    // issues.
+    let dev_url = if cfg!(debug_assertions) {
+        "http://localhost:3000"
+    } else {
+        "tauri://localhost"
+    };
+    let url = format!("{}/identify.html", dev_url);
+    let webview_url = tauri::WebviewUrl::External(url.parse().unwrap());
 
-    let b64 = base64::engine::general_purpose::STANDARD.encode(html.as_bytes());
-    let data_url = format!("data:text/html;base64,{}", b64);
-    let webview_url = tauri::WebviewUrl::External(data_url.parse().unwrap());
-
-    // Use transparent background so the underlying desktop shows through.
-    // The HTML itself provides a translucent color overlay via backdrop-filter.
     let window = tauri::WebviewWindowBuilder::new(&app, label, webview_url)
         .title("Identify")
         .inner_size(800.0, 600.0)
@@ -283,6 +278,17 @@ pub async fn identify_monitor(
         height: monitor.height,
     }));
     let _ = window.show();
+
+    // Use eval() to push color/name into the window. The page is served
+    // from the app's own origin so eval works reliably (unlike the old
+    // about:blank race condition). We use a small delay for the page JS
+    // to finish parsing, then call the global applyIdentity function.
+    let eval_js = format!(
+        r#"setTimeout(function(){{ if(window.applyIdentity) window.applyIdentity("{}", "{}"); }}, 200);"#,
+        color.replace('\\', "\\\\").replace('"', "\\\""),
+        name.replace('\\', "\\\\").replace('"', "\\\"")
+    );
+    let _ = window.eval(&eval_js);
 
     // Auto-close after 3.5 seconds
     let app_handle = app.clone();

@@ -4,7 +4,8 @@
     "description": "Default capabilities for Selah desktop app",
     "windows": [
         "main",
-        "live-output"
+        "live-output",
+        "selah-identify"
     ],
     "permissions": [
         "core:default",

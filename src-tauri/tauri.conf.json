@@ -43,7 +43,7 @@
     "app": {
         "security": {
             "csp": {
-                "default-src": "'self' asset: https:",
+                "default-src": "'self' asset: https: data:",
                 "script-src": "'self'",
                 "style-src": "'self' 'unsafe-inline'",
                 "img-src": "'self' asset: https: data: blob:",
