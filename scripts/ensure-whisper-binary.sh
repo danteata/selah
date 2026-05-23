@@ -1,14 +1,19 @@
-#!/bin/bash
-# Ensures the platform-specific whisper server sidecar binary exists.
-# If missing, builds it automatically using build-whisper.sh.
+#!/usr/bin/env bash
+# Ensures the whisper-server sidecar binary and _internal/ directory exist
+# in assets/whisper-server/ for Tauri resource bundling.
 #
-# This script is meant to be run before `tauri dev` so the sidecar
-# binary is always available for the current platform.
+# Search order:
+#   1. assets/whisper-server/{binary} — already built (dev or CI)
+#   2. binaries/{binary}               — sidecar-only copy; needs _internal/ populated
+#   3. Build from source via build-whisper.sh
+#
+# This script is called by desktop:prebuild before `tauri dev`.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BINARIES_DIR="${SCRIPT_DIR}/../src-tauri/binaries"
+ASSETS_DIR="${SCRIPT_DIR}/../src-tauri/assets/whisper-server"
 
 detect_target_triple() {
     local OS="$(uname -s)"
@@ -49,23 +54,49 @@ if [[ "$TARGET_TRIPLE" == *"-windows-"* ]]; then
     BINARY_NAME="${BINARY_NAME}.exe"
 fi
 
-BINARY_PATH="${BINARIES_DIR}/${BINARY_NAME}"
-# Also check the --onedir output in assets/whisper-server/
-ASSETS_BINARY_PATH="${SCRIPT_DIR}/../src-tauri/assets/whisper-server/${BINARY_NAME}"
+ASSETS_BINARY="${ASSETS_DIR}/${BINARY_NAME}"
+BINARIES_BINARY="${BINARIES_DIR}/${BINARY_NAME}"
 
-if [ -f "$BINARY_PATH" ]; then
+# 1. Already in assets/whisper-server/ (best case: dev build or CI artifact)
+if [ -f "$ASSETS_BINARY" ]; then
     echo "✓ Whisper sidecar binary exists: ${BINARY_NAME}"
+    # Also link to binaries/ for Tauri sidecar resolution
+    if [ ! -f "$BINARIES_BINARY" ]; then
+        mkdir -p "$BINARIES_DIR"
+        cp "$ASSETS_BINARY" "$BINARIES_BINARY"
+        echo "  Linked to binaries/ for Tauri sidecar"
+    fi
     exit 0
 fi
 
-if [ -f "$ASSETS_BINARY_PATH" ]; then
-    echo "✓ Whisper sidecar binary exists in assets: ${BINARY_NAME}"
-    # Also copy to binaries/ for the prebuild check
-    cp "$ASSETS_BINARY_PATH" "$BINARY_PATH"
-    echo "  Copied to binaries/ for prebuild check"
+# 2. In binaries/ but not in assets/ — copy binary + _internal/ over
+if [ -f "$BINARIES_BINARY" ]; then
+    echo "✓ Whisper sidecar binary exists in binaries/: ${BINARY_NAME}"
+    mkdir -p "$ASSETS_DIR"
+    cp "$BINARIES_BINARY" "$ASSETS_BINARY"
+
+    # Copy _internal/ from the PyInstaller onedir output if it exists
+    ONEDIR_INTERNAL="${BINARIES_DIR}/dist/${BINARY_NAME}/_internal"
+    if [ -d "$ONEDIR_INTERNAL" ] && [ ! -d "${ASSETS_DIR}/_internal" ]; then
+        cp -R "$ONEDIR_INTERNAL" "${ASSETS_DIR}/"
+        echo "  Copied _internal/ to assets/whisper-server/"
+    fi
+
+    # Also check for _internal/ directly in binaries/ (some build setups)
+    LOCAL_INTERNAL="${BINARIES_DIR}/_internal"
+    if [ -d "$LOCAL_INTERNAL" ] && [ ! -d "${ASSETS_DIR}/_internal" ]; then
+        cp -R "$LOCAL_INTERNAL" "${ASSETS_DIR}/"
+        echo "  Copied _internal/ to assets/whisper-server/"
+    fi
+
+    # If _internal/ is still missing, the binary may not need it (standalone build)
+    if [ ! -d "${ASSETS_DIR}/_internal" ]; then
+        echo "  Note: No _internal/ directory found (binary may be standalone)"
+    fi
     exit 0
 fi
 
+# 3. Build from source
 echo "⚠ Whisper sidecar binary not found: ${BINARY_NAME}"
 echo "  Building from source..."
 
@@ -76,10 +107,13 @@ else
     exit 1
 fi
 
-if [ -f "$BINARY_PATH" ]; then
+if [ -f "$ASSETS_BINARY" ]; then
     echo "✓ Whisper sidecar binary built successfully: ${BINARY_NAME}"
+elif [ -f "$BINARIES_BINARY" ]; then
+    echo "✓ Whisper sidecar binary built in binaries/: ${BINARY_NAME}"
 else
-    echo "ERROR: Build completed but binary not found at ${BINARY_PATH}"
-    echo "  Also checked: ${ASSETS_BINARY_PATH}"
+    echo "ERROR: Build completed but binary not found"
+    echo "  Checked: ${ASSETS_BINARY}"
+    echo "  Checked: ${BINARIES_BINARY}"
     exit 1
 fi
