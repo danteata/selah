@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from 'react'
 import { useSyncExternalStore } from 'react'
 import { embeddingSyncManager, type VersionSyncState } from '../services/sermon-listener/embeddingSyncManager'
 
@@ -10,6 +11,18 @@ export interface EmbeddingStatus {
     total: number
     hasEmbeddings: boolean
     hasFragments: boolean
+}
+
+export interface EmbeddingStatusAPI {
+    states: Map<string, VersionSyncState>
+    status: EmbeddingStatus | null
+    checkAllStatuses: (versionIds: string[]) => Promise<Map<string, VersionSyncState>>
+    startSync: typeof embeddingSyncManager.startSync
+    upgradeToFragments: typeof embeddingSyncManager.upgradeToFragments
+    clearEmbeddings: typeof embeddingSyncManager.clearEmbeddings
+    isSyncing: boolean
+    modelLoading: boolean
+    modelReady: boolean
 }
 
 function getStatusFromState(state: VersionSyncState | undefined): EmbeddingStatus {
@@ -45,20 +58,59 @@ function getStatesSnapshot(): Map<string, VersionSyncState> {
     return cachedSnapshot!
 }
 
-export function useEmbeddingStatus(versionId?: string): EmbeddingStatus | null {
+function computeAggregateStatus(states: Map<string, VersionSyncState>): EmbeddingStatus | null {
+    const allStates = Array.from(states.values())
+    if (allStates.length === 0) return null
+    const completed = allStates.find(s => s.stage === 'completed')
+    if (completed) return getStatusFromState(completed)
+    const inProgress = allStates.find(s => s.stage !== 'idle' && s.stage !== 'error')
+    if (inProgress) return getStatusFromState(inProgress)
+    return getStatusFromState(allStates[0])
+}
+
+export function useEmbeddingStatus(versionId?: string): EmbeddingStatus | EmbeddingStatusAPI | null {
     const states = useSyncExternalStore(
         (callback) => embeddingSyncManager.subscribe(callback),
         getStatesSnapshot,
     )
 
+    const checkAllStatuses = useCallback(
+        (versionIds: string[]) => embeddingSyncManager.checkAllStatuses(versionIds),
+        [],
+    )
+
+    const startSync = useCallback(
+        (...args: Parameters<typeof embeddingSyncManager.startSync>) => embeddingSyncManager.startSync(...args),
+        [],
+    )
+
+    const upgradeToFragments = useCallback(
+        (...args: Parameters<typeof embeddingSyncManager.upgradeToFragments>) => embeddingSyncManager.upgradeToFragments(...args),
+        [],
+    )
+
+    const clearEmbeddings = useCallback(
+        (...args: Parameters<typeof embeddingSyncManager.clearEmbeddings>) => embeddingSyncManager.clearEmbeddings(...args),
+        [],
+    )
+
     if (!versionId) {
-        const allStates = Array.from(states.values())
-        if (allStates.length === 0) return null
-        const completed = allStates.find(s => s.stage === 'completed')
-        if (completed) return getStatusFromState(completed)
-        const inProgress = allStates.find(s => s.stage !== 'idle' && s.stage !== 'error')
-        if (inProgress) return getStatusFromState(inProgress)
-        return getStatusFromState(allStates[0])
+        const isSyncing = embeddingSyncManager.isSyncing()
+        const modelLoading = embeddingSyncManager.getModelLoading()
+        const modelReady = embeddingSyncManager.getModelReady()
+        const status = computeAggregateStatus(states)
+
+        return {
+            states,
+            status,
+            checkAllStatuses,
+            startSync,
+            upgradeToFragments,
+            clearEmbeddings,
+            isSyncing,
+            modelLoading,
+            modelReady,
+        }
     }
 
     const state = states.get(versionId)

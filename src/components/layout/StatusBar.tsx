@@ -5,7 +5,7 @@ import { useAppStore } from '../../store/appStore'
 import { SlideChip } from '../slides/SlideChip'
 import { OfflineIndicator } from '../offline/OfflineIndicator'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
-import { useEmbeddingStatus } from '../../hooks/useEmbeddingStatus'
+import { useEmbeddingStatus, type EmbeddingStatusAPI } from '../../hooks/useEmbeddingStatus'
 
 type StatusLevel = 'ready' | 'loading' | 'error' | 'off'
 
@@ -29,7 +29,7 @@ export function StatusBar() {
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
     const toggleContextPanel = useAppStore((s) => s.toggleContextPanel)
     const sermonListener = useSermonListenerContext()
-    const embeddingStatus = useEmbeddingStatus()
+    const embeddingStatus = useEmbeddingStatus() as EmbeddingStatusAPI | null
 
     // Determine status levels for each subsystem
     const liveStatus: StatusLevel = liveSlideId ? 'ready' : 'off'
@@ -40,11 +40,11 @@ export function StatusBar() {
             : sermonListener?.error
                 ? 'error'
                 : 'off'
-    const searchStatus: StatusLevel = embeddingStatus?.stage === 'completed'
+    const searchStatus: StatusLevel = embeddingStatus?.status?.stage === 'completed'
         ? 'ready'
-        : embeddingStatus?.stage === 'generating' || embeddingStatus?.stage === 'importing'
+        : embeddingStatus?.status?.stage === 'generating' || embeddingStatus?.status?.stage === 'importing'
             ? 'loading'
-            : embeddingStatus?.stage === 'error'
+            : embeddingStatus?.status?.stage === 'error'
                 ? 'error'
                 : 'off'
 
@@ -108,7 +108,7 @@ export function StatusBar() {
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                         }
                     `}
-                    title={sermonListener?.isListening && activeNavSection !== 'sermon' ? 'Sermon Listener — Recording in background (click to show)' : 'Toggle Sermon Listener'}
+                    title={sermonListener?.isListening && activeNavSection !== 'sermon' ? 'Sermon Listener — Listening in background (click to show)' : 'Toggle Sermon Listener'}
                 >
                     {sermonListener?.isListening && (
                         <span className="relative flex h-1.5 w-1.5">
@@ -117,7 +117,7 @@ export function StatusBar() {
                         </span>
                     )}
                     <Mic className="w-3 h-3" />
-                    <span>{sermonListener?.isListening ? (activeNavSection === 'sermon' ? 'Recording' : 'Background') : 'Sermon'}</span>
+                    <span>{sermonListener?.isListening ? (activeNavSection === 'sermon' ? 'Recording' : 'Listening…') : 'Sermon'}</span>
                 </button>
 
                 {/* Search status indicator */}
