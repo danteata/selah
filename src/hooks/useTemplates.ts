@@ -5,12 +5,31 @@ import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import {
     saveLocalTemplate,
     getLocalTemplates,
+    getLocalTemplate,
     deleteLocalTemplate as deleteLocalTemplateFromDB,
     updateLocalTemplate as updateLocalTemplateFromDB,
     type LocalTemplate,
 } from './useIndexedDB'
 
 export type SlideType = 'bible' | 'song' | 'hymn' | 'text' | 'media' | 'announcement' | 'sermon' | 'prayer' | 'countdown' | 'any'
+type TemplateAppliesTo = Exclude<SlideType, 'sermon' | 'prayer'>
+
+const TEMPLATE_APPLIES_TO_VALUES = new Set<TemplateAppliesTo>([
+    'bible',
+    'song',
+    'hymn',
+    'text',
+    'media',
+    'announcement',
+    'countdown',
+    'any',
+])
+
+function normalizeAppliesTo(appliesTo?: SlideType[]): TemplateAppliesTo[] | undefined {
+    if (!appliesTo) return undefined
+    const normalized = appliesTo.filter((type): type is TemplateAppliesTo => TEMPLATE_APPLIES_TO_VALUES.has(type as TemplateAppliesTo))
+    return normalized.length > 0 ? normalized : ['any']
+}
 
 export type TemplateItem = {
     _id: string
@@ -152,7 +171,7 @@ export function useTemplates(): UseTemplatesReturn {
             description: data.description,
             slideId: data.slideId,
             category: data.category,
-            appliesTo: data.appliesTo,
+            appliesTo: normalizeAppliesTo(data.appliesTo),
             thumbnail: data.thumbnail,
             backgroundStorageId: data.backgroundStorageId,
         })
@@ -168,7 +187,7 @@ export function useTemplates(): UseTemplatesReturn {
         backgroundStorageId?: string
     }): Promise<string> => {
         if (templateId.startsWith('local_')) {
-            const local = await updateLocalTemplateFromDB(templateId, {
+            await updateLocalTemplateFromDB(templateId, {
                 name: updates.name,
                 description: updates.description,
                 slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : undefined,
@@ -177,6 +196,7 @@ export function useTemplates(): UseTemplatesReturn {
                 thumbnail: updates.thumbnail,
                 backgroundStorageId: updates.backgroundStorageId,
             })
+            const local = await getLocalTemplate(templateId)
             if (local) {
                 await refreshLocalTemplates()
                 return local.id
@@ -186,7 +206,10 @@ export function useTemplates(): UseTemplatesReturn {
 
         return await updateTemplateMutation({
             templateId,
-            ...updates,
+            updates: {
+                ...updates,
+                appliesTo: normalizeAppliesTo(updates.appliesTo),
+            },
         })
     }
 
