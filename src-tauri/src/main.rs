@@ -334,11 +334,12 @@ async fn run_whisper_server(
 /// times is harmless because we use an atomic compare-and-swap on the
 /// `poll_task_spawned` flag.
 ///
-/// Polls `/health` every 100 ms forever until the model is loaded. On the
-/// first success we update the cache, emit `whisper-server://ready` once,
-/// and exit. There is no timeout, no "degraded" event, no fallback — if the
-/// sidecar dies the stdout watcher in `run_whisper_server` will emit
-/// `whisper-server://error` instead.
+/// Polls `/health` every 100 ms.  On the first success where the model is
+/// loaded we update the cache, emit `whisper-server://ready`, and exit.
+/// If the server is up but the model hasn't loaded within 15 s (common on
+/// Windows when the model path is wrong and it falls back to lazy loading),
+/// we mark ready anyway — the model will load on the first transcription
+/// request and blocking forever on the readiness screen helps nobody.
 fn spawn_readiness_poll(app: tauri::AppHandle) {
     let cache = match app.try_state::<WhisperReadyCache>() {
         Some(c) => c,
@@ -370,6 +371,7 @@ fn spawn_readiness_poll(app: tauri::AppHandle) {
         let health_url = format!("{}/health", endpoint);
         let client = reqwest::Client::new();
         let started = std::time::Instant::now();
+        let max_wait = std::time::Duration::from_secs(15);
 
         loop {
             if let Ok(resp) = client
@@ -389,9 +391,6 @@ fn spawn_readiness_poll(app: tauri::AppHandle) {
                                 .get("model")
                                 .and_then(|v| v.as_str())
                                 .map(String::from);
-                            // Update the cache before emitting so an
-                            // immediate `check_whisper_ready` from JS
-                            // sees the new state.
                             if let Some(cache) = app_for_poll.try_state::<WhisperReadyCache>() {
                                 if let Ok(mut m) = cache.model.lock() {
                                     *m = model_str.clone();
@@ -415,6 +414,25 @@ fn spawn_readiness_poll(app: tauri::AppHandle) {
                         }
                     }
                 }
+            }
+            // If we've been waiting 15 s and the health endpoint is
+            // responding, the server is up — the model will load lazily
+            // on the first transcription request.  Don't block the UI.
+            if started.elapsed() >= max_wait {
+                println!("[whisper-server] server up but model not loaded after 15 s — proceeding (model loads on first request)");
+                if let Some(cache) = app_for_poll.try_state::<WhisperReadyCache>() {
+                    cache.ready.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                let _ = app_for_poll.emit(
+                    "whisper-server://ready",
+                    serde_json::json!({
+                        "endpoint": &endpoint,
+                        "model": serde_json::Value::Null,
+                        "elapsed_ms": started.elapsed().as_millis(),
+                        "model_loaded": false,
+                    }),
+                );
+                return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
