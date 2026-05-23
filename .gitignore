@@ -41,6 +41,7 @@ src-tauri/assets/whisper-server/
 # Downloaded embedding models and built embedding packs
 src-tauri/assets/embedding-models/
 src-tauri/assets/embedding-packs/
+!src-tauri/assets/embedding-packs/.gitkeep
 
 # IDE / tool internals
 .kilo/
