@@ -100,7 +100,7 @@ function postToTextWorker(text: string, excludedRanges: ExcludedRange[]): Promis
 // Configuration
 // ---------------------------------------------------------------------------
 
-const SEMANTIC_DETECTION_LIMIT = 3 // Max results per search (per query)
+const SEMANTIC_DETECTION_LIMIT = 5 // Max results per search (per query)
 const MIN_TEXT_LENGTH = 20 // Minimum characters before attempting detection
 const MAX_TEXT_LENGTH = 500 // Maximum characters to embed (truncated)
 const THROTTLE_MS = 3000 // Throttle semantic searches to 3 seconds
@@ -486,9 +486,15 @@ export class SemanticVerseDetector {
                     const result = windowSearchResults[idx]
                     if (result.status !== 'fulfilled') continue
                     const windowThreshold = windowThresholds[idx]
+                    const windowText = windows[idx]
+                    const windowWordCount = windowText.split(/\s+/).length
                     const matches = result.value as SemanticVerseMatch[]
                     for (const match of matches) {
-                        if (!matchedReferences.has(match.reference) && match.score >= windowThreshold) {
+                        if (
+                            !matchedReferences.has(match.reference) &&
+                            match.score >= windowThreshold &&
+                            validateSemanticMatch(windowText, match.text, windowWordCount)
+                        ) {
                             matchedReferences.add(match.reference)
                             allMatches.push(match)
                         }
@@ -526,7 +532,7 @@ export class SemanticVerseDetector {
         try {
             const results = await this.convexClient.action(api.verseEmbeddings.findSimilarVerses, {
                 queryEmbedding: embedding,
-                threshold: threshold ?? 0.38,
+                threshold: threshold ?? 0.32,
                 limit: this.config.limit,
                 version: this.config.version,
             })
@@ -585,7 +591,7 @@ export class SemanticVerseDetector {
                 )
                 const matches = await searchVerseEmbeddings(
                     embedding,
-                    threshold ?? 0.38,
+                    threshold ?? 0.32,
                     this.config.limit,
                 )
                 return matches.map((m) => ({
@@ -631,7 +637,7 @@ export class SemanticVerseDetector {
 
         const matches = await searchVerseEmbeddings(
             embedding,
-            threshold ?? 0.38,
+            threshold ?? 0.32,
             this.config.limit,
         )
 
