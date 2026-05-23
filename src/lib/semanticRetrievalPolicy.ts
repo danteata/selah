@@ -108,13 +108,34 @@ export function removeStopWords(text: string): string {
         .join(' ')
 }
 
+const DIGIT_WORDS: Record<string, string> = {
+    '0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
+    '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine',
+    '10': 'ten', '11': 'eleven', '12': 'twelve', '13': 'thirteen', '14': 'fourteen',
+    '15': 'fifteen', '16': 'sixteen', '17': 'seventeen', '18': 'eighteen', '19': 'nineteen',
+    '20': 'twenty', '30': 'thirty', '40': 'forty', '50': 'fifty',
+    '60': 'sixty', '70': 'seventy', '80': 'eighty', '90': 'ninety',
+    '100': 'one hundred', '1000': 'one thousand',
+}
+
+function replaceDigitsWithWords(text: string): string {
+    return text.replace(/\b(\d{1,4})\b/g, (match) => {
+        const num = parseInt(match, 10)
+        if (num <= 20) return DIGIT_WORDS[match] || match
+        if (num < 100 && num % 10 === 0) return DIGIT_WORDS[match] || match
+        if (num === 100 || num === 1000) return DIGIT_WORDS[match] || match
+        return match
+    })
+}
+
 export function normalizeQuery(text: string): string {
     const cleaned = text
         .toLowerCase()
         .replace(/[.,;:!?()[\]{}'"]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
-    return removeStopWords(cleaned)
+    const withWords = replaceDigitsWithWords(cleaned)
+    return removeStopWords(withWords)
 }
 
 export function getContentWords(text: string): string[] {
