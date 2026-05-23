@@ -61,25 +61,34 @@ pip install -r "%SCRIPT_DIR%requirements.txt"
 goto :build
 
 :build
-REM Build with PyInstaller — output goes directly into binaries/ (Tauri sidecar location)
+REM Build with PyInstaller --onedir for fast startup (no /tmp extraction).
+REM The output directory is copied to assets/whisper-server/ for Tauri bundling.
 echo Running PyInstaller...
 pyinstaller ^
-    --onefile ^
+    --onedir ^
     --name "selah-whisper-server-%TARGET_TRIPLE%" ^
-    --distpath "%OUTPUT_DIR%." ^
+    --distpath "%OUTPUT_DIR%" ^
     --workpath "%SCRIPT_DIR%.build" ^
     --specpath "%SCRIPT_DIR%." ^
     --clean ^
     "%SCRIPT_DIR%whisper-server.py"
 
-REM Cleanup
-echo Cleaning up...
+REM Copy the --onedir output to Tauri assets for resource bundling
+set ASSETS_DIR=%SCRIPT_DIR%..\src-tauri\assets\whisper-server
+if not exist "%ASSETS_DIR%" mkdir "%ASSETS_DIR%"
+xcopy /E /I /Y "%OUTPUT_DIR%\selah-whisper-server-%TARGET_TRIPLE%\*" "%ASSETS_DIR%\"
+
+REM Also copy the main binary to binaries/ for the prebuild check
+copy /Y "%ASSETS_DIR%\selah-whisper-server-%TARGET_TRIPLE%.exe" "%OUTPUT_DIR%\selah-whisper-server-%TARGET_TRIPLE%.exe" >nul
+
+REM Cleanup build artifacts (keep the binaries/ copy and assets/ output)
 if exist "%SCRIPT_DIR%.build" rmdir /s /q "%SCRIPT_DIR%.build"
 if exist "%SCRIPT_DIR%selah-whisper-server-%TARGET_TRIPLE%.spec" del "%SCRIPT_DIR%selah-whisper-server-%TARGET_TRIPLE%.spec"
+if exist "%OUTPUT_DIR%\selah-whisper-server-%TARGET_TRIPLE%" rmdir /s /q "%OUTPUT_DIR%\selah-whisper-server-%TARGET_TRIPLE%"
 call deactivate
 if exist "%VENV_DIR%" rmdir /s /q "%VENV_DIR%"
 
 echo.
 echo Build complete!
-echo Binary: %OUTPUT_DIR%selah-whisper-server-%TARGET_TRIPLE%.exe
-dir "%OUTPUT_DIR%selah-whisper-server-*"
+echo Binary: %ASSETS_DIR%\selah-whisper-server-%TARGET_TRIPLE%.exe
+dir "%ASSETS_DIR%\selah-whisper-server-*.exe"

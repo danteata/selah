@@ -106,8 +106,15 @@ fn resolve_bundled_model_path(app: &tauri::AppHandle) -> Option<String> {
     let resource_dir = app.path().resource_dir().ok()?;
     let bundled_path = resource_dir.join("assets").join("whisper-models").join("base.en");
     if bundled_path.exists() {
-        println!("Found bundled whisper model at: {}", bundled_path.display());
-        Some(bundled_path.to_string_lossy().to_string())
+        let path_str = bundled_path.to_string_lossy().to_string();
+        // Strip Windows UNC prefix (\\?\) which Python argparse and
+        // PyInstaller cannot handle.  Tauri's resource_dir() on Windows
+        // returns extended-length paths like
+        //   \\?\C:\dev\selah\src-tauri\target\debug
+        // which cause "unrecognized arguments" when passed via --model-path.
+        let clean_path = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str).to_string();
+        println!("Found bundled whisper model at: {}", clean_path);
+        Some(clean_path)
     } else {
         eprintln!(
             "No bundled whisper model found at: {}. \

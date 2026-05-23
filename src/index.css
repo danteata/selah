@@ -1,10 +1,8 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
 
 /* Enable class-based dark mode */
 @variant dark (&:where(.dark, .dark *));
-
-/* Import distinctive fonts - Crimson Pro for headings, DM Sans for body */
-@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
 
 /* Define theme colors for Tailwind v4 - Warm, reverent palette */
 @theme {
