@@ -30,7 +30,7 @@ import {
 import type { VoiceCommand } from '../services/sermon-listener/voiceCommandDetection'
 import type { DetectedVerse } from '../services/sermon-listener'
 import type { Scripture, BibleVersion } from '../types'
-import { filterHallucinations } from '../services/sermon-listener/hallucinationFilter'
+import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
 const SERMON_LIVE_STATE_STORAGE_KEY = 'sermon-listener:live-state'
@@ -869,7 +869,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // Never fall back to full transcript history, which can replay stale commands.
             const commandSource = latestChunkForCommands?.trim() || ''
             if (commandSource.length > 0) {
-            const commands = detectVoiceCommands(commandSource)
+            const correctedCommands = correctAccentMishearings(commandSource)
+            const commands = detectVoiceCommands(correctedCommands)
             let handledVersionSwitch = false
             let handledNavigationCommand = false
             for (const cmd of commands) {

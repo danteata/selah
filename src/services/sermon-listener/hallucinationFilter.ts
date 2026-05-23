@@ -44,6 +44,82 @@ const PROFANITY_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> = 
     { pattern: /\bb+a+s+t+a+r+d+\b/gi, replacement: '[censored]' },
 ]
 
+// ---------------------------------------------------------------------------
+// Accent / phonetic mishearing corrections
+// Whisper often mishears Bible names and church vocabulary when speakers
+// have non-American accents.  Patterns are context-aware (e.g. only replace
+// "some" with "Psalm" when followed by a number) to avoid false positives.
+// ---------------------------------------------------------------------------
+
+const ACCENT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string }> = [
+    // Psalm — only when followed by a number (avoids "some people" -> "Psalm people")
+    { pattern: /\b(some|sum)\s+(\d{1,3})\b/gi, replacement: 'Psalm $2' },
+    { pattern: /\b(salms|sums)\s+(\d{1,3})\b/gi, replacement: 'Psalms $2' },
+    // Proverbs
+    { pattern: /\b(brovabs|provabs|proves)\b/gi, replacement: 'Proverbs' },
+    // Ephesians
+    { pattern: /\b(efficient|efficience|efficients)\b/gi, replacement: 'Ephesians' },
+    // Philippians
+    { pattern: /\bphysicians\b/gi, replacement: 'Philippians' },
+    // Colossians
+    { pattern: /\bcolossus\b/gi, replacement: 'Colossians' },
+    // Galatians
+    { pattern: /\bgalations\b/gi, replacement: 'Galatians' },
+    // Thessalonians
+    { pattern: /\bthesalonians\b/gi, replacement: 'Thessalonians' },
+    // Philemon
+    { pattern: /\bfilemon\b/gi, replacement: 'Philemon' },
+    // Hebrews
+    { pattern: /\bhebrew\b/gi, replacement: 'Hebrews' },
+    // Revelation
+    { pattern: /\brevelations\b/gi, replacement: 'Revelation' },
+    // Deuteronomy
+    { pattern: /\bduty\s+ronomy\b/gi, replacement: 'Deuteronomy' },
+    { pattern: /\bduteronomy\b/gi, replacement: 'Deuteronomy' },
+    // Judges — only with a number to avoid real uses of "judge"
+    { pattern: /\bjudge\s+(\d{1,3})\b/gi, replacement: 'Judges $1' },
+    // Numbers — only with a number to avoid real uses of "number"
+    { pattern: /\bnumber\s+(\d{1,3})\b/gi, replacement: 'Numbers $1' },
+    // Verse — context aware to avoid replacing real "base" / "best"
+    { pattern: /\b(go\s+to|read|show|display|present)\s+(?:the\s+)?(?:base|best|vase|vers)\b/gi, replacement: '$1 verse' },
+    { pattern: /\b(?:base|best|vase|vers)\s+(\d{1,3})\b/gi, replacement: 'verse $1' },
+    { pattern: /\b(chapter|chap)\s+(\d{1,3})\s+(?:base|best|vase|vers)\s+(\d{1,3})\b/gi, replacement: 'chapter $2 verse $3' },
+    // Ecclesiastes
+    { pattern: /\becclesiastics\b/gi, replacement: 'Ecclesiastes' },
+    // Lamentations
+    { pattern: /\blamentations\b/gi, replacement: 'Lamentations' },
+    // Zechariah
+    { pattern: /\bzecharia\b/gi, replacement: 'Zechariah' },
+    // Habakkuk
+    { pattern: /\bhabakkuk\b/gi, replacement: 'Habakkuk' },
+    // Zephaniah
+    { pattern: /\bzephania\b/gi, replacement: 'Zephaniah' },
+    // Malachi
+    { pattern: /\bmalachi\b/gi, replacement: 'Malachi' },
+    // Nahum
+    { pattern: /\bnahum\b/gi, replacement: 'Nahum' },
+    // Luke — only when followed by a number or "chapter" to avoid replacing real "look"
+    { pattern: /\blook\s+(chapter\s+)?(\d{1,3})\b/gi, replacement: 'Luke $1$2' },
+    { pattern: /\bbook\s+of\s+look\b/gi, replacement: 'book of Luke' },
+    // Romans — only when followed by a number to avoid replacing real "romance"
+    { pattern: /\bromance\s+(\d{1,3})\b/gi, replacement: 'Romans $1' },
+    { pattern: /\bbook\s+of\s+romance\b/gi, replacement: 'book of Romans' },
+    // Ruth — only when followed by a number to avoid replacing real "root"
+    { pattern: /\broot\s+(\d{1,3})\b/gi, replacement: 'Ruth $1' },
+    { pattern: /\bbook\s+of\s+root\b/gi, replacement: 'book of Ruth' },
+    // Esther — only when followed by a number to avoid replacing real "Easter"
+    { pattern: /\beaster\s+(\d{1,3})\b/gi, replacement: 'Esther $1' },
+    { pattern: /\bbook\s+of\s+easter\b/gi, replacement: 'book of Esther' },
+]
+
+export function correctAccentMishearings(text: string): string {
+    let corrected = text
+    for (const { pattern, replacement } of ACCENT_CORRECTIONS) {
+        corrected = corrected.replace(pattern, replacement)
+    }
+    return corrected
+}
+
 function removeProfanity(text: string): { text: string; removed: number } {
     let cleaned = text
     let removed = 0
@@ -154,7 +230,10 @@ export function filterHallucinations(text: string): HallucinationFilterResult {
     let totalRepetitionsRemoved = 0
     let totalFillersRemoved = 0
 
-    // Remove profanity first so it doesn't skew verse detection
+    // Correct accent mishearings before anything else
+    current = correctAccentMishearings(current)
+
+    // Remove profanity so it doesn't skew verse detection
     const { text: afterProfanity, removed: profRemoved } = removeProfanity(current)
     current = afterProfanity
     const totalProfanityRemoved = profRemoved
