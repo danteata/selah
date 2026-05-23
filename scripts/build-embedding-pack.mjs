@@ -192,6 +192,19 @@ async function loadEmbedder() {
 async function main() {
     const start = Date.now()
 
+    // Skip if pack already built (manifest + embeddings + metadata all present)
+    const manifestPath = join(OUT_DIR, 'manifest.json')
+    const embeddingsPath = join(OUT_DIR, 'embeddings.f32')
+    const metadataPath = join(OUT_DIR, 'metadata.json')
+    if (existsSync(manifestPath) && existsSync(embeddingsPath) && existsSync(metadataPath)) {
+        const stat = await import('node:fs/promises')
+        const size = (await stat.stat(embeddingsPath)).size
+        if (size > 0) {
+            console.log(`[skip] ${VERSION} embedding pack already built (${(size / (1024 * 1024)).toFixed(1)} MB)`)
+            return
+        }
+    }
+
     const verses = await fetchVerses(VERSION, args.url)
     console.log(`[fetch] got ${verses.length} verses`)
 
