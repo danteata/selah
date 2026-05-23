@@ -1010,6 +1010,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             console.log('[SermonListener] Filtered hallucination:', {
                 repetitionsRemoved: hallucinationResult.repetitionsRemoved,
                 fillersRemoved: hallucinationResult.fillersRemoved,
+                profanityRemoved: hallucinationResult.profanityRemoved,
                 confidence: hallucinationResult.confidence,
             })
             cleanText = hallucinationResult.cleanedText
@@ -1166,7 +1167,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
                     const properReference = `${bookName} ${match.chapter}:${match.verse}`
 
-                    const confidence = match.score >= 0.85 ? 'high' : match.score >= 0.75 ? 'medium' : 'low'
+                    // Semantic paraphrases naturally score lower than exact regex matches;
+                    // use a more forgiving scale so verses like "kingdom of heaven... ten virgins"
+                    // (Matthew 25) are not discarded.
+                    const confidence = match.score >= 0.70 ? 'high' : match.score >= 0.55 ? 'medium' : 'low'
                     const matchConfidenceLevel = confidenceOrder[confidence]
 
                     if (matchConfidenceLevel < minConfidenceLevel) {

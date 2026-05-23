@@ -26,11 +26,43 @@ const FILLER_PATTERNS: RegExp[] = [
     /\bfollow\s+us\s+on\b/i,
 ]
 
+// Common English profanities that Whisper sometimes hallucinates or
+// mis-transcribes (e.g. "a far country" -> "a fuck country").
+// In a church context these are almost always transcription errors.
+const PROFANITY_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> = [
+    { pattern: /\bf+u+c+k+\b/gi, replacement: '[censored]' },
+    { pattern: /\bs+h+i+t+\b/gi, replacement: '[censored]' },
+    { pattern: /\bd+a+m+n+\b/gi, replacement: '[censored]' },
+    { pattern: /\bh+e+l+l+\b/gi, replacement: '[censored]' },
+    { pattern: /\ba+s+s+h+o+l+e+\b/gi, replacement: '[censored]' },
+    { pattern: /\bb+i+t+c+h+\b/gi, replacement: '[censored]' },
+    { pattern: /\ba+s+s+\b/gi, replacement: '[censored]' },
+    { pattern: /\bc+u+n+t+\b/gi, replacement: '[censored]' },
+    { pattern: /\bd+i+c+k+\b/gi, replacement: '[censored]' },
+    { pattern: /\bn+i+g+g+e+r+\b/gi, replacement: '[censored]' },
+    { pattern: /\bf+a+g+\b/gi, replacement: '[censored]' },
+    { pattern: /\bb+a+s+t+a+r+d+\b/gi, replacement: '[censored]' },
+]
+
+function removeProfanity(text: string): { text: string; removed: number } {
+    let cleaned = text
+    let removed = 0
+    for (const { pattern, replacement } of PROFANITY_REPLACEMENTS) {
+        const before = cleaned
+        cleaned = cleaned.replace(pattern, replacement)
+        if (cleaned !== before) {
+            removed += (before.match(pattern) || []).length
+        }
+    }
+    return { text: cleaned, removed }
+}
+
 export interface HallucinationFilterResult {
     cleanedText: string
     hadHallucination: boolean
     repetitionsRemoved: number
     fillersRemoved: number
+    profanityRemoved: number
     confidence: number
 }
 
@@ -113,6 +145,7 @@ export function filterHallucinations(text: string): HallucinationFilterResult {
             hadHallucination: false,
             repetitionsRemoved: 0,
             fillersRemoved: 0,
+            profanityRemoved: 0,
             confidence: 1,
         }
     }
@@ -120,6 +153,11 @@ export function filterHallucinations(text: string): HallucinationFilterResult {
     let current = text
     let totalRepetitionsRemoved = 0
     let totalFillersRemoved = 0
+
+    // Remove profanity first so it doesn't skew verse detection
+    const { text: afterProfanity, removed: profRemoved } = removeProfanity(current)
+    current = afterProfanity
+    const totalProfanityRemoved = profRemoved
 
     const { text: afterRepetition, removed: repRemoved } = removeRepetitionLoops(current)
     current = afterRepetition
@@ -129,7 +167,7 @@ export function filterHallucinations(text: string): HallucinationFilterResult {
     current = afterFillers
     totalFillersRemoved += fillRemoved
 
-    const hadHallucination = totalRepetitionsRemoved > 0 || totalFillersRemoved > 0
+    const hadHallucination = totalRepetitionsRemoved > 0 || totalFillersRemoved > 0 || totalProfanityRemoved > 0
     const hasImplausible = hasImplausibleReferences(current)
 
     let confidence = 1
@@ -141,6 +179,7 @@ export function filterHallucinations(text: string): HallucinationFilterResult {
         hadHallucination,
         repetitionsRemoved: totalRepetitionsRemoved,
         fillersRemoved: totalFillersRemoved,
+        profanityRemoved: totalProfanityRemoved,
         confidence,
     }
 }
