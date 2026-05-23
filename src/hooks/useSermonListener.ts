@@ -216,6 +216,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
+    const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
 
     // Get global settings (system-wide, no churchId needed)
     const { settings: globalSettings, isLoading: isGlobalSettingsLoading } = useGlobalSermonListenerSettings()
@@ -769,6 +770,40 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         return partial?.id || null
     }, [bibleVersions])
 
+    /**
+     * Update the current live Bible slide in-place instead of appending a new one.
+     * Keeps the slide queue clean while still refreshing the live output.
+     */
+    const refreshLiveSlide = useCallback((scripture: Scripture) => {
+        const state = useAppStore.getState()
+        const liveSlideId = state.liveSlideId
+        const existingSlide = state.activeSlides.find(s => s.id === liveSlideId)
+
+        if (existingSlide && existingSlide.type === 'bible') {
+            const newSlide = createBibleSlide(scripture)
+            const updatedSlide = {
+                ...existingSlide,
+                contents: newSlide.contents,
+                data: newSlide.data,
+                title: newSlide.title,
+                name: newSlide.name,
+                slideStyle: newSlide.slideStyle,
+            }
+            updateActiveSlide(updatedSlide)
+            setLiveSlide(existingSlide.id)
+
+            // Also broadcast to live window / multi-monitor so the update is pushed
+            if (typeof window !== 'undefined' && '__TAURI__' in window) {
+                window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
+            }
+        } else {
+            // No existing bible slide — fall back to creating one
+            const slide = createBibleSlide(scripture)
+            appendActiveSlide(slide)
+            setLiveSlide(slide.id)
+        }
+    }, [createBibleSlide, updateActiveSlide, appendActiveSlide, setLiveSlide])
+
     const applyBibleVersionChange = useCallback(async (requestedVersionId: string): Promise<boolean> => {
         const resolvedVersionId = resolveBibleVersionId(requestedVersionId) || requestedVersionId
         const requestId = ++versionChangeRequestIdRef.current
@@ -874,9 +909,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             lookupVerse(next).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
-                                    const slide = createBibleSlide(scripture)
-                                    appendActiveSlide(slide)
-                                    setLiveSlide(slide.id)
+                                    refreshLiveSlide(scripture)
                                 }
                             })
                             handledNavigationCommand = true
@@ -901,9 +934,32 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             lookupVerse(prev).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
-                                    const slide = createBibleSlide(scripture)
-                                    appendActiveSlide(slide)
-                                    setLiveSlide(slide.id)
+                                    refreshLiveSlide(scripture)
+                                }
+                            })
+                            handledNavigationCommand = true
+                        }
+                        break
+                    }
+                    case 'go_to_verse': {
+                        const cur = currentVerseRef.current
+                        const target = cmd.targetVerse
+                        if (cur && target && target >= 1) {
+                            const goto: DetectedVerse = {
+                                ...cur,
+                                verseStart: target,
+                                verseEnd: undefined,
+                                raw: `${cur.book} ${cur.chapter}:${target}`,
+                                reference: `${cur.book} ${cur.chapter}:${target}`,
+                                startIndex: 0,
+                                endIndex: 0,
+                            }
+                            setCurrentVerse(goto)
+                            navigationCooldownUntilRef.current = Date.now() + 3000
+                            lookupVerse(goto).then(scripture => {
+                                if (scripture) {
+                                    setCurrentScripture(scripture)
+                                    refreshLiveSlide(scripture)
                                 }
                             })
                             handledNavigationCommand = true
@@ -1075,7 +1131,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
 
         // Semantic verse detection (for paraphrases)
-        if (semanticDetectorReady && semanticDetectorRef.current && text.length >= 50) {
+        // Use the ref (not state) to avoid a stale closure: the detector may
+        // finish initialising *after* the onResult callback was registered.
+        if (semanticDetectorRef.current && text.length >= 30) {
             setIsSemanticSearching(true)
 
             // Pass the regex-detected verse ranges to exclude them from semantic detection
@@ -1223,7 +1281,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setIsSemanticSearching(false)
             })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, semanticDetectorReady, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange])
 
     /**
      * Set transcription provider

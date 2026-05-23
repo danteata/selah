@@ -25,6 +25,7 @@ import {
     loadFromCached as loadVerseStore,
     searchVerseEmbeddings,
     getLoadedIndex,
+    pingWorker,
 } from './verseEmbeddingStore'
 import { BOOK_PATTERN } from './verseDetection'
 import { getDynamicThreshold, validateSemanticMatch } from '../../lib/semanticRetrievalPolicy'
@@ -100,7 +101,7 @@ function postToTextWorker(text: string, excludedRanges: ExcludedRange[]): Promis
 // ---------------------------------------------------------------------------
 
 const SEMANTIC_DETECTION_LIMIT = 3 // Max results per search (per query)
-const MIN_TEXT_LENGTH = 50 // Minimum characters before attempting detection
+const MIN_TEXT_LENGTH = 20 // Minimum characters before attempting detection
 const MAX_TEXT_LENGTH = 500 // Maximum characters to embed (truncated)
 const THROTTLE_MS = 3000 // Throttle semantic searches to 3 seconds
 
@@ -498,9 +499,20 @@ export class SemanticVerseDetector {
             }
         }
 
-        return allMatches
+        const results = allMatches
             .sort((a, b) => b.score - a.score)
             .slice(0, this.config.limit)
+
+        if (results.length > 0) {
+            console.log(
+                '[SemanticDetector] Found',
+                results.length,
+                'semantic match(es):',
+                results.map((m) => `${m.reference} (${m.score.toFixed(3)})`).join(', '),
+            )
+        }
+
+        return results
     }
 
     /**
@@ -544,12 +556,51 @@ export class SemanticVerseDetector {
     private async searchLocally(embedding: number[], threshold?: number): Promise<SemanticVerseMatch[]> {
         const version = this.config.version || 'ANY'
 
-        // Reuse the worker's loaded index if it already matches this version;
-        // otherwise pull from IndexedDB once and hand off to the worker. The
-        // worker owns the only Float32Array; we drop our embedding references
-        // immediately afterwards so V8 can reclaim ~95 MB of heap.
-        const loaded = getLoadedIndex()
-        if (!loaded || loaded.version !== version) {
+        // Check what's loaded in the worker (handles both normal state and
+        // HMR re-evaluation where the module-level `loaded` variable resets).
+        let loaded = getLoadedIndex()
+        if (!loaded) {
+            try {
+                const ping = await pingWorker()
+                if (ping.ready && ping.version) {
+                    loaded = { version: ping.version, count: ping.count, dim: ping.dim, hasFragments: false }
+                }
+            } catch {
+                // ping failed — worker may not exist
+            }
+        }
+
+        // If the worker already has a usable index (exact version, or KJV
+        // prebuilt pack that we can search as a fallback), search directly.
+        const workerHasExact = loaded && loaded.version === version
+        const workerHasKJV = loaded && loaded.version === 'KJV'
+        const needKJVFallback = !workerHasExact && workerHasKJV && version !== 'KJV'
+
+        if (needKJVFallback) {
+            // Confirm the requested version isn't cached locally before falling back
+            const hasRequested = await hasCachedEmbeddings(version)
+            if (!hasRequested) {
+                console.log(
+                    `[SemanticDetector] ${version} not cached; falling back to KJV prebuilt pack for search`,
+                )
+                const matches = await searchVerseEmbeddings(
+                    embedding,
+                    threshold ?? 0.38,
+                    this.config.limit,
+                )
+                return matches.map((m) => ({
+                    reference: m.reference,
+                    book: m.book,
+                    chapter: m.chapter,
+                    verse: m.verse,
+                    text: m.text,
+                    score: m.score,
+                    detectionType: 'semantic' as const,
+                }))
+            }
+        }
+
+        if (!workerHasExact) {
             console.log('[SemanticDetector] Loading local embeddings for version:', version)
             let cached = await getCachedVerseEmbeddings(this.config.version)
 
