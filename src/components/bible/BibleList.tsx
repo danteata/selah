@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
+import { generateSlideContent, useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { TemplateSelector } from '../templates/TemplateSelector'
+import { DetectedVersesBar } from '../sermon-listener/DetectedVersesBar'
 import type { Scripture, BibleVerse } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
@@ -56,6 +57,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const { createBibleSlide } = useSlideCreation()
     const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
     const setLiveSlide = useAppStore((s) => s.setLiveSlide)
+    const updateActiveSlide = useAppStore((s) => s.updateActiveSlide)
     const defaultBibleVersion = useAppStore((s) => s.settings.defaultBibleVersion)
     const { templates, getTemplatesForSlideType } = useTemplates()
     const bibleTemplates = getTemplatesForSlideType('bible')
@@ -132,6 +134,24 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             setActiveVerseKey(`${bookIndex}:${chapter}:${verse}`)
         }
     }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, setLiveSlide, addRecentVerse])
+
+    const updateCurrentLiveBibleSlide = useCallback((scripture: Scripture) => {
+        const { activeSlides, liveSlideId } = useAppStore.getState()
+        const liveSlide = activeSlides.find((slide) => slide.id === liveSlideId)
+
+        if (!liveSlide || liveSlide.type !== 'bible') return false
+
+        const updatedSlide = {
+            ...liveSlide,
+            name: scripture.label || liveSlide.name,
+            data: scripture,
+            contents: generateSlideContent(liveSlide, scripture),
+        }
+
+        updateActiveSlide(updatedSlide)
+        window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
+        return true
+    }, [updateActiveSlide])
 
     const addToQueue = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
         const label = `${bookIndex}:${chapter}:${verse}`
@@ -265,10 +285,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             setCurrentEndVerse(newEnd)
             setActiveVerseKey(`${currentBookIndex}:${currentChapter}:${newStart}`)
             
-            const liveSlideId = useAppStore.getState().liveSlideId
-            if (liveSlideId) {
-                goLiveWithScripture(currentBookIndex, currentChapter, newStart)
-            }
+            updateCurrentLiveBibleSlide(result)
         }
         
         setLoading(false)
@@ -284,7 +301,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 next: nr && Array.isArray(nr.content) ? nr.content as BibleVerse[] : [],
             })
         })
-    }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse, fetchScripture, selectedVersion, goLiveWithScripture])
+    }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse, fetchScripture, selectedVersion, updateCurrentLiveBibleSlide])
 
     const changeVersion = useCallback((newVersion: string) => {
         setSelectedVersion(newVersion)
@@ -383,12 +400,14 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
             {/* Recent Verses Strip */}
             {recentVerses.length > 0 && (
-                <div className="px-3 pt-3 flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] shrink-0">Recent</span>
+                <div className="px-3 pt-3 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] shrink-0 mr-0.5">Recent</span>
                     {recentVerses.map((ref) => (
-                        <button key={ref} onClick={() => handleRecentVerseClick(ref)} className="group relative px-2 py-0.5 text-xs font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-full border border-[var(--border-default)] transition-colors">
+                        <button key={ref} onClick={() => handleRecentVerseClick(ref)} className="group relative px-2 py-0.5 text-[11px] font-medium bg-[var(--bg-tertiary)]/70 hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-full border border-[var(--border-subtle)] transition-colors">
                             {ref}
-                            <span onClick={(e) => { e.stopPropagation(); handleRecentVerseGoLive(ref) }} className="ml-1 text-[var(--accent-teal)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" title="Present">⚡</span>
+                            <span onClick={(e) => { e.stopPropagation(); handleRecentVerseGoLive(ref) }} className="ml-1 inline-flex text-[var(--accent-teal)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" title="Present">
+                                <Zap className="w-2.5 h-2.5" />
+                            </span>
                         </button>
                     ))}
                     <button onClick={() => { setRecentVerses([]); try { localStorage.removeItem(RECENT_VERSES_KEY) } catch {} }} className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">clear</button>
@@ -396,7 +415,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             )}
 
             {/* Search bar — always visible */}
-            <div className="p-4 border-b border-[var(--border-subtle)]">
+            <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70">
                 <div className="relative flex items-center gap-2">
                     <select value={selectedVersion} onChange={(e) => changeVersion(e.target.value)} className="shrink-0 px-2 py-2.5 text-xs font-medium rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none appearance-none cursor-pointer">
                         {bibleVersionObjects.map((v) => (<option key={v.id} value={v.id}>{v.id}</option>))}
@@ -431,16 +450,22 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </div>
                 )}
 
-                <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-muted)]">
-                    <span>Auto-searches as you type</span>
-                    <span className="text-[var(--border-emphasis)]">|</span>
-                    <span>Enter = Add</span>
-                    <span className="text-[var(--border-emphasis)]">|</span>
-                    <span>Shift+Enter = Live</span>
-                    <span className="text-[var(--border-emphasis)]">|</span>
-                    <span>↑↓ Navigate</span>
-                </div>
+                <details className="group mt-2 text-[10px] text-[var(--text-muted)]">
+                    <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-md px-1 py-0.5 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]">
+                        Shortcuts
+                        <span className="transition-transform group-open:rotate-90">&gt;</span>
+                    </summary>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
+                        <span>Auto-searches as you type</span>
+                        <span>Enter = Add</span>
+                        <span>Shift+Enter = Live</span>
+                        <span>↑↓ Navigate</span>
+                    </div>
+                </details>
             </div>
+
+            {/* Detected Verses from Sermon Listener */}
+            <DetectedVersesBar />
 
             {/* Results list — unified for both reference search and semantic search */}
             <div
@@ -455,22 +480,20 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 )}
 
                 {verseRows.length > 0 && !loading && (
-                    <div className="px-2 py-1 space-y-0.5">
+                    <div className="px-2 py-1 space-y-1">
                         {hasSearched && (
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 py-1">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-teal)] px-1 py-1">
                                 {bibleBooks[currentBookIndex! - 1]} {currentChapter}
                             </div>
                         )}
                         {!hasSearched && (
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--accent-teal)] px-1 py-1">Search Results</div>
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-teal)] px-1 py-1">Search Results</div>
                         )}
                         {verseRows.map((row, index) => {
                             const verseKey = `${row.bookIndex}:${row.chapter}:${row.verse}`
                             const isActive = activeVerseKey === verseKey
                             const isHovered = focusedIndex === index
-                            const handleRowClick = row.source === 'semantic'
-                                ? () => loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
-                                : () => addToQueue(row.bookIndex, row.chapter, row.verse)
+                            const handleRowClick = () => loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
                             return (
                             <Fragment key={verseKey}>
                                 {row.showChapterHeader && row.chapterHeaderLabel && (
@@ -484,9 +507,9 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                     initial={{ opacity: 0, y: 4 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: index * 0.02, layout: { duration: 0.2 } }}
-                                    className={`group rounded-lg border transition-colors cursor-pointer ${
+                                    className={`group rounded-xl border transition-colors cursor-pointer ${
                                         isActive
-                                            ? 'bg-[var(--accent-teal)]/12 border-[var(--accent-teal)]/30 ring-1 ring-[var(--accent-teal)]/25'
+                                            ? 'bg-[var(--accent-teal)]/12 border-[var(--accent-teal)]/35 ring-1 ring-[var(--accent-teal)]/25'
                                             : row.isCurrent
                                                 ? 'bg-[var(--accent-teal)]/8 border-[var(--accent-teal)]/20'
                                                 : isHovered
@@ -496,9 +519,9 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                     onClick={handleRowClick}
                                     onMouseEnter={() => setFocusedIndex(index)}
                                 >
-                                    <div className="px-3 py-2">
-                                        <div className="flex items-center gap-2 mb-0.5">
-                                            <span className={`text-[13px] font-bold shrink-0 ${isActive || row.isCurrent ? 'text-[var(--accent-teal)]' : 'text-[var(--text-secondary)]'}`}>
+                                    <div className="px-3 py-2.5">
+                                        <div className="flex items-start gap-2 mb-1">
+                                            <span className={`text-sm font-bold shrink-0 leading-5 tabular-nums ${isActive || row.isCurrent ? 'text-[var(--accent-teal)]' : 'text-[var(--text-secondary)]'}`}>
                                                 {row.displayLabel}
                                             </span>
                                             {row.source === 'semantic' && row.score !== undefined && (
@@ -510,12 +533,12 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                             {row.isCurrent && !isActive && (
                                                 <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-teal)]/15 text-[var(--accent-teal)] rounded font-medium">CURRENT</span>
                                             )}
-                                            <div className={`ml-auto flex items-center gap-0.5 shrink-0 ${
+                                            <div className={`ml-auto flex items-center gap-1 shrink-0 ${
                                                 row.isCurrent || isActive || isHovered ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                                             } transition-opacity`}>
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); addToQueue(row.bookIndex, row.chapter, row.verse) }}
-                                                    className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded transition-colors"
+                                                    className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-md transition-colors"
                                                 >
                                                     <Plus className="w-3 h-3" /> Add
                                                 </button>
@@ -527,15 +550,15 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                     }}
                                                     className={`flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium rounded transition-all ${
                                                         isActive
-                                                            ? 'bg-[var(--accent-teal)] text-white hover:brightness-110'
-                                                            : 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] hover:bg-[var(--accent-teal)] hover:text-white'
+                                                            ? 'bg-red-500 text-white hover:brightness-110'
+                                                            : 'bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white'
                                                     }`}
                                                 >
                                                     <Zap className="w-3 h-3" /> Live
                                                 </button>
                                             </div>
                                         </div>
-                                        <p className={`text-xs leading-relaxed ${isActive || row.isCurrent ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-tertiary)]'}`}>
+                                        <p className={`text-xs leading-relaxed ${isActive || row.isCurrent ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)]'}`}>
                                             {row.scripture}
                                         </p>
                                     </div>

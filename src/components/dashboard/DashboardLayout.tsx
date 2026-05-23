@@ -5,6 +5,8 @@ import { QuickActionsSidebar } from '../quick-actions/QuickActionsSidebar'
 import { PreviewContent } from '../preview/PreviewContent'
 import { LiveOutput } from '../live/LiveOutput'
 import { SermonListenerPanel } from '../sermon-listener'
+import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
+import { useAppStore } from '../../store/appStore'
 import {
     DEFAULT_PANEL_CONFIGS,
     DEFAULT_LAYOUTS,
@@ -51,8 +53,11 @@ export function DashboardLayout({
     showSermonListener = false,
     onSermonListenerToggle
 }: DashboardLayoutProps) {
+    const sermonListener = useSermonListenerContext()
+    const activeNavSection = useAppStore((s) => s.activeNavSection)
+    const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
     const [collapsedPanels, setCollapsedPanels] = useState<Set<PanelId>>(new Set())
-    const [hiddenPanels, setHiddenPanels] = useState<Set<PanelId>>(new Set()) // All panels visible by default
+    const [userHiddenPanels, setUserHiddenPanels] = useState<Set<PanelId>>(new Set())
     const [layouts, setLayouts] = useState<{ [key: string]: LayoutItem[] }>(() => {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
@@ -68,20 +73,27 @@ export function DashboardLayout({
     // Store original heights so we can restore them on expand
     const originalHeightsRef = useRef<Record<string, number>>({})
 
+    // Auto-hide sermon panel from dashboard grid when ContextPanel sidebar has sermon section open
+    // to prevent duplication — detected verses now appear in the Bible panel via DetectedVersesBar
+    const sermonDuplicatedInSidebar = activeNavSection === 'sermon' && contextPanelOpen
+
+    // Compute effective hidden panels: user-toggled + auto-hidden sermon when sidebar has it
+    const hiddenPanels = useMemo(() => {
+        const set = new Set(userHiddenPanels)
+        if (sermonDuplicatedInSidebar) {
+            set.add('sermonListener')
+        }
+        return set
+    }, [userHiddenPanels, sermonDuplicatedInSidebar])
+
     // Save layouts to localStorage
     useEffect(() => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts))
     }, [layouts])
 
-    // Handle sermon listener visibility
+    // Handle sermon listener visibility — restore layout when showing
     useEffect(() => {
         if (showSermonListener) {
-            setHiddenPanels(prev => {
-                const next = new Set(prev)
-                next.delete('sermonListener')
-                return next
-            })
-            // Restore default layout when showing
             const panelConfig = DEFAULT_PANEL_CONFIGS.find(p => p.id === 'sermonListener')
             if (panelConfig) {
                 setLayouts(prevLayouts => {
@@ -101,8 +113,6 @@ export function DashboardLayout({
                     return updated
                 })
             }
-        } else {
-            setHiddenPanels(prev => new Set(prev).add('sermonListener'))
         }
     }, [showSermonListener])
 
@@ -158,14 +168,14 @@ export function DashboardLayout({
     }, [])
 
     const handleClose = useCallback((panelId: PanelId) => {
-        setHiddenPanels(prev => new Set(prev).add(panelId))
+        setUserHiddenPanels(prev => new Set(prev).add(panelId))
         if (panelId === 'sermonListener' && onSermonListenerToggle) {
             onSermonListenerToggle()
         }
     }, [onSermonListenerToggle])
 
     const togglePanel = useCallback((panelId: PanelId) => {
-        setHiddenPanels(prev => {
+        setUserHiddenPanels(prev => {
             const next = new Set(prev)
             if (next.has(panelId)) {
                 // Showing the panel - restore default layout
@@ -200,7 +210,7 @@ export function DashboardLayout({
 
     const resetLayout = useCallback(() => {
         setLayouts(DEFAULT_LAYOUTS)
-        setHiddenPanels(new Set())
+        setUserHiddenPanels(new Set())
         setCollapsedPanels(new Set())
         originalHeightsRef.current = {}
     }, [])
@@ -310,6 +320,8 @@ export function DashboardLayout({
                     {DEFAULT_PANEL_CONFIGS.map((panel) => {
                         const isHidden = hiddenPanels.has(panel.id)
                         const Icon = iconMap[panel.icon]
+                        const isRecording = panel.id === 'sermonListener' && sermonListener?.isListening
+                        const label = isRecording ? 'Listening…' : panel.title
                         return (
                             <button
                                 key={panel.id}
@@ -325,17 +337,25 @@ export function DashboardLayout({
                                     transition-all duration-200 whitespace-nowrap
                                     ${isHidden
                                         ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                                        : `${accentColorMap[panel.id] === 'teal' ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]' : ''}
-                                           ${accentColorMap[panel.id] === 'indigo' ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)]' : ''}
-                                           ${accentColorMap[panel.id] === 'emerald' ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)]' : ''}
-                                           ${accentColorMap[panel.id] === 'amber' ? 'bg-[var(--accent-amber)]/10 text-[var(--accent-amber)]' : ''}
-                                           ${accentColorMap[panel.id] === 'rose' ? 'bg-[var(--accent-rose)]/10 text-[var(--accent-rose)]' : ''}`
+                                        : isRecording
+                                            ? 'bg-red-500/10 text-red-500'
+                                            : `${accentColorMap[panel.id] === 'teal' ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]' : ''}
+                                               ${accentColorMap[panel.id] === 'indigo' ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)]' : ''}
+                                               ${accentColorMap[panel.id] === 'emerald' ? 'bg-[var(--accent-emerald)]/10 text-[var(--accent-emerald)]' : ''}
+                                               ${accentColorMap[panel.id] === 'amber' ? 'bg-[var(--accent-amber)]/10 text-[var(--accent-amber)]' : ''}
+                                               ${accentColorMap[panel.id] === 'rose' ? 'bg-[var(--accent-rose)]/10 text-[var(--accent-rose)]' : ''}`
                                     }
                                 `}
-                                title={isHidden ? `Show ${panel.title}` : `Hide ${panel.title}`}
+                                title={isHidden ? `Show ${label}` : `Hide ${label}`}
                             >
+                                {isRecording && (
+                                    <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+                                    </span>
+                                )}
                                 {Icon}
-                                <span className="hidden sm:inline">{panel.title}</span>
+                                <span className="hidden sm:inline">{label}</span>
                             </button>
                         )
                     })}

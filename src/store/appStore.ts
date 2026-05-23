@@ -911,11 +911,7 @@ export const useAppStore = create<AppStore>()(
             setActiveNavSection: (section) => {
                 set((state) => ({
                     activeNavSection: section,
-                    // Auto-open context panel when selecting a section
                     contextPanelOpen: section !== null ? true : state.contextPanelOpen,
-                    // Clear split panel mode when switching away from sermon
-                    splitPanelMode: section === 'sermon' ? state.splitPanelMode : null,
-                    splitPanelQuery: section === 'sermon' ? state.splitPanelQuery : null,
                 }))
             },
 
@@ -973,10 +969,9 @@ export const useAppStore = create<AppStore>()(
 
             openBibleFromSermon: (verseReference) => {
                 set({ 
-                    activeNavSection: 'sermon',
+                    activeNavSection: 'bible',
                     contextPanelOpen: true,
-                    splitPanelMode: 'sermon-bible',
-                    splitPanelQuery: verseReference,
+                    biblePanelQuery: verseReference,
                 })
             },
 

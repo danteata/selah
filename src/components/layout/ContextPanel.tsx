@@ -2,11 +2,11 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     X, BookOpen, Music, Image, Layout, Clock,
-    AlertCircle, Archive, Calendar, Mic, Settings, GripVertical, Rows2, Pin, Maximize2
+    AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import type { NavSection, SplitPanelMode } from '../../types/studio'
-import type { Slide, Countdown } from '../../types'
+import type { NavSection } from '../../types/studio'
+import type { Slide } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { resolveLocalUrl } from '../../hooks/useLocalBackground'
 
@@ -18,8 +18,6 @@ import { MediaPicker } from '../media/MediaPicker'
 import { TemplateBrowser } from '../templates/TemplateBrowser'
 import { AddCountdownModal } from '../countdown/AddCountdownModal'
 import { AddAlertModal } from '../alerts/AddAlertModal'
-import { useMutation } from 'convex/react'
-import { api } from '../../../convex/_generated/api'
 
 
 const SECTION_META: Record<NavSection, { icon: React.ElementType; title: string }> = {
@@ -45,19 +43,11 @@ export function ContextPanel() {
     const setContextPanelWidth = useAppStore((s) => s.setContextPanelWidth)
     const setPanelMode = useAppStore((s) => s.setPanelMode)
     const setPanelPosition = useAppStore((s) => s.setPanelPosition)
-    const splitPanelMode = useAppStore((s) => s.splitPanelMode)
-    const splitPanelQuery = useAppStore((s) => s.splitPanelQuery)
-    const setSplitPanelMode = useAppStore((s) => s.setSplitPanelMode)
-    const setSplitPanelQuery = useAppStore((s) => s.setSplitPanelQuery)
-    const openModal = useAppStore((s) => s.openModal)
 
     const resizeRef = useRef<HTMLDivElement>(null)
     const isResizing = useRef(false)
-    const isSplitResizing = useRef(false)
     const isDragging = useRef(false)
     const dragOffset = useRef({ x: 0, y: 0 })
-    const splitPanelRef = useRef<HTMLDivElement>(null)
-    const [splitRatio, setSplitRatio] = useState(0.55)
 
     // Resize handler (outer panel — docked mode left edge)
     useEffect(() => {
@@ -80,30 +70,6 @@ export function ContextPanel() {
             document.removeEventListener('mouseup', handleMouseUp)
         }
     }, [setContextPanelWidth])
-
-    // Split panel resize handler
-    useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (!isSplitResizing.current || !splitPanelRef.current) return
-            const rect = splitPanelRef.current.getBoundingClientRect()
-            const y = e.clientY - rect.top
-            const ratio = Math.max(0.25, Math.min(0.75, y / rect.height))
-            setSplitRatio(ratio)
-        }
-
-        const handleMouseUp = () => {
-            isSplitResizing.current = false
-            document.body.style.cursor = ''
-            document.body.style.userSelect = ''
-        }
-
-        document.addEventListener('mousemove', handleMouseMove)
-        document.addEventListener('mouseup', handleMouseUp)
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove)
-            document.removeEventListener('mouseup', handleMouseUp)
-        }
-    }, [])
 
     // Floating panel drag handler
     useEffect(() => {
@@ -136,12 +102,6 @@ export function ContextPanel() {
         document.body.style.userSelect = 'none'
     }, [])
 
-    const startSplitResize = useCallback(() => {
-        isSplitResizing.current = true
-        document.body.style.cursor = 'row-resize'
-        document.body.style.userSelect = 'none'
-    }, [])
-
     const startDrag = useCallback((e: React.MouseEvent) => {
         if (panelMode !== 'floating') return
         isDragging.current = true
@@ -155,9 +115,7 @@ export function ContextPanel() {
 
     const handleClose = useCallback(() => {
         setActiveNavSection(null)
-        setSplitPanelMode(null)
-        setSplitPanelQuery(null)
-    }, [setActiveNavSection, setSplitPanelMode, setSplitPanelQuery])
+    }, [setActiveNavSection])
 
     const handleDetach = useCallback(() => {
         setPanelMode('floating')
@@ -257,7 +215,6 @@ export function ContextPanel() {
 
     const INLINE_SECTIONS: NavSection[] = ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'sermon']
     const showInline = activeNavSection && INLINE_SECTIONS.includes(activeNavSection)
-    const isInSplitMode = splitPanelMode === 'sermon-bible' && activeNavSection === 'sermon'
 
     if (!contextPanelOpen || !showInline || !activeNavSection) return null
 
@@ -266,14 +223,14 @@ export function ContextPanel() {
 
     const panelHeader = (
         <div
-            className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)] flex-shrink-0 bg-[var(--bg-tertiary)]/50"
+            className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)] flex-shrink-0 bg-[var(--bg-tertiary)]/25"
             onMouseDown={startDrag}
             style={panelMode === 'floating' ? { cursor: 'grab' } : undefined}
         >
             <div className="flex items-center gap-2">
                 <SectionIcon className="w-4 h-4 text-[var(--accent-teal)]" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-                    {isInSplitMode ? 'Sermon + Bible' : meta.title}
+                <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                    {meta.title}
                 </h3>
             </div>
             <div className="flex items-center gap-1">
@@ -295,26 +252,6 @@ export function ContextPanel() {
                         <Pin className="w-3.5 h-3.5" />
                     </button>
                 )}
-                {activeNavSection === 'sermon' && (
-                    <button
-                        onClick={() => {
-                            if (isInSplitMode) {
-                                setSplitPanelMode(null)
-                                setSplitPanelQuery(null)
-                            } else {
-                                setSplitPanelMode('sermon-bible')
-                            }
-                        }}
-                        className={`p-1 rounded transition-colors ${
-                            isInSplitMode
-                                ? 'text-[var(--accent-amber)] bg-[var(--accent-amber)]/10 hover:bg-[var(--accent-amber)]/20'
-                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
-                        }`}
-                        title={isInSplitMode ? 'Exit split view' : 'Open Bible alongside (split view)'}
-                    >
-                        <Rows2 className="w-3.5 h-3.5" />
-                    </button>
-                )}
                 <button
                     onClick={handleClose}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
@@ -327,89 +264,63 @@ export function ContextPanel() {
 
     const panelContent = (
         <div className="flex-1 min-h-0 overflow-hidden">
-            {isInSplitMode ? (
-                <div ref={splitPanelRef} className="h-full flex flex-col">
-                    <div style={{ height: `${splitRatio * 100}%` }} className="min-h-0 overflow-y-auto">
-                        <div className="h-full p-2">
+            <AnimatePresence mode="wait">
+                <motion.div
+                    key={activeNavSection}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="h-full"
+                >
+                    {activeNavSection === 'bible' && (
+                        <div className="h-full">
+                            <BibleList isInline onClose={handleClose} />
+                        </div>
+                    )}
+                    {activeNavSection === 'music' && (
+                        <MusicBrowser onClose={handleClose} />
+                    )}
+                    {activeNavSection === 'sermon' && (
+                        <div className="h-full">
                             <SermonListenerPanel onHide={handleClose} />
                         </div>
-                    </div>
-                    <div
-                        onMouseDown={startSplitResize}
-                        className="flex-shrink-0 h-2 flex items-center justify-center cursor-row-resize hover:bg-[var(--accent-teal)]/10 transition-colors group border-y border-[var(--border-subtle)]"
-                    >
-                        <GripVertical className="w-4 h-3 text-[var(--text-muted)] group-hover:text-[var(--accent-teal)] rotate-90 transition-colors" />
-                    </div>
-                    <div style={{ height: `${(1 - splitRatio) * 100}%` }} className="min-h-0 overflow-y-auto">
+                    )}
+                    {activeNavSection === 'media' && (
                         <div className="h-full">
-                            <BibleList
-                                key={splitPanelQuery || 'bible-split'}
+                            <MediaPicker
                                 isInline
-                                onClose={handleClose}
-                                initialQuery={splitPanelQuery || undefined}
+                                onSelect={handleMediaSelect}
                             />
                         </div>
-                    </div>
-                </div>
-            ) : (
-                <AnimatePresence mode="wait">
-                    <motion.div
-                        key={activeNavSection}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.2 }}
-                        className="h-full"
-                    >
-                        {activeNavSection === 'bible' && (
-                            <div className="h-full">
-                                <BibleList isInline onClose={handleClose} />
-                            </div>
-                        )}
-                        {activeNavSection === 'music' && (
-                            <MusicBrowser onClose={handleClose} />
-                        )}
-                        {activeNavSection === 'sermon' && (
-                            <div className="h-full">
-                                <SermonListenerPanel onHide={handleClose} />
-                            </div>
-                        )}
-                        {activeNavSection === 'media' && (
-                            <div className="h-full">
-                                <MediaPicker
-                                    isInline
-                                    onSelect={handleMediaSelect}
-                                />
-                            </div>
-                        )}
-                        {activeNavSection === 'templates' && (
-                            <div className="h-full">
-                                <TemplateBrowser
-                                    isInline
-                                    onSelect={handleTemplateSelect}
-                                />
-                            </div>
-                        )}
-                        {activeNavSection === 'countdown' && (
-                            <div className="h-full">
-                                <AddCountdownModal
-                                    isInline
-                                    onAdd={handleCountdownCreate}
-                                    editingSlide={editingSlide}
-                                />
-                            </div>
-                        )}
-                        {activeNavSection === 'alerts' && (
-                            <div className="h-full">
-                                <AddAlertModal
-                                    isInline
-                                    editingSlide={editingSlide}
-                                />
-                            </div>
-                        )}
-                    </motion.div>
-                </AnimatePresence>
-            )}
+                    )}
+                    {activeNavSection === 'templates' && (
+                        <div className="h-full">
+                            <TemplateBrowser
+                                isInline
+                                onSelect={handleTemplateSelect}
+                            />
+                        </div>
+                    )}
+                    {activeNavSection === 'countdown' && (
+                        <div className="h-full">
+                            <AddCountdownModal
+                                isInline
+                                onAdd={handleCountdownCreate}
+                                editingSlide={editingSlide}
+                            />
+                        </div>
+                    )}
+                    {activeNavSection === 'alerts' && (
+                        <div className="h-full">
+                            <AddAlertModal
+                                isInline
+                                editingSlide={editingSlide}
+                            />
+                        </div>
+                    )}
+                </motion.div>
+            </AnimatePresence>
         </div>
     )
 

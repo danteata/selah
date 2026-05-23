@@ -15,8 +15,8 @@ import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, Book, Send, Trash2, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Filter, NotebookPen, Minimize2, BookOpen } from 'lucide-react'
-import type { Scripture, BibleVerse } from '../../types'
+import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2 } from 'lucide-react'
+import type { Scripture } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 
 interface SermonListenerPanelProps {
@@ -66,7 +66,6 @@ function SermonListenerPanelInner({
     const [transcriptTitle, setTranscriptTitle] = useState('')
     const [isSaving, setIsSaving] = useState(false)
     const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null)
-    const [showOnlyBestMatches, setShowOnlyBestMatches] = useState(true)
     const [autoSaveTranscriptId, setAutoSaveTranscriptId] = useState<string | null>(null)
     const [sermonNotes, setSermonNotes] = useState('')
     const [showWizard, setShowWizard] = useState(!isSermonListenerWizardComplete())
@@ -82,24 +81,15 @@ function SermonListenerPanelInner({
         interimTranscript,
         detectedVerses,
         currentVerse,
-        currentScripture,
         error,
-        isLoading,
         provider,
         isSpeechDetected,
         audioLevel,
         isInitializingProvider,
         providerReady,
-        activeBibleVersion,
-        lastVoiceCommand,
         start,
         stop,
         reset,
-        displayCurrentVerse,
-        removeVerse,
-        setCurrentDetectedVerse,
-        nextVerse,
-        previousVerse,
     } = sermonListener
 
     const uniqueDetectedVerses = detectedVerses.filter((verse, index, arr) => arr.findIndex(v => v.reference === verse.reference) === index)
@@ -157,17 +147,6 @@ function SermonListenerPanelInner({
             transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
         }
     }, [transcript, interimTranscript])
-
-    const handleVerseClick = (verse: DetectedVerse) => {
-        void setCurrentDetectedVerse(verse)
-    }
-
-    const handleLookupInBible = (verse: DetectedVerse) => {
-        const ref = verse.verseEnd && verse.verseEnd !== verse.verseStart
-            ? `${verse.book} ${verse.chapter}:${verse.verseStart}-${verse.verseEnd}`
-            : `${verse.book} ${verse.chapter}:${verse.verseStart}`
-        openBibleFromSermon(ref)
-    }
 
     const handleSaveTranscript = async () => {
         if (!transcript.trim()) return
@@ -321,10 +300,10 @@ function SermonListenerPanelInner({
                     <button
                         onClick={onHide}
                         className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all flex-shrink-0"
-                        title="Hide panel — keep recording in background"
+                        title="Minimize panel — keep listening in background"
                     >
                         <Minimize2 className="w-3 h-3" />
-                        <span className="hidden sm:inline">Background</span>
+                        <span className="hidden sm:inline">Minimize</span>
                     </button>
                 )}
 
@@ -350,175 +329,29 @@ function SermonListenerPanelInner({
                 </div>
             )}
 
-            {/* Current verse display - compact */}
-            {currentVerse && currentScripture && (
-                <div className="p-2 rounded-lg border bg-[var(--accent-teal)]/5 border-[var(--accent-teal)]/30">
-                    <div className="flex items-center justify-between mb-1">
-                        <h4 className="font-semibold text-sm text-[var(--accent-teal)]">
-                            {formatVerseForDisplay(currentVerse)}
-                        </h4>
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => {
-                                    const ref = currentVerse.verseEnd && currentVerse.verseEnd !== currentVerse.verseStart
-                                        ? `${currentVerse.book} ${currentVerse.chapter}:${currentVerse.verseStart}-${currentVerse.verseEnd}`
-                                        : `${currentVerse.book} ${currentVerse.chapter}:${currentVerse.verseStart}`
-                                    openBibleFromSermon(ref)
-                                }}
-                                className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-tertiary)] text-[var(--accent-teal)] rounded text-xs hover:bg-[var(--accent-teal)]/10 transition-all"
-                                title="Look up in Bible panel"
-                            >
-                                <BookOpen className="w-3 h-3" />
-                                <span className="hidden sm:inline">Bible</span>
-                            </button>
-                            <button
-                                onClick={displayCurrentVerse}
-                                className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal)] text-white rounded text-xs hover:brightness-110 transition-all shadow-sm"
-                            >
-                                <Send className="w-3 h-3" />
-                                Send
-                            </button>
-                        </div>
-                    </div>
-                    <div className="text-xs text-gray-700 dark:text-gray-300 max-h-20 overflow-y-auto">
-                        {Array.isArray(currentScripture.content) && currentScripture.content.slice(0, 3).map((verse: BibleVerse, idx: number) => (
-                            <p key={idx} className="mb-0.5">
-                                <sup className="text-[10px] text-blue-500 mr-0.5">{verse.verse}</sup>
-                                {verse.scripture}
-                            </p>
-                        ))}
-                        {Array.isArray(currentScripture.content) && currentScripture.content.length > 3 && (
-                            <p className="text-[10px] text-gray-400">+{currentScripture.content.length - 3} more verses</p>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Voice command feedback and active Bible version */}
-            {(lastVoiceCommand || currentVerse) && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                    {activeBibleVersion && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]">
-                            {activeBibleVersion}
-                        </span>
-                    )}
-                    {lastVoiceCommand && (
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${lastVoiceCommand.type === 'change_version'
-                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                                : lastVoiceCommand.type === 'next_verse' || lastVoiceCommand.type === 'previous_verse'
-                                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                    : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                            }`}>
-                            {lastVoiceCommand.type === 'change_version' && `Switched to ${lastVoiceCommand.versionId}`}
-                            {lastVoiceCommand.type === 'next_verse' && 'Next verse'}
-                            {lastVoiceCommand.type === 'previous_verse' && 'Previous verse'}
-                            {lastVoiceCommand.type === 'display' && 'Sent to live'}
-                            {lastVoiceCommand.type === 'stop_listening' && 'Stopped listening'}
-                            {lastVoiceCommand.type === 'start_listening' && 'Started listening'}
-                        </span>
-                    )}
-                    {currentVerse && (
-                        <div className="flex items-center gap-0.5">
-                            <button
-                                onClick={previousVerse}
-                                className="px-1 py-0.5 rounded text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
-                                title="Previous verse"
-                            >
-                                &#x25C0;
-                            </button>
-                            <button
-                                onClick={nextVerse}
-                                className="px-1 py-0.5 rounded text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600"
-                                title="Next verse"
-                            >
-                                &#x25B6;
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Detected verses list - compact inline chips */}
+            {/* Detected verses link to Bible panel */}
             {uniqueDetectedVerses.length > 0 && (
-                <div className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
-                    <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                                {showOnlyBestMatches
-                                    ? `${uniqueDetectedVerses.filter(v => v.isBestMatch).length} confirmed`
-                                    : `${uniqueDetectedVerses.length} total`
-                                } verse{uniqueDetectedVerses.length !== 1 ? 's' : ''}
+                <div className="px-2 py-1.5 rounded-lg bg-[var(--accent-amber)]/5 border border-[var(--accent-amber)]/20">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                            <BookOpen className="w-3.5 h-3.5 text-[var(--accent-amber)]" />
+                            <span className="text-xs font-medium text-[var(--accent-amber)]">
+                                {uniqueDetectedVerses.filter(v => v.isBestMatch).length} confirmed verse{uniqueDetectedVerses.filter(v => v.isBestMatch).length !== 1 ? 's' : ''}
                             </span>
-                            <button
-                                onClick={() => setShowOnlyBestMatches(!showOnlyBestMatches)}
-                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${showOnlyBestMatches
-                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                    : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                                    }`}
-                                title={showOnlyBestMatches ? 'Showing only confirmed verses' : 'Showing all detected verses'}
-                            >
-                                <Filter className="w-3 h-3" />
-                                {showOnlyBestMatches ? 'Confirmed' : 'All'}
-                            </button>
                         </div>
                         <button
-                            onClick={reset}
-                            className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                            onClick={() => openBibleFromSermon(formatVerseForDisplay(currentVerse || uniqueDetectedVerses[0]))}
+                            className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal)] text-white rounded text-[10px] font-medium hover:brightness-110 transition-all shadow-sm"
                         >
-                            Clear
+                            <BookOpen className="w-3 h-3" />
+                            View in Bible
                         </button>
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                        {(showOnlyBestMatches
-                            ? uniqueDetectedVerses.filter(v => v.isBestMatch)
-                            : uniqueDetectedVerses
-                        ).map((verse, idx) => (
-                            <div
-                                key={`${verse.reference}-${idx}`}
-                                className={`group flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs cursor-pointer transition-colors ${currentVerse?.reference === verse.reference
-                                    ? 'bg-[var(--accent-teal)] text-white'
-                                    : verse.isBestMatch
-                                        ? 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200'
-                                        : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600'
-                                    }`}
-                                onClick={() => handleVerseClick(verse)}
-                            >
-                                <Book className="w-3 h-3" />
-                                <span>{formatVerseForDisplay(verse)}</span>
-                                {!verse.isBestMatch && (
-                                    <span className="text-[8px] opacity-60 ml-0.5">?</span>
-                                )}
-                                {isLoading && currentVerse?.reference === verse.reference && (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                )}
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        handleLookupInBible(verse)
-                                    }}
-                                    className={`opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
-                                        ? 'text-white/70 hover:text-white'
-                                        : 'text-gray-400 hover:text-[var(--accent-teal)]'
-                                    }`}
-                                    title="Look up in Bible"
-                                >
-                                    <BookOpen className="w-3 h-3" />
-                                </button>
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        removeVerse(verse)
-                                    }}
-                                    className={`opacity-0 group-hover:opacity-100 transition-opacity ${currentVerse?.reference === verse.reference
-                                        ? 'text-white/70 hover:text-white'
-                                        : 'text-gray-400 hover:text-red-500'
-                                    }`}
-                                >
-                                    <Trash2 className="w-3 h-3" />
-                                </button>
-                            </div>
-                        ))}
-                    </div>
+                    {currentVerse && (
+                        <p className="text-[10px] text-[var(--text-muted)] mt-1">
+                            Current: <span className="text-[var(--accent-teal)] font-medium">{formatVerseForDisplay(currentVerse)}</span>
+                        </p>
+                    )}
                 </div>
             )}
 

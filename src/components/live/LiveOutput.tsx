@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Mic } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -11,6 +11,8 @@ import type { Slide, Scripture, Countdown } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
 import { BibleVerseNavigator } from '../bible/BibleVerseNavigator'
+import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
+import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 
 // Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
 function parseTimeStringToSeconds(timeStr: string): number {
@@ -30,6 +32,13 @@ function formatSecondsToTime(totalSeconds: number): string {
 }
 
 export function LiveOutput() {
+    const sermonListener = useSermonListenerContext()
+    const activeNavSection = useAppStore((s) => s.activeNavSection)
+    const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
+
+    // Hide sermon listener panel when the ContextPanel sidebar is already showing it
+    const sermonShownInSidebar = activeNavSection === 'sermon' && contextPanelOpen
+
     const [ctrlOrMetaActive, setCtrlOrMetaActive] = useState(false)
     const [showScreenPicker, setShowScreenPicker] = useState(false)
 
@@ -395,11 +404,11 @@ export function LiveOutput() {
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
             {/* Header - Broadcast Controls */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-800">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/35">
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${isPresenting ? 'bg-red-500 animate-pulse' : 'bg-gray-500'}`} />
-                        <h2 className="text-sm font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                        <span className={`w-2 h-2 rounded-full ${liveSlide ? 'bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.55)]' : 'bg-[var(--text-muted)]/60'}`} />
+                        <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                             Program Output
                         </h2>
                     </div>
@@ -417,7 +426,7 @@ export function LiveOutput() {
                         </span>
                     )}
                     {ndiRunning && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/30">
+                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/20">
                             NDI ACTIVE
                         </span>
                     )}
@@ -427,7 +436,7 @@ export function LiveOutput() {
                     {ndiAvailable && (
                         <button
                             onClick={ndiRunning ? () => ndiStop() : () => ndiStart()}
-                            className={`p-1.5 rounded transition-colors ${ndiRunning ? 'text-[var(--accent-teal)] bg-[var(--accent-teal)]/10' : 'text-gray-400 hover:text-white'}`}
+                            className={`p-1.5 rounded-lg transition-colors ${ndiRunning ? 'text-[var(--accent-teal)] bg-[var(--accent-teal)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
                             title="NDI Output"
                         >
                             <Radio className="w-4 h-4" />
@@ -436,7 +445,7 @@ export function LiveOutput() {
                     {isPresenting ? (
                         <button
                             onClick={handleStopLive}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-all"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-red-500/20"
                         >
                             STOP
                         </button>
@@ -452,128 +461,81 @@ export function LiveOutput() {
                 </div>
             </div>
 
-            {/* Main Monitor Area */}
-            <div className="flex-1 flex flex-col p-6 overflow-y-auto">
-                {/* Primary Monitor */}
-                <div className="space-y-4 max-w-5xl mx-auto w-full">
-                    <div className="relative group">
-                        <div className="absolute -top-6 left-0 text-[10px] font-bold text-red-500 uppercase tracking-widest flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-                            Live Feed
-                        </div>
-                        <div className={`studio-live-monitor border border-gray-800 ring-1 ring-white/5 shadow-2xl ${liveSlide ? 'is-live' : ''}`}>
-                            {liveSlide ? (
-                                <div
-                                    className="w-full h-full relative"
-                                    style={{
-                                        backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
-                                        backgroundSize: 'cover',
-                                        backgroundPosition: 'center',
-                                    }}
-                                >
-                                    {isLiveSlideVideo && (
-                                        <video
-                                            src={liveSlideBackground}
-                                            className="absolute inset-0 w-full h-full object-cover"
-                                            autoPlay loop muted playsInline
-                                        />
-                                    )}
-                                    <div className="absolute inset-0 flex items-center justify-center p-[5%]">
-                                        {liveSlide.type === 'countdown' ? (
-                                            <div className="text-white font-mono font-bold tabular-nums drop-shadow-2xl" style={{ fontSize: '8vw' }}>
-                                                {formatSecondsToTime(previewCountdownSeconds)}
-                                            </div>
-                                        ) : (
-                                            <div
-                                                className="text-white text-center drop-shadow-2xl tiptap-preview w-full"
-                                                style={{ fontSize: '2.5vw' }}
-                                                dangerouslySetInnerHTML={{ __html: liveHtml }}
+            {/* Main Content — Live Feed + Active Slide side-by-side */}
+            <div className="flex-1 min-h-0 flex flex-col p-4 lg:p-5 gap-3">
+                <div className="flex-1 min-h-0 flex gap-4 lg:gap-5">
+                    {/* Left: Live Feed + contextual Bible navigator */}
+                    <div className="flex-1 min-w-0 flex flex-col gap-3">
+                        <div className="relative group flex-1 min-h-0 flex flex-col">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="text-[10px] font-bold text-red-500 uppercase tracking-[0.18em] flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                                    Live Output
+                                </div>
+                                <div className="text-[10px] font-medium text-[var(--text-muted)]">
+                                    {liveSlide ? liveSlide.name : 'No slide on air'}
+                                </div>
+                            </div>
+                            <div className={`flex-1 min-h-0 studio-live-monitor ${liveSlide ? 'is-live' : ''}`}>
+                                {liveSlide ? (
+                                    <div
+                                        className="w-full h-full relative"
+                                        style={{
+                                            backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
+                                            backgroundSize: 'cover',
+                                            backgroundPosition: 'center',
+                                        }}
+                                    >
+                                        {isLiveSlideVideo && (
+                                            <video
+                                                src={liveSlideBackground}
+                                                className="absolute inset-0 w-full h-full object-cover"
+                                                autoPlay loop muted playsInline
                                             />
                                         )}
+                                        <div className="absolute inset-0 flex items-center justify-center p-[5%]">
+                                            {liveSlide.type === 'countdown' ? (
+                                                <div className="text-white font-mono font-bold tabular-nums drop-shadow-2xl" style={{ fontSize: '8vw' }}>
+                                                    {formatSecondsToTime(previewCountdownSeconds)}
+                                                </div>
+                                            ) : (
+                                                <div
+                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full"
+                                                    style={{ fontSize: '2.5vw' }}
+                                                    dangerouslySetInnerHTML={{ __html: liveHtml }}
+                                                />
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">
-                                    <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/5 flex items-center justify-center border border-[var(--accent-teal)]/10">
-                                        <Monitor className="w-8 h-8 text-[var(--accent-teal)]/20" />
+                                ) : (
+                                    <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">
+                                        <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/5 flex items-center justify-center border border-[var(--accent-teal)]/10">
+                                            <Monitor className="w-8 h-8 text-[var(--accent-teal)]/20" />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-sm font-semibold text-[var(--text-primary)] opacity-40">Selah</p>
+                                            <p className="text-[10px] text-[var(--text-muted)] mt-1">Nothing is live yet</p>
+                                        </div>
                                     </div>
-                                    <div className="text-center">
-                                        <p className="text-sm font-semibold text-[var(--text-primary)] opacity-40">Selah</p>
-                                        <p className="text-[10px] text-[var(--text-muted)] mt-1">Nothing is live yet</p>
-                                    </div>
-                                </div>
-                            )}
+                                )}
+                            </div>
                         </div>
-                    </div>
 
-                    {liveSlide?.type === 'bible' && (
-                        <div className="mt-4">
+                        {/* Bible verse navigation — only when a bible slide is live */}
+                        {liveSlide?.type === 'bible' && (
                             <BibleVerseNavigator
                                 currentSlide={liveSlide}
                                 onVerseSelect={handleVerseSelect}
                             />
-                        </div>
-                    )}
+                        )}
+                    </div>
 
-                    {/* Shared Queue — contributions from non-operators */}
-                    {isConnected && sharedQueueSlides.length > 0 && (
-                        <div className="mt-4 space-y-2">
-                            <div className="flex items-center justify-between">
-                                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                                    Suggested ({sharedQueueSlides.length})
-                                </div>
-                                {isOperator && (
-                                    <button
-                                        onClick={() => {
-                                            const queueIds = sharedQueueSlides.map(s => s.slideId)
-                                            acceptFromQueue(queueIds)
-                                        }}
-                                        className="text-[10px] font-medium text-[var(--accent-teal)] hover:text-[var(--accent-teal)]/80 transition-colors"
-                                    >
-                                        Accept All
-                                    </button>
-                                )}
-                            </div>
-                            <div className="flex gap-2 overflow-x-auto pb-1">
-                                {sharedQueueSlides.map((entry) => (
-                                    <div
-                                        key={entry.queueKey}
-                                        className="flex-shrink-0 w-32 bg-gray-800/50 border border-blue-500/20 rounded-lg p-2 group relative"
-                                    >
-                                        <div className="text-[10px] text-white/70 truncate">{entry.slide.name}</div>
-                                        <div className="text-[8px] text-blue-400 mt-0.5">
-                                            {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : 'Slide'}
-                                        </div>
-                                        {isOperator && (
-                                            <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => acceptFromQueue([entry.slideId])}
-                                                    className="p-0.5 bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] rounded hover:bg-[var(--accent-teal)]/30"
-                                                    title="Accept slide"
-                                                >
-                                                    <Check className="w-2.5 h-2.5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => removeFromQueue([entry.slideId])}
-                                                    className="p-0.5 bg-rose-500/20 text-rose-400 rounded hover:bg-rose-500/30"
-                                                    title="Dismiss slide"
-                                                >
-                                                    <X className="w-2.5 h-2.5" />
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Secondary/Next Preview & Controls Row */}
-                    <div className="grid grid-cols-2 gap-6">
-                        {/* Next Preview */}
-                        <div className="space-y-2">
-                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Next Up</div>
-                            <div className="aspect-video border border-gray-800 rounded-lg overflow-hidden relative">
+                    {/* Right: Next Up + Active Slide controls */}
+                    <aside className="studio-output-sidecar w-[320px] flex-shrink-0 flex flex-col gap-3">
+                        {/* Next Up Preview — 16:9 aspect ratio */}
+                        <div className="flex flex-col">
+                            <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Next Up</div>
+                            <div className="aspect-video rounded-xl overflow-hidden relative border border-[var(--border-subtle)] bg-black/30 shadow-sm">
                                 {nextSlide ? (
                                     <div
                                         className="w-full h-full relative"
@@ -593,66 +555,143 @@ export function LiveOutput() {
                                         )}
                                         <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/40">
                                             <div
-                                                className="text-white/70 text-center text-[0.8vw] line-clamp-3 drop-shadow-lg"
+                                                className="text-white/70 text-center text-sm line-clamp-3 drop-shadow-lg"
                                                 dangerouslySetInnerHTML={{ __html: nextUpHtml }}
                                             />
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-800 italic text-[10px]">
+                                    <div className="w-full h-full flex items-center justify-center bg-black/30 text-[var(--text-muted)] italic text-[10px]">
                                         End of Schedule
                                     </div>
                                 )}
                             </div>
                         </div>
 
-                        {/* Quick Telemetry & Shortcuts */}
-                        <div className="flex flex-col justify-end gap-4">
-                            <div className="bg-gray-800/50 rounded-xl p-4 border border-white/5">
-                                <div className="flex items-center justify-between mb-4">
-                                    <div>
-                                        <div className="text-[10px] font-bold text-gray-500 uppercase mb-1">Active Slide</div>
-                                        <div className="text-sm font-bold text-white truncate max-w-[150px]">
-                                            {liveSlide?.name || 'None'}
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-[10px] font-bold text-gray-500 uppercase mb-1">Position</div>
-                                        <div className="text-sm font-mono text-white">
-                                            {currentIndex >= 0 ? `${currentIndex + 1} / ${liveOutputSlides.length}` : '- / -'}
-                                        </div>
+                        {/* Active Slide Controls — always visible */}
+                        <div className="flex-shrink-0 rounded-xl p-3 border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/45">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="min-w-0 flex-1">
+                                    <div className="text-[9px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.16em]">Active</div>
+                                    <div className="text-xs font-bold text-[var(--text-primary)] truncate">
+                                        {liveSlide?.name || 'None'}
                                     </div>
                                 </div>
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => prevSlide && handleSetLiveSlide(prevSlide.id)}
-                                        disabled={!prevSlide || (!isOperator && isConnected && !isOpen)}
-                                        className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-20 rounded-lg text-white transition-colors"
-                                    >
-                                        <ChevronUp className="w-5 h-5 mx-auto" />
-                                    </button>
-                                    {isConnected && !isOperator && !isOpen && !isStrict && nextSlide && (
-                                        <button
-                                            onClick={() => handleSuggestNext(nextSlide.id)}
-                                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-medium transition-colors flex items-center justify-center gap-1"
-                                            title="Suggest this slide be queued next"
-                                        >
-                                            <Lightbulb className="w-4 h-4" />
-                                            Suggest
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => nextSlide && handleSetLiveSlide(nextSlide.id)}
-                                        disabled={!nextSlide || (!isOperator && isConnected && !isOpen)}
-                                        className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-20 rounded-lg text-white transition-colors"
-                                    >
-                                        <ChevronDown className="w-5 h-5 mx-auto" />
-                                    </button>
+                                <div className="text-right flex-shrink-0 ml-2">
+                                    <div className="text-[9px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.16em]">Pos</div>
+                                    <div className="text-xs font-mono text-[var(--text-primary)]">
+                                        {currentIndex >= 0 ? `${currentIndex + 1}/${liveOutputSlides.length}` : '-/-'}
+                                    </div>
                                 </div>
                             </div>
+                            <div className="flex gap-1.5">
+                                <button
+                                    onClick={() => prevSlide && handleSetLiveSlide(prevSlide.id)}
+                                    disabled={!prevSlide || (!isOperator && isConnected && !isOpen)}
+                                    className="flex-1 py-1.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] disabled:opacity-25 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-xs font-medium border border-[var(--border-subtle)]"
+                                >
+                                    <ChevronUp className="w-4 h-4 mx-auto" />
+                                </button>
+                                {isConnected && !isOperator && !isOpen && !isStrict && nextSlide && (
+                                    <button
+                                        onClick={() => handleSuggestNext(nextSlide.id)}
+                                        className="flex-1 py-1.5 bg-[var(--accent-teal)]/15 hover:bg-[var(--accent-teal)] text-[var(--accent-teal)] hover:text-white rounded-lg text-[10px] font-medium transition-colors flex items-center justify-center gap-1"
+                                        title="Suggest this slide be queued next"
+                                    >
+                                        <Lightbulb className="w-3 h-3" />
+                                        Suggest
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => nextSlide && handleSetLiveSlide(nextSlide.id)}
+                                    disabled={!nextSlide || (!isOperator && isConnected && !isOpen)}
+                                    className="flex-1 py-1.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] disabled:opacity-25 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-xs font-medium border border-[var(--border-subtle)]"
+                                >
+                                    <ChevronDown className="w-4 h-4 mx-auto" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="min-h-0 flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-2 overflow-hidden">
+                            <div className="mb-2 flex items-center justify-between px-1">
+                                <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                                    Sermon Listener
+                                </span>
+                            </div>
+                            <div className="h-[calc(100%-1.25rem)] min-h-0 overflow-y-auto custom-scrollbar pr-1">
+                                {sermonShownInSidebar ? (
+                                    <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
+                                        <Mic className={`w-5 h-5 ${sermonListener?.isListening ? 'text-red-500' : 'text-[var(--text-muted)]'}`} />
+                                        {sermonListener?.isListening && (
+                                            <span className="relative flex h-2 w-2">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                                            </span>
+                                        )}
+                                        <p className="text-[10px] text-[var(--text-muted)]">
+                                            {sermonListener?.isListening ? 'Recording — see sidebar' : 'Open in sidebar'}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <SermonListenerPanel compact />
+                                )}
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+
+                {/* Shared Queue — contributions from non-operators */}
+                {isConnected && sharedQueueSlides.length > 0 && (
+                    <div className="flex-shrink-0 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                                Suggested ({sharedQueueSlides.length})
+                            </div>
+                            {isOperator && (
+                                <button
+                                    onClick={() => {
+                                        const queueIds = sharedQueueSlides.map(s => s.slideId)
+                                        acceptFromQueue(queueIds)
+                                    }}
+                                    className="text-[10px] font-medium text-[var(--accent-teal)] hover:text-[var(--accent-teal)]/80 transition-colors"
+                                >
+                                    Accept All
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto pb-1">
+                            {sharedQueueSlides.map((entry) => (
+                                <div
+                                    key={entry.queueKey}
+                                    className="flex-shrink-0 w-32 bg-gray-800/50 border border-blue-500/20 rounded-lg p-2 group relative"
+                                >
+                                    <div className="text-[10px] text-white/70 truncate">{entry.slide.name}</div>
+                                    <div className="text-[8px] text-blue-400 mt-0.5">
+                                        {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : 'Slide'}
+                                    </div>
+                                    {isOperator && (
+                                        <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                                onClick={() => acceptFromQueue([entry.slideId])}
+                                                className="p-0.5 bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] rounded hover:bg-[var(--accent-teal)]/30"
+                                                title="Accept slide"
+                                            >
+                                                <Check className="w-2.5 h-2.5" />
+                                            </button>
+                                            <button
+                                                onClick={() => removeFromQueue([entry.slideId])}
+                                                className="p-0.5 bg-rose-500/20 text-rose-400 rounded hover:bg-rose-500/30"
+                                                title="Dismiss slide"
+                                            >
+                                                <X className="w-2.5 h-2.5" />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
                         </div>
                     </div>
-                </div>
+                )}
             </div>
 
             {/* Screen Picker Modal */}
