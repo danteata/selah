@@ -2,7 +2,7 @@ import { bibleVersionObjects } from '../../types'
 import type { BibleVersion } from '../../types'
 
 export interface VoiceCommand {
-    type: 'change_version' | 'next_verse' | 'previous_verse' | 'go_to_verse' | 'display' | 'stop_listening' | 'start_listening'
+    type: 'change_version' | 'next_verse' | 'previous_verse' | 'next_chapter' | 'previous_chapter' | 'go_to_verse' | 'display' | 'stop_listening' | 'start_listening'
     raw: string
     confidence: 'high' | 'medium' | 'low'
     versionId?: string
@@ -164,26 +164,58 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
     const lower = text.toLowerCase()
 
-    const nextPatterns = [
-        /(?:go |move )?(?:to the |on to the )?next (?:verse|verses|chapter)/i,
-        /next verse/i,
-        /(?:next|go to next|move to next|advance|forward) (?:verse|verses|chapter)/i,
+    // Chapter navigation — checked first so "next chapter" doesn't fall through to verse
+    const nextChapterPatterns = [
+        /(?:go |move )?(?:to the |on to the )?next chapter/i,
+        /(?:next|go to next|move to next|advance|forward) chapter/i,
     ]
-
-    const nextResult = scanAllMatches(lower, nextPatterns)
-    if (nextResult) {
+    const nextChapterResult = scanAllMatches(lower, nextChapterPatterns)
+    if (nextChapterResult) {
         commands.push({
-            type: 'next_verse',
-            raw: nextResult.match[0],
+            type: 'next_chapter',
+            raw: nextChapterResult.match[0],
             confidence: 'high',
-            offset: 1,
         })
     }
 
     if (commands.length === 0) {
+        const prevChapterPatterns = [
+            /(?:go |move )?(?:to the |back to the )?(?:previous|prior|last) chapter/i,
+            /(?:previous|prev|go back|back|prior|last) chapter/i,
+        ]
+        const prevChapterResult = scanAllMatches(lower, prevChapterPatterns)
+        if (prevChapterResult) {
+            commands.push({
+                type: 'previous_chapter',
+                raw: prevChapterResult.match[0],
+                confidence: 'high',
+            })
+        }
+    }
+
+    // Verse navigation
+    if (commands.length === 0) {
+        const nextPatterns = [
+            /(?:go |move )?(?:to the |on to the )?next (?:verse|verses)/i,
+            /next verse/i,
+            /(?:next|go to next|move to next|advance|forward) (?:verse|verses)/i,
+        ]
+
+        const nextResult = scanAllMatches(lower, nextPatterns)
+        if (nextResult) {
+            commands.push({
+                type: 'next_verse',
+                raw: nextResult.match[0],
+                confidence: 'high',
+                offset: 1,
+            })
+        }
+    }
+
+    if (commands.length === 0) {
         const prevPatterns = [
-            /(?:go |move )?(?:to the |back to the )?(?:previous|prior|last) (?:verse|verses|chapter)/i,
-            /(?:previous|prev|go back|back|prior|last) (?:verse|verses|chapter)/i,
+            /(?:go |move )?(?:to the |back to the )?(?:previous|prior|last) (?:verse|verses)/i,
+            /(?:previous|prev|go back|back|prior|last) (?:verse|verses)/i,
         ]
 
         const prevResult = scanAllMatches(lower, prevPatterns)
@@ -221,6 +253,8 @@ const WRITTEN_NUMBERS: Record<string, number> = {
     six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
     eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
     sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+    // Common mishearings
+    too: 2, to: 2,
 }
 
 function parseVerseNumber(text: string): number | null {
@@ -298,8 +332,9 @@ function detectControlCommands(text: string): VoiceCommand[] {
 
 const COMMAND_KEYWORDS = [
     'version', 'switch', 'change', 'use the', 'next verse', 'previous verse',
-    'go to next', 'go back', 'display', 'show that', 'put up', 'go live',
-    'stop listening', 'start listening', 'verse'
+    'next chapter', 'previous chapter', 'go to next', 'go back', 'display',
+    'show that', 'put up', 'go live', 'stop listening', 'start listening', 'verse',
+    'chapter',
 ]
 
 function hasCommandIntent(text: string): boolean {

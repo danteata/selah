@@ -31,6 +31,7 @@ import type { VoiceCommand } from '../services/sermon-listener/voiceCommandDetec
 import type { DetectedVerse } from '../services/sermon-listener'
 import type { Scripture, BibleVersion } from '../types'
 import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
+import { getNextChapter, getPreviousChapter } from '../utils/bibleReference'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
 const SERMON_LIVE_STATE_STORAGE_KEY = 'sermon-listener:live-state'
@@ -964,6 +965,62 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 }
                             })
                             handledNavigationCommand = true
+                        }
+                        break
+                    }
+                    case 'next_chapter': {
+                        const cur = currentVerseRef.current
+                        if (cur) {
+                            const next = getNextChapter(cur.book, cur.chapter)
+                            if (next) {
+                                const nextVerse: DetectedVerse = {
+                                    ...cur,
+                                    chapter: next.chapter,
+                                    verseStart: 1,
+                                    verseEnd: undefined,
+                                    raw: `${next.book} ${next.chapter}:1`,
+                                    reference: `${next.book} ${next.chapter}:1`,
+                                    startIndex: 0,
+                                    endIndex: 0,
+                                }
+                                setCurrentVerse(nextVerse)
+                                navigationCooldownUntilRef.current = Date.now() + 3000
+                                lookupVerse(nextVerse).then(scripture => {
+                                    if (scripture) {
+                                        setCurrentScripture(scripture)
+                                        refreshLiveSlide(scripture)
+                                    }
+                                })
+                                handledNavigationCommand = true
+                            }
+                        }
+                        break
+                    }
+                    case 'previous_chapter': {
+                        const cur = currentVerseRef.current
+                        if (cur) {
+                            const prev = getPreviousChapter(cur.book, cur.chapter)
+                            if (prev) {
+                                const prevVerse: DetectedVerse = {
+                                    ...cur,
+                                    chapter: prev.chapter,
+                                    verseStart: 1,
+                                    verseEnd: undefined,
+                                    raw: `${prev.book} ${prev.chapter}:1`,
+                                    reference: `${prev.book} ${prev.chapter}:1`,
+                                    startIndex: 0,
+                                    endIndex: 0,
+                                }
+                                setCurrentVerse(prevVerse)
+                                navigationCooldownUntilRef.current = Date.now() + 3000
+                                lookupVerse(prevVerse).then(scripture => {
+                                    if (scripture) {
+                                        setCurrentScripture(scripture)
+                                        refreshLiveSlide(scripture)
+                                    }
+                                })
+                                handledNavigationCommand = true
+                            }
                         }
                         break
                     }

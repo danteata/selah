@@ -112,8 +112,38 @@ const ACCENT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string }> = [
     { pattern: /\bbook\s+of\s+easter\b/gi, replacement: 'book of Esther' },
 ]
 
+const WRITTEN_NUMBER_MAP: Record<string, string> = {
+    zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5',
+    six: '6', seven: '7', eight: '8', nine: '9', ten: '10',
+    eleven: '11', twelve: '12', thirteen: '13', fourteen: '14', fifteen: '15',
+    sixteen: '16', seventeen: '17', eighteen: '18', nineteen: '19', twenty: '20',
+    // Common mishearings of number words
+    too: '2', to: '2',
+}
+
+function replaceWrittenVerseNumbers(text: string): string {
+    // Whisper often transcribes spoken verse numbers as words
+    // e.g. "verse five" -> "best five", "verse two" -> "best, too"
+    return text.replace(
+        /\b(base|best|vase|vers)[,]?\s+(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|too|to)\b/gi,
+        (_, __, numWord) => {
+            const digit = WRITTEN_NUMBER_MAP[numWord.toLowerCase()] || numWord
+            return `verse ${digit}`
+        },
+    )
+}
+
 export function correctAccentMishearings(text: string): string {
     let corrected = text
+
+    // Fix common version-name mishearings before pattern loop
+    corrected = corrected.replace(/\ban\s+IV\b/gi, 'NIV')
+    corrected = corrected.replace(/\ban\s+LT\b/gi, 'NLT')
+    corrected = corrected.replace(/\binternational\s+passion\b/gi, 'international version')
+
+    // Fix spoken verse numbers (e.g. "best five" -> "verse 5")
+    corrected = replaceWrittenVerseNumbers(corrected)
+
     for (const { pattern, replacement } of ACCENT_CORRECTIONS) {
         corrected = corrected.replace(pattern, replacement)
     }
