@@ -15,12 +15,12 @@ const BASE_EN_DIR = join(MODELS_DIR, 'base.en')
 // due to server-side compression differences). Files smaller than these
 // are considered truncated / corrupted and will be re-downloaded.
 const EXPECTED_SIZES = {
-    'model.bin': 143_000_000,
-    'tokenizer.json': 450_000,
-    'vocabulary.txt': 440_000,
+    'model.bin': 140_000_000,
+    'tokenizer.json': 2_000_000,
+    'vocabulary.txt': 400_000,
     'config.json': 200,
-    'preprocessor_config.json': 200,
-    'tokenizer_config.json': 200,
+    'preprocessor_config.json': 10,
+    'tokenizer_config.json': 10,
 }
 
 const FILES = Object.keys(EXPECTED_SIZES)
