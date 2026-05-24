@@ -202,6 +202,7 @@ interface AppStore extends AppState {
     appendActiveSlides: (slides: Slide[]) => void
     updateActiveSlide: (slide: Slide) => void
     removeActiveSlide: (slide: Slide) => void
+    reorderActiveSlides: (fromIndex: number, toIndex: number) => void
     replaceScheduleActiveSlides: (slides: Slide[]) => void
     replaceSlidesForSchedule: (scheduleId: string, slides: Slide[], preserveLiveOutputOrder?: boolean) => void
     setActiveSlides: (slides: Slide[]) => void
@@ -386,6 +387,25 @@ export const useAppStore = create<AppStore>()(
             removeActiveSlide: (slide) => {
                 set((state) => {
                     const updatedSlides = state.activeSlides.filter((s) => s.id !== slide.id)
+                    return {
+                        pastStates: [...state.pastStates, { activeSlides: state.activeSlides }],
+                        activeSlides: updatedSlides,
+                        liveOutputSlidesId: Array.from(new Set(updatedSlides.map((slide) => slide.id))),
+                        futureStates: []
+                    }
+                })
+            },
+
+            reorderActiveSlides: (fromIndex, toIndex) => {
+                set((state) => {
+                    if (fromIndex < 0 || fromIndex >= state.activeSlides.length) return state
+                    if (toIndex < 0 || toIndex >= state.activeSlides.length) return state
+                    if (fromIndex === toIndex) return state
+
+                    const updatedSlides = [...state.activeSlides]
+                    const [moved] = updatedSlides.splice(fromIndex, 1)
+                    updatedSlides.splice(toIndex, 0, moved)
+
                     return {
                         pastStates: [...state.pastStates, { activeSlides: state.activeSlides }],
                         activeSlides: updatedSlides,
