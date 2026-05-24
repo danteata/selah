@@ -85,6 +85,7 @@ function SermonListenerPanelInner({
         provider,
         isSpeechDetected,
         audioLevel,
+        captureSource,
         isInitializingProvider,
         providerReady,
         start,
@@ -121,25 +122,53 @@ function SermonListenerPanelInner({
     const generateSermonNotes = () => {
         const body = transcript.trim()
         if (!body) return
-        const lines = body.split(/[.!?]\s+/).filter(Boolean)
-        const keyPoints = lines.filter(l => l.split(' ').length >= 8).slice(0, 8)
+        // Split into sentences, filter out very short fragments, take meaningful ones
+        const sentences = body
+            .replace(/\n+/g, ' ')
+            .split(/[.!?]+\s+/)
+            .map(s => s.trim())
+            .filter(s => s.length > 20 && s.split(/\s+/).length >= 5)
+        // Deduplicate near-identical sentences (common with ASR stutter)
+        const deduped: string[] = []
+        for (const s of sentences) {
+            const lower = s.toLowerCase()
+            const dup = deduped.some(d => d.toLowerCase().includes(lower) || lower.includes(d.toLowerCase()))
+            if (!dup) deduped.push(s)
+        }
+        const keyPoints = deduped.slice(0, 10)
         const verses = detectedVerses.map(v => formatVerseForDisplay(v))
+        const uniqueVerses = Array.from(new Set(verses))
+        const timestamp = new Date().toLocaleString()
+
         setSermonNotes([
-            'Title: Sermon Notes',
+            `Sermon Notes — ${timestamp}`,
+            `Generated from transcript (${(body.length / 5).toFixed(0)} words)`,
             '',
-            'Summary:',
-            keyPoints.slice(0, 3).map((p) => `- ${p.trim()}.`).join('\n'),
+            '─────────────────────────',
+            'SCRIPTURE REFERENCES',
+            '─────────────────────────',
+            uniqueVerses.length ? uniqueVerses.map((v) => `• ${v}`).join('\n') : '• None detected yet',
             '',
-            'Key Points:',
-            keyPoints.map((p) => `- ${p.trim()}.`).join('\n'),
+            '─────────────────────────',
+            'KEY POINTS',
+            '─────────────────────────',
+            keyPoints.map((p, i) => `${i + 1}. ${p}.`).join('\n\n'),
             '',
-            'Scripture References:',
-            verses.length ? verses.map((v) => `- ${v}`).join('\n') : '- None detected yet',
+            '─────────────────────────',
+            'REFLECTION & APPLICATION',
+            '─────────────────────────',
+            'Main takeaway:',
             '',
-            'Application:',
-            '- Personal reflection:',
-            '- Practical action this week:',
-            '- Prayer focus:',
+            'How does this apply to me?',
+            '',
+            'One action step this week:',
+            '',
+            'Prayer focus:',
+            '',
+            '─────────────────────────',
+            'FULL TRANSCRIPT',
+            '─────────────────────────',
+            body,
         ].join('\n'))
     }
 
@@ -251,7 +280,16 @@ function SermonListenerPanelInner({
                 </div>
 
                 {/* Audio waveform visualization - driven by real audio level */}
-                {isListening && (
+                {isListening && captureSource === 'system' && (
+                    <div className="flex items-center gap-1.5 h-6 px-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-[10px] font-medium text-blue-500">
+                        <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                        </span>
+                        System Audio
+                    </div>
+                )}
+                {isListening && captureSource !== 'system' && (
                     <div className={`flex items-end justify-center gap-[2px] h-6 min-w-[48px] ${(isSpeechDetected || audioLevel > 0.02) ? 'opacity-100' : 'opacity-35'} transition-opacity duration-200`}>
                         {[4, 7, 5, 9, 6, 8, 5, 7].map((weight, i) => {
                             const minH = 3
@@ -407,17 +445,36 @@ function SermonListenerPanelInner({
                         ref={transcriptRef}
                         className={`flex-1 p-2 rounded text-xs overflow-y-auto bg-white dark:bg-gray-900 transition-all duration-200 ${isSpeechDetected ? 'border border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.1)]' : ''}`}
                     >
-                        <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">
-                            {transcript}
-                            {interimTranscript && (
-                                <span className="text-gray-400 dark:text-gray-500 italic">
-                                    {interimTranscript}
-                                </span>
-                            )}
-                        </p>
-                        {!transcript && !interimTranscript && isListening && (
+                        {transcript ? (
+                            <div className="space-y-2 text-gray-700 dark:text-gray-300">
+                                {transcript.split(/\n{2,}|(?<=[.!?])\s+(?=[A-Z])/).filter(Boolean).map((para, i) => {
+                                    const trimmed = para.trim()
+                                    if (!trimmed) return null
+                                    const isInterim = i === 0 && interimTranscript && !transcript.includes(interimTranscript)
+                                    return (
+                                        <p key={i} className={`leading-relaxed ${isInterim ? 'italic text-gray-400 dark:text-gray-500' : ''}`}>
+                                            {trimmed}
+                                            {isInterim && ` ${interimTranscript}`}
+                                        </p>
+                                    )
+                                })}
+                                {interimTranscript && !transcript.includes(interimTranscript) && (
+                                    <p className="italic text-gray-400 dark:text-gray-500">
+                                        {interimTranscript}
+                                    </p>
+                                )}
+                            </div>
+                        ) : interimTranscript ? (
+                            <p className="italic text-gray-400 dark:text-gray-500">
+                                {interimTranscript}
+                            </p>
+                        ) : isListening ? (
                             <p className="italic text-gray-400 dark:text-gray-500">
                                 Listening...
+                            </p>
+                        ) : (
+                            <p className="italic text-gray-400 dark:text-gray-500">
+                                Start listening to see the transcript here.
                             </p>
                         )}
                     </div>
@@ -425,9 +482,26 @@ function SermonListenerPanelInner({
             )}
 
             {sermonNotes && (
-                <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
-                    <p className="text-xs font-medium mb-1">Sermon Notes</p>
-                    <pre className="text-xs whitespace-pre-wrap text-gray-700 dark:text-gray-200 font-sans">{sermonNotes}</pre>
+                <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
+                    <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium">Sermon Notes</p>
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(sermonNotes)
+                                    .then(() => alert('Notes copied to clipboard'))
+                                    .catch(() => {})
+                            }}
+                            className="text-[10px] text-[var(--accent-teal)] hover:brightness-110"
+                        >
+                            Copy
+                        </button>
+                    </div>
+                    <textarea
+                        value={sermonNotes}
+                        onChange={(e) => setSermonNotes(e.target.value)}
+                        className="w-full h-32 p-2 rounded text-xs bg-white dark:bg-gray-900 border border-amber-200 dark:border-amber-700/50 text-gray-700 dark:text-gray-200 font-sans resize-y focus:outline-none focus:ring-1 focus:ring-[var(--accent-teal)]"
+                        placeholder="Your sermon notes..."
+                    />
                 </div>
             )}
 
