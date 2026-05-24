@@ -465,7 +465,9 @@ export class SemanticVerseDetector {
         }
 
         // Fallback: sliding window if no good matches
-        const hasGoodMatch = allMatches.some((m) => m.score >= 0.65)
+        // Threshold lowered from 0.65 → 0.55: NIV paraphrases often score 0.58-0.65
+        // against cached embeddings; 0.65 was discarding legitimate matches.
+        const hasGoodMatch = allMatches.some((m) => m.score >= 0.55)
         if (!hasGoodMatch && windows.length > 0) {
             console.log('[SemanticDetector] Trying sliding window fallback...')
             try {

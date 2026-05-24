@@ -335,7 +335,7 @@ function getBookAliases(): BookAlias[] {
     return cachedBookAliases
 }
 
-function parseSpokenNumber(input: string): number | null {
+export function parseSpokenNumber(input: string): number | null {
     const normalized = input
         .toLowerCase()
         .replace(/-/g, ' ')
@@ -569,24 +569,80 @@ export function detectVerses(text: string): DetectedVerse[] {
         detected.push(spokenVerse)
     }
 
+    // -----------------------------------------------------------------------
     // Heuristic fallback for common quoted verse fragments that ASR can mangle.
-    // Example: "the name of the Lord is a strong tell/tower..." => Proverbs 18:10
+    // Data-driven so new patterns can be added without touching control flow.
+    // Each entry: required substrings → DetectedVerse when matched.
+    // -----------------------------------------------------------------------
     const normalized = text.toLowerCase()
-    const hasProv1810Already = detected.some(v => v.reference === 'Proverbs 18:10')
-    const looksLikeProv1810 =
-        normalized.includes('name of the lord') &&
-        (normalized.includes('strong tower') || normalized.includes('strong tell') || normalized.includes('strong fort'))
 
-    if (!hasProv1810Already && looksLikeProv1810) {
-        const idx = Math.max(0, normalized.indexOf('name of the lord'))
-        detected.push({
-            raw: 'name of the Lord is a strong tower',
+    interface HeuristicVerse {
+        reference: string
+        book: string
+        chapter: number
+        verseStart: number
+        raw: string
+        anchor: string
+        required: string[]
+        optional: string[]
+        // optional count of how many optionals must match (default: 1)
+        minOptionalMatches?: number
+    }
+
+    const HEURISTIC_VERSES: HeuristicVerse[] = [
+        {
             reference: 'Proverbs 18:10',
             book: 'Proverbs',
             chapter: 18,
             verseStart: 10,
+            raw: 'name of the Lord is a strong tower',
+            anchor: 'name of the lord',
+            required: ['name of the lord'],
+            optional: ['strong tower', 'strong tell', 'strong fort'],
+        },
+        {
+            reference: 'Psalm 23:1',
+            book: 'Psalm',
+            chapter: 23,
+            verseStart: 1,
+            raw: 'The Lord is my shepherd',
+            anchor: 'lord is my',
+            required: ['lord is my'],
+            optional: ['shepherd', 'ship', 'shipper'],
+        },
+        {
+            reference: 'Psalm 84:10',
+            book: 'Psalm',
+            chapter: 84,
+            verseStart: 10,
+            raw: 'Better is one day in your courts',
+            anchor: 'better is one day',
+            required: ['better is one day', 'better is one'],
+            optional: ['your house', 'your courts', 'your coat'],
+            minOptionalMatches: 1,
+        },
+    ]
+
+    for (const h of HEURISTIC_VERSES) {
+        const already = detected.some(v => v.reference === h.reference)
+        if (already) continue
+
+        const requiredHit = h.required.some(r => normalized.includes(r))
+        if (!requiredHit) continue
+
+        const optionalHits = h.optional.filter(o => normalized.includes(o)).length
+        const minOpt = h.minOptionalMatches ?? 1
+        if (optionalHits < minOpt) continue
+
+        const idx = Math.max(0, normalized.indexOf(h.anchor))
+        detected.push({
+            raw: h.raw,
+            reference: h.reference,
+            book: h.book,
+            chapter: h.chapter,
+            verseStart: h.verseStart,
             startIndex: idx,
-            endIndex: idx + 'name of the lord is a strong tower'.length,
+            endIndex: idx + h.anchor.length,
             confidence: 'medium',
             detectionType: 'regex',
         })

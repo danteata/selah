@@ -80,8 +80,15 @@ const ACCENT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string }> = [
     { pattern: /\bjudge\s+(\d{1,3})\b/gi, replacement: 'Judges $1' },
     // Numbers — only with a number to avoid real uses of "number"
     { pattern: /\bnumber\s+(\d{1,3})\b/gi, replacement: 'Numbers $1' },
-    // Read -> reach (common ASR mishearing)
-    { pattern: /\breach\b/gi, replacement: 'read' },
+    // Read -> reach (common ASR mishearing); only when followed by a number
+    // to avoid mangling phrases like "reach out to the community"
+    { pattern: /\breach\s+(\d{1,3})\b/gi, replacement: 'read $1' },
+    // Psalm misheard as Sound / some / son (context-guarded: only when followed by a number)
+    { pattern: /\b(sound|some|son)\s+(\d{1,3})\b/gi, replacement: 'Psalm $2' },
+    // Matthew misheard as "my T" / "my T8" / "my th" (context-guarded by number)
+    { pattern: /\bmy\s+t(h)?\s*(\d{1,3})\b/gi, replacement: 'Matthew $2' },
+    // Chapter keyword mishearings (context-guarded: only when followed by a number)
+    { pattern: /\b(chop that|check that|cut the)\s+(\d{1,3})\b/gi, replacement: 'chapter $2' },
     // Verse — context aware to avoid replacing real "base" / "best"
     { pattern: /\b(go\s+to|read|show|display|present)\s+(?:the\s+)?(?:base|best|vase|vers)\b/gi, replacement: '$1 verse' },
     { pattern: /\b(?:base|best|vase|vers)\s+(\d{1,3})\b/gi, replacement: 'verse $1' },
