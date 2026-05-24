@@ -1,8 +1,9 @@
 import { bibleVersionObjects } from '../../types'
 import type { BibleVersion } from '../../types'
+import { BOOK_PATTERN, normalizeBookName } from './verseDetection'
 
 export interface VoiceCommand {
-    type: 'change_version' | 'next_verse' | 'previous_verse' | 'next_chapter' | 'previous_chapter' | 'go_to_verse' | 'display' | 'stop_listening' | 'start_listening'
+    type: 'change_version' | 'next_verse' | 'previous_verse' | 'next_chapter' | 'previous_chapter' | 'go_to_verse' | 'go_to_reference' | 'display' | 'stop_listening' | 'start_listening'
     raw: string
     confidence: 'high' | 'medium' | 'low'
     versionId?: string
@@ -10,6 +11,9 @@ export interface VoiceCommand {
     offset?: number
     verseRef?: string
     targetVerse?: number
+    book?: string
+    chapter?: number
+    verse?: number
 }
 
 const AVAILABLE_VERSIONS: Array<{ id: string; names: string[] }> = (() => {
@@ -307,6 +311,61 @@ function detectGoToVerseCommands(text: string): VoiceCommand[] {
     return commands
 }
 
+// Detect book + chapter references without a verse (e.g. "Psalm 23", "Matthew 5", "Mark chapter 28")
+// Negative lookahead ensures we don't capture "Psalm 23:1" which is handled by verse detection.
+const BOOK_CHAPTER_REGEX = new RegExp(
+    `\\b(${BOOK_PATTERN})[,]?\\s*(?:chapter\\s+)?(\\d{1,3})\\b(?!\\s*(?:[:\\.\\-]|x|vs\\.?|verse)\\s*\\d)`,
+    'gi',
+)
+
+function detectGoToReferenceCommands(text: string): VoiceCommand[] {
+    const commands: VoiceCommand[] = []
+
+    // 1. Action-verb based: "open Psalm 23", "go to Matthew 5", "show me John 3", "turn to chapter 6"
+    const actionRefPattern = /\b(?:open|go to|turn to|return to|show|read|display|present|take me to|jump to)\s+(?:the\s+)?(?:book\s+of\s+)?(.+)/gi
+    let actionMatch: RegExpExecArray | null
+    while ((actionMatch = actionRefPattern.exec(text)) !== null) {
+        const rest = actionMatch[1].trim()
+        const bcMatch = BOOK_CHAPTER_REGEX.exec(rest)
+        if (bcMatch) {
+            const book = normalizeBookName(bcMatch[1])
+            const chapter = parseInt(bcMatch[2], 10)
+            if (book && chapter >= 1) {
+                commands.push({
+                    type: 'go_to_reference',
+                    raw: actionMatch[0].trim(),
+                    confidence: 'high',
+                    book,
+                    chapter,
+                    verse: 1,
+                })
+            }
+        }
+    }
+
+    // 2. Standalone book+chapter (no action verb) — lower confidence
+    if (commands.length === 0) {
+        BOOK_CHAPTER_REGEX.lastIndex = 0
+        let bcMatch: RegExpExecArray | null
+        while ((bcMatch = BOOK_CHAPTER_REGEX.exec(text)) !== null) {
+            const book = normalizeBookName(bcMatch[1])
+            const chapter = parseInt(bcMatch[2], 10)
+            if (book && chapter >= 1) {
+                commands.push({
+                    type: 'go_to_reference',
+                    raw: bcMatch[0].trim(),
+                    confidence: 'medium',
+                    book,
+                    chapter,
+                    verse: 1,
+                })
+            }
+        }
+    }
+
+    return commands
+}
+
 function detectControlCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
     const lower = text.toLowerCase()
@@ -332,9 +391,9 @@ function detectControlCommands(text: string): VoiceCommand[] {
 
 const COMMAND_KEYWORDS = [
     'version', 'switch', 'change', 'use the', 'next verse', 'previous verse',
-    'next chapter', 'previous chapter', 'go to next', 'go back', 'display',
+    'next chapter', 'previous chapter', 'go to', 'go to next', 'go back', 'display',
     'show that', 'put up', 'go live', 'stop listening', 'start listening', 'verse',
-    'chapter',
+    'chapter', 'open', 'read', 'turn to', 'return to',
 ]
 
 function hasCommandIntent(text: string): boolean {
@@ -347,18 +406,32 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
     if (!text || text.length < 3) return []
 
     const recentText = text.slice(-300)
-    if (!hasCommandIntent(recentText)) return []
+    const hasIntent = hasCommandIntent(recentText)
+
+    if (!hasIntent) {
+        console.log('[VoiceCommand] No command intent in:', recentText.slice(-80))
+        return []
+    }
 
     const allCommands: VoiceCommand[] = [
         ...detectVersionChangeCommands(recentText),
         ...detectNavigationCommands(recentText),
         ...detectGoToVerseCommands(recentText),
+        ...detectGoToReferenceCommands(recentText),
         ...detectControlCommands(recentText),
     ]
 
+    if (allCommands.length === 0) {
+        console.log('[VoiceCommand] Intent found but no command matched:', recentText.slice(-80))
+    } else {
+        console.log('[VoiceCommand] Matched:', allCommands.map(c => `${c.type}(${c.confidence})`))
+    }
+
     const seen = new Set<string>()
     return allCommands.filter(cmd => {
-        const key = `${cmd.type}:${cmd.versionId || ''}:${cmd.offset || ''}`
+        const key = cmd.type === 'go_to_reference'
+            ? `${cmd.type}:${cmd.book || ''}:${cmd.chapter || ''}`
+            : `${cmd.type}:${cmd.versionId || ''}:${cmd.offset || ''}`
         if (seen.has(key)) return false
         seen.add(key)
         return true

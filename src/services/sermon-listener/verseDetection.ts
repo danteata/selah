@@ -73,7 +73,7 @@ const BOOK_MAPPINGS: Record<string, string> = {
     'zech': 'Zechariah', 'zec': 'Zechariah', 'zechariah': 'Zechariah',
     'mal': 'Malachi', 'malachi': 'Malachi',
     // New Testament
-    'matt': 'Matthew', 'mat': 'Matthew', 'matthew': 'Matthew',
+    'matt': 'Matthew', 'mat': 'Matthew', 'matthew': 'Matthew', 'mathu': 'Matthew', 'machu': 'Matthew', 'math you': 'Matthew',
     'mk': 'Mark', 'mar': 'Mark', 'mark': 'Mark',
     'lk': 'Luke', 'luk': 'Luke', 'luke': 'Luke',
     'jn': 'John', 'joh': 'John', 'john': 'John',
@@ -274,7 +274,7 @@ const ALTERNATIVE_PATTERNS = [
     /(?:verse[s]?\s+)?(\d+)\s+of\s+chapter\s+(\d+)/gi,
 ]
 
-function normalizeBookName(bookText: string): string | null {
+export function normalizeBookName(bookText: string): string | null {
     const normalized = bookText.toLowerCase().trim()
 
     if (BOOK_MAPPINGS[normalized]) {

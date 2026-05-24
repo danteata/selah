@@ -872,6 +872,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (commandSource.length > 0) {
             const correctedCommands = correctAccentMishearings(commandSource)
             const commands = detectVoiceCommands(correctedCommands)
+            if (commands.length > 0) {
+                console.log('[SermonListener] Voice commands detected:', {
+                    source: commandSource,
+                    corrected: correctedCommands,
+                    commands: commands.map(c => ({ type: c.type, raw: c.raw, conf: c.confidence })),
+                })
+            }
             let handledVersionSwitch = false
             let handledNavigationCommand = false
             for (const cmd of commands) {
@@ -953,6 +960,32 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 verseEnd: undefined,
                                 raw: `${cur.book} ${cur.chapter}:${target}`,
                                 reference: `${cur.book} ${cur.chapter}:${target}`,
+                                startIndex: 0,
+                                endIndex: 0,
+                            }
+                            setCurrentVerse(goto)
+                            navigationCooldownUntilRef.current = Date.now() + 3000
+                            lookupVerse(goto).then(scripture => {
+                                if (scripture) {
+                                    setCurrentScripture(scripture)
+                                    refreshLiveSlide(scripture)
+                                }
+                            })
+                            handledNavigationCommand = true
+                        }
+                        break
+                    }
+                    case 'go_to_reference': {
+                        const { book, chapter, verse } = cmd
+                        if (book && chapter && chapter >= 1) {
+                            const goto: DetectedVerse = {
+                                book,
+                                chapter,
+                                verseStart: verse || 1,
+                                verseEnd: undefined,
+                                raw: `${book} ${chapter}:${verse || 1}`,
+                                reference: `${book} ${chapter}:${verse || 1}`,
+                                confidence: 'high',
                                 startIndex: 0,
                                 endIndex: 0,
                             }

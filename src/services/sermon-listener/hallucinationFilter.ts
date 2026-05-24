@@ -80,6 +80,8 @@ const ACCENT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string }> = [
     { pattern: /\bjudge\s+(\d{1,3})\b/gi, replacement: 'Judges $1' },
     // Numbers — only with a number to avoid real uses of "number"
     { pattern: /\bnumber\s+(\d{1,3})\b/gi, replacement: 'Numbers $1' },
+    // Read -> reach (common ASR mishearing)
+    { pattern: /\breach\b/gi, replacement: 'read' },
     // Verse — context aware to avoid replacing real "base" / "best"
     { pattern: /\b(go\s+to|read|show|display|present)\s+(?:the\s+)?(?:base|best|vase|vers)\b/gi, replacement: '$1 verse' },
     { pattern: /\b(?:base|best|vase|vers)\s+(\d{1,3})\b/gi, replacement: 'verse $1' },
