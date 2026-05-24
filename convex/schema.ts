@@ -304,6 +304,14 @@ export default defineSchema({
         _id: v.optional(v.string()),
         title: v.string(),
         transcript: v.string(),
+        // Optional speaker name for learning
+        speakerName: v.optional(v.string()),
+        // Raw utterances from the transcription engine
+        rawUtterances: v.optional(v.array(v.object({
+            text: v.string(),
+            timestamp: v.number(),
+            confidence: v.optional(v.number()),
+        }))),
         // Detected verses from the sermon
         detectedVerses: v.optional(v.array(v.object({
             reference: v.string(),
@@ -312,6 +320,23 @@ export default defineSchema({
             verseStart: v.number(),
             verseEnd: v.optional(v.number()),
             confidence: v.string(),
+            detectionMethod: v.optional(v.string()),
+            rawText: v.optional(v.string()),
+        }))),
+        // User corrections — what the operator had to fix
+        userCorrections: v.optional(v.array(v.object({
+            originalReference: v.optional(v.string()),
+            correctedReference: v.string(),
+            correctionType: v.union(v.literal("missed"), v.literal("wrong-verse"), v.literal("wrong-book")),
+            timestamp: v.number(),
+            closestRawText: v.optional(v.string()),
+        }))),
+        // Failed semantic candidates — verses the system almost found
+        failedCandidates: v.optional(v.array(v.object({
+            reference: v.string(),
+            score: v.number(),
+            threshold: v.number(),
+            rawText: v.string(),
         }))),
         // Transcription provider used
         provider: v.string(),
@@ -330,6 +355,40 @@ export default defineSchema({
         .index("by_church", ["churchId"])
         .index("by_creator", ["createdBy"])
         .index("by_schedule_created", ["scheduleId", "createdAt"]),
+
+    // Speaker profiles — learned phonetic patterns per speaker
+    speakerProfiles: defineTable({
+        speakerName: v.string(),
+        churchId: v.string(),
+        totalSermons: v.number(),
+        totalCorrections: v.number(),
+        // Learned book mishearings: { "Matthew": ["mathu", "machu"] }
+        bookMishearings: v.optional(v.string()), // JSON Record<string, string[]>
+        // Learned keyword mishearings
+        keywordMishearings: v.optional(v.string()), // JSON Record<string, string[]>
+        // Per-book detection stats
+        bookStats: v.optional(v.string()), // JSON Record<string, { detected: number; missed: number }>
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    })
+        .index("by_speaker_church", ["speakerName", "churchId"]),
+
+    // Misheard patterns — auto-discovered accent corrections (review queue)
+    misheardPatterns: defineTable({
+        correctForm: v.string(),
+        heardAs: v.string(),
+        patternType: v.union(v.literal("book"), v.literal("chapter-keyword"), v.literal("verse-keyword"), v.literal("version"), v.literal("number")),
+        speakerName: v.optional(v.string()),
+        churchId: v.string(),
+        frequency: v.number(),
+        confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+        status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    })
+        .index("by_status", ["status"])
+        .index("by_speaker", ["speakerName", "churchId"])
+        .index("by_type", ["patternType", "status"]),
 
     // Invitations table - for team member invitations
     invitations: defineTable({

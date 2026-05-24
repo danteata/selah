@@ -58,6 +58,12 @@ export const create = mutation({
     args: {
         title: v.string(),
         transcript: v.string(),
+        speakerName: v.optional(v.string()),
+        rawUtterances: v.optional(v.array(v.object({
+            text: v.string(),
+            timestamp: v.number(),
+            confidence: v.optional(v.number()),
+        }))),
         detectedVerses: v.optional(v.array(v.object({
             reference: v.string(),
             book: v.string(),
@@ -65,6 +71,8 @@ export const create = mutation({
             verseStart: v.number(),
             verseEnd: v.optional(v.number()),
             confidence: v.string(),
+            detectionMethod: v.optional(v.string()),
+            rawText: v.optional(v.string()),
         }))),
         provider: v.string(),
         language: v.optional(v.string()),
@@ -78,6 +86,8 @@ export const create = mutation({
         const transcriptId = await ctx.db.insert("transcripts", {
             title: args.title,
             transcript: args.transcript,
+            speakerName: args.speakerName,
+            rawUtterances: args.rawUtterances,
             detectedVerses: args.detectedVerses,
             provider: args.provider,
             language: args.language,
