@@ -19,8 +19,6 @@ const EXPECTED_SIZES = {
     'tokenizer.json': 2_000_000,
     'vocabulary.txt': 400_000,
     'config.json': 200,
-    'preprocessor_config.json': 10,
-    'tokenizer_config.json': 10,
 }
 
 const FILES = Object.keys(EXPECTED_SIZES)

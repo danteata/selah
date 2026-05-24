@@ -11,8 +11,6 @@ FILES=(
     "tokenizer.json"
     "vocabulary.txt"
     "config.json"
-    "preprocessor_config.json"
-    "tokenizer_config.json"
 )
 
 mkdir -p "$BASE_EN_DIR"
