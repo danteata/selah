@@ -17,6 +17,7 @@ export function PreviewContent() {
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
+    const reorderActiveSlides = useAppStore((state) => state.reorderActiveSlides)
     const setActiveSlides = useAppStore((state) => state.setActiveSlides)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
@@ -45,11 +46,15 @@ export function PreviewContent() {
     } = useLiveSession()
     const slidesGridRef = useRef<HTMLDivElement>(null)
     const activeSlideRef = useRef<HTMLDivElement>(null)
+    const userClickedSlideRef = useRef(false)
+    const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
-    // Auto-scroll to active slide when it changes
+    // Auto-scroll to active slide ONLY when user explicitly clicked it.
+    // Voice commands and auto-advance should not cause jumpy scrolling.
     useEffect(() => {
-        if (activeSlide && activeSlideRef.current) {
+        if (userClickedSlideRef.current && activeSlide && activeSlideRef.current) {
             activeSlideRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+            userClickedSlideRef.current = false
         }
     }, [activeSlide?.id])
 
@@ -101,6 +106,7 @@ export function PreviewContent() {
         if (bulkSelectMode) {
             toggleSlideSelection(slide.id)
         } else {
+            userClickedSlideRef.current = true
             setActiveSlide(slide)
         }
     }, [bulkSelectMode, toggleSlideSelection])
@@ -372,31 +378,61 @@ export function PreviewContent() {
                 </div>
             </div>
 
-            {/* Slides List - High Density Vertical */}
+            {/* Slides List — draggable reorderable queue */}
             <div
                 ref={slidesGridRef}
                 className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 custom-scrollbar"
             >
                 {slides.length > 0 ? (
-                    slides.map((slide) => (
-                        <SlideCard
+                    slides.map((slide, index) => (
+                        <div
                             key={slide.id}
                             ref={activeSlide?.id === slide.id ? activeSlideRef : undefined}
-                            slide={slide}
-                            isActive={activeSlide?.id === slide.id}
-                            isLive={liveSlideId === slide.id}
-                            isSelected={selectedSlideIds.includes(slide.id)}
-                            selectable={bulkSelectMode}
-                            onClick={() => handleSlideClick(slide)}
-                            onDuplicate={() => handleDuplicateSlide(slide)}
-                            onDelete={() => handleDeleteSlide(slide.id)}
-                            onEdit={() => handleEditSlide(slide)}
-                            onSaveToLibrary={() => handleSaveToLibrary(slide)}
-                            isSaved={isInLibrary(slide.id)}
-                            onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
-                            onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
-                            isStickyActive={activeSlide?.id === slide.id}
-                        />
+                            draggable={!bulkSelectMode}
+                            onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = 'move'
+                                e.dataTransfer.setData('text/plain', String(index))
+                            }}
+                            onDragOver={(e) => {
+                                e.preventDefault()
+                                if (dragOverIndex !== index) setDragOverIndex(index)
+                            }}
+                            onDragLeave={() => setDragOverIndex(null)}
+                            onDrop={(e) => {
+                                e.preventDefault()
+                                const from = parseInt(e.dataTransfer.getData('text/plain'), 10)
+                                if (!Number.isNaN(from) && from !== index) {
+                                    // Find actual indices in activeSlides (not filtered slides)
+                                    const fromSlide = slides[from]
+                                    const toSlide = slides[index]
+                                    const fromActiveIndex = activeSlides.findIndex(s => s.id === fromSlide.id)
+                                    const toActiveIndex = activeSlides.findIndex(s => s.id === toSlide.id)
+                                    if (fromActiveIndex !== -1 && toActiveIndex !== -1) {
+                                        reorderActiveSlides(fromActiveIndex, toActiveIndex)
+                                    }
+                                }
+                                setDragOverIndex(null)
+                            }}
+                            onDragEnd={() => setDragOverIndex(null)}
+                            className={`transition-all ${dragOverIndex === index ? 'border-t-2 border-[var(--accent-teal)] pt-1' : ''} ${!bulkSelectMode ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                        >
+                            <SlideCard
+                                slide={slide}
+                                isActive={activeSlide?.id === slide.id}
+                                isLive={liveSlideId === slide.id}
+                                isSelected={selectedSlideIds.includes(slide.id)}
+                                selectable={bulkSelectMode}
+                                onClick={() => handleSlideClick(slide)}
+                                onDuplicate={() => handleDuplicateSlide(slide)}
+                                onDelete={() => handleDeleteSlide(slide.id)}
+                                onEdit={() => handleEditSlide(slide)}
+                                onSaveToLibrary={() => handleSaveToLibrary(slide)}
+                                isSaved={isInLibrary(slide.id)}
+                                onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
+                                onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
+                                isStickyActive={activeSlide?.id === slide.id}
+                            />
+                        </div>
                     ))
                 ) : (
                     <div className="py-20 flex flex-col items-center opacity-40">

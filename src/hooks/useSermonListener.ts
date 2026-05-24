@@ -276,6 +276,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Real-time audio level (0-1) for waveform visualization
     const [audioLevel, setAudioLevel] = useState(0)
+    const [captureSource, setCaptureSource] = useState<'microphone' | 'system' | null>(null)
     const audioAnalyserRef = useRef<AnalyserNode | null>(null)
     const audioContextRef = useRef<AudioContext | null>(null)
     const audioStreamRef = useRef<MediaStream | null>(null)
@@ -351,6 +352,16 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             let stream = unifiedTranscriptionService.getMediaStream()
 
             if (!stream) {
+                // If the transcription service has no web MediaStream, it may be using
+                // native system audio capture (desktop loopback). Don't fall back to
+                // microphone — that would show mic levels while transcribing system audio.
+                const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window
+                if (isDesktop) {
+                    setCaptureSource('system')
+                    console.log('[useSermonListener] System audio active — mic analyser disabled')
+                    return
+                }
+
                 const audioConstraints: boolean | MediaTrackConstraints = sermonSettings?.selectedMicrophoneId
                     ? { deviceId: { exact: sermonSettings.selectedMicrophoneId }, echoCancellation: { ideal: true }, noiseSuppression: { ideal: true } }
                     : true
@@ -368,6 +379,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 }
             }
 
+            setCaptureSource('microphone')
             const ctx = new AudioContext()
             if (ctx.state === 'suspended') {
                 await ctx.resume()
@@ -783,8 +795,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     /**
      * Update the current live Bible slide in-place instead of appending a new one.
      * Keeps the slide queue clean while still refreshing the live output.
+     *
+     * @param scripture - The scripture to display
+     * @param skipQueueAppend - When true (voice command navigation), never creates
+     *   a new slide or appends to queue. Only updates an existing bible slide.
      */
-    const refreshLiveSlide = useCallback((scripture: Scripture) => {
+    const refreshLiveSlide = useCallback((scripture: Scripture, skipQueueAppend = false) => {
         const state = useAppStore.getState()
         const liveSlideId = state.liveSlideId
         const existingSlide = state.activeSlides.find(s => s.id === liveSlideId)
@@ -806,12 +822,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (typeof window !== 'undefined' && '__TAURI__' in window) {
                 window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
             }
-        } else {
-            // No existing bible slide — fall back to creating one
+        } else if (!skipQueueAppend) {
+            // No existing bible slide — fall back to creating one (only for auto-detect, not voice nav)
             const slide = createBibleSlide(scripture)
             appendActiveSlide(slide)
             setLiveSlide(slide.id)
         }
+        // When skipQueueAppend=true and no existing bible slide, do nothing.
+        // The user explicitly wants voice navigation to never spam the queue.
     }, [createBibleSlide, updateActiveSlide, appendActiveSlide, setLiveSlide])
 
     const applyBibleVersionChange = useCallback(async (requestedVersionId: string): Promise<boolean> => {
@@ -934,7 +952,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             lookupVerse(next).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
-                                    refreshLiveSlide(scripture)
+                                    refreshLiveSlide(scripture, true)
                                 }
                             })
                             handledNavigationCommand = true
@@ -959,7 +977,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             lookupVerse(prev).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
-                                    refreshLiveSlide(scripture)
+                                    refreshLiveSlide(scripture, true)
                                 }
                             })
                             handledNavigationCommand = true
@@ -984,7 +1002,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
-                                    refreshLiveSlide(scripture)
+                                    refreshLiveSlide(scripture, true)
                                 }
                             })
                             handledNavigationCommand = true
@@ -1010,7 +1028,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
-                                    refreshLiveSlide(scripture)
+                                    refreshLiveSlide(scripture, true)
                                 }
                             })
                             handledNavigationCommand = true
@@ -1037,7 +1055,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 lookupVerse(nextVerse).then(scripture => {
                                     if (scripture) {
                                         setCurrentScripture(scripture)
-                                        refreshLiveSlide(scripture)
+                                        refreshLiveSlide(scripture, true)
                                     }
                                 })
                                 handledNavigationCommand = true
@@ -1065,7 +1083,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 lookupVerse(prevVerse).then(scripture => {
                                     if (scripture) {
                                         setCurrentScripture(scripture)
-                                        refreshLiveSlide(scripture)
+                                        refreshLiveSlide(scripture, true)
                                     }
                                 })
                                 handledNavigationCommand = true
@@ -1756,6 +1774,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         isSemanticSearching,
         isSpeechDetected,
         audioLevel,
+        captureSource,
         activeBibleVersion,
         lastVoiceCommand,
         voiceCommands,
