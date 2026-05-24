@@ -1,6 +1,6 @@
 import { bibleVersionObjects } from '../../types'
 import type { BibleVersion } from '../../types'
-import { BOOK_PATTERN, normalizeBookName } from './verseDetection'
+import { BOOK_PATTERN, normalizeBookName, parseSpokenNumber } from './verseDetection'
 
 export interface VoiceCommand {
     type: 'change_version' | 'next_verse' | 'previous_verse' | 'next_chapter' | 'previous_chapter' | 'go_to_verse' | 'go_to_reference' | 'display' | 'stop_listening' | 'start_listening'
@@ -312,25 +312,40 @@ function detectGoToVerseCommands(text: string): VoiceCommand[] {
 }
 
 // Detect book + chapter references without a verse (e.g. "Psalm 23", "Matthew 5", "Mark chapter 28")
+// Also handles spoken numbers: "Matthew chapter six" → chapter 6
 // Negative lookahead ensures we don't capture "Psalm 23:1" which is handled by verse detection.
+const SPOKEN_NUMBERS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|first|second|third'
 const BOOK_CHAPTER_REGEX = new RegExp(
-    `\\b(${BOOK_PATTERN})[,]?\\s*(?:chapter\\s+)?(\\d{1,3})\\b(?!\\s*(?:[:\\.\\-]|x|vs\\.?|verse)\\s*\\d)`,
+    `\\b(${BOOK_PATTERN})[,]?\\s*(?:chapter\\s+)?(\\d{1,3}|${SPOKEN_NUMBERS})\\b(?!\\s*(?:[:\\.\\-]|x|vs\\.?|verse)\\s*\\d)`,
     'gi',
 )
 
+/** Parse a chapter string — handles digits ("5") and spoken numbers ("six"). */
+function parseChapter(raw: string): number | null {
+    const digit = parseInt(raw, 10)
+    if (!Number.isNaN(digit) && digit >= 1) return digit
+    const spoken = parseSpokenNumber(raw)
+    if (spoken !== null && spoken >= 1) return spoken
+    return null
+}
+
 function detectGoToReferenceCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
+
+    // Reset lastIndex so stale state from prior calls doesn't skip the first match
+    BOOK_CHAPTER_REGEX.lastIndex = 0
 
     // 1. Action-verb based: "open Psalm 23", "go to Matthew 5", "show me John 3", "turn to chapter 6"
     const actionRefPattern = /\b(?:open|go to|turn to|return to|show|read|display|present|take me to|jump to)\s+(?:the\s+)?(?:book\s+of\s+)?(.+)/gi
     let actionMatch: RegExpExecArray | null
     while ((actionMatch = actionRefPattern.exec(text)) !== null) {
         const rest = actionMatch[1].trim()
+        BOOK_CHAPTER_REGEX.lastIndex = 0
         const bcMatch = BOOK_CHAPTER_REGEX.exec(rest)
         if (bcMatch) {
             const book = normalizeBookName(bcMatch[1])
-            const chapter = parseInt(bcMatch[2], 10)
-            if (book && chapter >= 1) {
+            const chapter = parseChapter(bcMatch[2])
+            if (book && chapter !== null) {
                 commands.push({
                     type: 'go_to_reference',
                     raw: actionMatch[0].trim(),
@@ -349,8 +364,8 @@ function detectGoToReferenceCommands(text: string): VoiceCommand[] {
         let bcMatch: RegExpExecArray | null
         while ((bcMatch = BOOK_CHAPTER_REGEX.exec(text)) !== null) {
             const book = normalizeBookName(bcMatch[1])
-            const chapter = parseInt(bcMatch[2], 10)
-            if (book && chapter >= 1) {
+            const chapter = parseChapter(bcMatch[2])
+            if (book && chapter !== null) {
                 commands.push({
                     type: 'go_to_reference',
                     raw: bcMatch[0].trim(),
@@ -406,9 +421,14 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
     if (!text || text.length < 3) return []
 
     const recentText = text.slice(-300)
-    const hasIntent = hasCommandIntent(recentText)
 
-    if (!hasIntent) {
+    // Standalone book+chapter references (e.g. "Matthew 8", "Psalm 23") are valid
+    // voice commands even when no action verb is present. Check these first so
+    // they are not blocked by the keyword-intent filter.
+    const referenceCommands = detectGoToReferenceCommands(recentText)
+
+    const hasIntent = hasCommandIntent(recentText)
+    if (!hasIntent && referenceCommands.length === 0) {
         console.log('[VoiceCommand] No command intent in:', recentText.slice(-80))
         return []
     }
@@ -417,7 +437,7 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
         ...detectVersionChangeCommands(recentText),
         ...detectNavigationCommands(recentText),
         ...detectGoToVerseCommands(recentText),
-        ...detectGoToReferenceCommands(recentText),
+        ...referenceCommands,
         ...detectControlCommands(recentText),
     ]
 
