@@ -461,77 +461,11 @@ export function LiveOutput() {
                 </div>
             </div>
 
-            {/* Main Content — Live Feed + Active Slide side-by-side */}
+            {/* Main Content — Next Up + Controls on left, Live Feed on right */}
             <div className="flex-1 min-h-0 flex flex-col p-4 lg:p-5 gap-3">
                 <div className="flex-1 min-h-0 flex gap-4 lg:gap-5">
-                    {/* Left: Live Feed + contextual Bible navigator */}
-                    <div className="flex-1 min-w-0 flex flex-col gap-3">
-                        <div className="relative group flex-1 min-h-0 flex flex-col">
-                            <div className="flex items-center justify-between mb-2">
-                                <div className="text-[10px] font-bold text-red-500 uppercase tracking-[0.18em] flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-                                    Live Output
-                                </div>
-                                <div className="text-[10px] font-medium text-[var(--text-muted)]">
-                                    {liveSlide ? liveSlide.name : 'No slide on air'}
-                                </div>
-                            </div>
-                            <div className={`flex-1 min-h-0 studio-live-monitor ${liveSlide ? 'is-live' : ''}`}>
-                                {liveSlide ? (
-                                    <div
-                                        className="w-full h-full relative"
-                                        style={{
-                                            backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
-                                            backgroundSize: 'cover',
-                                            backgroundPosition: 'center',
-                                        }}
-                                    >
-                                        {isLiveSlideVideo && (
-                                            <video
-                                                src={liveSlideBackground}
-                                                className="absolute inset-0 w-full h-full object-cover"
-                                                autoPlay loop muted playsInline
-                                            />
-                                        )}
-                                        <div className="absolute inset-0 flex items-center justify-center p-[5%]">
-                                            {liveSlide.type === 'countdown' ? (
-                                                <div className="text-white font-mono font-bold tabular-nums drop-shadow-2xl" style={{ fontSize: '8vw' }}>
-                                                    {formatSecondsToTime(previewCountdownSeconds)}
-                                                </div>
-                                            ) : (
-                                                <div
-                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full"
-                                                    style={{ fontSize: '2.5vw' }}
-                                                    dangerouslySetInnerHTML={{ __html: liveHtml }}
-                                                />
-                                            )}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">
-                                        <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/5 flex items-center justify-center border border-[var(--accent-teal)]/10">
-                                            <Monitor className="w-8 h-8 text-[var(--accent-teal)]/20" />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-sm font-semibold text-[var(--text-primary)] opacity-40">Selah</p>
-                                            <p className="text-[10px] text-[var(--text-muted)] mt-1">Nothing is live yet</p>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Bible verse navigation — only when a bible slide is live */}
-                        {liveSlide?.type === 'bible' && (
-                            <BibleVerseNavigator
-                                currentSlide={liveSlide}
-                                onVerseSelect={handleVerseSelect}
-                            />
-                        )}
-                    </div>
-
-                    {/* Right: Next Up + Active Slide controls */}
-                    <aside className="studio-output-sidecar w-[320px] flex-shrink-0 flex flex-col gap-3">
+                    {/* Left: Next Up + Active Slide controls + Sermon Listener */}
+                    <aside className="studio-output-sidecar w-[320px] flex-shrink-0 flex flex-col gap-3 order-1">
                         {/* Next Up Preview — 16:9 aspect ratio */}
                         <div className="flex flex-col">
                             <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Next Up</div>
@@ -638,6 +572,72 @@ export function LiveOutput() {
                             </div>
                         </div>
                     </aside>
+
+                    {/* Right: Live Feed + contextual Bible navigator */}
+                    <div className="flex-1 min-w-0 flex flex-col gap-3 order-2">
+                        <div className="relative group flex-1 min-h-0 flex flex-col">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="text-[10px] font-bold text-red-500 uppercase tracking-[0.18em] flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                                    Live Output
+                                </div>
+                                <div className="text-[10px] font-medium text-[var(--text-muted)]">
+                                    {liveSlide ? liveSlide.name : 'No slide on air'}
+                                </div>
+                            </div>
+                            <div className={`flex-1 min-h-0 studio-live-monitor ${liveSlide ? 'is-live' : ''}`}>
+                                {liveSlide ? (
+                                    <div
+                                        className="w-full h-full relative"
+                                        style={{
+                                            backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
+                                            backgroundSize: 'cover',
+                                            backgroundPosition: 'center',
+                                        }}
+                                    >
+                                        {isLiveSlideVideo && (
+                                            <video
+                                                src={liveSlideBackground}
+                                                className="absolute inset-0 w-full h-full object-cover"
+                                                autoPlay loop muted playsInline
+                                            />
+                                        )}
+                                        <div className="absolute inset-0 flex items-center justify-center p-[5%]">
+                                            {liveSlide.type === 'countdown' ? (
+                                                <div className="text-white font-mono font-bold tabular-nums drop-shadow-2xl" style={{ fontSize: '8vw' }}>
+                                                    {formatSecondsToTime(previewCountdownSeconds)}
+                                                </div>
+                                            ) : (
+                                                <div
+                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full"
+                                                    style={{ fontSize: '2.5vw' }}
+                                                    dangerouslySetInnerHTML={{ __html: liveHtml }}
+                                                />
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">
+                                        <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/5 flex items-center justify-center border border-[var(--accent-teal)]/10">
+                                            <Monitor className="w-8 h-8 text-[var(--accent-teal)]/20" />
+                                        </div>
+                                        <div className="text-center">
+                                            <p className="text-sm font-semibold text-[var(--text-primary)] opacity-40">Selah</p>
+                                            <p className="text-[10px] text-[var(--text-muted)] mt-1">Nothing is live yet</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Bible verse navigation — only when a bible slide is live */}
+                        {liveSlide?.type === 'bible' && (
+                            <BibleVerseNavigator
+                                currentSlide={liveSlide}
+                                onVerseSelect={handleVerseSelect}
+                            />
+                        )}
+                    </div>
                 </div>
 
                 {/* Shared Queue — contributions from non-operators */}
