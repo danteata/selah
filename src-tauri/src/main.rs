@@ -146,53 +146,85 @@ async fn run_whisper_server(
     }
 
     // Check if a server is listening on our port (from a previous app session)
-    // even though we don't have a PID for it.
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        if let Ok(output) = Command::new("lsof")
-            .args(["-i", &format!(":{}", WHISPER_SERVER_PORT), "-sTCP:LISTEN"])
-            .output()
+    // even though we don't have a PID for it.  If one is found, verify that
+    // it actually has a model loaded.  If not, kill it and restart so we
+    // get a working server instead of adopting a zombie.
+    let orphan_pid = {
+        let mut found_pid: Option<u32> = None;
+        #[cfg(unix)]
         {
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            for line in output_str.lines().skip(1) {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let pid_str = parts[1];
-                    if let Ok(pid) = pid_str.parse::<u32>() {
-                        println!("Found existing whisper server on port {} (PID: {})", WHISPER_SERVER_PORT, pid);
-                        *state.server_pid.lock().unwrap() = Some(pid);
-                        // Spawn the readiness poll task against the orphan
-                        // server so the frontend gets a ready event when
-                        // the model finishes loading.
-                        spawn_readiness_poll(app.clone());
-                        return Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT));
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        use std::process::Command;
-        if let Ok(output) = Command::new("netstat")
-            .args(["-ano"])
-            .output()
-        {
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            for line in output_str.lines() {
-                if line.contains(&format!(":{}", WHISPER_SERVER_PORT)) && line.contains("LISTENING") {
-                    if let Some(pid_str) = line.split_whitespace().last() {
-                        if let Ok(pid) = pid_str.parse::<u32>() {
-                            println!("Found existing whisper server on port {} (PID: {})", WHISPER_SERVER_PORT, pid);
-                            *state.server_pid.lock().unwrap() = Some(pid);
-                            spawn_readiness_poll(app.clone());
-                            return Ok(format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT));
+            use std::process::Command;
+            if let Ok(output) = Command::new("lsof")
+                .args(["-i", &format!(":{}", WHISPER_SERVER_PORT), "-sTCP:LISTEN"])
+                .output()
+            {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                for line in output_str.lines().skip(1) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        if let Ok(pid) = parts[1].parse::<u32>() {
+                            found_pid = Some(pid);
+                            break;
                         }
                     }
                 }
             }
+        }
+        #[cfg(windows)]
+        {
+            use std::process::Command;
+            if let Ok(output) = Command::new("netstat")
+                .args(["-ano"])
+                .output()
+            {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                for line in output_str.lines() {
+                    if line.contains(&format!(":{}", WHISPER_SERVER_PORT)) && line.contains("LISTENING") {
+                        if let Some(pid_str) = line.split_whitespace().last() {
+                            if let Ok(pid) = pid_str.parse::<u32>() {
+                                found_pid = Some(pid);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        found_pid
+    };
+
+    if let Some(pid) = orphan_pid {
+        // Check if the orphan is actually functional (model loaded)
+        let endpoint = format!("http://127.0.0.1:{}", WHISPER_SERVER_PORT);
+        let health_url = format!("{}/health", &endpoint);
+        let orphan_healthy = match reqwest::Client::new()
+            .get(&health_url)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    body.get("model_loaded")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
+        if orphan_healthy {
+            println!("Found existing whisper server on port {} (PID: {}) with model loaded", WHISPER_SERVER_PORT, pid);
+            *state.server_pid.lock().unwrap() = Some(pid);
+            spawn_readiness_poll(app.clone());
+            return Ok(endpoint);
+        } else {
+            println!("Found zombie whisper server on port {} (PID: {}) without model — killing and restarting", WHISPER_SERVER_PORT, pid);
+            kill_whisper_pid(pid);
+            // Wait a moment for the port to be released
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
     }
 
