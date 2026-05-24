@@ -347,36 +347,51 @@ class DesktopWhisperTranscriptionService {
         try {
             console.log('[DesktopWhisper] Starting VAD-based capture');
 
+            // Unlock AudioContext within user gesture context before VAD creates its own
+            const unlockCtx = new AudioContext();
+            if (unlockCtx.state === 'suspended') {
+                await unlockCtx.resume();
+                console.log('[DesktopWhisper] AudioContext unlocked (was suspended)');
+            }
+            await unlockCtx.close();
+
             const requestedDeviceId = this.config.microphoneDeviceId;
 
             const getStreamWithFallback = async (): Promise<MediaStream> => {
-                if (requestedDeviceId) {
-                    try {
-                        return await navigator.mediaDevices.getUserMedia({
-                            audio: {
-                                deviceId: { exact: requestedDeviceId },
-                                channelCount: 1,
-                                noiseSuppression: { ideal: true },
-                                echoCancellation: { ideal: true },
-                                autoGainControl: { ideal: true },
-                            },
-                        });
-                    } catch (err) {
-                        if (err instanceof OverconstrainedError) {
-                            console.warn('[DesktopWhisper] Microphone device not available, falling back to default:', err.message);
-                        } else {
-                            console.warn('[DesktopWhisper] Failed to get specified microphone, falling back to default:', err);
-                        }
-                    }
-                }
-                return navigator.mediaDevices.getUserMedia({
+                const constraints: MediaStreamConstraints = {
                     audio: {
-                        channelCount: 1,
-                        noiseSuppression: { ideal: true },
-                        echoCancellation: { ideal: true },
-                        autoGainControl: { ideal: true },
+                        channelCount: { ideal: 1 },
+                        noiseSuppression: true,
+                        echoCancellation: true,
+                        autoGainControl: true,
                     },
-                });
+                };
+                if (requestedDeviceId) {
+                    (constraints.audio as MediaTrackConstraints).deviceId = { exact: requestedDeviceId };
+                }
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    const track = stream.getAudioTracks()[0];
+                    console.log('[DesktopWhisper] Got mic stream:', {
+                        label: track?.label,
+                        deviceId: track?.getSettings()?.deviceId,
+                        sampleRate: track?.getSettings()?.sampleRate,
+                        channelCount: track?.getSettings()?.channelCount,
+                        muted: track?.muted,
+                        readyState: track?.readyState,
+                    });
+                    return stream;
+                } catch (err) {
+                    if (requestedDeviceId) {
+                        console.warn('[DesktopWhisper] Failed to get specified microphone, falling back to default:', err);
+                    } else {
+                        console.warn('[DesktopWhisper] Failed to get microphone:', err);
+                        throw err;
+                    }
+                    return navigator.mediaDevices.getUserMedia({
+                        audio: { channelCount: { ideal: 1 }, noiseSuppression: true, echoCancellation: true, autoGainControl: true },
+                    });
+                }
             };
 
             const vadOptions: Parameters<MicVADStatic['new']>[0] = {
@@ -403,11 +418,12 @@ class DesktopWhisperTranscriptionService {
                     console.log('[DesktopWhisper] VAD misfire - too short, ignoring');
                     this.config.onStatus?.('listening');
                 },
-                positiveSpeechThreshold: this.config.positiveSpeechThreshold ?? 0.65,
-                negativeSpeechThreshold: this.config.negativeSpeechThreshold ?? 0.45,
-                minSpeechMs: this.config.minSpeechMs ?? 500,
-                preSpeechPadMs: this.config.preSpeechPadMs ?? 500,
-                redemptionMs: this.config.redemptionMs ?? 1000,
+                // Lowered thresholds for more sensitive speech detection
+                positiveSpeechThreshold: this.config.positiveSpeechThreshold ?? 0.55,
+                negativeSpeechThreshold: this.config.negativeSpeechThreshold ?? 0.35,
+                minSpeechMs: this.config.minSpeechMs ?? 400,
+                preSpeechPadMs: this.config.preSpeechPadMs ?? 400,
+                redemptionMs: this.config.redemptionMs ?? 800,
             };
 
             this.vad = await window.vad.MicVAD.new(vadOptions);
