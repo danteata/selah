@@ -20,14 +20,19 @@
  *   node scripts/build-embedding-pack.mjs --version KJV \
  *     [--url https://example.com/bibles/kjv.json] \
  *     [--out src-tauri/assets/embedding-packs/KJV] \
- *     [--batch 64]
+ *     [--batch 64] \
+ *     [--fragments]
  *
  * If `--url` is omitted the script tries common public sources in order
  * (see `KNOWN_SOURCES` below). The KJV source is committed as the
  * canonical reference; for new versions, supply `--url` explicitly.
  *
+ * Pass `--fragments` to embed clause + sliding-window fragments alongside
+ * full verses (~3-4× more rows, ~90-120k for KJV). This dramatically improves
+ * short-phrase / paraphrase detection but increases pack size to ~100-130 MB.
+ *
  * Output (under `--out`):
- *   manifest.json        — { version, dim, count, modelName, builtAt }
+ *   manifest.json        — { version, dim, count, hasFragments, modelName, builtAt }
  *   metadata.json        — array of verse metadata (no embeddings)
  *   embeddings.f32       — flat Float32 buffer (count × dim × 4 bytes)
  *
@@ -54,6 +59,7 @@ const { values: args } = parseArgs({
         out: { type: 'string' },
         batch: { type: 'string', default: '64' },
         model: { type: 'string', default: 'Xenova/all-MiniLM-L6-v2' },
+        fragments: { type: 'boolean', default: false },
     },
 })
 
@@ -186,6 +192,88 @@ async function loadEmbedder() {
 }
 
 // ---------------------------------------------------------------------------
+// Fragment generation (mirrors src/lib/extractVerseFragments.ts)
+// ---------------------------------------------------------------------------
+
+const MIN_FRAGMENT_WORDS = 4
+const MAX_FRAGMENT_WORDS = 14
+const WINDOW_SIZE = 6
+const WINDOW_STRIDE = 3
+const MAX_WINDOW_WORDS = 20
+const MAX_FRAGMENTS_PER_VERSE = 6
+
+function splitClauses(text) {
+    const parts = text.split(/[,;:().!?]/)
+    return parts
+        .map(p => p.trim())
+        .filter(p => {
+            const wordCount = p.split(/\s+/).filter(Boolean).length
+            return wordCount >= MIN_FRAGMENT_WORDS && wordCount <= MAX_FRAGMENT_WORDS
+        })
+}
+
+function generateWindows(words) {
+    if (words.length < MIN_FRAGMENT_WORDS) return []
+    const sourceWords = words.slice(0, MAX_WINDOW_WORDS)
+    if (sourceWords.length <= WINDOW_SIZE) {
+        return [sourceWords.join(' ')]
+    }
+    const windows = []
+    for (let i = 0; i <= sourceWords.length - WINDOW_SIZE; i += WINDOW_STRIDE) {
+        windows.push(sourceWords.slice(i, i + WINDOW_SIZE).join(' '))
+    }
+    const lastWindow = sourceWords.slice(-WINDOW_SIZE).join(' ')
+    if (windows[windows.length - 1] !== lastWindow) {
+        windows.push(lastWindow)
+    }
+    return windows
+}
+
+function fragmentSimilarity(a, b) {
+    const aWords = new Set(a.toLowerCase().split(/\s+/))
+    const bWords = new Set(b.toLowerCase().split(/\s+/))
+    const intersection = [...aWords].filter(w => bWords.has(w)).length
+    return (2 * intersection) / (aWords.size + bWords.size)
+}
+
+function extractVerseFragments(verseText) {
+    if (!verseText || !verseText.trim()) return []
+    const fragments = []
+    let fragmentIndex = 0
+
+    fragments.push({ text: verseText.trim(), type: 'full', fragmentIndex: fragmentIndex++ })
+
+    for (const clause of splitClauses(verseText)) {
+        fragments.push({ text: clause, type: 'clause', fragmentIndex: fragmentIndex++ })
+    }
+
+    const words = verseText.split(/\s+/).filter(Boolean)
+    for (const window of generateWindows(words)) {
+        if (window.split(/\s+/).filter(Boolean).length >= MIN_FRAGMENT_WORDS) {
+            fragments.push({ text: window, type: 'window', fragmentIndex: fragmentIndex++ })
+        }
+    }
+
+    // Deduplicate near-identical fragments using Dice coefficient on word sets.
+    // Threshold 0.7 means ≥70% word overlap (e.g. "the lord is my shepherd" vs
+    // "the lord is my ship" scores ~0.67; we keep both). 0.6 was too aggressive
+    // and discarded meaningful variants; 0.8 kept too many near-duplicates.
+    const kept = []
+    for (const f of fragments) {
+        if (f.type === 'full') { kept.push(f); continue }
+        const dup = kept.some(k => k.type !== 'full' && fragmentSimilarity(f.text, k.text) >= 0.7)
+        if (!dup) kept.push(f)
+    }
+
+    if (kept.length > MAX_FRAGMENTS_PER_VERSE) {
+        const full = kept.filter(f => f.type === 'full')
+        const rest = kept.filter(f => f.type !== 'full').slice(0, MAX_FRAGMENTS_PER_VERSE - 1)
+        return [...full, ...rest]
+    }
+    return kept
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -200,8 +288,22 @@ async function main() {
         const stat = await import('node:fs/promises')
         const size = (await stat.stat(embeddingsPath)).size
         if (size > 0) {
-            console.log(`[skip] ${VERSION} embedding pack already built (${(size / (1024 * 1024)).toFixed(1)} MB)`)
-            return
+            // If --fragments is requested, check whether the existing pack
+            // was actually built with fragments. If not, force rebuild.
+            let existingHasFragments = false
+            try {
+                const manifestRaw = await import('node:fs/promises').then(m => m.readFile(manifestPath, 'utf8'))
+                const existingManifest = JSON.parse(manifestRaw)
+                existingHasFragments = existingManifest.hasFragments === true
+            } catch {
+                // ignore parse errors, just rebuild
+            }
+            if (args.fragments && !existingHasFragments) {
+                console.log(`[rebuild] ${VERSION} pack exists but lacks fragments, rebuilding...`)
+            } else {
+                console.log(`[skip] ${VERSION} embedding pack already built (${(size / (1024 * 1024)).toFixed(1)} MB)`)
+                return
+            }
         }
     }
 
@@ -209,46 +311,77 @@ async function main() {
     console.log(`[fetch] got ${verses.length} verses`)
 
     const embedder = await loadEmbedder()
-    // Sniff dimension from one inference.
     const probe = await embedder('hello', { pooling: 'mean', normalize: true })
     const dim = probe.data.length
     console.log(`[model] ready, dim=${dim}`)
 
-    const count = verses.length
+    // -----------------------------------------------------------------------
+    // Flatten verses + optional fragments into embeddable items
+    // -----------------------------------------------------------------------
+    const embedItems = []
+    for (const v of verses) {
+        let bookNumber
+        let bookName
+        const parsedBook = parseInt(v.book, 10)
+        if (!isNaN(parsedBook)) {
+            bookNumber = parsedBook
+            bookName = NUMBER_TO_BOOK[bookNumber] || v.book
+        } else {
+            bookNumber = BOOK_TO_NUMBER[v.book] ?? 0
+            bookName = v.book
+        }
+        const baseRef = `${bookName} ${v.chapter}:${v.verse}`
+
+        if (args.fragments) {
+            const frags = extractVerseFragments(v.scripture.trim())
+            for (const frag of frags) {
+                embedItems.push({
+                    text: frag.text,
+                    reference: frag.type === 'full'
+                        ? baseRef
+                        : `${baseRef}__${frag.type}_${frag.fragmentIndex}`,
+                    book: bookName,
+                    bookNumber,
+                    chapter: parseInt(v.chapter, 10),
+                    verse: parseInt(v.verse, 10),
+                })
+            }
+        } else {
+            embedItems.push({
+                text: v.scripture.trim(),
+                reference: baseRef,
+                book: bookName,
+                bookNumber,
+                chapter: parseInt(v.chapter, 10),
+                verse: parseInt(v.verse, 10),
+            })
+        }
+    }
+
+    const count = embedItems.length
+    console.log(`[fragments] ${args.fragments ? 'enabled' : 'disabled'} — total items to embed: ${count}`)
+
     const packed = new Float32Array(count * dim)
     const metadata = new Array(count)
 
     let done = 0
     for (let i = 0; i < count; i += BATCH) {
-        const slice = verses.slice(i, i + BATCH)
-        const texts = slice.map((v) => v.scripture.trim())
+        const slice = embedItems.slice(i, i + BATCH)
+        const texts = slice.map((item) => item.text)
         const tensor = await embedder(texts, { pooling: 'mean', normalize: true })
 
-        // transformers.js returns a single concatenated Tensor of shape (batch, dim).
         const flat = tensor.data
         for (let b = 0; b < slice.length; b++) {
             const off = (i + b) * dim
             for (let d = 0; d < dim; d++) {
                 packed[off + d] = flat[b * dim + d]
             }
-
-            const v = slice[b]
-            let bookNumber
-            let bookName
-            const parsedBook = parseInt(v.book, 10)
-            if (!isNaN(parsedBook)) {
-                bookNumber = parsedBook
-                bookName = NUMBER_TO_BOOK[bookNumber] || v.book
-            } else {
-                bookNumber = BOOK_TO_NUMBER[v.book] ?? 0
-                bookName = v.book
-            }
             metadata[i + b] = {
-                reference: `${bookName} ${v.chapter}:${v.verse}`,
-                book: bookName,
-                bookNumber,
-                chapter: parseInt(v.chapter, 10),
-                verse: parseInt(v.verse, 10),
+                reference: slice[b].reference,
+                book: slice[b].book,
+                bookNumber: slice[b].bookNumber,
+                chapter: slice[b].chapter,
+                verse: slice[b].verse,
                 text: texts[b],
             }
         }
@@ -271,6 +404,7 @@ async function main() {
         version: VERSION,
         dim,
         count,
+        hasFragments: args.fragments,
         modelName: MODEL_NAME,
         builtAt: new Date().toISOString(),
     }
