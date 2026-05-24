@@ -300,7 +300,7 @@ async fn run_whisper_server(
         // For --onedir builds, the binary needs to find _internal/ relative to itself.
         // Set the current directory to the binary's parent directory.
         let exe_dir = whisper_exe.parent().unwrap_or_else(|| std::path::Path::new("."));
-        let mut cmd = app.shell().command(&whisper_exe)
+        let cmd = app.shell().command(&whisper_exe)
             .args(["--port", &WHISPER_SERVER_PORT.to_string(), "--model", &effective_model])
             .env("PYTHONUNBUFFERED", "1")
             .current_dir(exe_dir);
