@@ -186,7 +186,26 @@ export function useTemplates(): UseTemplatesReturn {
         thumbnail?: string
         backgroundStorageId?: string
     }): Promise<string> => {
-        if (templateId.startsWith('local_')) {
+        const isLocal = templateId.startsWith('local_')
+        if (isOffline || isLocal) {
+            // Optimistic update: update local state immediately so UI feels snappy
+            setLocalTemplates(prev => prev.map(t =>
+                t.id === templateId
+                    ? {
+                        ...t,
+                        name: updates.name ?? t.name,
+                        description: updates.description ?? t.description,
+                        slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : t.slideId,
+                        category: updates.category ?? t.category,
+                        appliesTo: updates.appliesTo as string[] ?? t.appliesTo,
+                        thumbnail: updates.thumbnail ?? t.thumbnail,
+                        backgroundStorageId: updates.backgroundStorageId ?? t.backgroundStorageId,
+                        updatedAt: new Date().toISOString(),
+                    }
+                    : t
+            ))
+
+            // Persist to IndexedDB in the background
             await updateLocalTemplateFromDB(templateId, {
                 name: updates.name,
                 description: updates.description,
@@ -196,12 +215,10 @@ export function useTemplates(): UseTemplatesReturn {
                 thumbnail: updates.thumbnail,
                 backgroundStorageId: updates.backgroundStorageId,
             })
-            const local = await getLocalTemplate(templateId)
-            if (local) {
-                await refreshLocalTemplates()
-                return local.id
-            }
-            throw new Error('Template not found')
+
+            // Re-sync from DB to ensure consistency
+            await refreshLocalTemplates()
+            return templateId
         }
 
         return await updateTemplateMutation({
