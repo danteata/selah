@@ -90,6 +90,7 @@ function SermonListenerPanelInner({
         start,
         stop,
         reset,
+        addCorrection,
     } = sermonListener
 
     const uniqueDetectedVerses = detectedVerses.filter((verse, index, arr) => arr.findIndex(v => v.reference === verse.reference) === index)
@@ -355,6 +356,9 @@ function SermonListenerPanelInner({
                 </div>
             )}
 
+            {/* Missed verse flag — zero friction, one tap records timestamp for post-sermon review */}
+            {(isListening || transcript) && <MissedVerseFlag onFlag={addCorrection} />}
+
             {/* Transcript section - compact */}
             {(isListening || transcript || interimTranscript) && (
                 <div className={`flex-1 min-h-0 p-2 rounded-lg bg-gray-100 dark:bg-gray-800 flex flex-col transition-all duration-300 ${isSpeechDetected ? 'ring-2 ring-green-500/30' : ''}`}>
@@ -605,6 +609,29 @@ function SermonListenerPanelInner({
                 </div>
             )}
         </div>
+    )
+}
+
+function MissedVerseFlag({ onFlag }: { onFlag: (ref: string) => void }) {
+    const [flagged, setFlagged] = useState(false)
+
+    const handleFlag = () => {
+        onFlag('manual-flag')
+        setFlagged(true)
+        setTimeout(() => setFlagged(false), 2000)
+    }
+
+    return (
+        <button
+            onClick={handleFlag}
+            className={`w-full px-2 py-1 rounded text-[10px] font-medium transition-all border ${flagged
+                    ? 'bg-green-50 dark:bg-green-900/20 border-green-300 text-green-600 dark:text-green-400'
+                    : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/20'
+                }`}
+            title="Tap to mark a missed verse — add the reference after the sermon"
+        >
+            {flagged ? 'Flagged for review' : 'Missed a verse? Tap here'}
+        </button>
     )
 }
 

@@ -117,6 +117,8 @@ export interface SermonListenerState {
     lastVoiceCommand: VoiceCommand | null
     /** List of recent voice commands */
     voiceCommands: VoiceCommand[]
+    /** Raw ASR utterances for learning */
+    rawUtterances: Array<{ text: string; timestamp: number; confidence?: number }>
 }
 
 export interface SermonListenerActions {
@@ -150,6 +152,8 @@ export interface SermonListenerActions {
     changeBibleVersion: (versionId: string) => void
     /** Manually set one detected verse as current */
     setCurrentDetectedVerse: (verse: DetectedVerse) => Promise<void>
+    /** Record a user correction for learning */
+    addCorrection: (reference: string, originalReference?: string) => void
 }
 
 export type UseSermonListenerReturn = SermonListenerState & SermonListenerActions
@@ -268,6 +272,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Speech detection state (for visual feedback)
     const [isSpeechDetected, setIsSpeechDetected] = useState(false)
+    const [corrections, setCorrections] = useState<Array<{ reference: string; originalReference?: string; timestamp: number }>>([])
 
     // Real-time audio level (0-1) for waveform visualization
     const [audioLevel, setAudioLevel] = useState(0)
@@ -284,6 +289,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const providerReadyRef = useRef(false)
     const [lastVoiceCommand, setLastVoiceCommand] = useState<VoiceCommand | null>(null)
     const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
+    const [rawUtterances, setRawUtterances] = useState<Array<{ text: string; timestamp: number; confidence?: number }>>([])
 
     // Refs for callback stability
     const optionsRef = useRef(options)
@@ -363,6 +369,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }
 
             const ctx = new AudioContext()
+            if (ctx.state === 'suspended') {
+                await ctx.resume()
+            }
             audioContextRef.current = ctx
             const source = ctx.createMediaStreamSource(stream)
             const analyser = ctx.createAnalyser()
@@ -882,7 +891,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             let handledVersionSwitch = false
             let handledNavigationCommand = false
             for (const cmd of commands) {
-                const commandKey = `${cmd.type}:${cmd.versionId || ''}:${cmd.offset || ''}`
+                const commandKey = (() => {
+                    switch (cmd.type) {
+                        case 'go_to_reference': return `${cmd.type}:${cmd.book || ''}:${cmd.chapter || ''}`
+                        case 'go_to_verse': return `${cmd.type}::${cmd.targetVerse || ''}`
+                        case 'change_version': return `${cmd.type}:${cmd.versionId || ''}:`
+                        default: return `${cmd.type}::`
+                    }
+                })()
                 const now = Date.now()
                 const lastRunAt = processedCommandTimesRef.current.get(commandKey) || 0
                 if (now - lastRunAt < 1800) continue
@@ -1467,6 +1483,18 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         console.log('[useSermonListener] Starting transcription with provider:', provider)
 
+        // Unlock AudioContext early so the VAD's internal AudioContext can resume
+        try {
+            const unlockCtx = new AudioContext()
+            if (unlockCtx.state === 'suspended') {
+                await unlockCtx.resume()
+                console.log('[useSermonListener] AudioContext unlocked for transcription')
+            }
+            await unlockCtx.close()
+        } catch (e) {
+            console.warn('[useSermonListener] AudioContext unlock failed:', e)
+        }
+
         const success = await unifiedTranscriptionService.start({
             provider,
             language,
@@ -1475,6 +1503,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             continuous: true,
             interimResults: true,
             useVAD: globalSettings?.sermonListener_useVAD,
+            initialPrompt: 'Bible sermon. Books: Genesis Exodus Leviticus Numbers Deuteronomy Joshua Judges Ruth Samuel Kings Chronicles Ezra Nehemiah Esther Job Psalms Proverbs Ecclesiastes Song Isaiah Jeremiah Lamentations Ezekiel Daniel Hosea Joel Amos Obadiah Jonah Micah Nahum Habakkuk Zephaniah Haggai Zechariah Malachi Matthew Mark Luke John Acts Romans Corinthians Galatians Ephesians Philippians Colossians Thessalonians Timothy Titus Philemon Hebrews James Peter John Jude Revelation. Chapter verse.',
             onStart: () => {
                 setIsListening(true)
                 setError(null)
@@ -1506,6 +1535,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     if (recentChunksRef.current.length > MAX_RECENT_CHUNKS) {
                         recentChunksRef.current.shift()
                     }
+
+                    // Track raw utterance for learning
+                    setRawUtterances(prev => [...prev, { text: cleanedText, timestamp: Date.now() }].slice(-200))
 
                     // Cancel any pending interim debounce
                     if (interimDebounceRef.current) {
@@ -1601,6 +1633,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setIsLoading(false)
         setLastVoiceCommand(null)
         setVoiceCommands([])
+        setRawUtterances([])
         setActiveBibleVersion(defaultBibleVersion)
         processedCommandTimesRef.current = new Map()
         transcriptBufferRef.current = ''
@@ -1663,13 +1696,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [])
 
     /**
+     * Record a user correction for learning. Stores locally until Convex wiring is ready.
+     */
+    const addCorrection = useCallback((reference: string, originalReference?: string) => {
+        setCorrections(prev => [...prev, { reference, originalReference, timestamp: Date.now() }])
+        console.log('[SermonListener] User correction recorded:', { reference, originalReference })
+    }, [])
+
+    /**
      * Export current transcript as a file
      */
     const exportCurrentTranscript = useCallback((): boolean => {
         if (!transcript.trim()) return false
 
         try {
-            const blob = new Blob([transcript], { type: 'text/plain' })
+            const header = `=== Sermon Transcript ===\nDate: ${new Date().toISOString()}\n\n`
+            const body = transcript
+            const footer = corrections.length > 0
+                ? `\n\n--- Corrections ---\n${corrections.map(c => `- ${c.reference}${c.originalReference ? ` (was: ${c.originalReference})` : ''} at ${new Date(c.timestamp).toISOString()}`).join('\n')}`
+                : ''
+            const blob = new Blob([header + body + footer], { type: 'text/plain' })
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a')
             a.href = url
@@ -1704,6 +1750,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         isInitializingProvider,
         providerReady,
         savedTranscripts,
+        corrections,
         semanticDetectionEnabled: enableSemanticDetection,
         semanticDetectorReady,
         isSemanticSearching,
@@ -1712,6 +1759,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         activeBibleVersion,
         lastVoiceCommand,
         voiceCommands,
+        rawUtterances,
         // Actions
         start,
         stop,
@@ -1728,6 +1776,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         previousVerse,
         changeBibleVersion,
         setCurrentDetectedVerse,
+        addCorrection,
     }
 }
 
