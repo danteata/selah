@@ -214,8 +214,8 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                         </span>
                     </div>
 
-                    {/* Keep actions discoverable; hover/focus raises their emphasis. */}
-                    <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    {/* Slide actions — always visible for discoverability */}
+                    <div className="flex items-center gap-1">
                         {onEdit && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); onEdit(); }}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare, Rows3, Plus } from 'lucide-react'
+import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare, Rows3, Plus, GripVertical, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture, useLiveSession } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
@@ -48,6 +48,8 @@ export function PreviewContent() {
     const activeSlideRef = useRef<HTMLDivElement>(null)
     const userClickedSlideRef = useRef(false)
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+    const [showClearConfirm, setShowClearConfirm] = useState(false)
+    const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
 
     // Auto-scroll to active slide ONLY when user explicitly clicked it.
     // Voice commands and auto-advance should not cause jumpy scrolling.
@@ -112,6 +114,11 @@ export function PreviewContent() {
     }, [bulkSelectMode, toggleSlideSelection])
 
     const handleDeleteSelected = useCallback(() => {
+        if (selectedSlideIds.length === 0) return
+        setShowBulkDeleteConfirm(true)
+    }, [selectedSlideIds])
+
+    const confirmBulkDelete = useCallback(() => {
         selectedSlideIds.forEach(id => {
             const slide = slides.find(s => s.id === id)
             if (slide) {
@@ -119,12 +126,19 @@ export function PreviewContent() {
             }
         })
         clearSelectedSlides()
+        setShowBulkDeleteConfirm(false)
     }, [selectedSlideIds, slides, removeActiveSlide, clearSelectedSlides])
+
+    const cancelBulkDelete = useCallback(() => {
+        setShowBulkDeleteConfirm(false)
+    }, [])
 
     const handleClearQueue = useCallback(() => {
         if (slides.length === 0) return
-        if (!confirm(`Clear ${slides.length} slide${slides.length === 1 ? '' : 's'} from this queue?`)) return
+        setShowClearConfirm(true)
+    }, [slides])
 
+    const confirmClearQueue = useCallback(() => {
         const slideIdsToClear = new Set(slides.map((slide) => slide.id))
         const remainingSlides = activeSlides.filter((slide) => !slideIdsToClear.has(slide.id))
 
@@ -134,7 +148,12 @@ export function PreviewContent() {
         }
         clearSelectedSlides()
         setActiveSlide(undefined)
+        setShowClearConfirm(false)
     }, [slides, activeSlides, setActiveSlides, liveSlideId, setLiveSlide, clearSelectedSlides])
+
+    const cancelClearQueue = useCallback(() => {
+        setShowClearConfirm(false)
+    }, [])
 
     // Check if all slides are selected
     const allSelected = slides.length > 0 && selectedSlideIds.length === slides.length
@@ -333,7 +352,7 @@ export function PreviewContent() {
     }, [scriptureRef, activeSlide, fetchScripture, activeSlides, setActiveSlides, setActiveSlide])
 
     return (
-        <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
+        <div className="relative flex-1 flex flex-col h-full bg-transparent overflow-hidden">
             {/* Header - Compact */}
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/20">
                 <div className="flex items-center gap-2">
@@ -388,21 +407,17 @@ export function PreviewContent() {
                         <div
                             key={slide.id}
                             ref={activeSlide?.id === slide.id ? activeSlideRef : undefined}
-                            draggable={!bulkSelectMode}
-                            onDragStart={(e) => {
-                                e.dataTransfer.effectAllowed = 'move'
-                                e.dataTransfer.setData('text/plain', String(index))
-                            }}
                             onDragOver={(e) => {
+                                if (bulkSelectMode) return
                                 e.preventDefault()
                                 if (dragOverIndex !== index) setDragOverIndex(index)
                             }}
                             onDragLeave={() => setDragOverIndex(null)}
                             onDrop={(e) => {
+                                if (bulkSelectMode) return
                                 e.preventDefault()
                                 const from = parseInt(e.dataTransfer.getData('text/plain'), 10)
                                 if (!Number.isNaN(from) && from !== index) {
-                                    // Find actual indices in activeSlides (not filtered slides)
                                     const fromSlide = slides[from]
                                     const toSlide = slides[index]
                                     const fromActiveIndex = activeSlides.findIndex(s => s.id === fromSlide.id)
@@ -413,25 +428,43 @@ export function PreviewContent() {
                                 }
                                 setDragOverIndex(null)
                             }}
-                            onDragEnd={() => setDragOverIndex(null)}
-                            className={`transition-all ${dragOverIndex === index ? 'border-t-2 border-[var(--accent-teal)] pt-1' : ''} ${!bulkSelectMode ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                            className={`transition-all ${dragOverIndex === index ? 'border-t-2 border-[var(--accent-teal)] pt-1' : ''}`}
                         >
-                            <SlideCard
-                                slide={slide}
-                                isActive={activeSlide?.id === slide.id}
-                                isLive={liveSlideId === slide.id}
-                                isSelected={selectedSlideIds.includes(slide.id)}
-                                selectable={bulkSelectMode}
-                                onClick={() => handleSlideClick(slide)}
-                                onDuplicate={() => handleDuplicateSlide(slide)}
-                                onDelete={() => handleDeleteSlide(slide.id)}
-                                onEdit={() => handleEditSlide(slide)}
-                                onSaveToLibrary={() => handleSaveToLibrary(slide)}
-                                isSaved={isInLibrary(slide.id)}
-                                onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
-                                onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
-                                isStickyActive={activeSlide?.id === slide.id}
-                            />
+                            <div className="flex items-center gap-1">
+                                {/* Drag handle — dedicated reorder grip */}
+                                {!bulkSelectMode && (
+                                    <div
+                                        draggable
+                                        onDragStart={(e) => {
+                                            e.dataTransfer.effectAllowed = 'move'
+                                            e.dataTransfer.setData('text/plain', String(index))
+                                        }}
+                                        onDragEnd={() => setDragOverIndex(null)}
+                                        className="cursor-grab active:cursor-grabbing p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                        title="Drag to reorder"
+                                    >
+                                        <GripVertical className="w-4 h-4" />
+                                    </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                    <SlideCard
+                                        slide={slide}
+                                        isActive={activeSlide?.id === slide.id}
+                                        isLive={liveSlideId === slide.id}
+                                        isSelected={selectedSlideIds.includes(slide.id)}
+                                        selectable={bulkSelectMode}
+                                        onClick={() => handleSlideClick(slide)}
+                                        onDuplicate={() => handleDuplicateSlide(slide)}
+                                        onDelete={() => handleDeleteSlide(slide.id)}
+                                        onEdit={() => handleEditSlide(slide)}
+                                        onSaveToLibrary={() => handleSaveToLibrary(slide)}
+                                        isSaved={isInLibrary(slide.id)}
+                                        onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
+                                        onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
+                                        isStickyActive={activeSlide?.id === slide.id}
+                                    />
+                                </div>
+                            </div>
                         </div>
                     ))
                 ) : (
@@ -446,6 +479,68 @@ export function PreviewContent() {
                     </div>
                 )}
             </div>
+
+            {/* Clear Queue Confirmation */}
+            {showClearConfirm && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                    <div className="bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded-xl p-5 max-w-sm w-full mx-4 shadow-xl">
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="p-2 bg-amber-500/10 rounded-full">
+                                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                            </div>
+                            <h3 className="font-semibold text-[var(--text-primary)]">Clear Queue?</h3>
+                        </div>
+                        <p className="text-sm text-[var(--text-secondary)] mb-5">
+                            Remove {slides.length} slide{slides.length === 1 ? '' : 's'} from the queue? This cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                onClick={cancelClearQueue}
+                                className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmClearQueue}
+                                className="px-4 py-2 text-sm bg-[var(--accent-rose)] hover:bg-red-600 text-white rounded-lg transition-colors"
+                            >
+                                Clear All
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Bulk Delete Confirmation */}
+            {showBulkDeleteConfirm && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                    <div className="bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded-xl p-5 max-w-sm w-full mx-4 shadow-xl">
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="p-2 bg-amber-500/10 rounded-full">
+                                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                            </div>
+                            <h3 className="font-semibold text-[var(--text-primary)]">Delete Selected?</h3>
+                        </div>
+                        <p className="text-sm text-[var(--text-secondary)] mb-5">
+                            Remove {selectedSlideIds.length} selected slide{selectedSlideIds.length === 1 ? '' : 's'}? This cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                onClick={cancelBulkDelete}
+                                className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmBulkDelete}
+                                className="px-4 py-2 text-sm bg-[var(--accent-rose)] hover:bg-red-600 text-white rounded-lg transition-colors"
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Quick Add Footer */}
             <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">

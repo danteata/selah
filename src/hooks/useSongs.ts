@@ -80,25 +80,32 @@ export function useSongs(): UseSongsReturn {
 
     const isOfflineData = isOffline && (allSongsQuery === undefined || allSongsQuery === null)
 
-    // Merge local + server, deduplicating by id (prefer server copy when both exist).
+    // Merge local + server, deduplicating by id (prefer most-recently-updated copy).
     const effectiveSongs = useMemo(() => {
         const serverList = (allSongsQuery || []) as Song[]
         if (localSongs.length === 0) return serverList
-        const seen = new Set<string>()
-        const merged: Song[] = []
+        const map = new Map<string, Song>()
         for (const s of serverList) {
             const k = s._id || s.id
-            if (!k || seen.has(k)) continue
-            seen.add(k)
-            merged.push(s)
+            if (!k) continue
+            map.set(k, s)
         }
         for (const s of localSongs) {
             const k = s._id || s.id
-            if (!k || seen.has(k)) continue
-            seen.add(k)
-            merged.push(s)
+            if (!k) continue
+            const existing = map.get(k)
+            if (!existing) {
+                map.set(k, s)
+            } else {
+                // Prefer whichever was updated more recently
+                const localTime = new Date(s.updatedAt || 0).getTime()
+                const serverTime = new Date(existing.updatedAt || 0).getTime()
+                if (localTime > serverTime) {
+                    map.set(k, s)
+                }
+            }
         }
-        return merged
+        return Array.from(map.values())
     }, [allSongsQuery, localSongs])
 
     const searchSongs = useCallback((query: string = '', limit: number = 20): Song[] => {
