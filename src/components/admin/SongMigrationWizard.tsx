@@ -12,11 +12,11 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { Upload, FileText, Music, AlertCircle, CheckCircle, XCircle, ChevronRight, ChevronLeft, Loader2, Database, FileStack } from 'lucide-react';
-import { useMutation, useQuery } from 'convex/react';
-import { api } from '../../../convex/_generated/api';
 import { parseEasyWorshipFile, parseEasyWorshipDatabases, toSelahSong } from '../../services/migration/easyWorshipParser';
 import type { ParsedSong, MigrationStatus, EasyWorshipFileType } from '../../services/migration/types';
 import { openFileDialog } from '../../utils/fileDialog';
+import { useSongs } from '../../hooks/useSongs';
+import { useConvexConnection } from '../../providers/ConvexConnectionProvider';
 
 type WizardStep = 'upload' | 'preview' | 'importing' | 'complete';
 
@@ -40,11 +40,17 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     const [importedIds, setImportedIds] = useState<string[]>([]);
     const [isParsing, setIsParsing] = useState(false);
 
-    const importSongsBatch = useMutation(api.migration.importSongsBatch);
+    const { createSong, songs: existingSongs } = useSongs();
+    const { isOffline } = useConvexConnection();
 
-    // Get church ID from user context
-    const churchId = useQuery(api.songs.getAllSongsForUser, {}) as any;
-    const userId = 'current-user'; // Would come from auth
+    // Local duplicate detection — works fully offline
+    const existingTitles = useMemo(() => {
+        const set = new Set<string>();
+        for (const s of existingSongs) {
+            if (s.title) set.add(s.title.toLowerCase().trim());
+        }
+        return set;
+    }, [existingSongs]);
 
     // Handle single file upload
     const handleSingleFileUpload = useCallback(async (file: File) => {
@@ -156,7 +162,9 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         }
     }, [files, handleMultipleFilesUpload]);
 
-    // Handle import
+    // Handle import — offline-first via useSongs.createSong (which writes to
+    // IndexedDB locally and syncs to Convex when online). Each song is imported
+    // independently so a single failure doesn't abort the whole batch.
     const handleImport = useCallback(async () => {
         if (selectedSongs.size === 0) return;
 
@@ -170,42 +178,65 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
             .filter(Boolean)
             .map(toSelahSong);
 
-        // Import in batches of 50
-        const BATCH_SIZE = 50;
-        const batches = [];
-        for (let i = 0; i < songsToImport.length; i += BATCH_SIZE) {
-            batches.push(songsToImport.slice(i, i + BATCH_SIZE));
-        }
-
-        let totalImported = 0;
         const allImportedIds: string[] = [];
         const allErrors: string[] = [];
+        let imported = 0;
+        let skipped = 0;
 
-        for (const batch of batches) {
-            try {
-                const result = await importSongsBatch({
-                    songs: batch,
-                    churchId: churchId?.[0]?.churchId || 'default',
-                    createdBy: userId,
-                });
+        // Process with bounded concurrency (8 parallel) so import feels fast on
+        // large libraries while not overwhelming IndexedDB / Convex.
+        const CONCURRENCY = 8;
+        let cursor = 0;
 
-                totalImported += result.success;
-                allImportedIds.push(...result.importedIds);
-                allErrors.push(...result.errors);
+        const worker = async () => {
+            while (cursor < songsToImport.length) {
+                const idx = cursor++;
+                const song = songsToImport[idx];
+                if (!song) continue;
 
-                setImportProgress({
-                    current: totalImported,
-                    total: songsToImport.length,
-                });
-            } catch (error) {
-                allErrors.push(`Batch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                // Skip duplicates by title (case-insensitive)
+                const titleKey = song.title.toLowerCase().trim();
+                if (existingTitles.has(titleKey)) {
+                    skipped++;
+                    setImportProgress(p => ({ current: p.current + 1, total: p.total }));
+                    continue;
+                }
+
+                try {
+                    const created = await createSong({
+                        title: song.title,
+                        artist: song.artist || song.author || 'Unknown',
+                        lyrics: song.lyrics,
+                        verses: song.verses,
+                        author: song.author,
+                    });
+                    if (created) {
+                        allImportedIds.push(created._id || created.id || '');
+                        existingTitles.add(titleKey);
+                        imported++;
+                    } else {
+                        allErrors.push(`Failed to import "${song.title}"`);
+                    }
+                } catch (error) {
+                    allErrors.push(`Failed to import "${song.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+                }
+                setImportProgress(p => ({ current: p.current + 1, total: p.total }));
             }
+        };
+
+        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+        if (skipped > 0) {
+            allErrors.unshift(`${skipped} song${skipped === 1 ? '' : 's'} skipped (already exist by title).`);
+        }
+        if (isOffline && imported > 0) {
+            allErrors.unshift(`Imported ${imported} song${imported === 1 ? '' : 's'} locally — they will sync to the server when you reconnect.`);
         }
 
         setImportedIds(allImportedIds);
         setImportErrors(allErrors);
         setStep('complete');
-    }, [selectedSongs, parsedSongs, importSongsBatch, churchId]);
+    }, [selectedSongs, parsedSongs, createSong, existingTitles, isOffline]);
 
     // Toggle song selection
     const toggleSong = useCallback((index: number) => {
@@ -292,6 +323,12 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                         </div>
                     ))}
                 </div>
+                {isOffline && (
+                    <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-800 dark:text-amber-200">
+                        <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span>Offline mode — songs will be saved locally and synced when you reconnect.</span>
+                    </div>
+                )}
             </div>
 
             {/* Content */}
