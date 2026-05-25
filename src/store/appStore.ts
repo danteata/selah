@@ -94,6 +94,7 @@ const defaultSettings: AppSettings = {
     defaultFont: 'Inter',
     defaultBackground: {
         hymn: DEFAULT_BACKGROUNDS.hymn,
+        song: DEFAULT_BACKGROUNDS.song,
         bible: DEFAULT_BACKGROUNDS.bible,
         text: DEFAULT_BACKGROUNDS.text,
     },

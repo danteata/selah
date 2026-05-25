@@ -328,6 +328,7 @@ export interface AppSettings {
     defaultBackground: {
         default?: DefaultBackgroundConfig
         hymn: DefaultBackgroundConfig
+        song: DefaultBackgroundConfig
         bible: DefaultBackgroundConfig
         text: DefaultBackgroundConfig
     }

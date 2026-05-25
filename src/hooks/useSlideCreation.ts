@@ -328,7 +328,7 @@ export function useSlideCreation() {
         tempSlide.name = `${hymn.title} - ${verseLabel}`
 
         return tempSlide
-    }, [preSlideCreation, settings])
+    }, [preSlideCreation, settings, templates])
 
     const createHymnSlides = useCallback((hymn: Hymn, options?: { template?: TemplateItem | null }): Slide[] => {
         const slides: Slide[] = []
@@ -361,9 +361,9 @@ export function useSlideCreation() {
         applyTemplateToSlide(
             tempSlide,
             templateToUse,
-            settings.defaultBackground.default?.background || settings.defaultBackground.hymn?.background,
-            settings.defaultBackground.default?.backgroundType || settings.defaultBackground.hymn?.backgroundType,
-            settings.defaultBackground.default?.backgroundVideoKey ?? settings.defaultBackground.hymn?.backgroundVideoKey ?? undefined,
+            settings.defaultBackground.default?.background || settings.defaultBackground.song?.background,
+            settings.defaultBackground.default?.backgroundType || settings.defaultBackground.song?.backgroundType,
+            settings.defaultBackground.default?.backgroundVideoKey ?? settings.defaultBackground.song?.backgroundVideoKey ?? undefined,
         )
         tempSlide.songId = song._id || song.id
 
@@ -393,7 +393,7 @@ export function useSlideCreation() {
         tempSlide.name = `${song.title} - ${verseLabel}`
 
         return tempSlide
-    }, [preSlideCreation, settings])
+    }, [preSlideCreation, settings, templates])
 
     const createSongSlides = useCallback((song: Song, options?: { template?: TemplateItem | null }): Slide[] => {
         console.log('createSongSlides called with song:', song)
