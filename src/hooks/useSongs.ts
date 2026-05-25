@@ -6,6 +6,11 @@ import type { Song } from '../types'
 import { getIndexedDB } from './useIndexedDB'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 
+// Cross-instance refresh signal — fired whenever any useSongs() instance mutates
+// IndexedDB so every other instance (Songs panel, MusicBrowser, etc.) reloads.
+const songsChangeTarget = new EventTarget()
+const notifySongsChanged = () => songsChangeTarget.dispatchEvent(new Event('songs-changed'))
+
 export interface UseSongsReturn {
     songs: Song[]
     loading: boolean
@@ -50,27 +55,51 @@ export function useSongs(): UseSongsReturn {
         }
     }, [allSongsQuery])
 
-    useEffect(() => {
-        if (!isOffline) return
-
-        const loadLocalSongs = async () => {
-            try {
-                const db = getIndexedDB()
-                const localItems = await db.library
-                    .where('type')
-                    .equals('song')
-                    .toArray()
-                setLocalSongs(localItems.map(item => item.content as Song))
-            } catch (err) {
-                console.warn('[useSongs] Failed to load local songs:', err)
-            }
+    // Always load local IndexedDB songs and merge with server results so that
+    // imported / locally-created songs (e.g. from EasyWorship import in offline
+    // mode) always show up in the Songs panel, regardless of connection state.
+    const loadLocalSongs = useCallback(async () => {
+        try {
+            const db = getIndexedDB()
+            const localItems = await db.library
+                .where('type')
+                .equals('song')
+                .toArray()
+            setLocalSongs(localItems.map(item => item.content as Song))
+        } catch (err) {
+            console.warn('[useSongs] Failed to load local songs:', err)
         }
+    }, [])
+
+    useEffect(() => {
         loadLocalSongs()
-    }, [isOffline])
+        const onChange = () => { void loadLocalSongs() }
+        songsChangeTarget.addEventListener('songs-changed', onChange)
+        return () => songsChangeTarget.removeEventListener('songs-changed', onChange)
+    }, [loadLocalSongs])
 
     const isOfflineData = isOffline && (allSongsQuery === undefined || allSongsQuery === null)
 
-    const effectiveSongs = isOfflineData ? localSongs : (allSongsQuery || [])
+    // Merge local + server, deduplicating by id (prefer server copy when both exist).
+    const effectiveSongs = useMemo(() => {
+        const serverList = (allSongsQuery || []) as Song[]
+        if (localSongs.length === 0) return serverList
+        const seen = new Set<string>()
+        const merged: Song[] = []
+        for (const s of serverList) {
+            const k = s._id || s.id
+            if (!k || seen.has(k)) continue
+            seen.add(k)
+            merged.push(s)
+        }
+        for (const s of localSongs) {
+            const k = s._id || s.id
+            if (!k || seen.has(k)) continue
+            seen.add(k)
+            merged.push(s)
+        }
+        return merged
+    }, [allSongsQuery, localSongs])
 
     const searchSongs = useCallback((query: string = '', limit: number = 20): Song[] => {
         if (!query.trim()) {
@@ -158,6 +187,10 @@ export function useSongs(): UseSongsReturn {
                 }
             }
 
+            // Refresh local cache (this instance) and notify other instances.
+            await loadLocalSongs()
+            notifySongsChanged()
+
             return localSong
         } catch (error) {
             console.error('Error creating song:', error)
@@ -165,7 +198,7 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [createSongMutation, churchId, isOffline])
+    }, [createSongMutation, churchId, isOffline, loadLocalSongs])
 
     const updateSong = useCallback(async (
         songId: string,
@@ -210,6 +243,8 @@ export function useSongs(): UseSongsReturn {
                 }
             }
 
+            await loadLocalSongs()
+            notifySongsChanged()
             return updatedLocal
         } catch (error) {
             console.error('Error updating song:', error)
@@ -217,7 +252,7 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [updateSongMutation, isOffline])
+    }, [updateSongMutation, isOffline, loadLocalSongs])
 
     const deleteSong = useCallback(async (songId: string): Promise<boolean> => {
         try {
@@ -234,6 +269,8 @@ export function useSongs(): UseSongsReturn {
                 }
             }
 
+            await loadLocalSongs()
+            notifySongsChanged()
             return true
         } catch (error) {
             console.error('Error deleting song:', error)
@@ -241,7 +278,7 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [deleteSongMutation, isOffline])
+    }, [deleteSongMutation, isOffline, loadLocalSongs])
 
     const parseSongLyrics = useCallback((
         lyrics: string,
