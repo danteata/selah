@@ -119,6 +119,10 @@ export interface SermonListenerState {
     voiceCommands: VoiceCommand[]
     /** Raw ASR utterances for learning */
     rawUtterances: Array<{ text: string; timestamp: number; confidence?: number }>
+    /** Active capture source */
+    captureSource: 'microphone' | 'system' | null
+    /** User corrections for verse detection learning */
+    corrections: Array<{ reference: string; originalReference?: string; timestamp: number }>
 }
 
 export interface SermonListenerActions {
@@ -349,19 +353,22 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Reuses the transcription service's media stream to avoid duplicate getUserMedia calls
     const startAudioAnalyser = useCallback(async () => {
         try {
+            const userCaptureSource = sermonSettings?.captureSource || 'microphone'
             let stream = unifiedTranscriptionService.getMediaStream()
 
             if (!stream) {
-                // If the transcription service has no web MediaStream, it may be using
-                // native system audio capture (desktop loopback). Don't fall back to
-                // microphone — that would show mic levels while transcribing system audio.
-                const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window
-                if (isDesktop) {
+                if (userCaptureSource === 'system') {
+                    // Native system audio capture has no web MediaStream.
+                    // Visualization would need native audio level events (not yet implemented).
                     setCaptureSource('system')
                     console.log('[useSermonListener] System audio active — mic analyser disabled')
                     return
                 }
 
+                // Microphone capture: the stream may be managed internally by VAD or
+                // native Rust capture, so we open a separate getUserMedia stream for
+                // the analyser. This is lightweight — the actual audio goes through the
+                // transcription path; we only read frequency data here.
                 const audioConstraints: boolean | MediaTrackConstraints = sermonSettings?.selectedMicrophoneId
                     ? { deviceId: { exact: sermonSettings.selectedMicrophoneId }, echoCancellation: { ideal: true }, noiseSuppression: { ideal: true } }
                     : true
@@ -379,7 +386,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 }
             }
 
-            setCaptureSource('microphone')
+            setCaptureSource(userCaptureSource)
             const ctx = new AudioContext()
             if (ctx.state === 'suspended') {
                 await ctx.resume()
@@ -407,7 +414,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } catch (e) {
             console.warn('[useSermonListener] Could not start audio analyser:', e)
         }
-    }, [sermonSettings?.selectedMicrophoneId])
+    }, [sermonSettings?.selectedMicrophoneId, sermonSettings?.captureSource])
 
     const stopAudioAnalyser = useCallback(() => {
         if (audioLevelRafRef.current != null) {
@@ -424,6 +431,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             audioStreamRef.current = null
         }
         setAudioLevel(0)
+        setCaptureSource(null)
     }, [])
 
     useEffect(() => {

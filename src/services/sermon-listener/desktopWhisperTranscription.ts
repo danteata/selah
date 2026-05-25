@@ -832,7 +832,13 @@ class DesktopWhisperTranscriptionService {
     }
 
     getMediaStream(): MediaStream | null {
-        return this._webMediaStream
+        if (this._webMediaStream) return this._webMediaStream
+        // VAD captures manage their own MediaStream internally.
+        // Access it so the audio analyser can reuse it instead of opening a duplicate.
+        if (this.vad && typeof (this.vad as any)._stream !== 'undefined') {
+            return (this.vad as any)._stream as MediaStream | null
+        }
+        return null
     }
 }
 

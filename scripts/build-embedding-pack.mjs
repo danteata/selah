@@ -39,7 +39,7 @@
  * The runtime loader is `src/services/sermon-listener/embeddingPackLoader.ts`.
  */
 
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync, copyFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -64,7 +64,7 @@ const { values: args } = parseArgs({
 })
 
 const VERSION = args.version
-const BATCH = parseInt(args.batch, 10) || 64
+const BATCH = parseInt(args.batch, 10) || 128
 const MODEL_NAME = args.model
 const OUT_DIR = args.out
     ? (args.out.startsWith('/') ? args.out : join(REPO_ROOT, args.out))
@@ -277,47 +277,7 @@ function extractVerseFragments(verseText) {
 // Main
 // ---------------------------------------------------------------------------
 
-async function main() {
-    const start = Date.now()
-
-    // Skip if pack already built (manifest + embeddings + metadata all present)
-    const manifestPath = join(OUT_DIR, 'manifest.json')
-    const embeddingsPath = join(OUT_DIR, 'embeddings.f32')
-    const metadataPath = join(OUT_DIR, 'metadata.json')
-    if (existsSync(manifestPath) && existsSync(embeddingsPath) && existsSync(metadataPath)) {
-        const stat = await import('node:fs/promises')
-        const size = (await stat.stat(embeddingsPath)).size
-        if (size > 0) {
-            // If --fragments is requested, check whether the existing pack
-            // was actually built with fragments. If not, force rebuild.
-            let existingHasFragments = false
-            try {
-                const manifestRaw = await import('node:fs/promises').then(m => m.readFile(manifestPath, 'utf8'))
-                const existingManifest = JSON.parse(manifestRaw)
-                existingHasFragments = existingManifest.hasFragments === true
-            } catch {
-                // ignore parse errors, just rebuild
-            }
-            if (args.fragments && !existingHasFragments) {
-                console.log(`[rebuild] ${VERSION} pack exists but lacks fragments, rebuilding...`)
-            } else {
-                console.log(`[skip] ${VERSION} embedding pack already built (${(size / (1024 * 1024)).toFixed(1)} MB)`)
-                return
-            }
-        }
-    }
-
-    const verses = await fetchVerses(VERSION, args.url)
-    console.log(`[fetch] got ${verses.length} verses`)
-
-    const embedder = await loadEmbedder()
-    const probe = await embedder('hello', { pooling: 'mean', normalize: true })
-    const dim = probe.data.length
-    console.log(`[model] ready, dim=${dim}`)
-
-    // -----------------------------------------------------------------------
-    // Flatten verses + optional fragments into embeddable items
-    // -----------------------------------------------------------------------
+function buildEmbedItems(verses, withFragments) {
     const embedItems = []
     for (const v of verses) {
         let bookNumber
@@ -332,7 +292,7 @@ async function main() {
         }
         const baseRef = `${bookName} ${v.chapter}:${v.verse}`
 
-        if (args.fragments) {
+        if (withFragments) {
             const frags = extractVerseFragments(v.scripture.trim())
             for (const frag of frags) {
                 embedItems.push({
@@ -344,6 +304,7 @@ async function main() {
                     bookNumber,
                     chapter: parseInt(v.chapter, 10),
                     verse: parseInt(v.verse, 10),
+                    type: frag.type,
                 })
             }
         } else {
@@ -354,51 +315,199 @@ async function main() {
                 bookNumber,
                 chapter: parseInt(v.chapter, 10),
                 verse: parseInt(v.verse, 10),
+                type: 'full',
             })
         }
     }
+    return embedItems
+}
 
+async function main() {
+    const start = Date.now()
+
+    const manifestPath = join(OUT_DIR, 'manifest.json')
+    const embeddingsPath = join(OUT_DIR, 'embeddings.f32')
+    const metadataPath = join(OUT_DIR, 'metadata.json')
+    const checkpointPath = join(OUT_DIR, 'checkpoint.json')
+    const partialEmbPath = join(OUT_DIR, 'embeddings.f32.partial')
+    const partialMetaPath = join(OUT_DIR, 'metadata.partial.json')
+
+    if (existsSync(manifestPath) && existsSync(embeddingsPath) && existsSync(metadataPath)) {
+        const fs = await import('node:fs/promises')
+        const size = (await fs.stat(embeddingsPath)).size
+        if (size > 0) {
+            let existingHasFragments = false
+            try {
+                const manifestRaw = await fs.readFile(manifestPath, 'utf8')
+                const existingManifest = JSON.parse(manifestRaw)
+                existingHasFragments = existingManifest.hasFragments === true
+            } catch {
+                // ignore parse errors, just rebuild
+            }
+            if (args.fragments && !existingHasFragments) {
+                console.log(`[rebuild] ${VERSION} pack exists but lacks fragments, rebuilding...`)
+            } else {
+                console.log(`[skip] ${VERSION} embedding pack already built (${(size / (1024 * 1024)).toFixed(1)} MB)`)
+                return
+            }
+        }
+    }
+
+    // Load existing verse-only pack for embedding reuse when upgrading to --fragments
+    let reuseEmbeddings = null
+    let reuseDim = 0
+    if (args.fragments && existsSync(embeddingsPath) && existsSync(metadataPath)) {
+        try {
+            const fs = await import('node:fs/promises')
+            const existingMeta = JSON.parse(await fs.readFile(metadataPath, 'utf8'))
+            const existingBuf = Buffer.from(await fs.readFile(embeddingsPath))
+            reuseDim = existingMeta.length > 0 ? Math.round(existingBuf.byteLength / (existingMeta.length * 4)) : 0
+            if (reuseDim > 0) {
+                reuseEmbeddings = { metadata: existingMeta, buffer: existingBuf, dim: reuseDim }
+                console.log(`[reuse] loaded ${existingMeta.length} verse embeddings from existing pack (dim=${reuseDim})`)
+            }
+        } catch (e) {
+            console.warn(`[reuse] could not load existing pack for reuse: ${e.message}`)
+            reuseEmbeddings = null
+        }
+    }
+
+    const verses = await fetchVerses(VERSION, args.url)
+    console.log(`[fetch] got ${verses.length} verses`)
+
+    const embedder = await loadEmbedder()
+    const probe = await embedder('hello', { pooling: 'mean', normalize: true })
+    const dim = probe.data.length
+    console.log(`[model] ready, dim=${dim}`)
+
+    const embedItems = buildEmbedItems(verses, args.fragments)
     const count = embedItems.length
     console.log(`[fragments] ${args.fragments ? 'enabled' : 'disabled'} — total items to embed: ${count}`)
+
+    // Build a lookup for reuse: reference -> offset in existing pack
+    let reuseLookup = null
+    if (reuseEmbeddings && reuseEmbeddings.dim === dim) {
+        reuseLookup = new Map()
+        for (let i = 0; i < reuseEmbeddings.metadata.length; i++) {
+            const ref = reuseEmbeddings.metadata[i].reference
+            // Also match fragment references like "John 3:16__clause_1" if they exist
+            reuseLookup.set(ref, i)
+        }
+    }
 
     const packed = new Float32Array(count * dim)
     const metadata = new Array(count)
 
-    let done = 0
-    for (let i = 0; i < count; i += BATCH) {
-        const slice = embedItems.slice(i, i + BATCH)
-        const texts = slice.map((item) => item.text)
-        const tensor = await embedder(texts, { pooling: 'mean', normalize: true })
-
-        const flat = tensor.data
-        for (let b = 0; b < slice.length; b++) {
-            const off = (i + b) * dim
-            for (let d = 0; d < dim; d++) {
-                packed[off + d] = flat[b * dim + d]
+    // Check for checkpoint to resume from
+    let resumeFrom = 0
+    if (existsSync(checkpointPath) && existsSync(partialEmbPath) && existsSync(partialMetaPath)) {
+        try {
+            const cp = JSON.parse(readFileSync(checkpointPath, 'utf8'))
+            if (cp.count === count && cp.dim === dim && cp.batch === BATCH) {
+                const partialBuf = Buffer.from(readFileSync(partialEmbPath))
+                const partialMeta = JSON.parse(readFileSync(partialMetaPath, 'utf8'))
+                if (partialBuf.byteLength === cp.done * dim * 4 && partialMeta.length === cp.done) {
+                    packed.set(new Float32Array(partialBuf.buffer, partialBuf.byteOffset, cp.done * dim))
+                    for (let i = 0; i < cp.done; i++) {
+                        metadata[i] = partialMeta[i]
+                    }
+                    resumeFrom = cp.done
+                    console.log(`[resume] continuing from item ${resumeFrom}/${count} (${((resumeFrom / count) * 100).toFixed(1)}%)`)
+                } else {
+                    console.log(`[resume] checkpoint size mismatch, starting fresh`)
+                }
+            } else {
+                console.log(`[resume] checkpoint params changed, starting fresh`)
             }
-            metadata[i + b] = {
-                reference: slice[b].reference,
-                book: slice[b].book,
-                bookNumber: slice[b].bookNumber,
-                chapter: slice[b].chapter,
-                verse: slice[b].verse,
-                text: texts[b],
-            }
-        }
-
-        done += slice.length
-        if (done % (BATCH * 16) === 0 || done === count) {
-            const pct = ((done / count) * 100).toFixed(1)
-            const elapsed = ((Date.now() - start) / 1000).toFixed(1)
-            console.log(`[embed] ${done}/${count} (${pct}%) — ${elapsed}s elapsed`)
+        } catch (e) {
+            console.warn(`[resume] could not load checkpoint: ${e.message}`)
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Write the three files
-    // -----------------------------------------------------------------------
-
     mkdirSync(OUT_DIR, { recursive: true })
+
+    let done = resumeFrom
+    let needsEmbed = 0
+    let reusedCount = 0
+    for (let i = resumeFrom; i < count; i += BATCH) {
+        const batchEnd = Math.min(i + BATCH, count)
+        const slice = embedItems.slice(i, batchEnd)
+
+        // Split batch into items we can reuse vs items needing embedding
+        const reuseIndices = []
+        const embedIndices = []
+        for (let b = 0; b < slice.length; b++) {
+            const item = slice[b]
+            if (reuseLookup && item.type === 'full' && reuseLookup.has(item.reference)) {
+                reuseIndices.push(b)
+            } else {
+                embedIndices.push(b)
+            }
+        }
+
+        // Copy reused embeddings directly from the existing pack
+        for (const b of reuseIndices) {
+            const item = slice[b]
+            const srcIdx = reuseLookup.get(item.reference)
+            const srcOff = srcIdx * reuseEmbeddings.dim
+            const dstOff = (i + b) * dim
+            for (let d = 0; d < dim; d++) {
+                packed[dstOff + d] = reuseEmbeddings.buffer.readFloatLE(srcOff * 4 + d * 4)
+            }
+            metadata[i + b] = {
+                reference: item.reference,
+                book: item.book,
+                bookNumber: item.bookNumber,
+                chapter: item.chapter,
+                verse: item.verse,
+                text: item.text,
+            }
+            reusedCount++
+        }
+
+        // Embed only the items that need fresh embeddings
+        if (embedIndices.length > 0) {
+            const embedSlice = embedIndices.map(b => slice[b])
+            const texts = embedSlice.map(item => item.text)
+            const tensor = await embedder(texts, { pooling: 'mean', normalize: true })
+
+            const flat = tensor.data
+            for (let ei = 0; ei < embedSlice.length; ei++) {
+                const b = embedIndices[ei]
+                const item = slice[b]
+                const off = (i + b) * dim
+                for (let d = 0; d < dim; d++) {
+                    packed[off + d] = flat[ei * dim + d]
+                }
+                metadata[i + b] = {
+                    reference: item.reference,
+                    book: item.book,
+                    bookNumber: item.bookNumber,
+                    chapter: item.chapter,
+                    verse: item.verse,
+                    text: item.text,
+                }
+            }
+            needsEmbed += embedIndices.length
+        }
+
+        done = batchEnd
+        if (done % (BATCH * 16) === 0 || done === count) {
+            const pct = ((done / count) * 100).toFixed(1)
+            const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+            const reusePct = reusedCount > 0 ? ` (${reusedCount} reused)` : ''
+            console.log(`[embed] ${done}/${count} (${pct}%) — ${elapsed}s elapsed${reusePct}`)
+        }
+
+        // Write checkpoint after each batch
+        writeFileSync(partialEmbPath, Buffer.from(packed.buffer, 0, done * dim * 4))
+        writeFileSync(partialMetaPath, JSON.stringify(metadata.slice(0, done)))
+        writeFileSync(checkpointPath, JSON.stringify({ done, count, dim, batch: BATCH }))
+    }
+
+    if (reusedCount > 0) {
+        console.log(`[reuse] reused ${reusedCount} existing verse embeddings, embedded ${needsEmbed} new items`)
+    }
 
     const manifest = {
         version: VERSION,
@@ -409,17 +518,20 @@ async function main() {
         builtAt: new Date().toISOString(),
     }
 
-    writeFileSync(join(OUT_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2))
-    writeFileSync(join(OUT_DIR, 'metadata.json'), JSON.stringify(metadata))
-    // Write the Float32Array as raw little-endian bytes (matches how
-    // `new Float32Array(arrayBuffer)` reads it back at runtime).
-    writeFileSync(join(OUT_DIR, 'embeddings.f32'), Buffer.from(packed.buffer))
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+    writeFileSync(metadataPath, JSON.stringify(metadata))
+    writeFileSync(embeddingsPath, Buffer.from(packed.buffer))
+
+    // Clean up checkpoint files
+    for (const f of [checkpointPath, partialEmbPath, partialMetaPath]) {
+        try { unlinkSync(f) } catch {}
+    }
 
     const totalSec = ((Date.now() - start) / 1000).toFixed(1)
     const sizeMb = (packed.byteLength / (1024 * 1024)).toFixed(1)
     console.log('')
     console.log(`✅ Wrote pack to ${OUT_DIR}`)
-    console.log(`   manifest.json       (${count} verses, dim ${dim})`)
+    console.log(`   manifest.json       (${count} items, dim ${dim})`)
     console.log(`   metadata.json`)
     console.log(`   embeddings.f32      (${sizeMb} MB)`)
     console.log(`   built in ${totalSec}s`)
