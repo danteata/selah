@@ -136,8 +136,10 @@ class NativeAudioCaptureService {
             this.eventUnlisten = await listen<VadAudioChunkEvent>(
                 'vad-audio-chunk',
                 (event) => {
-                    // Only process chunks with actual audio data
-                    if (this.isCapturing && event.payload.wav_base64 && event.payload.is_speaking) {
+                    // Process chunks with actual audio data (wav_base64 is non-empty)
+                    // The is_speaking flag is informational but should not block processing
+                    // of valid speech segments
+                    if (this.isCapturing && event.payload.wav_base64) {
                         config.onWavChunk?.(
                             event.payload.wav_base64,
                             event.payload.duration_ms
