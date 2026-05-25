@@ -11,6 +11,7 @@ export {
 export type { DetectedVerse } from './verseDetection'
 export { desktopWhisperTranscriptionService } from './desktopWhisperTranscription'
 export type { DesktopWhisperTranscriptionConfig, DesktopWhisperTranscriptionResult } from './desktopWhisperTranscription'
+export { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
 export { unifiedTranscriptionService } from './unifiedTranscription'
 export type { TranscriptionProvider, UnifiedTranscriptionOptions, TranscriptionStatus } from './unifiedTranscription'
 

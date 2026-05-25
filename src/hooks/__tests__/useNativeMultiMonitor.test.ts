@@ -133,7 +133,8 @@ describe('useNativeMultiMonitor', () => {
         })
 
         it('uses fallback name "Display" when monitor.name is empty', () => {
-            const name = '' || 'Display'
+            const emptyName: string = ''
+            const name = emptyName || 'Display'
             expect(name).toBe('Display')
         })
     })
@@ -158,7 +159,7 @@ describe('useNativeMultiMonitor', () => {
         })
 
         it('specific screen ID routes to openLiveViewOnScreen in web mode', () => {
-            const monitorId = 'screen-2'
+            const monitorId: string = 'screen-2'
             const useSpecificScreen = monitorId !== 'presentation-api'
             expect(useSpecificScreen).toBe(true)
         })
@@ -186,8 +187,9 @@ describe('useNativeMultiMonitor', () => {
         it('clears persisted ID when null is passed', () => {
             const KEY = 'selah-selected-monitor'
             localStorage.setItem(KEY, 'm1')
-            if (null as any) {
-                localStorage.setItem(KEY, null as any)
+            const valueToSet: string | null = null
+            if (valueToSet) {
+                localStorage.setItem(KEY, valueToSet)
             } else {
                 localStorage.removeItem(KEY)
             }
@@ -198,7 +200,7 @@ describe('useNativeMultiMonitor', () => {
     describe('isPresenting logic', () => {
         it('is true when liveWindowState is not Closed in desktop mode', () => {
             const isDesktop = true
-            const liveWindowState = 'Fullscreen' as const
+            const liveWindowState: string = 'Fullscreen'
             const isPresenting = isDesktop ? liveWindowState !== 'Closed' : false
             expect(isPresenting).toBe(true)
         })

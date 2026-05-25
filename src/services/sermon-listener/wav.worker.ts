@@ -194,7 +194,7 @@ self.onmessage = async (event: MessageEvent<WavRequest>) => {
             if (!audioBlob) throw new Error('No audio blob provided')
             const wavBlob = await convertBlobToWav(audioBlob)
             const response: WavSuccessResponse = { id, wavBlob }
-            self.postMessage(response, [wavBlob as unknown as Transferable])
+            self.postMessage(response, [wavBlob as unknown as Transferable] as any)
         }
     } catch (err) {
         const error = err instanceof Error ? err.message : String(err)

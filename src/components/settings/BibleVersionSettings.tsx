@@ -87,7 +87,7 @@ export function BibleVersionSettings() {
                     if (result) {
                         await refreshDownloadStatuses()
                     }
-                    return result
+                    return !!result
                 }
                 : undefined,
             withFragments,

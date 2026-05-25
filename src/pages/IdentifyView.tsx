@@ -9,7 +9,7 @@ export default function IdentifyView() {
     useEffect(() => {
         // Auto-close after 3 seconds using Tauri window API or fallback
         const timer = setTimeout(() => {
-            if (window.__TAURI__) {
+            if ((window as any).__TAURI__) {
                 import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
                     getCurrentWindow().close().catch(() => window.close())
                 })

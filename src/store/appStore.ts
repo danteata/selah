@@ -210,7 +210,7 @@ interface AppStore extends AppState {
     setSharedQueueSlideIds: (slideIds: string[]) => void
     addSharedQueueSlideIds: (slideIds: string[]) => void
     removeSharedQueueSlideIds: (slideIds: string[]) => void
-    setLiveSlide: (slideId: string) => void
+    setLiveSlide: (slideId: string | null) => void
     setEmitter: (emitter: Emitter<Record<EventType, unknown>> | null) => void
     setAppSettings: (settings: AppSettings) => void
     setSlideStyles: (styles: SlideStyle) => void

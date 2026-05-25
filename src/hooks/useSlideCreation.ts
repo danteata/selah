@@ -246,7 +246,7 @@ export function useSlideCreation() {
             templateToUse,
             settings.defaultBackground.default?.background || settings.defaultBackground.bible?.background,
             settings.defaultBackground.default?.backgroundType || settings.defaultBackground.bible?.backgroundType,
-            settings.defaultBackground.default?.backgroundVideoKey || settings.defaultBackground.bible?.backgroundVideoKey,
+            settings.defaultBackground.default?.backgroundVideoKey ?? settings.defaultBackground.bible?.backgroundVideoKey ?? undefined,
         )
 
         tempSlide.title = scripture?.label
@@ -288,7 +288,7 @@ export function useSlideCreation() {
             templateToUse,
             settings.defaultBackground.default?.background || settings.defaultBackground.hymn?.background,
             settings.defaultBackground.default?.backgroundType || settings.defaultBackground.hymn?.backgroundType,
-            settings.defaultBackground.default?.backgroundVideoKey || settings.defaultBackground.hymn?.backgroundVideoKey,
+            settings.defaultBackground.default?.backgroundVideoKey ?? settings.defaultBackground.hymn?.backgroundVideoKey ?? undefined,
         )
         tempSlide.songId = hymn.number
         tempSlide.hasChorus = hymn.chorus === 'false' ? false : !!hymn.chorus
@@ -363,7 +363,7 @@ export function useSlideCreation() {
             templateToUse,
             settings.defaultBackground.default?.background || settings.defaultBackground.hymn?.background,
             settings.defaultBackground.default?.backgroundType || settings.defaultBackground.hymn?.backgroundType,
-            settings.defaultBackground.default?.backgroundVideoKey || settings.defaultBackground.hymn?.backgroundVideoKey,
+            settings.defaultBackground.default?.backgroundVideoKey ?? settings.defaultBackground.hymn?.backgroundVideoKey ?? undefined,
         )
         tempSlide.songId = song._id || song.id
 

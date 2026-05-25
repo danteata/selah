@@ -68,6 +68,8 @@ function computeAggregateStatus(states: Map<string, VersionSyncState>): Embeddin
     return getStatusFromState(allStates[0])
 }
 
+export function useEmbeddingStatus(): EmbeddingStatusAPI
+export function useEmbeddingStatus(versionId: string): EmbeddingStatus | null
 export function useEmbeddingStatus(versionId?: string): EmbeddingStatus | EmbeddingStatusAPI | null {
     const states = useSyncExternalStore(
         (callback) => embeddingSyncManager.subscribe(callback),

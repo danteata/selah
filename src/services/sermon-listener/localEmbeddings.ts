@@ -296,7 +296,7 @@ async function openVerseCache(): Promise<IDBDatabase> {
         request.onerror = () => reject(request.error)
         request.onsuccess = () => resolve(request.result)
         request.onupgradeneeded = (event) => {
-            const db = (event.target as IDBOpenDbRequest).result
+            const db = (event.target as IDBOpenDBRequest).result
             if (!db.objectStoreNames.contains(VERSE_CACHE_STORE_NAME)) {
                 const store = db.createObjectStore(VERSE_CACHE_STORE_NAME, { keyPath: 'reference' })
                 store.createIndex('by_book', 'book')
