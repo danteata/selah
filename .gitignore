@@ -55,3 +55,7 @@ src-tauri/gen/
 
 # Handover docs (working notes, not source)
 HANDOVER-*.md.commandcode/
+
+# Session handover docs
+HANDOVER-*.md
+.commandcode/
