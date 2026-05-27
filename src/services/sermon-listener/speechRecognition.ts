@@ -118,6 +118,8 @@ export class SpeechRecognitionService {
     private restartAttempts = 0
     private restartTimer: number | null = null
     private consecutiveRecoverableErrors = 0
+    private lastResultTime = 0
+    private watchdogTimer: number | null = null
 
     constructor() {
         this.initialize()
@@ -160,6 +162,8 @@ export class SpeechRecognitionService {
             this.error = null
             this.restartAttempts = 0
             this.consecutiveRecoverableErrors = 0
+            this.lastResultTime = Date.now()
+            this.startWatchdog()
             this.options.onStart?.()
         }
 
@@ -173,6 +177,7 @@ export class SpeechRecognitionService {
         }
 
         this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+            this.lastResultTime = Date.now()
             let interimTranscript = ''
             let finalTranscript = ''
             let confidence = 0
@@ -206,25 +211,33 @@ export class SpeechRecognitionService {
             const message = this.getErrorMessage(event.error, event.message)
             const recoverable = this.isRecoverableError(event.error)
 
-            if (!recoverable) {
-                this.error = message
-            }
             this.isListening = false
+
+            // If the user already asked us to stop, report the error normally
             if (!this.shouldBeListening) {
                 this.options.onError?.(event.error, message)
                 return
             }
 
+            // Fatal errors: stop permanently and notify the consumer
             if (!recoverable) {
+                this.error = message
+                this.shouldBeListening = false
+                this.stopWatchdog()
                 this.options.onError?.(event.error, message)
                 return
             }
 
+            // Recoverable errors (network, no-speech): silently restart.
+            // Do NOT call onError — the consumer would stop the session.
             this.consecutiveRecoverableErrors += 1
+            console.warn(`[SpeechRecognition] Recoverable error: ${event.error} — auto-restarting`)
             const scheduled = this.scheduleRestart(`Speech recognition error: ${event.error}`)
             if (!scheduled) {
-                const finalMessage = 'Speech recognition could not recover from network interruptions. Switch to Whisper.cpp offline mode or retry.'
+                const finalMessage = 'Speech recognition stopped after repeated connection errors. Please retry.'
                 this.error = finalMessage
+                this.shouldBeListening = false
+                this.stopWatchdog()
                 this.options.onError?.(event.error, finalMessage)
             }
         }
@@ -327,6 +340,7 @@ export class SpeechRecognitionService {
     stop(): void {
         this.shouldBeListening = false
         this.clearRestartTimer()
+        this.stopWatchdog()
         if (!this.recognition || !this.isListening) return
 
         try {
@@ -342,6 +356,7 @@ export class SpeechRecognitionService {
     abort(): void {
         this.shouldBeListening = false
         this.clearRestartTimer()
+        this.stopWatchdog()
         if (!this.recognition) return
 
         try {
@@ -411,6 +426,27 @@ export class SpeechRecognitionService {
         }
     }
 
+    private startWatchdog(): void {
+        this.stopWatchdog()
+        this.watchdogTimer = window.setInterval(() => {
+            if (!this.shouldBeListening) return
+            if (this.isListening) return
+            // If we should be listening but aren't, and no result for 10s, force restart
+            const silenceMs = Date.now() - this.lastResultTime
+            if (silenceMs > 10000) {
+                console.warn('[SpeechRecognition] Watchdog: stalled, forcing restart')
+                this.scheduleRestart('Watchdog stall detected')
+            }
+        }, 5000)
+    }
+
+    private stopWatchdog(): void {
+        if (this.watchdogTimer !== null) {
+            window.clearInterval(this.watchdogTimer)
+            this.watchdogTimer = null
+        }
+    }
+
     private scheduleRestart(reason: string): boolean {
         if (!this.recognition) return false
         if (this.restartTimer !== null) return true
@@ -430,6 +466,16 @@ export class SpeechRecognitionService {
         this.restartTimer = window.setTimeout(() => {
             this.restartTimer = null
             if (!this.shouldBeListening || this.isListening) return
+
+            // Recreate the recognition instance to avoid InvalidStateError
+            // after Chrome stops the stream after extended use
+            try {
+                this.recognition?.abort()
+            } catch {
+                // ignore
+            }
+            this.initialize()
+            this.configure(this.options)
 
             try {
                 this.recognition?.start()

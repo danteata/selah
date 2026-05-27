@@ -48,6 +48,8 @@ export function PreviewContent() {
     const activeSlideRef = useRef<HTMLDivElement>(null)
     const userClickedSlideRef = useRef(false)
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+    const [isDraggingIndex, setIsDraggingIndex] = useState<number | null>(null)
+    const dragStateRef = useRef<number | null>(null)
     const [showClearConfirm, setShowClearConfirm] = useState(false)
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false)
 
@@ -397,50 +399,88 @@ export function PreviewContent() {
                 </div>
             </div>
 
-            {/* Slides List — draggable reorderable queue */}
+            {/* Slides List — pointer-based reorderable queue */}
             <div
                 ref={slidesGridRef}
                 className="flex-1 overflow-y-auto p-2 flex flex-col gap-2 custom-scrollbar"
+                onPointerMove={(e) => {
+                    if (dragStateRef.current == null) return
+                    const el = document.elementFromPoint(e.clientX, e.clientY)
+                    if (!el) return
+                    const dropTarget = (el as HTMLElement).closest('[data-slide-index]')
+                    if (dropTarget) {
+                        const targetIndex = Number(dropTarget.getAttribute('data-slide-index'))
+                        if (!Number.isNaN(targetIndex) && dragStateRef.current !== targetIndex) {
+                            setDragOverIndex(targetIndex)
+                        }
+                    }
+                }}
+                onPointerUp={(e) => {
+                    if (dragStateRef.current == null) return
+                    const el = document.elementFromPoint(e.clientX, e.clientY)
+                    if (el) {
+                        const dropTarget = (el as HTMLElement).closest('[data-slide-index]')
+                        if (dropTarget) {
+                            const targetIndex = Number(dropTarget.getAttribute('data-slide-index'))
+                            if (!Number.isNaN(targetIndex) && dragStateRef.current !== targetIndex) {
+                                const fromSlide = slides[dragStateRef.current]
+                                const toSlide = slides[targetIndex]
+                                const fromActiveIndex = activeSlides.findIndex(s => s.id === fromSlide.id)
+                                const toActiveIndex = activeSlides.findIndex(s => s.id === toSlide.id)
+                                if (fromActiveIndex !== -1 && toActiveIndex !== -1) {
+                                    reorderActiveSlides(fromActiveIndex, toActiveIndex)
+                                }
+                            }
+                        }
+                    }
+                    dragStateRef.current = null
+                    setDragOverIndex(null)
+                    setIsDraggingIndex(null)
+                    if (slidesGridRef.current) {
+                        slidesGridRef.current.style.userSelect = ''
+                        slidesGridRef.current.style.cursor = ''
+                    }
+                }}
+                onPointerLeave={() => {
+                    if (dragStateRef.current == null) return
+                    dragStateRef.current = null
+                    setDragOverIndex(null)
+                    setIsDraggingIndex(null)
+                    if (slidesGridRef.current) {
+                        slidesGridRef.current.style.userSelect = ''
+                        slidesGridRef.current.style.cursor = ''
+                    }
+                }}
             >
                 {slides.length > 0 ? (
                     slides.map((slide, index) => (
                         <div
                             key={slide.id}
+                            data-slide-index={index}
                             ref={activeSlide?.id === slide.id ? activeSlideRef : undefined}
-                            onDragOver={(e) => {
-                                if (bulkSelectMode) return
-                                e.preventDefault()
-                                if (dragOverIndex !== index) setDragOverIndex(index)
-                            }}
-                            onDragLeave={() => setDragOverIndex(null)}
-                            onDrop={(e) => {
-                                if (bulkSelectMode) return
-                                e.preventDefault()
-                                const from = parseInt(e.dataTransfer.getData('text/plain'), 10)
-                                if (!Number.isNaN(from) && from !== index) {
-                                    const fromSlide = slides[from]
-                                    const toSlide = slides[index]
-                                    const fromActiveIndex = activeSlides.findIndex(s => s.id === fromSlide.id)
-                                    const toActiveIndex = activeSlides.findIndex(s => s.id === toSlide.id)
-                                    if (fromActiveIndex !== -1 && toActiveIndex !== -1) {
-                                        reorderActiveSlides(fromActiveIndex, toActiveIndex)
-                                    }
-                                }
-                                setDragOverIndex(null)
-                            }}
-                            className={`transition-all ${dragOverIndex === index ? 'border-t-2 border-[var(--accent-teal)] pt-1' : ''}`}
+                            className={`transition-all ${
+                                isDraggingIndex === index ? 'opacity-50 scale-95' : ''
+                            } ${
+                                dragOverIndex === index && isDraggingIndex != null && isDraggingIndex !== index
+                                    ? 'border-t-2 border-[var(--accent-teal)] pt-2'
+                                    : ''
+                            }`}
                         >
                             <div className="flex items-center gap-1">
-                                {/* Drag handle — dedicated reorder grip */}
+                                {/* Drag handle */}
                                 {!bulkSelectMode && (
                                     <div
-                                        draggable
-                                        onDragStart={(e) => {
-                                            e.dataTransfer.effectAllowed = 'move'
-                                            e.dataTransfer.setData('text/plain', String(index))
+                                        onPointerDown={(e) => {
+                                            if (e.button !== 0) return
+                                            e.preventDefault()
+                                            dragStateRef.current = index
+                                            setIsDraggingIndex(index)
+                                            if (slidesGridRef.current) {
+                                                slidesGridRef.current.style.userSelect = 'none'
+                                                slidesGridRef.current.style.cursor = 'grabbing'
+                                            }
                                         }}
-                                        onDragEnd={() => setDragOverIndex(null)}
-                                        className="cursor-grab active:cursor-grabbing p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                        className="cursor-grab active:cursor-grabbing p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)] touch-none"
                                         title="Drag to reorder"
                                     >
                                         <GripVertical className="w-4 h-4" />

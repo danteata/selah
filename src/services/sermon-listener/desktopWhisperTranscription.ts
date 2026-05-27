@@ -11,15 +11,19 @@ import {
     startDesktopWhisperServer,
     stopDesktopWhisperServer,
     transcribeWithDesktopWhisper,
+    transcribeWithDesktopWhisperStreaming,
     getDesktopWhisperStatus,
+    resetRestartAttempts,
     type DesktopWhisperConfig,
     type DesktopWhisperResult,
     type WhisperServerStatus,
+    type StreamingTranscriptionCallbacks,
 } from './desktopWhisperService';
 import {
     nativeAudioCaptureManager,
     isNativeAudioCaptureAvailable,
 } from './nativeAudioCapture';
+import { applyPreprocessing, createPreprocessingNodes } from './audioPreprocessing';
 
 const DEFAULT_CHUNK_DURATION_MS = 3000; // 3 seconds (fallback for non-VAD mode)
 
@@ -78,6 +82,8 @@ export interface DesktopWhisperTranscriptionConfig extends DesktopWhisperConfig 
     redemptionMs?: number;
     onSpeechStart?: () => void;
     onSpeechEnd?: () => void;
+    enableStreaming?: boolean;
+    onPartialSegment?: (segment: { start: number; end: number; text: string }) => void;
 }
 
 export interface DesktopWhisperTranscriptionResult {
@@ -107,13 +113,20 @@ class DesktopWhisperTranscriptionService {
     private isInitialized = false;
     private isRecording = false;
     private config: DesktopWhisperTranscriptionConfig = {};
-    private useNativeCapture = true; // Fallback for non-VAD mode
-    private useVAD = true; // Default to VAD-based chunking
+    private useNativeCapture = true;
+    private useVAD = true;
     private vad: MicVADInstance | null = null;
     private vadLoaded = false;
     private utteranceCount = 0;
     private abortController: AbortController | null = null;
     private pendingVADTranscription: Promise<void> = Promise.resolve();
+    private vadSpeechStartMs: number = 0;
+    private sessionStartTimeMs: number = 0;
+
+    // Dropped chunk tracking
+    private totalChunksAttempted = 0;
+    private droppedChunks = 0;
+    private droppedChunkCallbacks: Array<(dropped: number, total: number) => void> = [];
 
     /**
      * Check if running in desktop mode
@@ -305,6 +318,11 @@ class DesktopWhisperTranscriptionService {
             return false;
         }
 
+        // Reset per-session counters
+        this.totalChunksAttempted = 0;
+        this.droppedChunks = 0;
+        resetRestartAttempts();
+
         // Ensure server is running
         if (!this.isInitialized) {
             const initialized = await this.init(this.config);
@@ -400,15 +418,21 @@ class DesktopWhisperTranscriptionService {
                 getStream: getStreamWithFallback,
                 onSpeechStart: () => {
                     console.log('[DesktopWhisper] Speech started');
+                    // Record when speech started relative to session start
+                    this.vadSpeechStartMs = Date.now() - this.sessionStartTimeMs;
                     this.config.onSpeechStart?.();
                     this.config.onStatus?.('speech');
                 },
                 onSpeechEnd: async (audio: Float32Array) => {
+                    const endMs = Date.now() - this.sessionStartTimeMs;
                     console.log('[DesktopWhisper] Speech ended, audio length:', audio.length);
                     this.config.onSpeechEnd?.();
                     this.config.onStatus?.('processing');
+                    // Apply highpass filter + gain to remove rumble and boost speech
+                    const processed = applyPreprocessing(new Float32Array(audio), 16000);
+                    const startMs = this.vadSpeechStartMs;
                     this.pendingVADTranscription = this.pendingVADTranscription
-                        .then(() => this.processVADUtterance(audio, onResult, onError))
+                        .then(() => this.processVADUtterance(processed, onResult, onError, startMs, endMs))
                         .catch((error) => {
                             console.error('[DesktopWhisper] Queued VAD processing error:', error);
                         });
@@ -428,6 +452,7 @@ class DesktopWhisperTranscriptionService {
 
             this.vad = await window.vad.MicVAD.new(vadOptions);
 
+            this.sessionStartTimeMs = Date.now();
             this.vad.start();
             this.isRecording = true;
             this.config.onStatus?.('listening');
@@ -442,14 +467,22 @@ class DesktopWhisperTranscriptionService {
 
     /**
      * Process a VAD utterance (complete speech segment)
+     * @param audio Float32 PCM samples from VAD
+     * @param onResult callback for successful transcription
+     * @param onError callback for errors
+     * @param startMs sermon-relative start time in ms
+     * @param endMs sermon-relative end time in ms
      */
     private async processVADUtterance(
         audio: Float32Array,
         onResult: ResultCallback,
-        onError: ErrorCallback
+        onError: ErrorCallback,
+        startMs: number = 0,
+        endMs: number = 0
     ): Promise<void> {
         const utteranceId = `utt-${Date.now()}-${++this.utteranceCount}`;
         const startTime = Date.now();
+        this.totalChunksAttempted++;
 
         try {
             // Convert Float32 PCM to WAV using VAD utils
@@ -461,32 +494,66 @@ class DesktopWhisperTranscriptionService {
 
             console.log('[DesktopWhisper] Utterance', utteranceId, 'size:', blob.size, 'bytes');
 
-            const result = await this.transcribeBlobWithRetry(blob, utteranceId);
+            const result = await this.transcribeBlobWithRetry(
+                blob,
+                utteranceId,
+                this.config.enableStreaming ?? true,
+                this.config.onPartialSegment
+            );
 
             if (result && result.text.trim()) {
                 const duration = Date.now() - startTime;
                 console.log('[DesktopWhisper] Transcription complete in', duration, 'ms:', result.text.substring(0, 50) + '...');
+
+                // Adjust whisper-relative segment timestamps to sermon-relative
+                // by adding the VAD segment start offset
+                const adjustedSegments = result.segments?.map(seg => ({
+                    start: seg.start + (startMs / 1000),
+                    end: seg.end + (startMs / 1000),
+                    text: seg.text,
+                }));
+
                 onResult({
                     text: result.text.trim(),
                     language: result.language,
-                    segments: result.segments,
+                    segments: adjustedSegments || result.segments,
                 });
             }
 
             this.config.onStatus?.('listening');
         } catch (error) {
             console.error('[DesktopWhisper] Error processing VAD utterance:', error);
-            onError(error instanceof Error ? error.message : String(error));
+            this.droppedChunks++;
+            this.notifyDroppedChunk();
             this.config.onStatus?.('error');
+            // NOTE: Do NOT call onError here — a single failed utterance is transient.
+            // The VAD continues capturing and the next utterance will retry.
         }
     }
 
-    private async transcribeBlobWithRetry(audioBlob: Blob, traceId: string): Promise<DesktopWhisperResult | null> {
+    private async transcribeBlobWithRetry(
+        audioBlob: Blob,
+        traceId: string,
+        useStreaming: boolean = false,
+        onSegment?: (segment: { start: number; end: number; text: string }) => void
+    ): Promise<DesktopWhisperResult | null> {
         const language = (this.config.language || 'en').split('-')[0];
         const maxAttempts = 3;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
+                if (useStreaming && onSegment) {
+                    const callbacks: StreamingTranscriptionCallbacks = {
+                        onSegment,
+                    };
+                    return await transcribeWithDesktopWhisperStreaming(audioBlob, callbacks, {
+                        language,
+                        vadFilter: false,
+                        hotwords: this.config.hotwords,
+                        initialPrompt: this.config.initialPrompt,
+                    });
+                }
+
                 return await transcribeWithDesktopWhisper(audioBlob, {
                     language,
                     vadFilter: false,
@@ -519,12 +586,13 @@ class DesktopWhisperTranscriptionService {
     ): Promise<boolean> {
         try {
             console.log(`[DesktopWhisper] Starting native capture with type: ${captureType}`);
+            const sessionStart = Date.now();
             const started = await nativeAudioCaptureManager.startWithEvents({
                 captureType,
                 chunkDurationMs,
                 deviceName: this.config.microphoneDeviceId || undefined,
-                onWavChunk: async (wavBase64: string, durationMs: number) => {
-                    await this.processWavChunk(wavBase64, durationMs, onResult, onError);
+                onWavChunk: async (wavBase64: string, durationMs: number, startOffsetMs: number) => {
+                    await this.processWavChunk(wavBase64, durationMs, onResult, onError, startOffsetMs);
                 },
                 onError: (errorMsg: string) => {
                     onError(errorMsg);
@@ -533,6 +601,7 @@ class DesktopWhisperTranscriptionService {
 
             if (started) {
                 this.isRecording = true;
+                this.sessionStartTimeMs = Date.now();
                 console.log('Desktop whisper transcription started (event-driven native capture)');
                 return true;
             } else {
@@ -546,21 +615,25 @@ class DesktopWhisperTranscriptionService {
         }
     }
 
-    /**
-     * Process a WAV chunk received from Rust via Tauri event
-     * The WAV data is already base64-encoded Rust-side — just decode to Blob
-     */
+  /**
+   * Process a WAV chunk received from Rust via Tauri event
+   * The WAV data is already base64-encoded Rust-side — just decode to Blob
+   * @param startOffsetMs Sermon-relative offset when this segment began (from VAD timing)
+   */
   private async processWavChunk(
     wavBase64: string,
     durationMs: number,
     onResult: ResultCallback,
-    onError: ErrorCallback
+    onError: ErrorCallback,
+    startOffsetMs: number = 0
   ): Promise<void> {
     try {
       if (!wavBase64 || wavBase64.length === 0) {
         console.log('[DesktopWhisper] Empty WAV chunk, skipping');
         return;
       }
+
+      this.totalChunksAttempted++;
 
       console.log('[DesktopWhisper] Processing WAV chunk:', {
         base64Length: wavBase64.length,
@@ -580,32 +653,43 @@ class DesktopWhisperTranscriptionService {
         type: wavBlob.type,
       });
 
-      const result = await this.transcribeBlobWithRetry(wavBlob, `native-${Date.now()}`);
+      const result = await this.transcribeBlobWithRetry(
+        wavBlob,
+        `native-${Date.now()}`,
+        this.config.enableStreaming ?? true,
+        this.config.onPartialSegment
+      );
 
       if (result && result.text.trim()) {
         console.log('[DesktopWhisper] Transcription result:', result.text);
+        // Adjust segment timestamps to be session-relative using the VAD start offset
+        const adjustedSegments = result.segments?.map(seg => ({
+            start: seg.start + (startOffsetMs / 1000),
+            end: seg.end + (startOffsetMs / 1000),
+            text: seg.text,
+        }));
         onResult({
           text: result.text.trim(),
           language: result.language,
-          segments: result.segments,
+          segments: adjustedSegments || result.segments,
         });
       }
     } catch (error) {
-            // Don't spam errors for timeouts - they're expected occasionally
             const isTimeout = error instanceof Error && (
                 error.name === 'TimeoutError' ||
                 error.message.includes('timed out')
             );
 
+            this.droppedChunks++;
+            this.notifyDroppedChunk();
+
             if (!isTimeout) {
                 console.error('[DesktopWhisper] Error processing WAV chunk:', error);
-                onError(error instanceof Error ? error.message : 'Transcription error');
-            } else {
-                // Just log timeout occasionally
-                if (Math.random() < 0.1) {
-                    console.warn('[DesktopWhisper] Transcription timeout (server busy), skipping chunk');
-                }
+            } else if (Math.random() < 0.1) {
+                console.warn('[DesktopWhisper] Transcription timeout (server busy), skipping chunk');
             }
+            // NOTE: Do NOT call onError here — a single failed chunk is transient.
+            // Native capture continues and the next chunk will retry.
         }
     }
 
@@ -723,13 +807,22 @@ class DesktopWhisperTranscriptionService {
             await audioContext.audioWorklet.addModule(workletUrl);
 
             const workletNode = new AudioWorkletNode(audioContext, 'audio-capture-processor');
-            source.connect(workletNode);
+            // Apply highpass filter (85 Hz) and +3 dB gain before the worklet
+            const { highpass, gain } = createPreprocessingNodes(audioContext)
+            source.connect(highpass)
+            highpass.connect(gain)
+            gain.connect(workletNode)
             workletNode.connect(audioContext.destination);
 
             // Handle audio chunks — WAV blob already encoded in the worklet
             workletNode.port.onmessage = async (event) => {
                 if (event.data.wavBlob) {
-                    await this.transcribeBlobWithRetry(event.data.wavBlob, `web-${Date.now()}`)
+                    await this.transcribeBlobWithRetry(
+                        event.data.wavBlob,
+                        `web-${Date.now()}`,
+                        this.config.enableStreaming ?? true,
+                        this.config.onPartialSegment
+                    )
                         .then((result) => {
                             if (result && result.text.trim()) {
                                 onResult({
@@ -741,7 +834,9 @@ class DesktopWhisperTranscriptionService {
                         })
                         .catch((error) => {
                             console.error('Error processing web audio chunk:', error)
-                            onError(error instanceof Error ? error.message : 'Transcription error')
+                            this.droppedChunks++;
+                            this.notifyDroppedChunk();
+                            // NOTE: Do NOT call onError here — a single failed chunk is transient.
                         })
                 }
             }
@@ -752,6 +847,7 @@ class DesktopWhisperTranscriptionService {
             this._webWorkletNode = workletNode;
 
             this.isRecording = true;
+            this.sessionStartTimeMs = Date.now();
             console.log('Desktop whisper transcription started (web audio capture fallback)');
             return true;
         } catch (error) {
@@ -833,12 +929,49 @@ class DesktopWhisperTranscriptionService {
 
     getMediaStream(): MediaStream | null {
         if (this._webMediaStream) return this._webMediaStream
-        // VAD captures manage their own MediaStream internally.
-        // Access it so the audio analyser can reuse it instead of opening a duplicate.
         if (this.vad && typeof (this.vad as any)._stream !== 'undefined') {
             return (this.vad as any)._stream as MediaStream | null
         }
         return null
+    }
+
+    /**
+     * Get the number of chunks that failed to transcribe (dropped).
+     */
+    getDroppedChunkCount(): number {
+        return this.droppedChunks
+    }
+
+    /**
+     * Get total chunks attempted since the session started.
+     */
+    getTotalChunkCount(): number {
+        return this.totalChunksAttempted
+    }
+
+    /**
+     * Get the drop rate as a number between 0 and 1.
+     */
+    getDropRate(): number {
+        if (this.totalChunksAttempted === 0) return 0
+        return this.droppedChunks / this.totalChunksAttempted
+    }
+
+    /**
+     * Register a callback that fires whenever a chunk is dropped.
+     * Callback receives (droppedCount, totalAttempted).
+     */
+    onDroppedChunk(callback: (dropped: number, total: number) => void): () => void {
+        this.droppedChunkCallbacks.push(callback)
+        return () => {
+            this.droppedChunkCallbacks = this.droppedChunkCallbacks.filter(cb => cb !== callback)
+        }
+    }
+
+    private notifyDroppedChunk(): void {
+        for (const cb of this.droppedChunkCallbacks) {
+            try { cb(this.droppedChunks, this.totalChunksAttempted) } catch { /* noop */ }
+        }
     }
 }
 

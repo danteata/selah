@@ -609,7 +609,7 @@ export function LiveOutput() {
                                                 </div>
                                             ) : (
                                                 <div
-                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full"
+                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full max-w-full max-h-full overflow-y-auto"
                                                     style={{ fontSize: '2.5vw' }}
                                                     dangerouslySetInnerHTML={{ __html: liveHtml }}
                                                 />
