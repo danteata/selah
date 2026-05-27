@@ -55,22 +55,28 @@ const ACCENT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string }> = [
     // Psalm — only when followed by a number (avoids "some people" -> "Psalm people")
     { pattern: /\b(some|sum)\s+(\d{1,3})\b/gi, replacement: 'Psalm $2' },
     { pattern: /\b(salms|sums)\s+(\d{1,3})\b/gi, replacement: 'Psalms $2' },
+    // "Pass 7" is ambiguous — could be "verse 7" or "Psalm 7" — treated as "verse"
+    { pattern: /\b(pass|past)\s+(\d{1,3})\b/gi, replacement: 'verse $2' },
     // Proverbs
     { pattern: /\b(brovabs|provabs|proves)\b/gi, replacement: 'Proverbs' },
     // Ephesians
-    { pattern: /\b(efficient|efficience|efficients)\b/gi, replacement: 'Ephesians' },
-    // Philippians
-    { pattern: /\bphysicians\b/gi, replacement: 'Philippians' },
-    // Colossians
-    { pattern: /\bcolossus\b/gi, replacement: 'Colossians' },
+    { pattern: /\b(efficient|efficience|efficients|if\s+she\s+shuns?)\b/gi, replacement: 'Ephesians' },
+    // "6x1" is a common Whisper hallucination for "6 verse 1" or "6:1"
+    { pattern: /\b(ephesians|efficient|efficience)\s+(\d{1,3})\s*[x×]\s*(\d{1,3})\b/gi, replacement: '$1 $2 verse $3' },
+    // Philippians — "physicians" in a sermon context often misheard
+    // Context-guarded: only when followed by a chapter number
+    { pattern: /\bphysicians\s+(\d{1,3})\b/gi, replacement: 'Philippians $1' },
+    // Colossians — "colossus" in a sermon context often misheard
+    // Context-guarded: only when followed by a chapter number
+    { pattern: /\bcolossus\s+(\d{1,3})\b/gi, replacement: 'Colossians $1' },
     // Galatians
     { pattern: /\bgalations\b/gi, replacement: 'Galatians' },
     // Thessalonians
     { pattern: /\bthesalonians\b/gi, replacement: 'Thessalonians' },
     // Philemon
     { pattern: /\bfilemon\b/gi, replacement: 'Philemon' },
-    // Hebrews
-    { pattern: /\bhebrew\b/gi, replacement: 'Hebrews' },
+    // Hebrews — only replace the standalone word (not the adjective "Hebrew" in "Hebrew text")
+    { pattern: /\bhebrew\b(?!\s+(text|language|people|scripture|bible|word|law|letter|man|woman|name|song|prayer|faith)\b)/gi, replacement: 'Hebrews' },
     // Revelation
     { pattern: /\brevelations\b/gi, replacement: 'Revelation' },
     // Deuteronomy
@@ -80,16 +86,15 @@ const ACCENT_CORRECTIONS: Array<{ pattern: RegExp; replacement: string }> = [
     { pattern: /\bjudge\s+(\d{1,3})\b/gi, replacement: 'Judges $1' },
     // Numbers — only with a number to avoid real uses of "number"
     { pattern: /\bnumber\s+(\d{1,3})\b/gi, replacement: 'Numbers $1' },
-    // Read -> reach (common ASR mishearing); only when followed by a number
-    // to avoid mangling phrases like "reach out to the community"
-    { pattern: /\breach\s+(\d{1,3})\b/gi, replacement: 'read $1' },
+
     // Psalm misheard as Sound / some / son (context-guarded: only when followed by a number)
     { pattern: /\b(sound|some|son)\s+(\d{1,3})\b/gi, replacement: 'Psalm $2' },
     // Matthew misheard as "my T" / "my T8" / "my th" (context-guarded by number)
     { pattern: /\bmy\s+t(h)?\s*(\d{1,3})\b/gi, replacement: 'Matthew $2' },
     // Chapter keyword mishearings (context-guarded: only when followed by a number)
     { pattern: /\b(chop that|check that|cut the)\s+(\d{1,3})\b/gi, replacement: 'chapter $2' },
-    // Verse — context aware to avoid replacing real "base" / "best"
+    // Verse — context aware to avoid replacing real "base" / "best" / "vase"
+    // "Best for you verse 5" / "base 5" / "best five" -> verse 5
     { pattern: /\b(go\s+to|read|show|display|present)\s+(?:the\s+)?(?:base|best|vase|vers)\b/gi, replacement: '$1 verse' },
     { pattern: /\b(?:base|best|vase|vers)\s+(\d{1,3})\b/gi, replacement: 'verse $1' },
     { pattern: /\b(chapter|chap)\s+(\d{1,3})\s+(?:base|best|vase|vers)\s+(\d{1,3})\b/gi, replacement: 'chapter $2 verse $3' },

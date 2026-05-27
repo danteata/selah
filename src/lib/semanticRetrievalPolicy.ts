@@ -1,21 +1,31 @@
-const THRESHOLD_FLOOR = 0.28
-const THRESHOLD_CEILING = 0.50
+const THRESHOLD_FLOOR = 0.32
+const THRESHOLD_CEILING = 0.55
 
 const BANDS: Array<{ maxWords: number; threshold: number }> = [
-    { maxWords: 4, threshold: 0.30 },
-    { maxWords: 8, threshold: 0.35 },
-    { maxWords: 14, threshold: 0.40 },
-    { maxWords: Infinity, threshold: 0.45 },
+    { maxWords: 4, threshold: 0.35 },
+    { maxWords: 8, threshold: 0.40 },
+    { maxWords: 14, threshold: 0.45 },
+    { maxWords: Infinity, threshold: 0.50 },
 ]
 
-export function getDynamicThreshold(wordCount: number): number {
+export function getDynamicThreshold(wordCount: number, mode?: 'sentence' | 'window'): number {
+    let threshold: number | undefined
     for (const band of BANDS) {
         if (wordCount <= band.maxWords) {
-            return clampThreshold(band.threshold)
+            threshold = band.threshold
+            break
         }
     }
-    return clampThreshold(BANDS[BANDS.length - 1].threshold)
+    threshold = threshold ?? BANDS[BANDS.length - 1].threshold
+
+    if (mode === 'window') {
+        return Math.max(threshold, WINDOW_THRESHOLD_FLOOR)
+    }
+
+    return clampThreshold(threshold)
 }
+
+const WINDOW_THRESHOLD_FLOOR = 0.58
 
 function clampThreshold(t: number): number {
     return Math.max(THRESHOLD_FLOOR, Math.min(THRESHOLD_CEILING, t))
@@ -39,8 +49,66 @@ const STOP_WORDS = new Set([
     'ye', 'unto', 'upon', 'among', 'neath', 'saith', 'sayeth',
 ])
 
-const ARCHAIc_STEM_MAP: Record<string, string> = {
+const BIBLICAL_SYNONYMS: Record<string, string[]> = {
+    'house': ['court', 'courts', 'temple', 'dwelling', 'tabernacle', 'sanctuary'],
+    'courts': ['court', 'house', 'temple', 'dwelling', 'tabernacle', 'sanctuary'],
+    'court': ['courts', 'house', 'temple', 'dwelling', 'tabernacle', 'sanctuary'],
+    'shepherd': ['pastor', 'keeper', 'guide', 'leader'],
+    'lord': ['god', 'yahweh', 'jehovah', 'almighty', 'creator'],
+    'god': ['lord', 'yahweh', 'jehovah', 'almighty', 'creator'],
+    'righteousness': ['justice', 'uprightness', 'integrity', 'holiness'],
+    'salvation': ['deliverance', 'rescue', 'redemption', '-saving'],
+    'faith': ['trust', 'belief', 'confidence'],
+    'grace': ['mercy', 'favor', 'kindness', 'compassion'],
+    'mercy': ['grace', 'compassion', 'forgiveness', 'lovingkindness'],
+    'forgive': ['pardon', 'absolve', 'excuse'],
+    'sin': ['transgression', 'iniquity', 'wrongdoing', 'trespass', 'offense'],
+    'righteous': ['just', 'upright', 'blameless', 'holy'],
+    'wicked': ['evil', 'ungodly', 'sinful', 'wrong'],
+    'blessed': ['happy', 'favored', 'fortunate'],
+    'pray': ['plead', 'ask', 'beseech', 'entreat'],
+    'praise': ['worship', 'glorify', 'extol', 'bless'],
+    'trust': ['believe', 'rely', 'depend', 'confide'],
+    'love': ['cherish', 'devotion', 'affection'],
+    'hope': ['expect', 'anticipate', 'trust'],
+    'peace': ['shalom', 'calm', 'rest', 'tranquility'],
+    'eternal': ['everlasting', 'forever', 'perpetual'],
+    'heaven': ['sky', 'heavens', 'paradise'],
+    'earth': ['world', 'land', 'ground'],
+    'throne': ['seat', 'rule', 'reign', 'authority'],
+    'king': ['ruler', 'sovereign', 'monarch'],
+    'kingdom': ['reign', 'dominion', 'realm', 'rule'],
+    'spirit': ['ghost', 'breath', 'wind', 'soul'],
+    'flesh': ['body', 'mortal', 'human'],
+    'cross': ['crucify', 'crucifixion', 'calvary'],
+    'resurrection': ['rising', 'raised', 'life'],
+    'baptize': ['baptism', 'wash', 'cleanse', 'immerse'],
+    'covenant': ['promise', 'agreement', 'pact', 'testament'],
+    'sacrifice': ['offering', 'oblation', 'gift'],
+    'redeem': ['ransom', 'buy', 'rescue', 'deliver'],
+    'anoint': ['consecrate', 'ordain', 'set'],
+    'glory': ['majesty', 'splendor', 'honor', 'radiance'],
+    'light': [' illumination', 'brightness', 'radiance', 'day'],
+    'darkness': ['night', 'shadow', 'gloom', 'obscurity'],
+    'bread': ['food', 'manna', 'sustenance', 'provision'],
+    'water': ['river', 'stream', 'fountain', 'spring'],
+    'fire': ['flame', 'burning', 'blaze'],
+    'mountain': ['hill', 'mount', 'height', 'peak'],
+    'wilderness': ['desert', 'waste', 'barren'],
+    'sheep': ['flock', 'lamb', 'herd'],
+    'vine': ['vineyard', 'grape', 'branch'],
+    'seed': ['offspring', 'descendant', 'planting'],
+    'harvest': ['reap', 'crop', 'gather', 'fruit'],
+    'sword': ['weapon', 'blade'],
+    'shield': ['buckler', 'protection', 'defense'],
+    'tower': ['fortress', 'stronghold', 'citadel', 'refuge'],
+}
+
+const ARCHAIC_STEM_MAP: Record<string, string> = {
     'builded': 'built',
+    'thou': 'you',
+    'thine': 'yours',
+    'thy': 'your',
     'build': 'built',
     'hath': 'has',
     'has': 'has',
@@ -98,7 +166,7 @@ const ARCHAIc_STEM_MAP: Record<string, string> = {
 
 function stemWord(word: string): string {
     const lower = word.toLowerCase()
-    return ARCHAIc_STEM_MAP[lower] || lower
+    return ARCHAIC_STEM_MAP[lower] || lower
 }
 
 export function removeStopWords(text: string): string {
@@ -144,6 +212,45 @@ export function getContentWords(text: string): string[] {
     return normalized.split(/\s+/).map(stemWord).filter(Boolean)
 }
 
+function getSynonyms(word: string): string[] {
+    const lower = word.toLowerCase()
+    const direct = BIBLICAL_SYNONYMS[lower]
+    if (direct) return direct
+    const stemmed = stemWord(lower)
+    if (BIBLICAL_SYNONYMS[stemmed]) return BIBLICAL_SYNONYMS[stemmed]
+    return []
+}
+
+function isSynonymMatch(queryWord: string, verseWord: string): boolean {
+    const qLower = queryWord.toLowerCase()
+    const vLower = verseWord.toLowerCase()
+    if (qLower === vLower) return true
+    const qSyns = getSynonyms(qLower)
+    if (qSyns.some(s => s === vLower)) return true
+    const vSyns = getSynonyms(vLower)
+    if (vSyns.some(s => s === qLower)) return true
+    return false
+}
+
+const THEOLOGICAL_COMMON = new Set([
+    'god', 'lord', 'jesus', 'christ', 'holy', 'spirit', 'ghost',
+    'heaven', 'heavenly', 'father', 'son', 'church', 'faith', 'pray',
+    'prayer', 'love', 'grace', 'mercy', 'sin', 'sinner', 'believe',
+    'believer', 'believers', 'saved', 'salvation', 'glory', 'praise',
+    'worship', 'bless', 'blessed', 'blessing', 'eternal', 'forever',
+    'angel', 'angels', 'prophet', 'prophets', 'apostle', 'apostles',
+    'disciple', 'disciples', 'righteous', 'righteousness', 'wicked',
+    'judge', 'judgment', 'king', 'kingdom', 'priest', 'priestly',
+    'sacrifice', 'offering', 'commandment', 'commandments', 'law',
+    'covenant', 'promise', 'preach', 'preaching', 'teach', 'teaching',
+    'teacher', 'ministry', 'minister', 'gift', 'gifts', 'baptize',
+    'baptism', 'cross', 'resurrection', 'born', 'gather', 'gathered',
+])
+
+function isTheologicalCommon(word: string): boolean {
+    return THEOLOGICAL_COMMON.has(word.toLowerCase())
+}
+
 export function validateSemanticMatch(
     query: string,
     verseText: string,
@@ -152,14 +259,33 @@ export function validateSemanticMatch(
     const queryContentWords = getContentWords(query)
     const verseContentWords = getContentWords(verseText)
 
-    if (queryContentWords.length === 0) return false
+    if (queryContentWords.length < 2) return false
 
     const verseSet = new Set(verseContentWords)
-    const overlapCount = queryContentWords.filter(w => verseSet.has(w)).length
+    let overlapCount = 0
+    let distinctiveOverlap = 0
 
-    if (queryWordCount <= 5) {
-        return overlapCount >= 1
+    for (const w of queryContentWords) {
+        const exactMatch = verseSet.has(w)
+        const synonymMatch = !exactMatch && verseContentWords.some(v => isSynonymMatch(w, v))
+        if (exactMatch || synonymMatch) {
+            overlapCount++
+            const isCommon = isTheologicalCommon(w)
+            if (!isCommon || synonymMatch) {
+                distinctiveOverlap++
+            }
+        }
     }
 
-    return overlapCount >= 2
+    if (overlapCount < 2) return false
+
+    if (distinctiveOverlap >= 2) return true
+
+    if (distinctiveOverlap === 1 && overlapCount >= 2 && queryWordCount <= 8) return true
+
+    if (distinctiveOverlap === 0 && overlapCount >= 3 && queryWordCount <= 5) return true
+
+    if (distinctiveOverlap === 0 && queryWordCount >= 6) return false
+
+    return false
 }

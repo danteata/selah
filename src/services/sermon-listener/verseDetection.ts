@@ -102,53 +102,33 @@ const BOOK_MAPPINGS: Record<string, string> = {
     'rev': 'Revelation', 'revelation': 'Revelation', 'revelations': 'Revelation',
 
     // ASR (Automatic Speech Recognition) common errors and phonetic variations
-    // John -> Join, Joan, Jean (common ASR misrecognitions)
-    // Note: 'jon' is already mapped to 'Jonah' above
-    'join': 'John', 'joan': 'John', 'jean': 'John', 'june': 'John', 'johnny': 'John', 'channel': 'John',
-    // Psalms -> sanct, som, sum, psalm (phonetic variations)
-    'sanct': 'Psalms', 'some': 'Psalms', 'sum': 'Psalms', 'salm': 'Psalms',
-    'sans': 'Psalms', 'saint': 'Psalms',
-    // Matthew -> mathew, mathieu, matty
+    // --- REMOVED dangerous standalone-word aliases (join, joan, jean, june, channel,
+    //     some, sum, sanct, sans, saint, current, courant, ramon, look, izzy,
+    //     jeremy, danny, genes is, jenny is, exo dus, ex doubt, easy kill, easy keel,
+    //     fish in, fill up, core in, cor in, gal ation, he bread).
+    // These were causing false positives in everyday speech ("channel 5", "some people",
+    // "look at", "current events", "ramon", "jeremy", "danny", "izzy", etc).
+    // Context-guarded corrections for these are still applied upstream by
+    // correctAccentMishearings() in hallucinationFilter.ts (only when followed by a
+    // chapter/verse pattern).
+    //
+    // Kept: safe phonetic variants that only trigger on clear book-name misspellings.
+    'johnny': 'John',
+    'salm': 'Psalms',
     'mathew': 'Matthew', 'mathieu': 'Matthew', 'matty': 'Matthew',
-    // Mark -> marc, marke
     'marc': 'Mark', 'marke': 'Mark',
-    // Luke -> look, luc
-    'look': 'Luke', 'luc': 'Luke',
-    // Romans -> roman, ramon
-    'roman': 'Romans', 'ramon': 'Romans',
-    // Corinthians -> corinthian, courant, current
-    'corinthian': 'Corinthians', 'courant': 'Corinthians', 'current': 'Corinthians',
-    'core in': 'Corinthians', 'cor in': 'Corinthians',
-    // Galatians -> galatian
-    'galatian': 'Galatians', 'gal ation': 'Galatians',
-    // Ephesians -> ephesian, fish in
-    'ephesian': 'Ephesians', 'fish in': 'Ephesians',
-    // Philippians -> philippian, fill up
-    'philippian': 'Philippians', 'fill up': 'Philippians',
-    // Colossians -> colossian
+    'luc': 'Luke',
+    'roman': 'Romans',
+    'corinthian': 'Corinthians',
+    'galatian': 'Galatians',
+    'ephesian': 'Ephesians',
+    'philippian': 'Philippians',
     'colossian': 'Colossians',
-    // Thessalonians -> thessalonian
     'thessalonian': 'Thessalonians',
-    // Timothy -> timmothy, timothee
     'timmothy': 'Timothy', 'timothee': 'Timothy',
-    // Peter -> peters, pedro
     'peters': 'Peter', 'pedro': 'Peter', 'peet': 'Peter',
-    // James -> jams, jame
     'jams': 'James', 'jame': 'James',
-    // Hebrews -> hebrew, he bread
-    'hebrew': 'Hebrews', 'he bread': 'Hebrews',
-    // Genesis -> genes is, jenny's
-    'genes is': 'Genesis', 'jenny is': 'Genesis',
-    // Exodus -> exo dus, ex doubt
-    'exo dus': 'Exodus', 'ex doubt': 'Exodus',
-    // Isaiah -> isa, izzy
-    'izzy': 'Isaiah',
-    // Jeremiah -> jeremi, jeremy
-    'jeremi': 'Jeremiah', 'jeremy': 'Jeremiah',
-    // Ezekiel -> ezekiel, easy kill
-    'easy kill': 'Ezekiel', 'easy keel': 'Ezekiel',
-    // Daniel -> dan, danny
-    'danny': 'Daniel',
+    'hebrew': 'Hebrews',
 }
 
 // Book names with their corresponding book numbers (for internal use)
@@ -260,8 +240,31 @@ function buildBookPattern(): string {
 
 export const BOOK_PATTERN = buildBookPattern()
 
-// Pattern for chapter and verse (supports colon, period, or hyphen as separator)
-const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*(?:[:\\.\\-]|x|vs\\.?|verse)\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
+// Pattern for chapter and verse (supports : . - x × vs verse and spaces as separator)
+// U+00D7 = multiplication sign (×) — Whisper sometimes outputs it for "verse"
+// Spaces are intentionally NOT in the main separator list because they create
+// too many false positives ("Genesis 7 1 was destroyed").  A dedicated
+// fallback in detectSpokenVerses handles the "book chapter verse" case.
+const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*(?:[:\\.\\-]|x|×|vs\\.?|verse)\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
+
+// Sanity-check map: canonical book → max chapter count.
+// Used to reject hallucinated references like "Ephesians 600 verse 1".
+export const BOOK_MAX_CHAPTER: Record<string, number> = {
+    'Genesis': 50, 'Exodus': 40, 'Leviticus': 27, 'Numbers': 36, 'Deuteronomy': 34,
+    'Joshua': 24, 'Judges': 21, 'Ruth': 4, '1 Samuel': 31, '2 Samuel': 24,
+    '1 Kings': 22, '2 Kings': 25, '1 Chronicles': 29, '2 Chronicles': 36, 'Ezra': 10,
+    'Nehemiah': 13, 'Esther': 10, 'Job': 42, 'Psalms': 150, 'Proverbs': 31,
+    'Ecclesiastes': 12, 'Song of Solomon': 8, 'Isaiah': 66, 'Jeremiah': 52, 'Lamentations': 5,
+    'Ezekiel': 48, 'Daniel': 12, 'Hosea': 14, 'Joel': 3, 'Amos': 9,
+    'Obadiah': 1, 'Jonah': 4, 'Micah': 7, 'Nahum': 3, 'Habakkuk': 3,
+    'Zephaniah': 3, 'Haggai': 2, 'Zechariah': 14, 'Malachi': 4,
+    'Matthew': 28, 'Mark': 16, 'Luke': 24, 'John': 21, 'Acts': 28,
+    'Romans': 16, '1 Corinthians': 16, '2 Corinthians': 13, 'Galatians': 6, 'Ephesians': 6,
+    'Philippians': 4, 'Colossians': 4, '1 Thessalonians': 5, '2 Thessalonians': 3, '1 Timothy': 6,
+    '2 Timothy': 4, 'Titus': 3, 'Philemon': 1, 'Hebrews': 13, 'James': 5,
+    '1 Peter': 5, '2 Peter': 3, '1 John': 5, '2 John': 1, '3 John': 1,
+    'Jude': 1, 'Revelation': 22,
+}
 
 // Full verse detection pattern
 const VERSE_PATTERN = new RegExp(
@@ -401,6 +404,11 @@ function parseNumberFromTokens(tokens: string[], startIndex: number, maxTokens: 
     return null
 }
 
+const NAME_PREFIXES = new Set([
+    'pope', 'dr', 'father', 'saint', 'st', 'mr', 'mrs', 'ms', 'professor',
+    'prof', 'pastor', 'reverend', 'rev', 'elder', 'bishop', 'cardinal',
+])
+
 function detectSpokenVerses(text: string): DetectedVerse[] {
     const normalizedText = text
         .toLowerCase()
@@ -421,6 +429,9 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
             candidate.aliasTokens.every((token, aliasIndex) => tokens[tokenIndex + aliasIndex] === token)
         )
         if (!alias) continue
+
+        const precedingToken = tokenIndex > 0 ? tokens[tokenIndex - 1] : ''
+        if (NAME_PREFIXES.has(precedingToken)) continue
 
         let pointer = tokenIndex + alias.aliasTokens.length
 
@@ -453,6 +464,12 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
             ? parseNumberFromTokens(tokens, pointer, 4)
             : parseNumberFromTokens(tokens, pointer, 2)
 
+        // Sanity-check: reject wildly out-of-bounds chapter numbers (Whisper hallucinations)
+        const maxChapter = BOOK_MAX_CHAPTER[alias.book]
+        if (maxChapter !== undefined && chapter.value > maxChapter) {
+            continue
+        }
+
         // Handle compact spoken refs like "John 316" => John 3:16
         // but only when verse token is missing and the chapter token was a single compact number.
         if (!verseStart) {
@@ -473,6 +490,32 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
                         confidence: hasChapterKeyword ? 'high' : 'medium',
                     })
                     continue
+                }
+            }
+
+            // CHAPTER-ONLY FALLBACK: e.g. "Ephesians chapter 6" → Eph 6:1
+            // Only emit when "chapter" keyword was explicitly spoken.
+            // Medium confidence so it respects the user's min-confidence threshold.
+            if (hasChapterKeyword) {
+                const chapterOnlyRef = `${alias.book} ${chapter.value}:1`
+                if (!seen.has(chapterOnlyRef)) {
+                    seen.add(chapterOnlyRef)
+                    const raw = tokens.slice(tokenIndex, pointer).join(' ')
+                    const startIndex = normalizedText.indexOf(raw, searchFrom)
+                    const endIndex = startIndex === -1 ? -1 : startIndex + raw.length
+                    if (startIndex !== -1) {
+                        searchFrom = endIndex
+                    }
+                    detected.push({
+                        raw,
+                        reference: chapterOnlyRef,
+                        book: alias.book,
+                        chapter: chapter.value,
+                        verseStart: 1,
+                        startIndex: startIndex === -1 ? 0 : startIndex,
+                        endIndex: endIndex === -1 ? raw.length : endIndex,
+                        confidence: 'medium',
+                    })
                 }
             }
             continue
@@ -500,6 +543,11 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
         const endIndex = startIndex === -1 ? -1 : startIndex + raw.length
         if (startIndex !== -1) {
             searchFrom = endIndex
+        }
+
+        // Sanity-check: reject out-of-bounds verse numbers
+        if (verseStart.value < 1 || verseStart.value > 176) {
+            continue
         }
 
         // Higher confidence if both chapter and verse keywords are present
@@ -531,13 +579,22 @@ export function detectVerses(text: string): DetectedVerse[] {
 
     let match: RegExpExecArray | null
     while ((match = VERSE_PATTERN.exec(text)) !== null) {
-        const [fullMatch, bookText, chapter, verseStart, verseEnd] = match
+        const [fullMatch, bookText, chapterStr, verseStartStr, verseEndStr] = match
 
         const normalizedBook = normalizeBookName(bookText)
         if (!normalizedBook) continue
 
-        const reference = verseEnd
-            ? `${normalizedBook} ${chapter}:${verseStart}-${verseEnd}`
+        const chapter = parseInt(chapterStr, 10)
+        const verseStart = parseInt(verseStartStr, 10)
+
+        // Sanity-check chapter bounds
+        const maxChapter = BOOK_MAX_CHAPTER[normalizedBook]
+        if (maxChapter !== undefined && chapter > maxChapter) {
+            continue
+        }
+
+        const reference = verseEndStr
+            ? `${normalizedBook} ${chapter}:${verseStart}-${verseEndStr}`
             : `${normalizedBook} ${chapter}:${verseStart}`
 
         if (seen.has(reference)) continue
@@ -547,9 +604,9 @@ export function detectVerses(text: string): DetectedVerse[] {
             raw: fullMatch,
             reference,
             book: normalizedBook,
-            chapter: parseInt(chapter, 10),
-            verseStart: parseInt(verseStart, 10),
-            verseEnd: verseEnd ? parseInt(verseEnd, 10) : undefined,
+            chapter,
+            verseStart,
+            verseEnd: verseEndStr ? parseInt(verseEndStr, 10) : undefined,
             startIndex: match.index,
             endIndex: match.index + fullMatch.length,
             confidence: 'high',

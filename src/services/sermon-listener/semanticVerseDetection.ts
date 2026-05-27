@@ -465,14 +465,15 @@ export class SemanticVerseDetector {
         }
 
         // Fallback: sliding window if no good matches
-        // Threshold lowered from 0.65 → 0.55: NIV paraphrases often score 0.58-0.65
-        // against cached embeddings; 0.65 was discarding legitimate matches.
-        const hasGoodMatch = allMatches.some((m) => m.score >= 0.55)
+        // Threshold 0.62: fallback only runs when sentence-level search found
+        // nothing, so we demand a stronger signal. This prevents accidental
+        // short-phrase matches (e.g. voice-command residue) from leaking through.
+        const hasGoodMatch = allMatches.some((m) => m.score >= 0.62)
         if (!hasGoodMatch && windows.length > 0) {
             console.log('[SemanticDetector] Trying sliding window fallback...')
             try {
                 const windowEmbeddings = await embedBatch(windows)
-                const windowThresholds = windows.map((w) => getDynamicThreshold(w.split(/\s+/).length))
+                const windowThresholds = windows.map((w) => getDynamicThreshold(w.split(/\s+/).length, 'window'))
                 const searchMethod = this.useLocalFallback
                     ? (emb: number[], t: number) => this.searchLocally(emb, t)
                     : this.convexClient
