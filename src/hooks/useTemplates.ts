@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
@@ -116,23 +116,46 @@ export function useTemplates(): UseTemplatesReturn {
 
     const [localTemplates, setLocalTemplates] = useState<LocalTemplate[]>([])
 
+    // Always load local templates so we can use them for optimistic updates even online
     useEffect(() => {
-        if (!isOffline) return
         getLocalTemplates().then(setLocalTemplates).catch(() => {})
-    }, [isOffline])
+    }, [])
 
     const refreshLocalTemplates = useCallback(async () => {
         const locals = await getLocalTemplates()
         setLocalTemplates(locals)
     }, [])
 
-    const customTemplates = isOffline
-        ? localTemplates.filter(t => t.createdBy).map(localTemplateToTemplateItem)
-        : templates?.filter(t => t.createdBy)
+    const effectiveTemplates: TemplateItem[] | undefined = useMemo(() => {
+        const localList = localTemplates.map(localTemplateToTemplateItem)
+        const serverList = (templates || []) as TemplateItem[]
 
-    const effectiveTemplates: TemplateItem[] | undefined = isOffline
-        ? localTemplates.map(localTemplateToTemplateItem)
-        : templates
+        // Preserve loading state when online and templates haven't loaded yet
+        if (!isOffline && templates === undefined) return undefined
+
+        const map = new Map<string, TemplateItem>()
+        for (const t of serverList) {
+            map.set(t._id, t)
+        }
+        for (const t of localList) {
+            const existing = map.get(t._id)
+            if (!existing) {
+                map.set(t._id, t)
+            } else {
+                const localTime = new Date(t.updatedAt || 0).getTime()
+                const serverTime = new Date(existing.updatedAt || 0).getTime()
+                if (localTime > serverTime) {
+                    map.set(t._id, t)
+                }
+            }
+        }
+        return Array.from(map.values())
+    }, [isOffline, templates, localTemplates])
+
+    const customTemplates = useMemo(() => {
+        const all = effectiveTemplates || []
+        return all.filter(t => t.createdBy)
+    }, [effectiveTemplates])
 
     const createTemplate = async (data: {
         name: string
@@ -166,7 +189,7 @@ export function useTemplates(): UseTemplatesReturn {
             return id
         }
 
-        return await createTemplateMutation({
+        const serverId = await createTemplateMutation({
             name: data.name,
             description: data.description,
             slideId: data.slideId,
@@ -175,6 +198,26 @@ export function useTemplates(): UseTemplatesReturn {
             thumbnail: data.thumbnail,
             backgroundStorageId: data.backgroundStorageId,
         })
+
+        // Also cache locally for optimistic consistency
+        const now = new Date().toISOString()
+        await saveLocalTemplate({
+            id: serverId,
+            name: data.name,
+            description: data.description,
+            slideId: typeof data.slideId === 'string' ? data.slideId : JSON.stringify(data.slideId),
+            category: data.category,
+            appliesTo: data.appliesTo,
+            thumbnail: data.thumbnail,
+            backgroundStorageId: data.backgroundStorageId,
+            createdBy: undefined,
+            favoritedBy: [],
+            createdAt: now,
+            updatedAt: now,
+            synced: true,
+        })
+        await refreshLocalTemplates()
+        return serverId
     }
 
     const updateTemplate = async (templateId: string, updates: {
@@ -187,53 +230,57 @@ export function useTemplates(): UseTemplatesReturn {
         backgroundStorageId?: string
     }): Promise<string> => {
         const isLocal = templateId.startsWith('local_')
+
+        // Optimistic update: update local state immediately so UI feels snappy
+        setLocalTemplates(prev => prev.map(t =>
+            t.id === templateId
+                ? {
+                    ...t,
+                    name: updates.name ?? t.name,
+                    description: updates.description ?? t.description,
+                    slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : t.slideId,
+                    category: updates.category ?? t.category,
+                    appliesTo: updates.appliesTo as string[] ?? t.appliesTo,
+                    thumbnail: updates.thumbnail ?? t.thumbnail,
+                    backgroundStorageId: updates.backgroundStorageId ?? t.backgroundStorageId,
+                    updatedAt: new Date().toISOString(),
+                }
+                : t
+        ))
+
+        // Persist to IndexedDB so the optimistic cache survives reloads
+        await updateLocalTemplateFromDB(templateId, {
+            name: updates.name,
+            description: updates.description,
+            slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : undefined,
+            category: updates.category,
+            appliesTo: updates.appliesTo,
+            thumbnail: updates.thumbnail,
+            backgroundStorageId: updates.backgroundStorageId,
+        })
+        await refreshLocalTemplates()
+
         if (isOffline || isLocal) {
-            // Optimistic update: update local state immediately so UI feels snappy
-            setLocalTemplates(prev => prev.map(t =>
-                t.id === templateId
-                    ? {
-                        ...t,
-                        name: updates.name ?? t.name,
-                        description: updates.description ?? t.description,
-                        slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : t.slideId,
-                        category: updates.category ?? t.category,
-                        appliesTo: updates.appliesTo as string[] ?? t.appliesTo,
-                        thumbnail: updates.thumbnail ?? t.thumbnail,
-                        backgroundStorageId: updates.backgroundStorageId ?? t.backgroundStorageId,
-                        updatedAt: new Date().toISOString(),
-                    }
-                    : t
-            ))
-
-            // Persist to IndexedDB in the background
-            await updateLocalTemplateFromDB(templateId, {
-                name: updates.name,
-                description: updates.description,
-                slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : undefined,
-                category: updates.category,
-                appliesTo: updates.appliesTo,
-                thumbnail: updates.thumbnail,
-                backgroundStorageId: updates.backgroundStorageId,
-            })
-
-            // Re-sync from DB to ensure consistency
-            await refreshLocalTemplates()
             return templateId
         }
 
-        return await updateTemplateMutation({
+        // Online server update
+        await updateTemplateMutation({
             templateId,
             updates: {
                 ...updates,
                 appliesTo: normalizeAppliesTo(updates.appliesTo),
             },
         })
+        return templateId
     }
 
     const deleteTemplate = async (templateId: string): Promise<boolean> => {
+        // Always remove from local cache so the UI updates immediately
+        await deleteLocalTemplateFromDB(templateId)
+        await refreshLocalTemplates()
+
         if (isOffline && templateId.startsWith('local_')) {
-            await deleteLocalTemplateFromDB(templateId)
-            await refreshLocalTemplates()
             return true
         }
 

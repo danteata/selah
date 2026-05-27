@@ -219,6 +219,8 @@ export function useSongs(): UseSongsReturn {
             const updatedLocal: Song = {
                 ...(existing?.content as Song || {}),
                 ...updateData,
+                id: songId,
+                _id: songId,
                 updatedAt: new Date().toISOString(),
             }
 

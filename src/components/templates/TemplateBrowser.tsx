@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
-import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate } from 'lucide-react'
-import { useTemplates, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video } from 'lucide-react'
+import { useTemplates, type TemplateItem, type SlideType, useFileUrl } from '../../hooks/useTemplates'
 import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
+import { useLocalBackground } from '../../hooks/useLocalBackground'
 
 const CATEGORY_CONFIG: Record<string, { label: string; abbr: string; color: string; bgClass: string; dotClass: string }> = {
     announcement: { label: 'Announcement', abbr: 'A', color: '#3B82F6', bgClass: 'bg-blue-500/15 text-blue-700 dark:text-blue-300', dotClass: 'bg-blue-500' },
@@ -82,7 +83,52 @@ function TemplateCard({
     const isFavorite = template.favoritedBy && template.favoritedBy.length > 0
     const config = CATEGORY_CONFIG[template.category]
 
+    const slideData = useMemo(() => {
+        try {
+            return typeof template.slideId === 'string' ? JSON.parse(template.slideId) : null
+        } catch {
+            return null
+        }
+    }, [template.slideId])
+
+    const isVideoBackground = slideData?.backgroundType === 'video'
+    const storageId = template.backgroundStorageId || (slideData?.backgroundStorageId as string | undefined) || null
+    const fileUrl = useFileUrl(isVideoBackground ? storageId : null)
+    const localBg = useLocalBackground(
+        isVideoBackground ? (slideData?.background || '') : '',
+        isVideoBackground ? (slideData?.localFilePath || '') : '',
+    )
+    const videoUrl = fileUrl || localBg
+    const videoRef = useRef<HTMLVideoElement>(null)
+
+    useEffect(() => {
+        if (videoRef.current && videoUrl) {
+            videoRef.current.load()
+        }
+    }, [videoUrl])
+
     const renderThumbnail = () => {
+        if (isVideoBackground && videoUrl) {
+            return (
+                <div className="absolute inset-0">
+                    <video
+                        ref={videoRef}
+                        src={videoUrl}
+                        className="w-full h-full object-cover"
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                    />
+                    <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-1.5 py-0.5 bg-black/50 backdrop-blur-sm rounded text-white text-[9px] font-medium">
+                        <Video className="w-2.5 h-2.5" />
+                        Video
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                </div>
+            )
+        }
+
         if (template.thumbnail) {
             return (
                 <div className="absolute inset-0">

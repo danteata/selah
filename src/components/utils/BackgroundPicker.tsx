@@ -168,10 +168,17 @@ export function BackgroundPicker({ value, onChange, previewChildren }: Backgroun
                                             {/* Background preview */}
                                             <div
                                                 className="absolute inset-0"
-                                                style={{ background: bg.background }}
+                                                style={{ background: bg.backgroundType === 'video' ? '#1a1a2e' : bg.background }}
                                             />
-                                            {/* Thumbnail image (if from template) */}
+                                            {/* Thumbnail image */}
                                             {template.thumbnail && bg.backgroundType === 'image' && (
+                                                <img
+                                                    src={template.thumbnail}
+                                                    alt={template.name}
+                                                    className="absolute inset-0 w-full h-full object-cover"
+                                                />
+                                            )}
+                                            {template.thumbnail && bg.backgroundType === 'video' && (
                                                 <img
                                                     src={template.thumbnail}
                                                     alt={template.name}

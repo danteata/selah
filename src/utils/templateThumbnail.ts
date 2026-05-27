@@ -160,6 +160,7 @@ export async function generateThumbnail(
     background: string,
     backgroundType: string,
     content?: string,
+    resolvedUrl?: string,
 ): Promise<string> {
     const canvas = document.createElement('canvas')
     canvas.width = THUMB_WIDTH
@@ -167,7 +168,8 @@ export async function generateThumbnail(
     const ctx = canvas.getContext('2d')
     if (!ctx) return ''
 
-    await drawBackgroundToCanvas(ctx, background, backgroundType, THUMB_WIDTH, THUMB_HEIGHT)
+    const url = resolvedUrl || background
+    await drawBackgroundToCanvas(ctx, url, backgroundType, THUMB_WIDTH, THUMB_HEIGHT)
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)'
     ctx.fillRect(0, 0, THUMB_WIDTH, THUMB_HEIGHT)

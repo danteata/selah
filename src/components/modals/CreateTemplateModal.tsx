@@ -326,7 +326,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
             } else if (backgroundType === 'gradient' || backgroundType === 'color') {
                 thumbnail = await generateThumbnail(background, backgroundType, content || name)
             } else if (backgroundType === 'video' && background) {
-                thumbnail = await generateThumbnail(background, 'video', content || name)
+                thumbnail = await generateThumbnail(background, 'video', content || name, resolvedBackground || undefined)
             }
 
             const slideData = {

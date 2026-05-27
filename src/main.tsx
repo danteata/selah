@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { prewarmSemanticSearch } from './services/sermon-listener/localEmbeddings'
+import { setupSummarizer } from './services/sermon-listener/sermonNotes'
 
 const savedTheme = localStorage.getItem('theme')
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -48,9 +49,18 @@ window.addEventListener('error', (event: ErrorEvent) => {
 // blocking the initial render and making the app unresponsive.
 const schedulePrewarm = () => {
     if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(() => prewarmSemanticSearch(), { timeout: 5000 })
+        requestIdleCallback(() => {
+            prewarmSemanticSearch()
+            // Pre-warm the abstractive summarization model in the background.
+            // Downloads ~330MB on first use, then caches. Runs in a Web Worker
+            // so it doesn't block the UI thread.
+            setupSummarizer()
+        }, { timeout: 5000 })
     } else {
-        setTimeout(() => prewarmSemanticSearch(), 3000)
+        setTimeout(() => {
+            prewarmSemanticSearch()
+            setupSummarizer()
+        }, 3000)
     }
 }
 schedulePrewarm()

@@ -31,6 +31,7 @@ src-tauri/binaries/.build
 src-tauri/binaries/dist
 src-tauri/binaries/selah-whisper-server-*
 !src-tauri/binaries/.gitkeep
+# !src-tauri/assets/whisper-server
 *.spec
 
 src-tauri/assets/whisper-models/**/*.bin
@@ -53,4 +54,4 @@ src-tauri/binaries/.openclaude/
 src-tauri/gen/
 
 # Handover docs (working notes, not source)
-HANDOVER-*.md
+HANDOVER-*.md.commandcode/

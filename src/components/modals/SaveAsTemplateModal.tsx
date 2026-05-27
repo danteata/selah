@@ -62,7 +62,7 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
             } else if (bgType === 'gradient' || bgType === 'color') {
                 thumbnail = await generateThumbnail(bg, bgType, name)
             } else if (bgType === 'video' && bg) {
-                thumbnail = await generateThumbnail(bg, 'image', name)
+                thumbnail = await generateThumbnail(bg, 'video', name, resolvedBg || undefined)
             }
 
             await onSave({

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { isDesktop } from '../platform'
 import { listAudioDevices, type AudioDeviceInfo, isTauriAvailable } from '../services/sermon-listener/nativeAudioCapture'
 
@@ -10,10 +10,57 @@ export interface AudioInputDevice {
     nativeName?: string
 }
 
+const DEVICE_LABEL_STORAGE_KEY = 'sermon-listener:selected-mic-label'
+
+/**
+ * Save the selected device by label (not deviceId, which is ephemeral).
+ * Browser deviceIds reset on origin change; labels persist.
+ */
+export function saveSelectedDeviceLabel(label: string | null): void {
+    if (typeof window === 'undefined') return
+    try {
+        if (label) {
+            localStorage.setItem(DEVICE_LABEL_STORAGE_KEY, label)
+        } else {
+            localStorage.removeItem(DEVICE_LABEL_STORAGE_KEY)
+        }
+    } catch {
+        // localStorage unavailable — non-critical
+    }
+}
+
+/**
+ * Resolve a previously saved device label to a current deviceId.
+ * Returns the deviceId if found, or null to fall back to system default.
+ */
+export function resolveSavedDevice(devices: AudioInputDevice[]): string | null {
+    if (typeof window === 'undefined') return null
+    try {
+        const savedLabel = localStorage.getItem(DEVICE_LABEL_STORAGE_KEY)
+        if (!savedLabel) return null
+
+        // Try exact match first, then substring match
+        const exactMatch = devices.find(d => d.label === savedLabel)
+        if (exactMatch) return exactMatch.id
+
+        const partialMatch = devices.find(d =>
+            d.label.includes(savedLabel) || savedLabel.includes(d.label)
+        )
+        if (partialMatch) return partialMatch.id
+
+        // No match found — device was unplugged or renamed
+        console.warn(`[useAudioDevices] Saved device "${savedLabel}" not found, falling back to default`)
+        return null
+    } catch {
+        return null
+    }
+}
+
 export function useAudioDevices() {
     const [devices, setDevices] = useState<AudioInputDevice[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [resolvedDeviceId, setResolvedDeviceId] = useState<string | null>(null)
 
     const enumerateBrowserDevices = useCallback(async (): Promise<AudioInputDevice[]> => {
         if (!navigator.mediaDevices?.enumerateDevices) return []
@@ -92,6 +139,10 @@ export function useAudioDevices() {
             }
 
             setDevices(browserDevices)
+
+            // Resolve saved device label to current deviceId
+            const resolved = resolveSavedDevice(browserDevices)
+            setResolvedDeviceId(resolved)
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to enumerate devices')
             setDevices([])
@@ -111,5 +162,5 @@ export function useAudioDevices() {
         return () => navigator.mediaDevices.removeEventListener('devicechange', handler)
     }, [refresh])
 
-    return { devices, isLoading, error, refresh }
+    return { devices, isLoading, error, refresh, resolvedDeviceId }
 }

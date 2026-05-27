@@ -56,6 +56,18 @@ export interface PendingMutation {
     localId?: string
 }
 
+export interface LocalSermonCorrection {
+    id: string
+    sermonSessionId?: string
+    reference: string
+    originalReference?: string
+    correctionType: 'missed' | 'wrong-verse' | 'wrong-book'
+    closestRawText?: string
+    timestamp: number
+    synced: boolean
+    createdAt: string
+}
+
 class WorshipCloudDatabase extends Dexie {
     songs!: Table<Song>
     media!: Table<Media>
@@ -72,6 +84,7 @@ class WorshipCloudDatabase extends Dexie {
     appSettings!: Table<CachedSetting, string>
     pendingMutations!: Table<PendingMutation, number>
     localTemplates!: Table<LocalTemplate, string>
+    sermonCorrections!: Table<LocalSermonCorrection, string>
 
     constructor() {
         super('WorshipCloudDatabase')
@@ -104,6 +117,9 @@ class WorshipCloudDatabase extends Dexie {
             appSettings: 'id,cachedAt',
             pendingMutations: '++id,status,createdAt,mutationName',
             localTemplates: 'id,category,createdAt,updatedAt,synced'
+        })
+        this.version(5).stores({
+            sermonCorrections: 'id,synced,createdAt,sermonSessionId'
         })
     }
 }
@@ -330,4 +346,37 @@ export async function updateLocalTemplate(id: string, updates: Partial<LocalTemp
         ...updates,
         updatedAt: new Date().toISOString(),
     })
+}
+
+export async function saveSermonCorrection(correction: LocalSermonCorrection): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonCorrections.put(correction)
+}
+
+export async function getSermonCorrections(sessionId?: string): Promise<LocalSermonCorrection[]> {
+    const db = getIndexedDB()
+    if (sessionId) {
+        return await db.sermonCorrections.where('sermonSessionId').equals(sessionId).toArray()
+    }
+    return await db.sermonCorrections.toArray()
+}
+
+export async function getUnsyncedCorrections(): Promise<LocalSermonCorrection[]> {
+    const db = getIndexedDB()
+    return await db.sermonCorrections.where('synced').equals(0).toArray()
+}
+
+export async function markCorrectionSynced(id: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonCorrections.update(id, { synced: true })
+}
+
+export async function deleteSermonCorrection(id: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonCorrections.delete(id)
+}
+
+export async function clearSermonCorrections(): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonCorrections.clear()
 }
