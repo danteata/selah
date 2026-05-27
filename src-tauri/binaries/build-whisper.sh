@@ -66,7 +66,7 @@ pyinstaller \
     "${SCRIPT_DIR}/whisper-server.py"
 
 # Copy the --onedir output to Tauri assets for resource bundling
-ASSETS_DIR="${SCRIPT_DIR}/../src-tauri/assets/whisper-server"
+ASSETS_DIR="${SCRIPT_DIR}/../assets/whisper-server"
 rm -rf "$ASSETS_DIR"
 mkdir -p "$ASSETS_DIR"
 cp -R "${OUTPUT_DIR}/${BINARY_NAME}/" "$ASSETS_DIR/"

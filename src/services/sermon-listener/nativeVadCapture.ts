@@ -13,11 +13,13 @@ export interface VadAudioChunkEvent {
     wav_base64: string
     duration_ms: number
     is_speaking: boolean
+    /** Sermon-relative start offset in milliseconds (when this segment began) */
+    start_offset_ms: number
 }
 
 export interface NativeVadConfig {
     captureType: 'microphone' | 'system'
-    onSpeechChunk: (wavBase64: string, durationMs: number) => void
+    onSpeechChunk: (wavBase64: string, durationMs: number, startOffsetMs: number) => void
     onSpeakingChange?: (isSpeaking: boolean) => void
     onError?: (error: string) => void
 }
@@ -39,10 +41,10 @@ export async function startNativeVadCapture(config: NativeVadConfig): Promise<()
 
     // Listen for VAD audio chunk events
     const unlisten = await listen<VadAudioChunkEvent>('vad-audio-chunk', (event) => {
-        const { wav_base64, duration_ms, is_speaking } = event.payload
+        const { wav_base64, duration_ms, is_speaking, start_offset_ms } = event.payload
 
         if (wav_base64 && duration_ms > 0) {
-            config.onSpeechChunk(wav_base64, duration_ms)
+            config.onSpeechChunk(wav_base64, duration_ms, start_offset_ms || 0)
         }
 
         if (config.onSpeakingChange) {
@@ -97,16 +99,16 @@ export function useNativeVadCapture() {
     }, [])
 
     const start = async (config: Omit<NativeVadConfig, 'onSpeechChunk' | 'onSpeakingChange' | 'onError'> & {
-        onSpeechChunk?: (wavBase64: string, durationMs: number) => void
+        onSpeechChunk?: (wavBase64: string, durationMs: number, startOffsetMs: number) => void
     }): Promise<boolean> => {
         setError(null)
 
         try {
             const stop = await startNativeVadCapture({
                 ...config,
-                onSpeechChunk: (wav, duration) => {
+                onSpeechChunk: (wav, duration, startOffset) => {
                     setIsCapturing(true)
-                    config.onSpeechChunk?.(wav, duration)
+                    config.onSpeechChunk?.(wav, duration, startOffset)
                 },
                 onSpeakingChange: (speaking) => {
                     setIsSpeaking(speaking)

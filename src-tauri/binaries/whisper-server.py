@@ -43,6 +43,37 @@ except ImportError:
     print("Please install with: pip install flask flask-cors faster-whisper")
     sys.exit(1)
 
+# Optional: summarization support using sumy (lightweight extractive summarization)
+try:
+    import nltk
+    from sumy.parsers.plaintext import PlaintextParser
+    from sumy.nlp.tokenizers import Tokenizer
+    from sumy.summarizers.lsa import LsaSummarizer
+    from sumy.summarizers.text_rank import TextRankSummarizer
+    from sumy.nlp.stemmers import Stemmer
+    from sumy.utils import get_stop_words
+    
+    # Download required NLTK data on import
+    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+    
+    SUMMARIZATION_AVAILABLE = True
+except ImportError as e:
+    SUMMARIZATION_AVAILABLE = False
+    logger_init = logging.getLogger('whisper-server')
+    logger_init.warning(f"sumy not installed - summarization disabled: {e}")
+
+# Optional: abstractive summarization using Hugging Face transformers
+# (lazy-loaded on first request, adds ~330MB download for distilbart model)
+ABSTRACTIVE_SUMMARIZER = None
+ABSTRACTIVE_SUMMARIZATION_AVAILABLE = False
+
+try:
+    from transformers import pipeline
+    ABSTRACTIVE_SUMMARIZATION_AVAILABLE = True
+except ImportError:
+    pass
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +88,10 @@ CORS(app)
 # Global model instance
 model: Optional[WhisperModel] = None
 model_name: Optional[str] = None
+
+# Global summarizer instance (lightweight, no model download needed)
+summarizer = None
+SUMMARIZATION_LANGUAGE = 'english'
 
 
 def get_model_size(model_id: str) -> str:
@@ -154,12 +189,25 @@ def health_check():
         'status': 'healthy',
         'model': model_name,
         'model_loaded': model is not None,
+        'summarization_available': SUMMARIZATION_AVAILABLE,
+        'summarizer_loaded': summarizer is not None,
+        'abstractive_available': ABSTRACTIVE_SUMMARIZATION_AVAILABLE,
+        'abstractive_loaded': ABSTRACTIVE_SUMMARIZER is not None,
     })
 
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
-    """Transcribe audio file."""
+    """Transcribe audio file.
+    
+    Supports two response formats:
+    - JSON (default): Returns complete result as a single JSON object.
+    - ndjson: Streams segment events as newline-delimited JSON.
+      Activated by passing response_format=ndjson in form data.
+      Events: {"type":"segment","start":...,"end":...,"text":"..."}
+              {"type":"result","text":"...","language":"...","language_probability":...,"segments":[...]}
+              {"type":"error","code":"...","message":"..."}
+    """
     if model is None:
         return jsonify({'error': 'Model not loaded'}), 500
     
@@ -176,12 +224,11 @@ def transcribe():
         
         # Get optional parameters
         language = request.form.get('language', None)
-        task = request.form.get('task', 'transcribe')  # transcribe or translate
-        # VAD filter disabled by default - requires silero_vad.onnx which is not bundled
-        # Enable only if the VAD model file is available
+        task = request.form.get('task', 'transcribe')
         vad_filter_requested = request.form.get('vad_filter', 'false').lower() == 'true'
         vad_filter = vad_filter_requested and check_vad_available()
         hotwords = request.form.get('hotwords', None)
+        response_format = request.form.get('response_format', 'json').lower()
         
         # Save to temp file and transcribe
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
@@ -199,7 +246,7 @@ def transcribe():
         
         try:
             # Run transcription
-            logger.info(f"Starting transcription with language={language}, vad_filter={vad_filter}")
+            logger.info(f"Starting transcription with language={language}, vad_filter={vad_filter}, format={response_format}")
             segments, info = model.transcribe(
                 tmp_path,
                 language=language,
@@ -208,7 +255,10 @@ def transcribe():
                 hotwords=hotwords,
             )
             
-            # Collect results
+            if response_format == 'ndjson':
+                return _stream_ndjson(segments, info, tmp_path)
+            
+            # JSON mode: collect all results
             text = ''
             segment_list = []
             for segment in segments:
@@ -228,17 +278,68 @@ def transcribe():
                 'segments': segment_list,
             })
         finally:
-            # Clean up temp file
-            os.unlink(tmp_path)
+            if response_format != 'ndjson':
+                os.unlink(tmp_path)
             
     except Exception as e:
         logger.error(f"Transcription error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
+def _stream_ndjson(segments_iter, info, tmp_path):
+    """Stream transcription results as newline-delimited JSON.
+    
+    Events emitted:
+    - {"type":"segment","start":...,"end":...,"text":"..."} for each segment as decoded
+    - {"type":"result","text":"...","language":"...","language_probability":...,"segments":[...]} at the end
+    - {"type":"error","code":"...","message":"..."} on error
+    
+    Cleans up tmp_path when streaming is done.
+    """
+    from flask import Response
+    
+    def generate():
+        try:
+            text_parts = []
+            all_segments = []
+            
+            for segment in segments_iter:
+                seg_data = {
+                    'start': segment.start,
+                    'end': segment.end,
+                    'text': segment.text,
+                }
+                all_segments.append(seg_data)
+                text_parts.append(segment.text)
+                yield json.dumps({'type': 'segment', **seg_data}) + '\n'
+            
+            full_text = ''.join(text_parts).strip()
+            result = {
+                'type': 'result',
+                'text': full_text,
+                'language': info.language,
+                'language_probability': info.language_probability,
+                'segments': all_segments,
+            }
+            yield json.dumps(result) + '\n'
+        except Exception as e:
+            logger.error(f"ndjson streaming error: {e}", exc_info=True)
+            yield json.dumps({'type': 'error', 'code': 'streaming_error', 'message': str(e)}) + '\n'
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+    
+    return Response(generate(), mimetype='application/x-ndjson')
+
+
 @app.route('/transcribe-raw', methods=['POST'])
 def transcribe_raw():
-    """Transcribe raw audio data (PCM or WAV bytes)."""
+    """Transcribe raw audio data (PCM or WAV bytes).
+    
+    Supports response_format=ndjson via X-Response-Format header for streaming.
+    """
     if model is None:
         return jsonify({'error': 'Model not loaded'}), 500
     
@@ -252,9 +353,11 @@ def transcribe_raw():
         # Get parameters from headers or query
         sample_rate = int(request.headers.get('X-Sample-Rate', 16000))
         language = request.headers.get('X-Language', None)
-        # VAD filter disabled by default - requires silero_vad.onnx which is not bundled
+        hotwords = request.headers.get('X-Hotwords', None)
+        initial_prompt = request.headers.get('X-Initial-Prompt', None)
         vad_filter_requested = request.headers.get('X-VAD-Filter', 'false').lower() == 'true'
         vad_filter = vad_filter_requested and check_vad_available()
+        response_format = request.headers.get('X-Response-Format', 'json').lower()
         
         # Convert raw PCM to WAV
         with io.BytesIO() as wav_buffer:
@@ -276,7 +379,12 @@ def transcribe_raw():
                 tmp_path,
                 language=language,
                 vad_filter=vad_filter,
+                hotwords=hotwords,
+                initial_prompt=initial_prompt,
             )
+            
+            if response_format == 'ndjson':
+                return _stream_ndjson(segments, info, tmp_path)
             
             # Collect results
             text = ''
@@ -295,7 +403,8 @@ def transcribe_raw():
                 'segments': segment_list,
             })
         finally:
-            os.unlink(tmp_path)
+            if response_format != 'ndjson':
+                os.unlink(tmp_path)
             
     except Exception as e:
         logger.error(f"Transcription error: {e}")
@@ -339,6 +448,165 @@ def list_models():
             {'id': 'distil-large-v3', 'size': '1.5GB', 'description': 'Distilled large model, fast and accurate'},
         ],
         'current_model': model_name,
+    })
+
+
+def get_summarizer():
+    """Return the sumy summarizer (TextRank - lightweight, no model download)."""
+    global summarizer
+    if summarizer is not None:
+        return summarizer
+
+    if not SUMMARIZATION_AVAILABLE:
+        raise RuntimeError("sumy library not installed")
+
+    logger.info("Initializing TextRank summarizer")
+    stemmer = Stemmer(SUMMARIZATION_LANGUAGE)
+    summarizer = TextRankSummarizer(stemmer)
+    summarizer.stop_words = get_stop_words(SUMMARIZATION_LANGUAGE)
+    logger.info("TextRank summarizer ready")
+    return summarizer
+
+
+def get_abstractive_summarizer():
+    """Lazy-load the abstractive summarization model (distilbart-cnn-6-6).
+    
+    Only loads on first call to avoid slowing startup. The model is ~330MB
+    and downloads automatically from HuggingFace on first use.
+    """
+    global ABSTRACTIVE_SUMMARIZER
+    if ABSTRACTIVE_SUMMARIZER is not None:
+        return ABSTRACTIVE_SUMMARIZER
+
+    if not ABSTRACTIVE_SUMMARIZATION_AVAILABLE:
+        raise RuntimeError("transformers library not installed - abstractive summarization unavailable")
+
+    logger.info("Loading abstractive summarization model (sshleifer/distilbart-cnn-6-6)...")
+    ABSTRACTIVE_SUMMARIZER = pipeline(
+        "summarization",
+        model="sshleifer/distilbart-cnn-6-6",
+        device=-1,  # CPU; set to 0 for GPU
+    )
+    logger.info("Abstractive summarization model ready")
+    return ABSTRACTIVE_SUMMARIZER
+
+
+@app.route('/summarize', methods=['POST'])
+def summarize():
+    """Summarize text using extractive TextRank summarization."""
+    if not SUMMARIZATION_AVAILABLE:
+        return jsonify({'error': 'Summarization not available (sumy not installed)'}), 500
+
+    try:
+        data = request.get_json() or {}
+        text = data.get('text', '').strip()
+
+        if not text or len(text) < 50:
+            return jsonify({'error': 'Text too short to summarize'}), 400
+
+        sentence_count = data.get('sentence_count', 8)
+
+        logger.info(f"Summarizing text ({len(text)} chars, {sentence_count} sentences)")
+
+        summarizer_fn = get_summarizer()
+        parser = PlaintextParser.from_string(text, Tokenizer(SUMMARIZATION_LANGUAGE))
+        
+        sentences = summarizer_fn(parser.document, sentence_count)
+        summary = ' '.join(str(s) for s in sentences)
+
+        logger.info(f"Summarization complete: {len(summary)} chars")
+        return jsonify({'summary': summary.strip()})
+
+    except Exception as e:
+        logger.error(f"Summarization error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/summarize-abstractive', methods=['POST'])
+def summarize_abstractive():
+    """Summarize text using the best available method.
+    
+    Priority:
+    1. If transformers is installed: use distilbart-cnn-6-6 for true abstractive summarization
+    2. Otherwise: use TextRank extractive + sentence cleaning for a semi-paraphrased output
+    
+    The model is lazy-loaded on the first abstractive request.
+    """
+    try:
+        data = request.get_json() or {}
+        text = data.get('text', '').strip()
+
+        if not text or len(text) < 50:
+            return jsonify({'error': 'Text too short to summarize (min 50 chars)'}), 400
+
+        max_length = data.get('max_length', 150)
+        min_length = data.get('min_length', 30)
+
+        # Try abstractive model if available (requires transformers + torch)
+        if ABSTRACTIVE_SUMMARIZATION_AVAILABLE:
+            try:
+                summarizer = get_abstractive_summarizer()
+                input_text = text[:4000]  # Truncate to safe limit
+                result = summarizer(input_text, max_length=max_length, min_length=min_length, do_sample=False)
+                
+                if result and result[0].get('summary_text'):
+                    summary = result[0]['summary_text'].strip()
+                    if summary:
+                        logger.info(f"Abstractive summarization complete: {len(summary)} chars")
+                        return jsonify({
+                            'summary': summary,
+                            'method': 'abstractive',
+                            'model': 'sshleifer/distilbart-cnn-6-6',
+                        })
+            except Exception as e:
+                logger.warning(f"Abstractive model failed, falling back to extractive: {e}")
+
+        # Fallback: use TextRank + sentence reconstruction for a summary that
+        # reads more like a continuous paragraph rather than bullet points
+        if SUMMARIZATION_AVAILABLE:
+            try:
+                sentence_count = max(4, min_length // 15)  # ~15 words per sentence
+                summarizer_fn = get_summarizer()
+                parser = PlaintextParser.from_string(text, Tokenizer(SUMMARIZATION_LANGUAGE))
+                sentences = summarizer_fn(parser.document, sentence_count)
+                
+                if sentences:
+                    # Join with spaces and clean up for paragraph-style output
+                    summary = ' '.join(str(s).strip() for s in sentences)
+                    # Capitalize first letter after period if lowercase
+                    import re
+                    summary = re.sub(r'\.\s+([a-z])', lambda m: '. ' + m.group(1).upper(), summary)
+                    # Ensure starts with uppercase
+                    if summary and summary[0].islower():
+                        summary = summary[0].upper() + summary[1:]
+                    
+                    logger.info(f"Extractive-then-clean summarization: {len(summary)} chars")
+                    return jsonify({
+                        'summary': summary.strip(),
+                        'method': 'extractive-enhanced',
+                        'model': 'sumy-textrank',
+                    })
+            except Exception as e:
+                logger.warning(f"Extractive summarization also failed: {e}")
+
+        # Neither available
+        return jsonify({
+            'error': 'No summarization method available',
+            'available': False,
+        }), 501
+
+    except Exception as e:
+        logger.error(f"Summarization error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/summarize/status', methods=['GET'])
+def summarize_status():
+    """Check which summarization methods are available."""
+    return jsonify({
+        'extractive_available': SUMMARIZATION_AVAILABLE,
+        'abstractive_available': ABSTRACTIVE_SUMMARIZATION_AVAILABLE,
+        'abstractive_loaded': ABSTRACTIVE_SUMMARIZER is not None,
     })
 
 

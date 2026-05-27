@@ -2,12 +2,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_capture;
+mod logging;
 mod multi_monitor;
 mod ndi_output;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_shell::ShellExt;
+use tracing::info;
 
 use audio_capture::{
     AudioCaptureState,
@@ -59,6 +61,14 @@ use ndi_output::{
     ndi_send_video_frame,
     ndi_send_audio_frame,
     ndi_discover_sources,
+};
+
+use logging::{
+    init_logging,
+    log_message,
+    get_logs,
+    check_previous_crash,
+    cleanup_old_logs,
 };
 
 const WHISPER_SERVER_PORT: u16 = 17493;
@@ -703,8 +713,38 @@ pub fn run() {
             ndi_send_video_frame,
             ndi_send_audio_frame,
             ndi_discover_sources,
+            log_message,
+            get_logs,
+            check_previous_crash,
         ])
         .setup(move |app| {
+            // Initialize file logging and crash detection
+            let app_config_dir = app.path().app_config_dir()
+                .expect("Failed to get app config dir");
+            std::fs::create_dir_all(&app_config_dir)
+                .unwrap_or_else(|e| eprintln!("[main] Failed to create config dir: {}", e));
+            
+            // Check for previous crash before initializing the sentinel
+            let crashed = logging::check_crash_detection(&app_config_dir);
+            if crashed == Some(true) {
+                eprintln!("[main] Previous session crashed — crash detected via sentinel file");
+            }
+            
+            let (sentinel_guard, log_state) = init_logging(&app_config_dir);
+            
+            info!("[main] Selah starting — config dir: {:?}", app_config_dir);
+            
+            // Clean up old log files (keep last 7 days)
+            cleanup_old_logs(&log_state.log_dir, 7);
+            
+            // Store log state for the get_logs command
+            app.manage(log_state);
+            
+            // Leak the sentinel guard so it persists until process exit.
+            // On clean shutdown, the guard's Drop impl removes the sentinel file.
+            // On crash, the file remains and is detected on next launch.
+            std::mem::forget(sentinel_guard);
+
             multi_monitor_state.init(app.handle().clone());
             ndi_manager.init(app.handle().clone());
 
@@ -713,7 +753,7 @@ pub fn run() {
             if sermon_enabled {
                 prewarm_whisper_server(app_handle, whisper_child_pid_for_prewarm.clone(), whisper_pid_for_prewarm.clone());
             } else {
-                println!("[PreWarm] Skipping whisper server — sermon listener is disabled");
+                info!("[PreWarm] Skipping whisper server — sermon listener is disabled");
             }
 
             // Ensure the sidecar is terminated when the main window closes,

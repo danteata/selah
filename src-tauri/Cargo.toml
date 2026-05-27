@@ -28,6 +28,10 @@ hound = "3.5"  # For WAV encoding
 scopeguard = "1.2.0"  # For RAII guards (COM cleanup, etc.)
 ort = "2.0.0-rc.11"  # ONNX Runtime for Silero VAD
 ndarray = "0.17"  # For tensor operations with ort (must match ort's ndarray version)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+chrono = "0.4"  # For date-based log rotation
 grafton-ndi = { version = "0.11", features = ["tokio"], optional = true }
 
 # Platform-specific dependencies for system audio capture

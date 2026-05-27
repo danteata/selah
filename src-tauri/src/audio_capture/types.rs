@@ -194,19 +194,59 @@ pub fn mix_to_mono(samples: &[f32], channels: u16) -> Vec<f32> {
         .collect()
 }
 
-/// Process audio samples (mix to mono, resample, and buffer)
+/// 2nd-order Butterworth highpass IIR filter coefficients at 85 Hz, Q=0.707
+/// for 16 kHz sample rate. Removes low-frequency rumble (HVAC, handling noise).
+struct HighpassFilter {
+    d1: f32,
+    d2: f32,
+}
+
+impl HighpassFilter {
+    fn new() -> Self {
+        Self { d1: 0.0, d2: 0.0 }
+    }
+
+    fn process_sample(&mut self, input: f32) -> f32 {
+        // 2nd-order Butterworth highpass at 85 Hz for 16 kHz
+        // H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)
+        const B0: f32 = 0.944_35;
+        const B1: f32 = -1.888_70;
+        const B2: f32 = 0.944_35;
+        const A1: f32 = -1.889_15;
+        const A2: f32 = 0.888_25;
+
+        let output = B0 * input + self.d1;
+        self.d1 = B1 * input - A1 * output + self.d2;
+        self.d2 = B2 * input - A2 * output;
+        output
+    }
+
+    fn apply(samples: &mut [f32]) {
+        let mut filter = Self::new();
+        // +3 dB gain ≈ 1.4125 linear
+        const GAIN: f32 = 1.4125;
+        for sample in samples.iter_mut() {
+            *sample = filter.process_sample(*sample) * GAIN;
+        }
+    }
+}
+
+/// Process audio samples (mix to mono, resample, highpass filter, and buffer)
 pub fn process_audio_samples(
     samples: &[f32],
     source_sample_rate: u32,
     source_channels: u16,
 ) -> Vec<f32> {
     // Mix to mono if stereo
-    let mono_samples = mix_to_mono(samples, source_channels);
+    let mut mono_samples = mix_to_mono(samples, source_channels);
 
     // Resample to 16kHz if needed
     if source_sample_rate != TARGET_SAMPLE_RATE {
-        resample_cubic(&mono_samples, source_sample_rate, TARGET_SAMPLE_RATE)
-    } else {
-        mono_samples
+        mono_samples = resample_cubic(&mono_samples, source_sample_rate, TARGET_SAMPLE_RATE);
     }
+
+    // Apply highpass filter (85 Hz) and +3 dB gain to suppress rumble/boost speech
+    HighpassFilter::apply(&mut mono_samples);
+
+    mono_samples
 }

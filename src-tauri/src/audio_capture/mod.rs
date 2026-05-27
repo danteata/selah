@@ -320,6 +320,8 @@ struct VadAudioChunkEvent {
     duration_ms: u32,
     /// Whether speech is currently detected
     is_speaking: bool,
+    /// Sermon-relative start offset in milliseconds (when this segment began)
+    start_offset_ms: u32,
 }
 
 /// Tauri command: Initialize VAD with model path
@@ -411,6 +413,8 @@ pub fn start_capture_with_vad(
         use tauri::Emitter;
 
         let check_interval_ms = 10; // Check every 10ms for low latency
+        // Record session start time for sermon-relative offset calculation
+        let session_start = std::time::Instant::now();
 
         while is_capturing.load(Ordering::SeqCst) {
             if !vad_enabled.load(Ordering::SeqCst) {
@@ -429,6 +433,9 @@ pub fn start_capture_with_vad(
                 std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
                 continue;
             }
+
+            // Compute sermon-relative offset (ms since capture started)
+            let start_offset_ms = session_start.elapsed().as_millis() as u32;
 
             // Process through VAD
             let mut segmenter = vad_segmenter.lock();
@@ -454,6 +461,7 @@ pub fn start_capture_with_vad(
                                     wav_base64,
                                     duration_ms,
                                     is_speaking: true,
+                                    start_offset_ms,
                                 },
                             );
                         }
@@ -466,6 +474,7 @@ pub fn start_capture_with_vad(
                                 wav_base64: String::new(),
                                 duration_ms: 0,
                                 is_speaking: vad.is_speaking(),
+                                start_offset_ms,
                             },
                         );
                     }
@@ -484,6 +493,7 @@ pub fn start_capture_with_vad(
             if let Some(speech_samples) = vad.flush() {
                 let duration_ms =
                     (speech_samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
+                let start_offset_ms = session_start.elapsed().as_millis() as u32;
                 let chunk = AudioChunk {
                     samples: speech_samples,
                     duration_ms,
@@ -497,6 +507,7 @@ pub fn start_capture_with_vad(
                             wav_base64,
                             duration_ms,
                             is_speaking: false,
+                            start_offset_ms,
                         },
                     );
                 }

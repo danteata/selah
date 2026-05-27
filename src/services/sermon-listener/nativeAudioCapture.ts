@@ -45,7 +45,7 @@ export interface NativeCaptureEventConfig {
     captureType: CaptureType
     chunkDurationMs?: number
     deviceName?: string
-    onWavChunk?: (wavBase64: string, durationMs: number) => void
+    onWavChunk?: (wavBase64: string, durationMs: number, startOffsetMs: number) => void
     onStatus?: (status: CaptureStatus) => void
     onError?: (error: string) => void
 }
@@ -142,7 +142,8 @@ class NativeAudioCaptureService {
                     if (this.isCapturing && event.payload.wav_base64) {
                         config.onWavChunk?.(
                             event.payload.wav_base64,
-                            event.payload.duration_ms
+                            event.payload.duration_ms,
+                            event.payload.start_offset_ms || 0
                         )
                     }
                 }
