@@ -41,9 +41,9 @@ export function DetectedVersesBar() {
     return (
         <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/30">
             {/* Header bar */}
-            <button
+            <div
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/50 transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-[var(--bg-tertiary)]/50 transition-colors cursor-pointer"
             >
                 <div className="flex items-center gap-2">
                     {isListening && (
@@ -79,13 +79,13 @@ export function DetectedVersesBar() {
                             {showOnlyBestMatches ? 'Confirmed' : 'All'}
                         </button>
                     )}
-                    {isExpanded ? (
-                        <ChevronUp className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                    ) : (
-                        <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                    )}
+                {isExpanded ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                )}
                 </div>
-            </button>
+            </div>
 
             {/* Expanded content */}
             {isExpanded && (

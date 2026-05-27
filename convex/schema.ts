@@ -338,6 +338,16 @@ export default defineSchema({
             threshold: v.number(),
             rawText: v.string(),
         }))),
+        // Timestamped transcript segments
+        segments: v.optional(v.array(v.object({
+            id: v.string(),
+            text: v.string(),
+            startMs: v.number(),
+            endMs: v.number(),
+            source: v.union(v.literal('web-speech'), v.literal('whisper'), v.literal('elevenlabs')),
+            confidence: v.optional(v.number()),
+            speaker: v.optional(v.number()),
+        }))),
         // Transcription provider used
         provider: v.string(),
         // Language used for transcription

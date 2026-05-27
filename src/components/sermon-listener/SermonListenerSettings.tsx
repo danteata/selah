@@ -1,6 +1,6 @@
 import { useAppStore } from '../../store/appStore'
 import { useNativeAudioCapture } from '../../services/sermon-listener/nativeAudioCapture'
-import { useAudioDevices } from '../../hooks/useAudioDevices'
+import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDevices'
 import { Mic, Monitor, RefreshCw, Info } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
@@ -24,7 +24,22 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         })
     }
 
-    const { devices: micDevices, isLoading: isLoadingDevices, refresh: refreshDevices } = useAudioDevices()
+    const { devices: micDevices, isLoading: isLoadingDevices, refresh: refreshDevices, resolvedDeviceId } = useAudioDevices()
+
+    // Use the resolved device ID (from label persistence) if available,
+    // otherwise fall back to the stored deviceId
+    const activeMicId = sermon?.selectedMicrophoneId || resolvedDeviceId || ''
+
+    const handleDeviceChange = (deviceId: string) => {
+        // Find the label for this device to persist it
+        const selectedDevice = micDevices.find(d => d.id === deviceId)
+        if (selectedDevice) {
+            saveSelectedDeviceLabel(selectedDevice.label)
+        } else if (!deviceId) {
+            saveSelectedDeviceLabel(null)
+        }
+        update({ selectedMicrophoneId: deviceId })
+    }
 
     return (
         <div className="space-y-6">
@@ -117,8 +132,8 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Microphone</label>
                     <div className="relative">
                         <select
-                            value={sermon?.selectedMicrophoneId || ''}
-                            onChange={(e) => update({ selectedMicrophoneId: e.target.value })}
+                            value={activeMicId}
+                            onChange={(e) => handleDeviceChange(e.target.value)}
                             disabled={isLoadingDevices}
                             className="w-full p-2 pr-9 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white appearance-none"
                         >

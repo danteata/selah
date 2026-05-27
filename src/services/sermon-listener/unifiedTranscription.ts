@@ -13,8 +13,16 @@
 
 import { speechRecognitionService } from './speechRecognition'
 import { desktopWhisperTranscriptionService } from './desktopWhisperTranscription'
+import type { DesktopWhisperTranscriptionResult } from './desktopWhisperTranscription'
 
 export type TranscriptionProvider = 'web-speech' | 'desktop-whisper'
+
+/** Segment timing from whisper transcription (seconds) */
+export interface WhisperSegmentTiming {
+    start: number
+    end: number
+    text: string
+}
 
 export interface UnifiedTranscriptionOptions {
   provider?: TranscriptionProvider
@@ -27,7 +35,7 @@ export interface UnifiedTranscriptionOptions {
   interimResults?: boolean
   onStart?: () => void
   onEnd?: () => void
-  onResult?: (transcript: string, isFinal: boolean, confidence?: number) => void
+  onResult?: (transcript: string, isFinal: boolean, confidence?: number, segments?: WhisperSegmentTiming[]) => void
   onError?: (error: string, message?: string) => void
   onStatusChange?: (status: TranscriptionStatus) => void
   /** Called when speech is detected (VAD speech start) */
@@ -41,6 +49,10 @@ export interface UnifiedTranscriptionOptions {
   /** Initial prompt to bias transcription vocabulary (prevents offensive word hallucination) */
   initialPrompt?: string
   onProgress?: (progress: number) => void
+  /** Enable ndjson streaming from whisper server for progressive segment display */
+  enableStreaming?: boolean
+  /** Called with each partial segment as it's decoded by the streaming transcription */
+  onPartialSegment?: (segment: { start: number; end: number; text: string }) => void
 }
 
 export interface TranscriptionStatus {
@@ -225,6 +237,8 @@ class UnifiedTranscriptionService {
                 initialPrompt: this.options.initialPrompt,
                 microphoneDeviceId: this.options.microphoneDeviceId,
                 onProgress: this.options.onProgress,
+                enableStreaming: this.options.enableStreaming,
+                onPartialSegment: this.options.onPartialSegment,
             })
             if (!initialized) {
                 this.error = 'Desktop Whisper is only available in the desktop app.'
@@ -234,8 +248,8 @@ class UnifiedTranscriptionService {
         }
 
         const started = await desktopWhisperTranscriptionService.startRealtimeTranscription(
-            (result) => {
-                this.options.onResult?.(result.text, true, undefined)
+            (result: DesktopWhisperTranscriptionResult) => {
+                this.options.onResult?.(result.text, true, undefined, result.segments)
             },
             (error) => {
                 this.error = error

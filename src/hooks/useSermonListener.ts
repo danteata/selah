@@ -15,13 +15,16 @@ import { useSlideCreation } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
-import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
+import type { TranscriptionProvider, TranscriptionStatus, WhisperSegmentTiming } from '../services/sermon-listener'
+import { desktopWhisperTranscriptionService } from '../services/sermon-listener/desktopWhisperTranscription'
 import { subscribeWhisperReadiness } from '../services/sermon-listener/whisperReadiness'
 import { detectVerses,
     verseToLabel,
     getSemanticDetector,
     resetSemanticDetector,
     NUMBER_TO_BOOK,
+    resolveBareReferences,
+    updateContextFromVerse,
 } from '../services/sermon-listener'
 import {
     detectVoiceCommands,
@@ -29,8 +32,11 @@ import {
 } from '../services/sermon-listener/voiceCommandDetection'
 import type { VoiceCommand } from '../services/sermon-listener/voiceCommandDetection'
 import type { DetectedVerse } from '../services/sermon-listener'
+import type { ActiveReferenceContext } from '../services/sermon-listener'
 import type { Scripture, BibleVersion } from '../types'
+import type { TranscriptSegment } from '../types/sermon-listener'
 import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
+import { startKeepAwake, stopKeepAwake, setupVisibilityKeepAwake } from '../services/sermon-listener/keepAwake'
 import { getNextChapter, getPreviousChapter } from '../utils/bibleReference'
 
 const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
@@ -41,6 +47,7 @@ export interface SavedSermonTranscript {
     id: string
     title: string
     transcript: string
+    segments: TranscriptSegment[]
     provider: TranscriptionProvider
     createdAt: string
 }
@@ -77,6 +84,8 @@ export interface SermonListenerState {
     isSupported: boolean
     /** Current full transcript */
     transcript: string
+    /** Timestamped transcript segments */
+    transcriptSegments: TranscriptSegment[]
     /** Current interim (partial) transcript */
     interimTranscript: string
     /** List of detected verses */
@@ -121,8 +130,8 @@ export interface SermonListenerState {
     rawUtterances: Array<{ text: string; timestamp: number; confidence?: number }>
     /** Active capture source */
     captureSource: 'microphone' | 'system' | null
-    /** User corrections for verse detection learning */
-    corrections: Array<{ reference: string; originalReference?: string; timestamp: number }>
+    /** Dropped chunk stats for desktop-whisper (for quality warning) */
+    droppedChunkInfo: { dropped: number; total: number }
 }
 
 export interface SermonListenerActions {
@@ -156,8 +165,6 @@ export interface SermonListenerActions {
     changeBibleVersion: (versionId: string) => void
     /** Manually set one detected verse as current */
     setCurrentDetectedVerse: (verse: DetectedVerse) => Promise<void>
-    /** Record a user correction for learning */
-    addCorrection: (reference: string, originalReference?: string) => void
 }
 
 export type UseSermonListenerReturn = SermonListenerState & SermonListenerActions
@@ -182,6 +189,7 @@ function writeSavedTranscripts(items: SavedSermonTranscript[]): void {
 
 interface PersistedLiveState {
     transcript: string
+    segments: TranscriptSegment[]
     detectedVerses: DetectedVerse[]
     currentVerse: DetectedVerse | null
     activeBibleVersion: string
@@ -254,6 +262,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [isListening, setIsListening] = useState(false)
     const [isSupported, setIsSupported] = useState(false)
     const [transcript, setTranscript] = useState(() => readLiveState()?.transcript || '')
+    const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>(() => readLiveState()?.segments || [])
     const [interimTranscript, setInterimTranscript] = useState('')
     const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>(() => readLiveState()?.detectedVerses || [])
     const detectedVersesRef = useRef<DetectedVerse[]>(detectedVerses)
@@ -276,7 +285,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Speech detection state (for visual feedback)
     const [isSpeechDetected, setIsSpeechDetected] = useState(false)
-    const [corrections, setCorrections] = useState<Array<{ reference: string; originalReference?: string; timestamp: number }>>([])
 
     // Real-time audio level (0-1) for waveform visualization
     const [audioLevel, setAudioLevel] = useState(0)
@@ -296,12 +304,22 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
     const [rawUtterances, setRawUtterances] = useState<Array<{ text: string; timestamp: number; confidence?: number }>>([])
 
+    // Dropped chunk tracking for desktop-whisper
+    const [droppedChunkInfo, setDroppedChunkInfo] = useState<{ dropped: number; total: number }>({ dropped: 0, total: 0 })
+
+    // Track dropped chunk subscription so we can clean it up
+    const droppedChunkUnsubRef = useRef<(() => void) | null>(null)
+
     // Refs for callback stability
     const optionsRef = useRef(options)
     optionsRef.current = options
 
     // Track transcript buffer for context
     const transcriptBufferRef = useRef(readLiveState()?.transcript || '')
+
+    // Session-relative timer for segment timestamps
+    const sessionStartTimeRef = useRef<number>(0)
+    const chunkStartTimeRef = useRef<number>(0)
 
     // Track recent chunks for deduplication
     const recentChunksRef = useRef<string[]>([])
@@ -317,6 +335,34 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Debounce timer for interim transcript processing
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const INTERIM_DEBOUNCE_MS = 300
+
+    // Read current live Bible slide as fallback when currentVerseRef is null
+    // (e.g. user opened the verse via Bible tab instead of sermon detection)
+    const getCurrentVerseFromLiveSlide = useCallback((): DetectedVerse | null => {
+        const state = useAppStore.getState()
+        const liveSlide = state.activeSlides.find(s => s.id === state.liveSlideId)
+        if (liveSlide?.type === 'bible' && liveSlide.data) {
+            const scripture = liveSlide.data as Scripture
+            const verses = Array.isArray(scripture.content) ? scripture.content : null
+            if (verses && verses.length > 0) {
+                const first = verses[0]
+                const last = verses[verses.length - 1]
+                return {
+                    book: first.book,
+                    chapter: parseInt(first.chapter, 10),
+                    verseStart: parseInt(first.verse, 10),
+                    verseEnd: verses.length > 1 ? parseInt(last.verse, 10) : undefined,
+                    raw: scripture.label,
+                    reference: scripture.label,
+                    confidence: 'high',
+                    startIndex: 0,
+                    endIndex: 0,
+                }
+            }
+        }
+        return null
+    }, [])
+
     const dedupeVerses = useCallback((items: DetectedVerse[]): DetectedVerse[] => {
         const map = new Map<string, DetectedVerse>()
         for (const verse of items) {
@@ -349,8 +395,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const versionSwitchCooldownUntilRef = useRef(0)
     const navigationCooldownUntilRef = useRef(0)
 
+    // Active reference context for resolving bare "verse 6" from prior book+chapter
+    const activeReferenceContextRef = useRef<ActiveReferenceContext | null>(null)
+    const CONTEXT_TTL_MS = 120_000
+
     // Real-time audio level analysis via Web Audio API AnalyserNode
-    // Reuses the transcription service's media stream to avoid duplicate getUserMedia calls
+    // Reuses the transcription service's media stream to avoid duplicate getUserMedia calls.
+    // If the primary stream isn't ready yet (VAD still initializing), retries for up to 3s
+    // before falling back to opening a separate stream.
     const startAudioAnalyser = useCallback(async () => {
         try {
             const userCaptureSource = sermonSettings?.captureSource || 'microphone'
@@ -358,17 +410,25 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
             if (!stream) {
                 if (userCaptureSource === 'system') {
-                    // Native system audio capture has no web MediaStream.
-                    // Visualization would need native audio level events (not yet implemented).
                     setCaptureSource('system')
                     console.log('[useSermonListener] System audio active — mic analyser disabled')
                     return
                 }
 
-                // Microphone capture: the stream may be managed internally by VAD or
-                // native Rust capture, so we open a separate getUserMedia stream for
-                // the analyser. This is lightweight — the actual audio goes through the
-                // transcription path; we only read frequency data here.
+                // Retry for up to 3s waiting for the primary stream to appear
+                // (VAD/web-audio capture initializes asynchronously)
+                const retryDelay = 200
+                const maxRetries = 15
+                for (let i = 0; i < maxRetries; i++) {
+                    await new Promise(r => setTimeout(r, retryDelay))
+                    stream = unifiedTranscriptionService.getMediaStream()
+                    if (stream) break
+                }
+            }
+
+            if (!stream) {
+                // Still no stream after retries — fall back to a separate getUserMedia.
+                // This is the lightweight path that just reads frequency data.
                 const audioConstraints: boolean | MediaTrackConstraints = sermonSettings?.selectedMicrophoneId
                     ? { deviceId: { exact: sermonSettings.selectedMicrophoneId }, echoCancellation: { ideal: true }, noiseSuppression: { ideal: true } }
                     : true
@@ -436,8 +496,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     useEffect(() => {
         if (isListening) {
-            const timer = setTimeout(startAudioAnalyser, 300)
-            return () => clearTimeout(timer)
+            startAudioAnalyser()
+            return () => {} // cleanup is handled by stopAudioAnalyser on !isListening
         } else {
             stopAudioAnalyser()
         }
@@ -535,13 +595,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         const timer = setTimeout(() => {
             writeLiveState({
                 transcript,
+                segments: transcriptSegments,
                 detectedVerses,
                 currentVerse,
                 activeBibleVersion,
             })
         }, 400)
         return () => clearTimeout(timer)
-    }, [transcript, detectedVerses, currentVerse, activeBibleVersion])
+    }, [transcript, transcriptSegments, detectedVerses, currentVerse, activeBibleVersion])
 
     useEffect(() => {
         activeBibleVersionRef.current = activeBibleVersion
@@ -562,6 +623,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     useEffect(() => {
         providerReadyRef.current = providerReady
     }, [providerReady])
+
+    // Re-acquire Screen Wake Lock when tab becomes visible again.
+    // The browser releases the lock when the tab is hidden; this
+    // listener re-requests it so recording isn't interrupted by sleep.
+    useEffect(() => {
+        const cleanup = setupVisibilityKeepAwake()
+        return cleanup
+    }, [])
 
     // Check provider availability and configure the unified service. The heavy
     // model load is no longer staggered behind an 8s timer; instead we listen
@@ -944,7 +1013,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         }
                         break
                     case 'next_verse': {
-                        const cur = currentVerseRef.current
+                        handledNavigationCommand = true
+                        const cur = currentVerseRef.current || getCurrentVerseFromLiveSlide()
                         if (cur) {
                             const next: DetectedVerse = {
                                 ...cur,
@@ -956,6 +1026,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 endIndex: 0,
                             }
                             setCurrentVerse(next)
+                            activeReferenceContextRef.current = updateContextFromVerse(next)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(next).then(scripture => {
                                 if (scripture) {
@@ -963,12 +1034,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                     refreshLiveSlide(scripture, true)
                                 }
                             })
-                            handledNavigationCommand = true
                         }
                         break
                     }
                     case 'previous_verse': {
-                        const cur = currentVerseRef.current
+                        handledNavigationCommand = true
+                        const cur = currentVerseRef.current || getCurrentVerseFromLiveSlide()
                         if (cur) {
                             const prevVerse = Math.max(1, cur.verseStart - 1)
                             const prev: DetectedVerse = {
@@ -981,6 +1052,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 endIndex: 0,
                             }
                             setCurrentVerse(prev)
+                            activeReferenceContextRef.current = updateContextFromVerse(prev)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(prev).then(scripture => {
                                 if (scripture) {
@@ -988,12 +1060,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                     refreshLiveSlide(scripture, true)
                                 }
                             })
-                            handledNavigationCommand = true
                         }
                         break
                     }
                     case 'go_to_verse': {
-                        const cur = currentVerseRef.current
+                        handledNavigationCommand = true
+                        const cur = currentVerseRef.current || getCurrentVerseFromLiveSlide()
                         const target = cmd.targetVerse
                         if (cur && target && target >= 1) {
                             const goto: DetectedVerse = {
@@ -1006,6 +1078,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 endIndex: 0,
                             }
                             setCurrentVerse(goto)
+                            activeReferenceContextRef.current = updateContextFromVerse(goto)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
@@ -1013,11 +1086,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                     refreshLiveSlide(scripture, true)
                                 }
                             })
-                            handledNavigationCommand = true
                         }
                         break
                     }
                     case 'go_to_reference': {
+                        handledNavigationCommand = true
                         const { book, chapter, verse } = cmd
                         if (book && chapter && chapter >= 1) {
                             const goto: DetectedVerse = {
@@ -1032,6 +1105,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 endIndex: 0,
                             }
                             setCurrentVerse(goto)
+                            activeReferenceContextRef.current = updateContextFromVerse(goto)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
@@ -1039,12 +1113,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                     refreshLiveSlide(scripture, true)
                                 }
                             })
-                            handledNavigationCommand = true
                         }
                         break
                     }
                     case 'next_chapter': {
-                        const cur = currentVerseRef.current
+                        handledNavigationCommand = true
+                        const cur = currentVerseRef.current || getCurrentVerseFromLiveSlide()
                         if (cur) {
                             const next = getNextChapter(cur.book, cur.chapter)
                             if (next) {
@@ -1059,6 +1133,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                     endIndex: 0,
                                 }
                                 setCurrentVerse(nextVerse)
+                                activeReferenceContextRef.current = updateContextFromVerse(nextVerse)
                                 navigationCooldownUntilRef.current = Date.now() + 3000
                                 lookupVerse(nextVerse).then(scripture => {
                                     if (scripture) {
@@ -1066,13 +1141,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                         refreshLiveSlide(scripture, true)
                                     }
                                 })
-                                handledNavigationCommand = true
                             }
                         }
                         break
                     }
                     case 'previous_chapter': {
-                        const cur = currentVerseRef.current
+                        handledNavigationCommand = true
+                        const cur = currentVerseRef.current || getCurrentVerseFromLiveSlide()
                         if (cur) {
                             const prev = getPreviousChapter(cur.book, cur.chapter)
                             if (prev) {
@@ -1087,6 +1162,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                     endIndex: 0,
                                 }
                                 setCurrentVerse(prevVerse)
+                                activeReferenceContextRef.current = updateContextFromVerse(prevVerse)
                                 navigationCooldownUntilRef.current = Date.now() + 3000
                                 lookupVerse(prevVerse).then(scripture => {
                                     if (scripture) {
@@ -1094,7 +1170,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                         refreshLiveSlide(scripture, true)
                                     }
                                 })
-                                handledNavigationCommand = true
                             }
                         }
                         break
@@ -1153,7 +1228,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
         const inNavigationCooldown = Date.now() < navigationCooldownUntilRef.current
 
-        const verses = detectVerses(cleanText)
+        let verses = detectVerses(cleanText)
+
+        // Resolve bare references (e.g. "verse 6") from active sermon context.
+        // Only runs when no full book+chapter reference was found in this chunk,
+        // and the context has not expired (default 120 s TTL).
+        if (verses.length === 0) {
+            const bareRefs = resolveBareReferences(cleanText, activeReferenceContextRef.current, CONTEXT_TTL_MS)
+            if (bareRefs.length > 0) {
+                verses = [...verses, ...bareRefs]
+            }
+        }
 
         const confidenceOrder = { high: 3, medium: 2, low: 1 }
         const minConfidenceLevel = confidenceOrder[minConfidence]
@@ -1213,6 +1298,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const latestVerse = versesWithTimestamp[0]
             setCurrentVerse(latestVerse)
 
+            // Refresh active reference context so later bare references resolve correctly
+            activeReferenceContextRef.current = updateContextFromVerse(latestVerse)
+
             // Auto-lookup if enabled
             if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                 lookupVerse(latestVerse).then(scripture => {
@@ -1267,7 +1355,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // Semantic verse detection (for paraphrases)
         // Use the ref (not state) to avoid a stale closure: the detector may
         // finish initialising *after* the onResult callback was registered.
-        if (semanticDetectorRef.current && text.length >= 30) {
+        //
+        // CRITICAL: Feed cleanText (voice commands stripped + hallucinations
+        // filtered) — NOT raw text. Raw voice commands like "next verse" or
+        // "previous verse" accumulate in the semantic buffer and cause false
+        // positives (e.g. "previous this" matching Judges 18:6).
+        const semanticReady = semanticDetectorRef.current && cleanText.length >= 30
+        if (semanticReady) {
             setIsSemanticSearching(true)
 
             // Pass the regex-detected verse ranges to exclude them from semantic detection
@@ -1278,7 +1372,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }))
 
             // Use addText which handles throttling internally
-            semanticDetectorRef.current.addText(text, excludedRanges).then((semanticMatches) => {
+            semanticDetectorRef.current!.addText(cleanText, excludedRanges).then((semanticMatches) => {
                 // Stale means a regex verse was found AFTER this semantic search started.
                 // In that case, skip updating currentVerse (regex takes priority) but still
                 // add new verses to the detected list.
@@ -1509,6 +1603,18 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         console.log('[useSermonListener] Starting transcription with provider:', provider)
 
+        // Prevent device from sleeping during sermon recording
+        startKeepAwake().catch(err => {
+            console.warn('[useSermonListener] Keep-awake failed (non-fatal):', err)
+        })
+
+        // Subscribe to dropped chunk notifications from desktop-whisper
+        if (provider === 'desktop-whisper') {
+            droppedChunkUnsubRef.current = desktopWhisperTranscriptionService.onDroppedChunk((dropped, total) => {
+                setDroppedChunkInfo({ dropped, total })
+            })
+        }
+
         // Unlock AudioContext early so the VAD's internal AudioContext can resume
         try {
             const unlockCtx = new AudioContext()
@@ -1530,15 +1636,25 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             interimResults: true,
             useVAD: globalSettings?.sermonListener_useVAD,
             initialPrompt: 'Bible sermon. Books: Genesis Exodus Leviticus Numbers Deuteronomy Joshua Judges Ruth Samuel Kings Chronicles Ezra Nehemiah Esther Job Psalms Proverbs Ecclesiastes Song Isaiah Jeremiah Lamentations Ezekiel Daniel Hosea Joel Amos Obadiah Jonah Micah Nahum Habakkuk Zephaniah Haggai Zechariah Malachi Matthew Mark Luke John Acts Romans Corinthians Galatians Ephesians Philippians Colossians Thessalonians Timothy Titus Philemon Hebrews James Peter John Jude Revelation. Chapter verse.',
+            enableStreaming: true,
+            onPartialSegment: (segment) => {
+                console.log('[useSermonListener] Partial segment:', segment.text.substring(0, 50))
+                setInterimTranscript(prev => {
+                    const prefix = prev ? prev + ' ' : ''
+                    return prefix + segment.text.trim()
+                })
+            },
             onStart: () => {
                 setIsListening(true)
                 setError(null)
+                sessionStartTimeRef.current = Date.now()
+                chunkStartTimeRef.current = 0
             },
             onEnd: () => {
                 setIsListening(false)
             },
-            onResult: (text, isFinal) => {
-                console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal })
+            onResult: (text, isFinal, _confidence, whisperSegments) => {
+                console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal, hasSegments: !!whisperSegments?.length })
 
                 // Clean up repeated phrases in the incoming text
                 let cleanedText = cleanRepeatedPhrases(text)
@@ -1572,13 +1688,63 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     }
 
                     setInterimTranscript('')
-                    const newFullTranscript = `${transcriptBufferRef.current} ${cleanedText}`.trim()
-                    transcriptBufferRef.current = newFullTranscript
-                    setTranscript(newFullTranscript)
 
+                    // Build timestamped segment(s)
+                    const now = Date.now()
+                    const sessionStart = sessionStartTimeRef.current || now
+
+                    if (whisperSegments && whisperSegments.length > 0 && provider === 'desktop-whisper') {
+                        // Whisper returns segment timing in seconds relative to the utterance start.
+                        // These are already adjusted by the desktop whisper service to be
+                        // session-relative (VAD adds vadSpeechStartMs, native adds startOffsetMs).
+                        // So we can use them directly — just convert seconds → milliseconds.
+                        const newSegments: TranscriptSegment[] = whisperSegments.map((seg, idx) => {
+                            return {
+                                id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
+                                text: seg.text.trim(),
+                                startMs: Math.max(0, Math.round(seg.start * 1000)),
+                                endMs: Math.max(0, Math.round(seg.end * 1000)),
+                                source: 'whisper' as const,
+                            }
+                        }).filter(seg => seg.text.length > 0)
+
+                        setTranscriptSegments(prev => {
+                            const next = [...prev, ...newSegments]
+                            const fullText = next.map(s => s.text).join(' ').trim()
+                            transcriptBufferRef.current = fullText
+                            setTranscript(fullText)
+                            return next
+                        })
+                    } else {
+                        // Web Speech or no segment timing — use wall-clock offsets.
+                        // chunkStartTimeRef tracks when the current chunk started (set on first
+                        // interim, or falls back to sessionStart for immediate finals).
+                        const segmentStart = chunkStartTimeRef.current || now
+                        const segment: TranscriptSegment = {
+                            id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${Math.random().toString(36).slice(2, 9)}`,
+                            text: cleanedText,
+                            startMs: Math.max(0, segmentStart - sessionStart),
+                            endMs: Math.max(0, now - sessionStart),
+                            source: provider === 'desktop-whisper' ? 'whisper' : 'web-speech',
+                        }
+
+                        setTranscriptSegments(prev => {
+                            const next = [...prev, segment]
+                            const fullText = next.map(s => s.text).join(' ').trim()
+                            transcriptBufferRef.current = fullText
+                            setTranscript(fullText)
+                            return next
+                        })
+                    }
+
+                    const newFullTranscript = `${transcriptBufferRef.current}`.trim()
                     processTranscript(newFullTranscript, cleanedText)
+                    chunkStartTimeRef.current = 0
                 } else {
                     setInterimTranscript(cleanedText)
+                    if (chunkStartTimeRef.current === 0) {
+                        chunkStartTimeRef.current = Date.now()
+                    }
                     const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
                     // Debounce interim verse detection to reduce processing load
                     if (interimDebounceRef.current) {
@@ -1639,10 +1805,18 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      * Stop listening
      */
     const stop = useCallback(() => {
+        if (droppedChunkUnsubRef.current) {
+            droppedChunkUnsubRef.current()
+            droppedChunkUnsubRef.current = null
+        }
         unifiedTranscriptionService.stop()
         setIsListening(false)
         setInterimTranscript('')
         setIsSpeechDetected(false)
+        setDroppedChunkInfo({ dropped: 0, total: 0 })
+        stopKeepAwake().catch(err => {
+            console.warn('[useSermonListener] Keep-awake release failed (non-fatal):', err)
+        })
     }, [])
 
     /**
@@ -1650,6 +1824,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      */
     const reset = useCallback(() => {
         setTranscript('')
+        setTranscriptSegments([])
         setInterimTranscript('')
         setDetectedVerses([])
         setCurrentVerse(null)
@@ -1660,11 +1835,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setLastVoiceCommand(null)
         setVoiceCommands([])
         setRawUtterances([])
+        setDroppedChunkInfo({ dropped: 0, total: 0 })
         setActiveBibleVersion(defaultBibleVersion)
         processedCommandTimesRef.current = new Map()
         transcriptBufferRef.current = ''
         recentChunksRef.current = []
         detectedRefsRef.current = new Set()
+        sessionStartTimeRef.current = 0
+        chunkStartTimeRef.current = 0
         if (interimDebounceRef.current) {
             clearTimeout(interimDebounceRef.current)
             interimDebounceRef.current = null
@@ -1689,6 +1867,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             id: `transcript-${Date.now()}`,
             title: title || `Sermon Transcript ${new Date().toLocaleDateString()}`,
             transcript,
+            segments: transcriptSegments,
             provider,
             createdAt: new Date().toISOString(),
         }
@@ -1722,14 +1901,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [])
 
     /**
-     * Record a user correction for learning. Stores locally until Convex wiring is ready.
-     */
-    const addCorrection = useCallback((reference: string, originalReference?: string) => {
-        setCorrections(prev => [...prev, { reference, originalReference, timestamp: Date.now() }])
-        console.log('[SermonListener] User correction recorded:', { reference, originalReference })
-    }, [])
-
-    /**
      * Export current transcript as a file
      */
     const exportCurrentTranscript = useCallback((): boolean => {
@@ -1738,10 +1909,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         try {
             const header = `=== Sermon Transcript ===\nDate: ${new Date().toISOString()}\n\n`
             const body = transcript
-            const footer = corrections.length > 0
-                ? `\n\n--- Corrections ---\n${corrections.map(c => `- ${c.reference}${c.originalReference ? ` (was: ${c.originalReference})` : ''} at ${new Date(c.timestamp).toISOString()}`).join('\n')}`
-                : ''
-            const blob = new Blob([header + body + footer], { type: 'text/plain' })
+            const blob = new Blob([header + body], { type: 'text/plain' })
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a')
             a.href = url
@@ -1764,6 +1932,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         isListening,
         isSupported,
         transcript,
+        transcriptSegments,
         interimTranscript,
         detectedVerses,
         currentVerse,
@@ -1776,7 +1945,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         isInitializingProvider,
         providerReady,
         savedTranscripts,
-        corrections,
         semanticDetectionEnabled: enableSemanticDetection,
         semanticDetectorReady,
         isSemanticSearching,
@@ -1787,6 +1955,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         lastVoiceCommand,
         voiceCommands,
         rawUtterances,
+        droppedChunkInfo,
         // Actions
         start,
         stop,
@@ -1803,7 +1972,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         previousVerse,
         changeBibleVersion,
         setCurrentDetectedVerse,
-        addCorrection,
     }
 }
 
