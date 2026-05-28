@@ -22,6 +22,20 @@ function parseTimeStringToSeconds(timeStr: string): number {
     return 0
 }
 
+// Calculate content-aware font size for the studio monitor (vw units, more aggressive than the full-screen version)
+function monitorFontSize(content: string): number {
+    const len = content?.length || 0
+    if (len === 0) return 2.5
+    if (len < 50) return 3.5
+    if (len < 100) return 3
+    if (len < 200) return 2.5
+    if (len < 400) return 2
+    if (len < 700) return 1.6
+    if (len < 1000) return 1.3
+    if (len < 1500) return 1.1
+    return 0.9
+}
+
 // Helper: format total seconds to "HH:MM:SS" or "MM:SS"
 function formatSecondsToTime(totalSeconds: number): string {
     const h = Math.floor(totalSeconds / 3600)
@@ -489,7 +503,8 @@ export function LiveOutput() {
                                         )}
                                         <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/40">
                                             <div
-                                                className="text-white/70 text-center text-sm line-clamp-3 drop-shadow-lg"
+                                                className="text-white/70 text-center drop-shadow-lg overflow-hidden"
+                                                style={{ fontSize: `${monitorFontSize(nextUpHtml) * 0.35}vw`, lineHeight: 1.2 }}
                                                 dangerouslySetInnerHTML={{ __html: nextUpHtml }}
                                             />
                                         </div>
@@ -609,8 +624,8 @@ export function LiveOutput() {
                                                 </div>
                                             ) : (
                                                 <div
-                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full max-w-full max-h-full overflow-y-auto"
-                                                    style={{ fontSize: '2.5vw' }}
+                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full max-w-full max-h-full overflow-hidden"
+                                                    style={{ fontSize: `${monitorFontSize(liveHtml)}vw`, lineHeight: 1.3 }}
                                                     dangerouslySetInnerHTML={{ __html: liveHtml }}
                                                 />
                                             )}

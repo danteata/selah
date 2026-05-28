@@ -55,6 +55,16 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
         ? `${slide.contents[0] || ''}${slide.contents[1] || ''}`
         : (slide.contents[0] || '')
 
+    const cardFontSize = (() => {
+        const len = previewHtml?.length || 0
+        if (len === 0) return '0.75rem'
+        if (len < 100) return '0.75rem'
+        if (len < 200) return '0.7rem'
+        if (len < 400) return '0.6rem'
+        if (len < 700) return '0.5rem'
+        return '0.45rem'
+    })()
+
     return (
         <div
             ref={ref}
@@ -152,9 +162,10 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                             </div>
                         </div>
                     ) : (
-                        <div className="absolute inset-0 flex items-center justify-center p-4">
+                        <div className="absolute inset-0 flex items-center justify-center p-2">
                                 <div
-                                    className="text-white text-xs text-center line-clamp-3 drop-shadow-lg tiptap-preview"
+                                    className="text-white text-center drop-shadow-lg tiptap-preview"
+                                    style={{ fontSize: cardFontSize }}
                                 dangerouslySetInnerHTML={{ __html: previewHtml }}
                             />
                         </div>
