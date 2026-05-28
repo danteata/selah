@@ -228,6 +228,7 @@ def transcribe():
         vad_filter_requested = request.form.get('vad_filter', 'false').lower() == 'true'
         vad_filter = vad_filter_requested and check_vad_available()
         hotwords = request.form.get('hotwords', None)
+        initial_prompt = request.form.get('initial_prompt', None)
         response_format = request.form.get('response_format', 'json').lower()
         
         # Save to temp file and transcribe
@@ -246,13 +247,14 @@ def transcribe():
         
         try:
             # Run transcription
-            logger.info(f"Starting transcription with language={language}, vad_filter={vad_filter}, format={response_format}")
+            logger.info(f"Starting transcription with language={language}, vad_filter={vad_filter}, initial_prompt={initial_prompt!r}, format={response_format}")
             segments, info = model.transcribe(
                 tmp_path,
                 language=language,
                 task=task,
                 vad_filter=vad_filter,
                 hotwords=hotwords,
+                initial_prompt=initial_prompt,
             )
             
             if response_format == 'ndjson':

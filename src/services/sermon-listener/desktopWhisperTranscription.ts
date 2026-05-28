@@ -27,6 +27,59 @@ import { applyPreprocessing, createPreprocessingNodes } from './audioPreprocessi
 
 const DEFAULT_CHUNK_DURATION_MS = 3000; // 3 seconds (fallback for non-VAD mode)
 
+/**
+ * Encode Float32 PCM samples as a 16-bit PCM WAV file.
+ *
+ * The VAD library's `encodeWAV` defaults to 32-bit float (format code 3),
+ * which some Whisper servers misinterpret or handle poorly, producing
+ * "You" hallucinations on short utterances. This encoder produces the
+ * standard 16-bit PCM format (format code 1) that Whisper reliably handles.
+ */
+function encodePcm16Wav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const bytesPerSample = bitsPerSample / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataLength = samples.length * bytesPerSample;
+    const bufferLength = 44 + dataLength;
+
+    const buffer = new ArrayBuffer(bufferLength);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) {
+            view.setUint8(offset + i, str.charCodeAt(i));
+        }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataLength, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataLength, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++) {
+        // Replace NaN/Infinity with 0 (silence) before clamping.
+        // NaN propagates through Math.max/Math.min and corrupts the entire WAV.
+        const raw = samples[i];
+        const s = Number.isFinite(raw) ? Math.max(-1, Math.min(1, raw)) : 0;
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        offset += 2;
+    }
+
+    return buffer;
+}
+
 // Type definitions for the VAD library (loaded from CDN)
 type MicVADInstance = {
     start: () => void
@@ -425,7 +478,22 @@ class DesktopWhisperTranscriptionService {
                 },
                 onSpeechEnd: async (audio: Float32Array) => {
                     const endMs = Date.now() - this.sessionStartTimeMs;
-                    console.log('[DesktopWhisper] Speech ended, audio length:', audio.length);
+                    // Check raw VAD audio for corruption before preprocessing
+                    let rawInfinite = 0;
+                    let rawNaN = 0;
+                    let rawPeak = 0;
+                    for (let i = 0; i < audio.length; i++) {
+                        if (!Number.isFinite(audio[i])) {
+                            if (Number.isNaN(audio[i])) rawNaN++;
+                            else rawInfinite++;
+                        } else if (Math.abs(audio[i]) > rawPeak) {
+                            rawPeak = Math.abs(audio[i]);
+                        }
+                    }
+                    if (rawInfinite > 0 || rawNaN > 0) {
+                        console.warn('[DesktopWhisper] Raw VAD audio has', rawInfinite, 'Infinity,', rawNaN, 'NaN values out of', audio.length, 'samples. Raw peak:', rawPeak.toFixed(4));
+                    }
+                    console.log('[DesktopWhisper] Speech ended, audio length:', audio.length, 'rawPeak:', rawPeak.toFixed(4));
                     this.config.onSpeechEnd?.();
                     this.config.onStatus?.('processing');
                     // Apply highpass filter + gain to remove rumble and boost speech
@@ -485,14 +553,24 @@ class DesktopWhisperTranscriptionService {
         this.totalChunksAttempted++;
 
         try {
-            // Convert Float32 PCM to WAV using VAD utils
-            if (!window.vad?.utils) {
-                throw new Error('VAD utils not available');
-            }
-            const wavBuffer = window.vad.utils.encodeWAV(audio);
+            // Convert Float32 PCM to 16-bit PCM WAV (format Whisper reliably handles).
+            // The VAD library's encodeWAV defaults to 32-bit float (format code 3),
+            // which some Whisper servers misinterpret, causing "You" hallucinations.
+            const wavBuffer = encodePcm16Wav(audio, 16000);
             const blob = new Blob([wavBuffer], { type: 'audio/wav' });
 
-            console.log('[DesktopWhisper] Utterance', utteranceId, 'size:', blob.size, 'bytes');
+            let peakAmp = 0;
+            let sumSq = 0;
+            let nanCount = 0;
+            for (let i = 0; i < audio.length; i++) {
+                const v = audio[i];
+                if (!Number.isFinite(v)) { nanCount++; continue; }
+                const abs = Math.abs(v);
+                if (abs > peakAmp) peakAmp = abs;
+                sumSq += v * v;
+            }
+            const rmsAmp = Math.sqrt(sumSq / (audio.length - nanCount || 1));
+            console.log('[DesktopWhisper] Utterance', utteranceId, 'size:', blob.size, 'bytes, peak:', peakAmp.toFixed(4), 'rms:', rmsAmp.toFixed(4), 'samples:', audio.length, 'nanCount:', nanCount);
 
             const result = await this.transcribeBlobWithRetry(
                 blob,

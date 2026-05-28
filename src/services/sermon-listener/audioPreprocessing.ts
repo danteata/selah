@@ -16,24 +16,26 @@
 // +3 dB ≈ linear gain of ~1.4125
 const SPEECH_GAIN = Math.pow(10, 3 / 20) // ~1.4125
 
-// 2nd-order Butterworth highpass at 85 Hz, Q=0.707 for 16 kHz sample rate
-// Transfer function H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)
+// 2nd-order Butterworth highpass at 85 Hz for 16 kHz sample rate.
+// Designed using the Audio EQ Cookbook (bilinear transform with prewarping).
+// Previous coefficients had a pole outside the unit circle (|z|=1.0076), causing
+// exponential growth in the IIR filter state and Infinity/NaN in the output.
 const HP_85Hz_16kHz = {
-    b0: 0.9443516179571823,
-    b1: -1.8887032359143647,
-    b2: 0.9443516179571823,
-    a1: -1.8891530210580773,
-    a2: 0.888253450770652,
+    b0: 0.9766732990954886,
+    b1: -1.9533465981909772,
+    b2: 0.9766732990954886,
+    a1: -1.9528023993722512,
+    a2: 0.9538907970097036,
 }
 
-// 2nd-order Butterworth highpass at 85 Hz, Q=0.707 for 48 kHz sample rate
-// (used when we don't know the exact rate; close enough for anti-rumble)
+// 2nd-order Butterworth highpass at 85 Hz for 48 kHz sample rate.
+// Same design method — stable complex conjugate poles with |z|^2 < 1.
 const HP_85Hz_48kHz = {
-    b0: 0.9885495390489216,
-    b1: -1.9770990780978431,
-    b2: 0.9885495390489216,
-    a1: -1.9771462858973206,
-    a2: 0.977051270198368,
+    b0: 0.992163188649353,
+    b1: -1.984326377298706,
+    b2: 0.992163188649353,
+    a1: -1.984264961912336,
+    a2: 0.9843877926850756,
 }
 
 /**
@@ -46,6 +48,15 @@ export function applyPreprocessing(samples: Float32Array, sampleRate: number = 1
     const coeffs = sampleRate <= 22050 ? HP_85Hz_16kHz : HP_85Hz_48kHz
     const { b0, b1, b2, a1, a2 } = coeffs
 
+    // Sanitize input: replace NaN/Infinity with 0 to prevent IIR filter state corruption.
+    // A single NaN propagates through Direct Form II Transposed and poisons all subsequent output.
+    // VAD resamplers and AudioContext edge cases can produce these values.
+    for (let i = 0; i < samples.length; i++) {
+        if (!Number.isFinite(samples[i])) {
+            samples[i] = 0
+        }
+    }
+
     // Direct Form II Transposed state
     let d1 = 0
     let d2 = 0
@@ -56,6 +67,13 @@ export function applyPreprocessing(samples: Float32Array, sampleRate: number = 1
         d1 = b1 * input - a1 * output + d2
         d2 = b2 * input - a2 * output
         samples[i] = output * SPEECH_GAIN
+    }
+
+    // Sanitize output: guard against any remaining non-finite values after filtering
+    for (let i = 0; i < samples.length; i++) {
+        if (!Number.isFinite(samples[i])) {
+            samples[i] = 0
+        }
     }
 
     return samples
