@@ -18,6 +18,7 @@ const DESKTOP_WHISPER_URL = `http://127.0.0.1:${DESKTOP_WHISPER_PORT}`;
 const MAX_RESTART_ATTEMPTS = 3
 const HEALTH_CHECK_TIMEOUT_MS = 3000
 const RESTART_COOLDOWN_MS = 5000
+const RESTART_DECAY_MS = 30000
 
 let restartAttempts = 0
 let lastRestartTime = 0
@@ -93,6 +94,22 @@ async function checkServerHealth(): Promise<boolean> {
 export async function restartServerIfNeeded(): Promise<boolean> {
     if (!isDesktop()) return false;
 
+    const now = Date.now();
+
+    // Time-based decay: if enough time passed since last attempt, reset and try again
+    if (restartAttempts >= MAX_RESTART_ATTEMPTS && now - lastRestartTime > RESTART_DECAY_MS) {
+        restartAttempts = 0;
+        console.log('[DesktopWhisperService] Restart counter decayed, will retry');
+    }
+
+    // First check if the server is actually healthy — maybe it recovered on its own
+    const alreadyHealthy = await checkServerHealth();
+    if (alreadyHealthy) {
+        restartAttempts = 0;
+        console.log('[DesktopWhisperService] Server is healthy, resetting restart counter');
+        return true;
+    }
+
     // Respect per-session restart limit
     if (restartAttempts >= MAX_RESTART_ATTEMPTS) {
         console.warn('[DesktopWhisperService] Max restart attempts reached — not retrying');
@@ -100,7 +117,6 @@ export async function restartServerIfNeeded(): Promise<boolean> {
     }
 
     // Respect cooldown between restart attempts
-    const now = Date.now();
     if (now - lastRestartTime < RESTART_COOLDOWN_MS) {
         console.log('[DesktopWhisperService] Restart cooldown active, skipping');
         return false;
@@ -122,6 +138,7 @@ export async function restartServerIfNeeded(): Promise<boolean> {
 
             const healthy = await checkServerHealth();
             if (healthy) {
+                restartAttempts = 0;
                 console.log('[DesktopWhisperService] Server restarted successfully');
                 return true;
             }
@@ -145,8 +162,9 @@ export function resetRestartAttempts(): void {
 /**
  * Transcribe audio using the desktop whisper server.
  * 
- * If the server appears to be down (connection refused / timeout),
+ * If the server appears to be down (connection refused),
  * attempts an automatic restart before retrying the request.
+ * Timeouts are not treated as crashes — the server may just be busy.
  */
 export async function transcribeWithDesktopWhisper(
     audioBlob: Blob,
@@ -161,6 +179,18 @@ export async function transcribeWithDesktopWhisper(
     // Try transcription, auto-restart on server failure
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
+            // Quick health check before sending — fail fast if server is down
+            if (attempt === 0) {
+                const healthy = await checkServerHealth();
+                if (!healthy) {
+                    console.log('[DesktopWhisperService] Server not healthy before request, attempting restart');
+                    const restarted = await restartServerIfNeeded();
+                    if (!restarted) {
+                        throw new Error('Server is down and could not be restarted');
+                    }
+                }
+            }
+
             const formData = new FormData();
             formData.append('audio', audioBlob, 'audio.wav');
 
@@ -218,13 +248,21 @@ export async function transcribeWithDesktopWhisper(
         } catch (error) {
             lastError = error instanceof Error ? error : new Error(String(error));
 
-            // Network errors (connection refused, timeout) suggest the server crashed
-            const isNetworkError = /failed to fetch|could not connect|networkerror|timed out|aborted|fetch/i.test(lastError.message);
+            // Connection refused = server is definitely down — attempt restart
+            // Timeout (AbortError) = server is busy — don't waste a restart slot
+            const isTimeout = error instanceof DOMException && error.name === 'AbortError';
+            const isConnectionRefused = !isTimeout && /failed to fetch|could not connect|networkerror|fetch/i.test(lastError.message);
 
-            if (isNetworkError && attempt === 0) {
-                console.log('[DesktopWhisperService] Network error — server may have crashed, attempting restart');
+            if (isConnectionRefused && attempt === 0) {
+                console.log('[DesktopWhisperService] Connection refused — server may have crashed, attempting restart');
                 const restarted = await restartServerIfNeeded();
                 if (restarted) continue;
+            }
+
+            // Timeout is transient — just retry without consuming a restart slot
+            if (isTimeout && attempt === 0) {
+                console.log('[DesktopWhisperService] Request timed out (server busy), retrying without restart');
+                continue;
             }
 
             // Non-retryable or second attempt failed
@@ -496,6 +534,16 @@ export async function transcribeWithDesktopWhisperStreaming(
     }
 
     try {
+        // Quick health check before sending — fail fast if server is down
+        const healthy = await checkServerHealth();
+        if (!healthy) {
+            console.log('[DesktopWhisperService] Server not healthy before streaming request, attempting restart');
+            const restarted = await restartServerIfNeeded();
+            if (!restarted) {
+                throw new Error('Server is down and could not be restarted');
+            }
+        }
+
         const formData = new FormData();
         formData.append('audio', audioBlob, 'audio.wav');
         formData.append('response_format', 'ndjson');
@@ -558,16 +606,20 @@ export async function transcribeWithDesktopWhisperStreaming(
         return json;
     } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        const isNetworkError = /failed to fetch|could not connect|networkerror|timed out|aborted|fetch/i.test(err.message);
 
-        if (isNetworkError) {
-            console.log('[DesktopWhisperService] Network error in streaming — server may have crashed, attempting restart');
+        // Connection refused = server is down — attempt restart
+        const isTimeout = err instanceof DOMException && err.name === 'AbortError';
+        const isConnectionRefused = !isTimeout && /failed to fetch|could not connect|networkerror|fetch/i.test(err.message);
+
+        if (isConnectionRefused) {
+            console.log('[DesktopWhisperService] Connection refused in streaming — server may have crashed, attempting restart');
             const restarted = await restartServerIfNeeded();
             if (restarted) {
                 return transcribeWithDesktopWhisperStreaming(audioBlob, callbacks, config);
             }
         }
 
+        // Timeout is transient — throw so transcribeBlobWithRetry can retry
         throw err;
     }
 }
