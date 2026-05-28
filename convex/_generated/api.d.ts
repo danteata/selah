@@ -18,6 +18,7 @@ import type * as liveSessions from "../liveSessions.js";
 import type * as migration from "../migration.js";
 import type * as presence from "../presence.js";
 import type * as schedules from "../schedules.js";
+import type * as sermonLearning from "../sermonLearning.js";
 import type * as slides from "../slides.js";
 import type * as songs from "../songs.js";
 import type * as templates from "../templates.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   migration: typeof migration;
   presence: typeof presence;
   schedules: typeof schedules;
+  sermonLearning: typeof sermonLearning;
   slides: typeof slides;
   songs: typeof songs;
   templates: typeof templates;

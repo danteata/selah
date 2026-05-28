@@ -54,6 +54,7 @@ export interface NativeCaptureEventConfig {
 interface VadAudioChunkEvent {
     wav_base64: string
     duration_ms: number
+    start_offset_ms?: number
     is_speaking: boolean
 }
 

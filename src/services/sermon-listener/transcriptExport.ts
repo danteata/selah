@@ -5,9 +5,9 @@
  * Requires TranscriptSegment[] with sermon-relative timestamps.
  */
 
-import type { TranscriptSegment } from '../types/sermon-listener'
+import type { TranscriptSegment } from '../../types/sermon-listener'
 
-interface TranscriptMeta {
+export interface TranscriptMeta {
     title: string
     date: string
     provider: string
