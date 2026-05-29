@@ -58,7 +58,7 @@ export function useUserRole(): UseUserRoleReturn {
         if (!currentUser || !clerkId) return
 
         const user = currentUser as any
-        cacheAuthSession({
+        Promise.resolve(cacheAuthSession({
             id: `session_${clerkId}`,
             clerkId,
             email: user.email || '',
@@ -67,7 +67,7 @@ export function useUserRole(): UseUserRoleReturn {
             avatar: user.avatar || '',
             churchId: user.churchId || '',
             churchName: '',
-        }).catch((err) => {
+        })).catch((err) => {
             console.warn('[useUserRole] Failed to cache session:', err)
         })
     }, [currentUser, clerkId])
@@ -75,14 +75,20 @@ export function useUserRole(): UseUserRoleReturn {
     const isOfflineMode = isOffline && currentUser === undefined && cachedSession !== null
     const isCachedSession = isOfflineMode
 
-    const effectiveUser = currentUser ?? (cachedSession ? {
-        ...cachedSession,
-        _id: cachedSession.id,
-        role: cachedSession.role,
-    } : null)
+    // Only fall back to cached session when Convex is still loading (undefined),
+    // NOT when server explicitly returns null (user deleted/not found)
+    const effectiveUser = currentUser === undefined
+        ? (cachedSession ? {
+            ...cachedSession,
+            _id: cachedSession.id,
+            role: cachedSession.role,
+        } : null)
+        : currentUser
 
     const role = (effectiveUser?.role as UserRole) || null
-    const isLoading = !sessionLoaded && currentUser === undefined && !cachedSession
+    // isLoading is true while cache hasn't been checked OR while Convex is still loading
+    // and there's no valid cached session to fall back to
+    const isLoading = !sessionLoaded || (!!clerkId && currentUser === undefined && !cachedSession)
 
     return {
         role,
