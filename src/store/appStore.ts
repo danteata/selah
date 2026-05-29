@@ -353,7 +353,10 @@ export const useAppStore = create<AppStore>()(
                     }
 
                     return {
-                        pastStates: [...state.pastStates, { activeSlides: state.activeSlides }],
+                        pastStates: [...state.pastStates, {
+                            activeSlides: state.activeSlides,
+                            liveOutputSlidesId: state.liveOutputSlidesId
+                        }],
                         activeSlides: ensureUniqueIds(updatedSlides),
                         liveOutputSlidesId: Array.from(new Set(updatedSlides.map((slide) => slide?.id))),
                         futureStates: []
@@ -462,7 +465,27 @@ export const useAppStore = create<AppStore>()(
             },
 
             setLiveOutputSlidesId: (slides) => {
-                set({ liveOutputSlidesId: Array.from(new Set(slides)) })
+                set((state) => {
+                    const newIds = Array.from(new Set(slides))
+                    const currentIds = state.liveOutputSlidesId
+                    // Only save to pastStates if value actually changes
+                    const hasChanged = !currentIds
+                        || newIds.length !== currentIds.length
+                        || newIds.some((id, i) => id !== currentIds[i])
+
+                    if (!hasChanged) {
+                        return { liveOutputSlidesId: newIds }
+                    }
+
+                    return {
+                        pastStates: [...state.pastStates, {
+                            activeSlides: state.activeSlides,
+                            liveOutputSlidesId: state.liveOutputSlidesId
+                        }],
+                        liveOutputSlidesId: newIds,
+                        futureStates: []
+                    }
+                })
             },
 
             setSharedQueueSlideIds: (slideIds) => {
@@ -813,11 +836,17 @@ export const useAppStore = create<AppStore>()(
                     const previousState = state.pastStates[state.pastStates.length - 1]
                     const newPastStates = state.pastStates.slice(0, -1)
 
+                    // Build minimal snapshot of current state (only tracked properties)
+                    const currentSnapshot = {
+                        activeSlides: state.activeSlides,
+                        liveOutputSlidesId: state.liveOutputSlidesId,
+                    }
+
                     return {
                         ...state,
                         ...previousState,
                         pastStates: newPastStates,
-                        futureStates: [state, ...state.futureStates]
+                        futureStates: [currentSnapshot, ...state.futureStates]
                     }
                 })
             },
@@ -829,10 +858,16 @@ export const useAppStore = create<AppStore>()(
                     const nextState = state.futureStates[0]
                     const newFutureStates = state.futureStates.slice(1)
 
+                    // Build minimal snapshot of current state (only tracked properties)
+                    const currentSnapshot = {
+                        activeSlides: state.activeSlides,
+                        liveOutputSlidesId: state.liveOutputSlidesId,
+                    }
+
                     return {
                         ...state,
                         ...nextState,
-                        pastStates: [...state.pastStates, state],
+                        pastStates: [...state.pastStates, currentSnapshot],
                         futureStates: newFutureStates
                     }
                 })
