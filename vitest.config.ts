@@ -9,6 +9,12 @@ export default defineConfig({
         environment: 'happy-dom',
         setupFiles: ['./src/test-setup.ts'],
         include: ['src/**/*.{test,spec}.{ts,tsx}'],
+        pool: 'forks',
+        poolOptions: {
+            forks: {
+                execArgv: ['--max-old-space-size=4096'],
+            },
+        },
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json', 'html'],

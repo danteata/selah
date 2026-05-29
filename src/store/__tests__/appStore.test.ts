@@ -168,9 +168,9 @@ describe('appStore', () => {
                 store.undo()
             })
 
-            // After undo, slides should be empty (reverted to initial state)
-            // Note: This depends on how the undo is implemented
-            // The current implementation may need adjustment
+            expect(useAppStore.getState().activeSlides).toHaveLength(0)
+            expect(useAppStore.getState().pastStates).toHaveLength(0)
+            expect(useAppStore.getState().futureStates).toHaveLength(1)
         })
 
         it('should redo undone action', () => {
@@ -193,7 +193,37 @@ describe('appStore', () => {
                 store.redo()
             })
 
-            // After redo, slide should be back
+            expect(useAppStore.getState().activeSlides).toHaveLength(1)
+            expect(useAppStore.getState().activeSlides[0].id).toBe('slide-1')
+            expect(useAppStore.getState().pastStates).toHaveLength(1)
+            expect(useAppStore.getState().futureStates).toHaveLength(0)
+        })
+
+        it('should clear futureStates on new mutation after undo', () => {
+            const store = useAppStore.getState()
+            const slide1: Slide = {
+                id: 'slide-1', index: 0, name: 'A', type: 'text',
+                layout: 'full-text', userId: '', churchId: '', scheduleId: '', contents: [],
+            }
+            const slide2: Slide = {
+                id: 'slide-2', index: 0, name: 'B', type: 'text',
+                layout: 'full-text', userId: '', churchId: '', scheduleId: '', contents: [],
+            }
+
+            act(() => {
+                store.appendActiveSlide(slide1)
+                store.undo()
+            })
+
+            expect(useAppStore.getState().futureStates.length).toBe(1)
+
+            act(() => {
+                store.appendActiveSlide(slide2)
+            })
+
+            expect(useAppStore.getState().futureStates.length).toBe(0)
+            expect(useAppStore.getState().activeSlides.length).toBe(1)
+            expect(useAppStore.getState().activeSlides[0].id).toBe('slide-2')
         })
     })
 
