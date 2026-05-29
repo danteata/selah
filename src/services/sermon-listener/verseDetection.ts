@@ -266,6 +266,14 @@ export const BOOK_MAX_CHAPTER: Record<string, number> = {
     'Jude': 1, 'Revelation': 22,
 }
 
+// Verse count map: canonical book → array of max verses per chapter (1-indexed)
+// Used to reject impossible verse references like "John 21:1000"
+// Array index = chapter number - 1, value = max verse number in that chapter
+const BOOK_MAX_VERSES: Record<string, number[]> = {
+    'John': [51, 25, 36, 54, 47, 71, 53, 59, 41, 42, 57, 50, 38, 21, 27, 33, 26, 26, 40, 31, 25],
+    'Psalm': [6, 12, 8, 8, 12, 10, 17, 9, 20, 18, 7, 8, 6, 5, 5, 11, 15, 50, 14, 9, 13, 31, 6, 10, 22, 12, 14, 9, 11, 12, 12, 11, 22, 22, 28, 12, 40, 22, 39, 43, 13, 17, 26, 12, 11, 17, 13, 14, 11, 20, 23, 19, 9, 7, 23, 13, 6, 11, 8, 12, 7, 9, 13, 19, 11, 20, 24, 17, 20, 28, 8, 14, 10, 9, 24, 13, 16, 5, 18, 8, 12, 11, 10, 9, 18, 19, 15, 13, 17, 11, 16, 17, 15, 20, 21, 10, 16, 8, 18, 12, 13, 15, 12, 9, 9, 5, 8, 13, 12, 10, 10, 9, 8, 18, 14, 10, 11, 14, 16, 19, 8, 11, 7, 10, 10, 12, 9, 6, 11, 8, 8, 10, 10, 12, 11, 7, 7, 13, 17, 13, 16, 10, 12, 15, 7, 7, 10, 8, 18, 10, 11, 9, 11, 13, 10, 10, 12, 11, 10, 10, 12, 15, 13, 11, 16, 18, 12, 12, 14, 13, 11, 12, 15, 14, 9, 9, 7, 9, 10, 6, 7, 9, 9, 9, 5, 8, 12, 12, 10, 10, 8, 12, 11, 11, 9, 13, 13, 9, 14, 13, 10, 11, 11, 12, 15, 10, 11, 11, 11, 14, 14, 12, 13, 13, 11, 15, 13, 12, 13, 13, 14, 14, 13, 11, 12, 17, 12, 12, 14, 9, 13, 11, 13, 12, 10, 15, 13, 11, 16, 15, 11, 11, 13, 12, 11, 8, 8, 8, 12, 13, 7, 13, 12, 12, 13, 16, 13, 13, 12, 11, 11, 12, 11, 9, 14, 11, 11, 11, 12, 11, 13, 13, 10, 10, 11, 11, 10, 11, 9, 10, 11, 11, 11, 10, 12, 12, 10, 9, 10, 11, 11, 11, 11, 12, 11, 9, 10, 11, 11, 11, 10, 10, 10, 11, 11, 11, 10, 11, 11, 11, 10, 12, 11, 10, 10, 176],
+}
+
 // Full verse detection pattern
 const VERSE_PATTERN = new RegExp(
     `\\b(${BOOK_PATTERN})\\s+${CHAPTER_VERSE_PATTERN}\\b`,
@@ -550,6 +558,15 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
             continue
         }
 
+        // Sanity-check: reject impossible verse numbers for the specific book/chapter
+        const maxVerses = BOOK_MAX_VERSES[alias.book]?.[chapter.value - 1]
+        if (maxVerses && verseStart.value > maxVerses) {
+            continue
+        }
+        if (verseEnd && maxVerses && verseEnd > maxVerses) {
+            continue
+        }
+
         // Higher confidence if both chapter and verse keywords are present
         const confidence = (hasChapterKeyword && hasVerseKeyword) ? 'high' : 'medium'
 
@@ -590,6 +607,22 @@ export function detectVerses(text: string): DetectedVerse[] {
         // Sanity-check chapter bounds
         const maxChapter = BOOK_MAX_CHAPTER[normalizedBook]
         if (maxChapter !== undefined && chapter > maxChapter) {
+            continue
+        }
+
+        // Check if this is followed by a time indicator (AM/PM) - not a verse
+        const matchEnd = match.index + fullMatch.length
+        const nextChars = text.slice(matchEnd, matchEnd + 3).toLowerCase()
+        if (nextChars.includes('am') || nextChars.includes('pm')) {
+            continue
+        }
+
+        // Sanity-check: reject impossible verse numbers for the specific book/chapter
+        const maxVerses = BOOK_MAX_VERSES[normalizedBook]?.[chapter - 1]
+        if (maxVerses && verseStart > maxVerses) {
+            continue
+        }
+        if (verseEndStr && maxVerses && parseInt(verseEndStr, 10) > maxVerses) {
             continue
         }
 
