@@ -59,3 +59,13 @@ HANDOVER-*.md.commandcode/
 # Session handover docs
 HANDOVER-*.md
 .commandcode/
+
+# Test coverage output
+coverage/
+
+# Database files
+*.db
+
+# Lock files (use pnpm)
+package-lock.json
+yarn.lock
