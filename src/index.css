@@ -715,6 +715,8 @@ h6 {
         0 24px 80px rgba(0, 0, 0, 0.35),
         inset 0 0 0 1px rgba(255, 255, 255, 0.04);
     transition: box-shadow 0.4s ease, border-color 0.4s ease;
+    container-type: inline-size;
+    container-name: live-monitor;
 }
 
 .studio-live-monitor.is-live {

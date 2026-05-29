@@ -17,9 +17,11 @@ interface AppShellProps {
         onSignOut: () => void
     }
     children: React.ReactNode
+    showAdminPanel?: boolean
+    onToggleAdminPanel?: () => void
 }
 
-export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children }: AppShellProps) {
+export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children, showAdminPanel, onToggleAdminPanel }: AppShellProps) {
     const openModal = useAppStore((s) => s.openModal)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
@@ -77,6 +79,8 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
                 onToggleTheme={onToggleTheme}
                 activeSchedule={activeSchedule}
                 user={user}
+                showAdminPanel={showAdminPanel}
+                onToggleAdminPanel={onToggleAdminPanel}
             />
 
             {/* Middle row: NavRail + Workspace + ContextPanel */}

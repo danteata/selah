@@ -373,6 +373,8 @@ export default function Dashboard() {
                 name: clerkUser?.firstName || clerkUser?.username || 'User',
                 onSignOut: () => signOut()
             }}
+            showAdminPanel={showAdminPanel}
+            onToggleAdminPanel={() => setShowAdminPanel(prev => !prev)}
         >
             {workspaceMode === 'dashboard' ? (
                 <DashboardLayout

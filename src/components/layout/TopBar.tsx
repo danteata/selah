@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useQuery } from 'convex/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3, Users, Plus, Check, Loader2 } from 'lucide-react'
+import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3, Users, Plus, Check, Loader2, Shield } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
@@ -19,10 +19,12 @@ interface TopBarProps {
         name: string
         onSignOut: () => void
     }
+    showAdminPanel?: boolean
+    onToggleAdminPanel?: () => void
 }
 
-export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarProps) {
-    const { currentUser } = useUserRole()
+export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminPanel, onToggleAdminPanel }: TopBarProps) {
+    const { currentUser, canAccessAdmin } = useUserRole()
     const { isOffline } = useConvexConnection()
     const churchId = currentUser?.churchId || ''
     const [showUserMenu, setShowUserMenu] = useState(false)
@@ -243,6 +245,23 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user }: TopBarPr
                 >
                     {workspaceMode === 'studio' ? <LayoutGrid className="w-4 h-4" /> : <Rows3 className="w-4 h-4" />}
                 </button>
+
+                {/* Admin Panel Toggle */}
+                {canAccessAdmin && onToggleAdminPanel && (
+                    <motion.button
+                        onClick={onToggleAdminPanel}
+                        className={`p-1.5 rounded-lg transition-all ${
+                            showAdminPanel
+                                ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)]'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                        }`}
+                        title="Admin Panel"
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                    >
+                        <Shield className="w-4 h-4" />
+                    </motion.button>
+                )}
 
                 {/* Theme Toggle */}
                 <motion.button

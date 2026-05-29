@@ -477,9 +477,9 @@ export function LiveOutput() {
 
             {/* Main Content — Next Up + Controls on left, Live Feed on right */}
             <div className="flex-1 min-h-0 flex flex-col p-4 lg:p-5 gap-3">
-                <div className="flex-1 min-h-0 flex gap-4 lg:gap-5">
+                <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-4 lg:gap-5">
                     {/* Left: Next Up + Active Slide controls + Sermon Listener */}
-                    <aside className="studio-output-sidecar w-[320px] flex-shrink-0 flex flex-col gap-3 order-1">
+                    <aside className="studio-output-sidecar w-full xl:w-[260px] 2xl:w-[300px] flex-shrink-0 flex flex-row xl:flex-col gap-3 order-1">
                         {/* Next Up Preview — 16:9 aspect ratio */}
                         <div className="flex flex-col">
                             <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Next Up</div>
