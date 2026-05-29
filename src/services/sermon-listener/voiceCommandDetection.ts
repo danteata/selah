@@ -268,10 +268,10 @@ function parseVerseNumber(text: string): number | null {
         const n = parseInt(digitMatch[1], 10)
         if (n >= 1 && n <= 150) return n
     }
-    // Try written number (e.g. "verse three")
+    // Try written number (e.g. "verse three") - use word boundary to prevent substring matches
     const lower = text.toLowerCase()
     for (const [word, num] of Object.entries(WRITTEN_NUMBERS)) {
-        if (lower.includes(word)) return num
+        if (new RegExp(`\\b${word}\\b`).test(lower)) return num
     }
     return null
 }
