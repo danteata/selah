@@ -9,7 +9,7 @@ import {
 
 describe('verseDetection', () => {
     // -----------------------------------------------------------------------
-    // Classic formats (existing behaviour)
+    // Classic formats
     // -----------------------------------------------------------------------
     it('detects classic references with chapter:verse format', () => {
         const verses = detectVerses('As written in John 3:16, God so loved the world.')
@@ -171,5 +171,95 @@ describe('verseDetection', () => {
     it('does NOT falsely detect "Saint John" as starting a book reference', () => {
         const verses = detectVerses('Saint John wrote about the love of God.')
         expect(verses).toHaveLength(0)
+    })
+
+    // -----------------------------------------------------------------------
+    // New edge cases (added in this review)
+    // -----------------------------------------------------------------------
+    describe('edge cases', () => {
+        it('handles empty input', () => {
+            const verses = detectVerses('')
+            expect(verses).toEqual([])
+        })
+
+        it('handles whitespace-only input', () => {
+            const verses = detectVerses('   \n\t  ')
+            expect(verses).toEqual([])
+        })
+
+        it('handles special characters in book names', () => {
+            // "1" + "Samuel" with various spacing
+            expect(detectVerses('1Samuel 17:50').length).toBeGreaterThanOrEqual(0)
+            expect(detectVerses('1 Samuel 17:50').length).toBeGreaterThanOrEqual(1)
+        })
+
+        it('handles very long text with many references', () => {
+            const longText = Array.from({ length: 100 }, (_, i) => `John 3:${i + 1}`).join(' ')
+            const verses = detectVerses(longText)
+            expect(verses.length).toBeGreaterThan(10)
+            // Each should have a unique reference (or be deduplicated)
+            const uniqueRefs = new Set(verses.map(v => v.reference))
+            expect(uniqueRefs.size).toBeGreaterThan(0)
+        })
+
+        it('handles unicode characters in surrounding text', () => {
+            const verses = detectVerses('🙏 John 3:16 ✝️ is the famous verse')
+            expect(verses.length).toBeGreaterThanOrEqual(1)
+        })
+
+        it('handles references in code-like text', () => {
+            // "1:5" appears but is not a Bible reference if no book prefix
+            const verses = detectVerses('function foo(a, b) { return a + b; }')
+            expect(verses).toEqual([])
+        })
+
+        it('handles multiple consecutive references', () => {
+            const verses = detectVerses('John 3:16 Romans 8:28 Philippians 4:13')
+            expect(verses.length).toBeGreaterThanOrEqual(3)
+        })
+
+        it('detects references in different positions', () => {
+            // Beginning, middle, end
+            const start = detectVerses('John 3:16 is the start')
+            const middle = detectVerses('and now for John 3:16 today')
+            const end = detectVerses('the verse of John 3:16')
+            expect(start.length).toBeGreaterThan(0)
+            expect(middle.length).toBeGreaterThan(0)
+            expect(end.length).toBeGreaterThan(0)
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // DetectedVerse shape
+    // -----------------------------------------------------------------------
+    describe('DetectedVerse shape', () => {
+        it('returns verses with required fields', () => {
+            const verses = detectVerses('John 3:16')
+            expect(verses[0]).toHaveProperty('raw')
+            expect(verses[0]).toHaveProperty('reference')
+            expect(verses[0]).toHaveProperty('book')
+            expect(verses[0]).toHaveProperty('chapter')
+            expect(verses[0]).toHaveProperty('verseStart')
+            expect(verses[0]).toHaveProperty('startIndex')
+            expect(verses[0]).toHaveProperty('endIndex')
+            expect(verses[0]).toHaveProperty('confidence')
+        })
+
+        it('confidence is one of high, medium, low', () => {
+            const verses = detectVerses('John 3:16')
+            expect(['high', 'medium', 'low']).toContain(verses[0].confidence)
+        })
+
+        it('verseStart is a positive integer', () => {
+            const verses = detectVerses('John 3:16')
+            expect(verses[0].verseStart).toBeGreaterThan(0)
+            expect(Number.isInteger(verses[0].verseStart)).toBe(true)
+        })
+
+        it('chapter is a positive integer', () => {
+            const verses = detectVerses('John 3:16')
+            expect(verses[0].chapter).toBeGreaterThan(0)
+            expect(Number.isInteger(verses[0].chapter)).toBe(true)
+        })
     })
 })

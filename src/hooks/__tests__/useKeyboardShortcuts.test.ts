@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import {
     useKeyboardShortcut,
     useKeyboardShortcuts,
@@ -217,30 +217,75 @@ describe('useNumberShortcuts', () => {
 })
 
 describe('useCtrlOrMetaActive', () => {
-    // NOTE: happy-dom does not support KeyboardEvent modifier properties
-    // (ctrlKey / metaKey) on synthetic events, so we can't verify the
-    // actual toggle behavior here. The logic is covered indirectly by the
-    // shortcut tests above, which also rely on the same modifier checks.
-    it.skip('returns true while Ctrl is held', () => {
+    // The implementation uses event.ctrlKey and event.metaKey — happy-dom
+    // supports both on synthetic KeyboardEvent objects (see the
+    // useKeyboardShortcut tests above that use { ctrlKey: true }).
+    //
+    // React state updates from event handlers are batched, so we use
+    // act() to flush them before reading result.current.
+
+    it('starts as false', () => {
         const { result } = renderHook(() => useCtrlOrMetaActive())
-
-        expect(result.current).toBe(false)
-
-        const down = new KeyboardEvent('keydown', { key: 'Control' })
-        Object.defineProperty(down, 'ctrlKey', { value: true })
-        window.dispatchEvent(down)
-        expect(result.current).toBe(true)
-
-        window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control' }))
         expect(result.current).toBe(false)
     })
 
-    it.skip('returns true while Meta is held', () => {
+    it('returns true while Ctrl is held (keydown)', async () => {
+        const { result } = renderHook(() => useCtrlOrMetaActive())
+        expect(result.current).toBe(false)
+
+        await act(async () => {
+            const down = new KeyboardEvent('keydown', {
+                key: 'Control',
+                ctrlKey: true,
+            })
+            window.dispatchEvent(down)
+        })
+
+        await waitFor(() => {
+            expect(result.current).toBe(true)
+        })
+    })
+
+    it('returns false on keyup', async () => {
         const { result } = renderHook(() => useCtrlOrMetaActive())
 
-        const event = new KeyboardEvent('keydown', { key: 'Meta' })
-        Object.defineProperty(event, 'metaKey', { value: true })
-        window.dispatchEvent(event)
-        expect(result.current).toBe(true)
+        await act(async () => {
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', ctrlKey: true }))
+        })
+        await waitFor(() => {
+            expect(result.current).toBe(true)
+        })
+
+        await act(async () => {
+            window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control' }))
+        })
+        await waitFor(() => {
+            expect(result.current).toBe(false)
+        })
+    })
+
+    it('returns true while Meta is held (keydown)', async () => {
+        const { result } = renderHook(() => useCtrlOrMetaActive())
+
+        await act(async () => {
+            const event = new KeyboardEvent('keydown', { key: 'Meta', metaKey: true })
+            window.dispatchEvent(event)
+        })
+        await waitFor(() => {
+            expect(result.current).toBe(true)
+        })
+    })
+
+    it('ignores non-modifier key presses', async () => {
+        const { result } = renderHook(() => useCtrlOrMetaActive())
+
+        await act(async () => {
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+        })
+
+        // Wait a tick to make sure the state would have updated if the
+        // handler were going to set it (it shouldn't)
+        await new Promise(r => setTimeout(r, 10))
+        expect(result.current).toBe(false)
     })
 })

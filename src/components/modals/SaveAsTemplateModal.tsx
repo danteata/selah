@@ -73,6 +73,8 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
                 appliesTo,
             })
             onClose()
+        } catch (err) {
+            console.error('[SaveAsTemplateModal] Failed to save template:', err)
         } finally {
             setIsSaving(false)
         }
