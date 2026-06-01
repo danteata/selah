@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
-import { X, Save, Upload, Image, Palette, Type, Loader2, Video } from 'lucide-react'
+import {
+    X, Save, Upload, Image, Palette, Type, Loader2, Video,
+    LayoutTemplate, PanelBottom, AlignLeft, AlignCenter, AlignRight,
+} from 'lucide-react'
 import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
 import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
 import { openFileDialog } from '../../utils/fileDialog'
@@ -7,6 +10,27 @@ import { isDesktop } from '../../platform'
 import { generateThumbnail } from '../../utils/templateThumbnail'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import type { SlideStyle } from '../../types'
+
+type TemplateLayout = 'full-text' | 'lower-third'
+
+const LOWER_THIRD_STYLES: { value: NonNullable<SlideStyle['lowerThirdStyle']>; label: string; desc: string }[] = [
+    { value: 'standard', label: 'Standard', desc: 'Dark semi-transparent bar' },
+    { value: 'minimalist', label: 'Minimalist', desc: 'Clean text, no bar' },
+    { value: 'accent-bar', label: 'Accent Bar', desc: 'Colored left stripe' },
+    { value: 'gradient-bar', label: 'Gradient', desc: 'Gradient background bar' },
+]
+
+const LOWER_THIRD_POSITIONS: { value: NonNullable<SlideStyle['lowerThirdPosition']>; icon: typeof AlignLeft }[] = [
+    { value: 'left', icon: AlignLeft },
+    { value: 'center', icon: AlignCenter },
+    { value: 'right', icon: AlignRight },
+]
+
+const ACCENT_PRESETS = [
+    '#0d9488', '#3b82f6', '#8b5cf6', '#ef4444',
+    '#f59e0b', '#10b981', '#ec4899', '#6366f1',
+]
 
 async function getConvertFileSrc(): Promise<((filePath: string) => string) | null> {
     try {
@@ -39,6 +63,13 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const [isUploading, setIsUploading] = useState(false)
     const [backgroundStorageId, setBackgroundStorageId] = useState<string | null>(null)
     const [localFilePath, setLocalFilePath] = useState<string | null>(null)
+
+    // Layout & lower-third options — lets templates define a lower-third look.
+    const [layout, setLayout] = useState<TemplateLayout>('full-text')
+    const [lowerThirdStyle, setLowerThirdStyle] = useState<NonNullable<SlideStyle['lowerThirdStyle']>>('standard')
+    const [lowerThirdPosition, setLowerThirdPosition] = useState<NonNullable<SlideStyle['lowerThirdPosition']>>('left')
+    const [lowerThirdAccentColor, setLowerThirdAccentColor] = useState<string>('#0d9488')
+    const [lowerThirdSubtitle, setLowerThirdSubtitle] = useState<string>('')
 
     const isEditing = !!editingTemplate
 
@@ -90,7 +121,14 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setDescription(editingTemplate.description || '')
 
                 // Parse slideId to get content and background
-                let slideData: { contents?: string[]; background?: string; backgroundType?: 'image' | 'gradient' | 'color'; localFilePath?: string } | null = null
+                let slideData: {
+                    contents?: string[]
+                    background?: string
+                    backgroundType?: 'image' | 'gradient' | 'color' | 'video'
+                    localFilePath?: string
+                    layout?: TemplateLayout
+                    slideStyle?: SlideStyle
+                } | null = null
                 if (typeof editingTemplate.slideId === 'string') {
                     try {
                         slideData = JSON.parse(editingTemplate.slideId)
@@ -98,7 +136,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                         // If parsing fails, use defaults
                     }
                 } else if (typeof editingTemplate.slideId === 'object' && editingTemplate.slideId !== null) {
-                    slideData = editingTemplate.slideId as { contents?: string[]; background?: string; backgroundType?: 'image' | 'gradient' | 'color' }
+                    slideData = editingTemplate.slideId as unknown as typeof slideData
                 }
 
                 setContent(slideData?.contents?.[0] || '')
@@ -107,6 +145,13 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
                 setLocalFilePath(slideData?.localFilePath || null)
+
+                // Layout & lower-third options
+                setLayout(slideData?.layout === 'lower-third' ? 'lower-third' : 'full-text')
+                setLowerThirdStyle(slideData?.slideStyle?.lowerThirdStyle || 'standard')
+                setLowerThirdPosition(slideData?.slideStyle?.lowerThirdPosition || 'left')
+                setLowerThirdAccentColor(slideData?.slideStyle?.lowerThirdAccentColor || '#0d9488')
+                setLowerThirdSubtitle(slideData?.slideStyle?.lowerThirdSubtitle || '')
             } else {
                 // Reset form for new template
                 setName('')
@@ -119,6 +164,12 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
                 setLocalFilePath(null)
+
+                setLayout('full-text')
+                setLowerThirdStyle('standard')
+                setLowerThirdPosition('left')
+                setLowerThirdAccentColor('#0d9488')
+                setLowerThirdSubtitle('')
             }
         }
     }, [isOpen, editingTemplate])
@@ -329,14 +380,24 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 thumbnail = await generateThumbnail(background, 'video', content || name, resolvedBackground || undefined)
             }
 
+            const slideStyle: SlideStyle | undefined = layout === 'lower-third'
+                ? {
+                    lowerThirdStyle,
+                    lowerThirdPosition,
+                    lowerThirdAccentColor,
+                    lowerThirdSubtitle,
+                }
+                : undefined
+
             const slideData = {
                 type: 'text',
-                layout: 'full-text',
+                layout,
                 contents: content ? [content] : ['Your content here'],
                 background: resolvedBackground || background,
                 backgroundType,
                 backgroundStorageId,
                 localFilePath: localFilePath || undefined,
+                ...(slideStyle ? { slideStyle } : {}),
             }
 
             if (isEditing && editingTemplate) {
@@ -414,7 +475,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 />
                             ) : (
                                 <div
-                                    className="w-full h-full flex items-center justify-center p-4 text-center"
+                                    className="absolute inset-0 w-full h-full"
                                     style={{
                                         background: resolvedBackground,
                                         backgroundSize: 'cover',
@@ -422,9 +483,37 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                     }}
                                 />
                             )}
-                            <span className="relative text-white text-lg font-medium drop-shadow-lg z-10">
-                                {content || 'Your content here'}
-                            </span>
+                            {layout === 'lower-third' ? (
+                                <div
+                                    className="absolute inset-x-0 bottom-0 px-4 py-3 flex flex-col z-10"
+                                    style={{
+                                        alignItems: lowerThirdPosition === 'center' ? 'center'
+                                            : lowerThirdPosition === 'right' ? 'flex-end'
+                                                : 'flex-start',
+                                        background: lowerThirdStyle === 'minimalist' ? 'transparent'
+                                            : lowerThirdStyle === 'gradient-bar'
+                                                ? `linear-gradient(135deg, ${lowerThirdAccentColor}ee, ${lowerThirdAccentColor}88)`
+                                                : 'rgba(0,0,0,0.75)',
+                                        backdropFilter: lowerThirdStyle === 'minimalist' ? undefined : 'blur(8px)',
+                                        borderLeft: lowerThirdStyle === 'accent-bar'
+                                            ? `4px solid ${lowerThirdAccentColor}`
+                                            : undefined,
+                                    }}
+                                >
+                                    <span className="text-white font-semibold drop-shadow-lg text-base">
+                                        {content || 'Speaker Name'}
+                                    </span>
+                                    {lowerThirdSubtitle && (
+                                        <span className="text-white/80 drop-shadow-lg text-xs mt-0.5">
+                                            {lowerThirdSubtitle}
+                                        </span>
+                                    )}
+                                </div>
+                            ) : (
+                                <span className="relative text-white text-lg font-medium drop-shadow-lg z-10">
+                                    {content || 'Your content here'}
+                                </span>
+                            )}
                         </div>
 
                         {/* Name */}
@@ -446,16 +535,180 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                         <div>
                             <label className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                                 <Type className="w-4 h-4" />
-                                Default Content
+                                {layout === 'lower-third' ? 'Default Title' : 'Default Content'}
                             </label>
                             <input
                                 type="text"
                                 value={content}
                                 onChange={(e) => setContent(e.target.value)}
-                                placeholder="Enter default text for this template..."
+                                placeholder={layout === 'lower-third'
+                                    ? 'e.g. Pastor John Smith'
+                                    : 'Enter default text for this template...'}
                                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                             />
                         </div>
+
+                        {/* Layout selector — full-text vs lower-third */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Layout
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setLayout('full-text')}
+                                    className={`flex items-center gap-3 px-3 py-3 rounded-lg border-2 text-left transition-all ${
+                                        layout === 'full-text'
+                                            ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/5'
+                                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                    }`}
+                                >
+                                    <LayoutTemplate className={`w-5 h-5 ${layout === 'full-text' ? 'text-[var(--accent-teal)]' : 'text-gray-400'}`} />
+                                    <div className="flex-1">
+                                        <div className={`text-sm font-medium ${layout === 'full-text' ? 'text-[var(--accent-teal)]' : 'text-gray-900 dark:text-white'}`}>
+                                            Full Text
+                                        </div>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                            Centered, fills the screen
+                                        </div>
+                                    </div>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setLayout('lower-third')}
+                                    className={`flex items-center gap-3 px-3 py-3 rounded-lg border-2 text-left transition-all ${
+                                        layout === 'lower-third'
+                                            ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/5'
+                                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                    }`}
+                                >
+                                    <PanelBottom className={`w-5 h-5 ${layout === 'lower-third' ? 'text-[var(--accent-teal)]' : 'text-gray-400'}`} />
+                                    <div className="flex-1">
+                                        <div className={`text-sm font-medium ${layout === 'lower-third' ? 'text-[var(--accent-teal)]' : 'text-gray-900 dark:text-white'}`}>
+                                            Lower Third
+                                        </div>
+                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                            Name banner across the bottom
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Lower-third specific controls */}
+                        {layout === 'lower-third' && (
+                            <div className="space-y-4 p-4 rounded-lg border border-[var(--accent-teal)]/30 bg-[var(--accent-teal)]/[0.03]">
+                                {/* Subtitle */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                                        Default Subtitle
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={lowerThirdSubtitle}
+                                        onChange={(e) => setLowerThirdSubtitle(e.target.value)}
+                                        placeholder="e.g. Senior Pastor · Grace Community Church"
+                                        className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/40 focus:border-[var(--accent-teal)]"
+                                    />
+                                </div>
+
+                                {/* Style */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                                        Style
+                                    </label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {LOWER_THIRD_STYLES.map((opt) => (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                onClick={() => setLowerThirdStyle(opt.value)}
+                                                className={`px-3 py-2 rounded-lg border-2 text-left transition-all ${
+                                                    lowerThirdStyle === opt.value
+                                                        ? 'border-[var(--accent-teal)] bg-white dark:bg-gray-800'
+                                                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                                }`}
+                                            >
+                                                <span className={`block text-sm font-medium ${
+                                                    lowerThirdStyle === opt.value
+                                                        ? 'text-[var(--accent-teal)]'
+                                                        : 'text-gray-900 dark:text-white'
+                                                }`}>
+                                                    {opt.label}
+                                                </span>
+                                                <span className="block text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                                                    {opt.desc}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Position */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                                        Position
+                                    </label>
+                                    <div className="flex gap-2">
+                                        {LOWER_THIRD_POSITIONS.map((opt) => {
+                                            const Icon = opt.icon
+                                            return (
+                                                <button
+                                                    key={opt.value}
+                                                    type="button"
+                                                    onClick={() => setLowerThirdPosition(opt.value)}
+                                                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
+                                                        lowerThirdPosition === opt.value
+                                                            ? 'border-[var(--accent-teal)] bg-white dark:bg-gray-800 text-[var(--accent-teal)]'
+                                                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-600 dark:text-gray-400'
+                                                    }`}
+                                                >
+                                                    <Icon className="w-4 h-4" />
+                                                    <span className="text-sm font-medium capitalize">{opt.value}</span>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Accent Color */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                                        <Palette className="w-3.5 h-3.5 inline mr-1.5" />
+                                        Accent Color
+                                    </label>
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            {ACCENT_PRESETS.map((color) => (
+                                                <button
+                                                    key={color}
+                                                    type="button"
+                                                    onClick={() => setLowerThirdAccentColor(color)}
+                                                    className={`w-7 h-7 rounded-md transition-all ${
+                                                        lowerThirdAccentColor === color
+                                                            ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900 scale-110'
+                                                            : 'hover:scale-105'
+                                                    }`}
+                                                    style={{
+                                                        backgroundColor: color,
+                                                        outline: lowerThirdAccentColor === color ? `2px solid ${color}` : undefined,
+                                                        outlineOffset: lowerThirdAccentColor === color ? '2px' : undefined,
+                                                    }}
+                                                    title={color}
+                                                />
+                                            ))}
+                                        </div>
+                                        <input
+                                            type="color"
+                                            value={lowerThirdAccentColor}
+                                            onChange={(e) => setLowerThirdAccentColor(e.target.value)}
+                                            className="w-7 h-7 rounded-md border-0 cursor-pointer"
+                                        />
+                                        <span className="text-[11px] text-gray-500 font-mono">{lowerThirdAccentColor}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Background Type Selection */}
                         <div>

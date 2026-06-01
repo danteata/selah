@@ -41,6 +41,11 @@ function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, d
         tempSlide.backgroundStorageId = templateSlide.backgroundStorageId || null
         tempSlide.backgroundVideoKey = templateSlide.backgroundVideoKey || null
         tempSlide.localFilePath = templateSlide.localFilePath || undefined
+        // Layout determines fundamental rendering (e.g. lower-third vs full-text). A template that
+        // declares a non-default layout should propagate it to the new slide.
+        if (templateSlide.layout) {
+            tempSlide.layout = templateSlide.layout
+        }
         if (templateSlide.slideStyle) {
             tempSlide.slideStyle = { ...tempSlide.slideStyle, ...templateSlide.slideStyle }
         }
