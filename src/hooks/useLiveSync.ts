@@ -35,6 +35,7 @@ export function useLiveSync() {
                 liveWindowFullscreen: settings.liveWindowFullscreen,
                 songAndHymnLabelsVisibility: settings.songAndHymnLabelsVisibility,
                 defaultFont: settings.defaultFont,
+                verseRefPosition: settings.slideStyles?.verseRefPosition,
             },
             overlay: activeOverlay,
             alert: activeAlert,

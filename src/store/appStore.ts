@@ -235,6 +235,7 @@ interface AppStore extends AppState {
     setLiveWindowFullscreen: (fullscreen: boolean) => void
     setLiveOutputMonitorId: (monitorId: string | null) => void
     setLinesPerSlide: (lines: number) => void
+    setVerseRefPosition: (position: 'top' | 'bottom') => void
     setAnimations: (animations: boolean) => void
     setFootnotes: (footnotes: boolean) => void
     setSongAndHymnLabelsVisibility: (visibility: boolean) => void
@@ -663,6 +664,20 @@ export const useAppStore = create<AppStore>()(
                         slideStyles: {
                             ...state.settings.slideStyles,
                             linesPerSlide: lines
+                        }
+                    }
+                }))
+            },
+
+            // Global default for bible verse reference position (above or below the verse body).
+            // Per-slide `slide.slideStyle.verseRefPosition` overrides this at render time.
+            setVerseRefPosition: (position) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        slideStyles: {
+                            ...state.settings.slideStyles,
+                            verseRefPosition: position
                         }
                     }
                 }))

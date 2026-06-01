@@ -295,6 +295,8 @@ export interface SlideStyle {
     lowerThirdPosition?: 'left' | 'center' | 'right'
     lowerThirdAccentColor?: string
     lowerThirdSubtitle?: string
+    // Verse reference position
+    verseRefPosition?: 'top' | 'bottom'
 }
 
 export interface Advert {

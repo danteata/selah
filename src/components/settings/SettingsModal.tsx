@@ -31,6 +31,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
     const setFootnotes = useAppStore((state) => state.setFootnotes)
     const setLinesPerSlide = useAppStore((state) => state.setLinesPerSlide)
     const setTransitionInterval = useAppStore((state) => state.setTransitionInterval)
+    const setVerseRefPosition = useAppStore((state) => state.setVerseRefPosition)
 
     useEffect(() => {
         if (initialTab) {
@@ -161,7 +162,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                         {activeTab === 'bible' && (
                             <BibleSettings
                                 settings={settings}
-                                onUpdate={{ setDefaultBibleVersion, setFootnotes }}
+                                onUpdate={{ setDefaultBibleVersion, setFootnotes, setVerseRefPosition }}
                             />
                         )}
                         {activeTab === 'migration' && <SongMigrationWizard onClose={onClose} />}
@@ -647,8 +648,11 @@ function BibleSettings({
     onUpdate: {
         setDefaultBibleVersion: any
         setFootnotes: any
+        setVerseRefPosition: (position: 'top' | 'bottom') => void
     }
 }) {
+    const currentRefPos: 'top' | 'bottom' = settings.slideStyles?.verseRefPosition ?? 'bottom'
+
     return (
         <div className="space-y-6">
             {/* Footnotes Toggle */}
@@ -670,6 +674,39 @@ function BibleSettings({
                         style={{ transform: settings.footnotes ? 'translateX(28px)' : 'translateX(0)' }}
                     />
                 </button>
+            </div>
+
+            {/* Verse reference position — applies to every bible slide unless explicitly overridden */}
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Verse Reference Position
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-3">
+                    Default position of the verse reference (e.g. "John 11:32 · KJV") for all bible slides.
+                    Individual slides can override this in the slide editor.
+                </p>
+                <div className="inline-flex bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                    <button
+                        onClick={() => onUpdate.setVerseRefPosition('top')}
+                        className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
+                            currentRefPos === 'top'
+                                ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white'
+                                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700/50'
+                        }`}
+                    >
+                        Above the verse
+                    </button>
+                    <button
+                        onClick={() => onUpdate.setVerseRefPosition('bottom')}
+                        className={`px-4 py-1.5 text-xs font-medium rounded transition-colors ${
+                            currentRefPos === 'bottom'
+                                ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white'
+                                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700/50'
+                        }`}
+                    >
+                        Below the verse
+                    </button>
+                </div>
             </div>
 
             {/* Bible Version Settings */}

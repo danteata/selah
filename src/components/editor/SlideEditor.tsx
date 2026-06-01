@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import {
     AlignLeft, AlignCenter, AlignRight,
     Bold, Italic, Type, ImageIcon, Palette,
-    ZoomIn, ZoomOut, RotateCcw, Trash2, Save, X
+    ZoomIn, ZoomOut, RotateCcw, Trash2, Save, X,
+    ArrowUpToLine, ArrowDownToLine
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Slide, SlideStyle } from '../../types'
@@ -197,6 +198,61 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                                     <ZoomIn className="w-4 h-4" />
                                 </button>
                             </div>
+
+                            {/* Verse reference position — bible slides only.
+                                Tri-state: Default (uses global setting), Above, Below. */}
+                            {editedSlide.type === 'bible' && (() => {
+                                const slideRefPos = editedSlide.slideStyle?.verseRefPosition // undefined | 'top' | 'bottom'
+                                const globalRefPos = settings.slideStyles?.verseRefPosition ?? 'bottom'
+                                const usingDefault = slideRefPos === undefined
+                                return (
+                                    <>
+                                        <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" />
+                                        <div className="flex items-center gap-1.5" title={`Verse reference position (global default: ${globalRefPos === 'top' ? 'Above' : 'Below'})`}>
+                                            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                                Ref
+                                            </span>
+                                            <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+                                                <button
+                                                    onClick={() => updateStyle({ verseRefPosition: undefined })}
+                                                    title={`Use global default (${globalRefPos === 'top' ? 'Above' : 'Below'})`}
+                                                    className={`px-2 py-1 rounded text-xs ${
+                                                        usingDefault
+                                                            ? 'bg-white dark:bg-gray-600 shadow-sm text-gray-900 dark:text-white'
+                                                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                                    }`}
+                                                >
+                                                    Default
+                                                </button>
+                                                <button
+                                                    onClick={() => updateStyle({ verseRefPosition: 'top' })}
+                                                    title="Reference above body (override)"
+                                                    className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${
+                                                        slideRefPos === 'top'
+                                                            ? 'bg-white dark:bg-gray-600 shadow-sm text-gray-900 dark:text-white'
+                                                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                                    }`}
+                                                >
+                                                    <ArrowUpToLine className="w-3.5 h-3.5" />
+                                                    Above
+                                                </button>
+                                                <button
+                                                    onClick={() => updateStyle({ verseRefPosition: 'bottom' })}
+                                                    title="Reference below body (override)"
+                                                    className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${
+                                                        slideRefPos === 'bottom'
+                                                            ? 'bg-white dark:bg-gray-600 shadow-sm text-gray-900 dark:text-white'
+                                                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                                    }`}
+                                                >
+                                                    <ArrowDownToLine className="w-3.5 h-3.5" />
+                                                    Below
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </>
+                                )
+                            })()}
                         </div>
 
                         {/* Content Blocks */}
