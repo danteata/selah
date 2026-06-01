@@ -542,23 +542,26 @@ export function LiveOutput() {
                                                 )
                                             })()
                                         ) : (
-                                            <div className="absolute inset-0 flex flex-col p-3 bg-black/40">
+                                            // Default branch — no opaque overlay so the slide's video/image bg
+                                            // shows through. Text legibility is carried by drop-shadow-2xl and
+                                            // a subtle vignette at the top/bottom edges only where the caption sits.
+                                            <div className="absolute inset-0 flex flex-col p-3">
                                                 {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
                                                     <div
-                                                        className="shrink-0 text-center text-white/65 text-[9px] pb-1 truncate"
+                                                        className="shrink-0 text-center text-white text-[11px] font-medium pb-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
                                                         dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
                                                     />
                                                 )}
                                                 <AutoFitText
                                                     html={nextUpBodyHtml}
-                                                    className="flex-1 min-h-0 text-white/80 text-center drop-shadow-lg"
-                                                    minPx={8}
-                                                    maxPx={32}
+                                                    className="flex-1 min-h-0 text-white text-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]"
+                                                    minPx={10}
+                                                    maxPx={36}
                                                     style={{ lineHeight: 1.2 }}
                                                 />
                                                 {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
                                                     <div
-                                                        className="shrink-0 text-center text-white/55 text-[9px] pt-1 truncate"
+                                                        className="shrink-0 text-center text-white text-[11px] font-medium pt-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
                                                         dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
                                                     />
                                                 )}
@@ -721,7 +724,7 @@ export function LiveOutput() {
                                                         className="shrink-0 text-white/85 drop-shadow-lg"
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || 'Inter',
-                                                            fontSize: 'clamp(10px, 2cqw, 22px)',
+                                                            fontSize: 'clamp(14px, 3cqw, 36px)',
                                                             lineHeight: 1.25,
                                                             fontWeight: 500,
                                                             width: '100%',
@@ -772,7 +775,7 @@ export function LiveOutput() {
                                                         className="shrink-0 text-center text-white/85 pb-2 drop-shadow-lg"
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || 'Inter',
-                                                            fontSize: 'clamp(12px, 2.2cqw, 32px)',
+                                                            fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.3,
                                                             fontWeight: 600,
                                                         }}
@@ -797,7 +800,7 @@ export function LiveOutput() {
                                                         className="shrink-0 text-center text-white/85 pt-2 drop-shadow-lg"
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || 'Inter',
-                                                            fontSize: 'clamp(12px, 2.2cqw, 32px)',
+                                                            fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.3,
                                                             fontWeight: 600,
                                                         }}

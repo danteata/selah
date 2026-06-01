@@ -444,7 +444,7 @@ export default function LiveView() {
                             className="shrink-0 text-white/85 drop-shadow-lg"
                             style={{
                                 fontFamily: slide.slideStyle?.font || 'Inter',
-                                fontSize: 'clamp(14px, 1.6vw, 32px)',
+                                fontSize: 'clamp(20px, 2.4vw, 48px)',
                                 lineHeight: 1.25,
                                 fontWeight: 500,
                                 letterSpacing: '0.02em',
@@ -569,7 +569,7 @@ export default function LiveView() {
                                     className="shrink-0 text-center pb-3 text-white/85 drop-shadow-lg"
                                     style={{
                                         fontFamily: slide.slideStyle?.font || 'Inter',
-                                        fontSize: 'clamp(20px, 2.4vw, 56px)',
+                                        fontSize: 'clamp(28px, 3.2vw, 80px)',
                                         lineHeight: 1.3,
                                         fontWeight: 600,
                                         letterSpacing: '0.01em',
@@ -599,7 +599,7 @@ export default function LiveView() {
                                     className="shrink-0 text-center pt-3 text-white/85 drop-shadow-lg"
                                     style={{
                                         fontFamily: slide.slideStyle?.font || 'Inter',
-                                        fontSize: 'clamp(20px, 2.4vw, 56px)',
+                                        fontSize: 'clamp(28px, 3.2vw, 80px)',
                                         lineHeight: 1.3,
                                         fontWeight: 600,
                                         letterSpacing: '0.01em',
