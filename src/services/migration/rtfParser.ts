@@ -14,7 +14,11 @@ const DESTINATION_WORDS = new Set([
     'pnseclvl', 'author', 'title', 'subject', 'keywords', 'comment',
     'operator', 'company', 'manager', 'doccomm', 'creatim', 'revtim',
     'printim', 'buptim', 'version', 'edmins', 'nofpages', 'nofwords',
-    'nofchars', 'nofcharsws', 'id', 'vern', 'pntxtb', 'pntxta'
+    'nofchars', 'nofcharsws', 'id', 'vern', 'pntxtb', 'pntxta',
+    // EasyWorship specific destination markers
+    'sdparawysiwghidden', 'sdlistlevel', 'sdfsreal', 'sdfsdef', 'sdfsauto',
+    'sdslidemarker', 'sdewparatemplatestyle', 'sdastextstyle', 'sdasfactor',
+    'sdasbaseline', 'sdlistlevel', 'deff'
 ]);
 
 /**
