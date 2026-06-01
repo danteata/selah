@@ -4,6 +4,7 @@ import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useAppStore } from '../../store/appStore'
 
 interface SlideCardProps {
     slide: Slide
@@ -51,12 +52,19 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
 
     // Check if this is a video background
     const isVideoBackground = slide.backgroundType === 'video' && backgroundUrl
-    const previewHtml = slide.type === 'bible' && slide.contents[1]
-        ? `${slide.contents[0] || ''}${slide.contents[1] || ''}`
-        : (slide.contents[0] || '')
+
+    // Bible slides have a separate reference label (contents[1]) that can sit above or below the body.
+    const isBibleWithRef = slide.type === 'bible' && !!slide.contents[1]
+    const globalVerseRefPosition = useAppStore((state) => state.settings.slideStyles?.verseRefPosition)
+    const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom'
+    const refOnTop = isBibleWithRef && effectiveRefPos === 'top'
+
+    const previewBodyHtml = slide.contents[0] || ''
+    const previewRefHtml = isBibleWithRef ? (slide.contents[1] || '') : ''
 
     const cardFontSize = (() => {
-        const len = previewHtml?.length || 0
+        const measuringText = previewBodyHtml + previewRefHtml
+        const len = measuringText?.length || 0
         if (len === 0) return '0.75rem'
         if (len < 100) return '0.75rem'
         if (len < 200) return '0.7rem'
@@ -136,10 +144,11 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                 )}
                 {slide.contents[0] && slide.contents[0] !== '<p></p>' && slide.contents[0] !== '' && (
                     slide.layout === 'lower-third' ? (
-                        <div className="absolute inset-x-0 bottom-0">
+                        <div className="absolute inset-x-0 bottom-0" style={{ height: '30%' }}>
                             <div
-                                className="px-3 py-2"
+                                className="w-full h-full flex flex-col justify-center px-3 py-1.5"
                                 style={{
+                                    gap: '2px',
                                     background: slide.slideStyle?.lowerThirdStyle === 'minimalist' ? 'transparent'
                                         : slide.slideStyle?.lowerThirdStyle === 'gradient-bar'
                                             ? `linear-gradient(135deg, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`
@@ -151,23 +160,44 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                                 }}
                             >
                                 <div
-                                    className="text-white text-xs font-semibold line-clamp-1 drop-shadow-lg tiptap-preview"
-                                    dangerouslySetInnerHTML={{ __html: slide.contents[0] }}
+                                    className="text-white text-[10px] font-semibold line-clamp-2 drop-shadow-lg tiptap-preview"
+                                    style={{ lineHeight: 1.2 }}
+                                    dangerouslySetInnerHTML={{ __html: previewBodyHtml }}
                                 />
-                                {slide.slideStyle?.lowerThirdSubtitle && (
-                                    <div className="text-white/70 text-[9px] line-clamp-1 mt-0.5">
+                                {previewRefHtml && (
+                                    <div
+                                        className="text-white/80 text-[8px] line-clamp-1 drop-shadow-lg tiptap-preview"
+                                        dangerouslySetInnerHTML={{ __html: previewRefHtml }}
+                                    />
+                                )}
+                                {!previewRefHtml && slide.slideStyle?.lowerThirdSubtitle && (
+                                    <div className="text-white/70 text-[8px] line-clamp-1">
                                         {slide.slideStyle.lowerThirdSubtitle}
                                     </div>
                                 )}
                             </div>
                         </div>
                     ) : (
-                        <div className="absolute inset-0 flex items-center justify-center p-2">
+                        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 gap-1">
+                            {refOnTop && previewRefHtml && (
                                 <div
-                                    className="text-white text-center drop-shadow-lg tiptap-preview"
-                                    style={{ fontSize: cardFontSize }}
-                                dangerouslySetInnerHTML={{ __html: previewHtml }}
+                                    className="text-white/80 text-center drop-shadow-lg tiptap-preview line-clamp-1 font-semibold"
+                                    style={{ fontSize: `calc(${cardFontSize} * 0.85)` }}
+                                    dangerouslySetInnerHTML={{ __html: previewRefHtml }}
+                                />
+                            )}
+                            <div
+                                className="text-white text-center drop-shadow-lg tiptap-preview"
+                                style={{ fontSize: cardFontSize }}
+                                dangerouslySetInnerHTML={{ __html: previewBodyHtml }}
                             />
+                            {!refOnTop && previewRefHtml && (
+                                <div
+                                    className="text-white/80 text-center drop-shadow-lg tiptap-preview line-clamp-1 font-semibold"
+                                    style={{ fontSize: `calc(${cardFontSize} * 0.85)` }}
+                                    dangerouslySetInnerHTML={{ __html: previewRefHtml }}
+                                />
+                            )}
                         </div>
                     )
                 )}

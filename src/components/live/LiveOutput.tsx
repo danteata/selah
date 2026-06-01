@@ -10,6 +10,7 @@ import { useLocalBackground } from '../../hooks/useLocalBackground'
 import type { Slide, Scripture, Countdown } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
+import { AutoFitText } from './AutoFitText'
 import { BibleVerseNavigator } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
@@ -20,20 +21,6 @@ function parseTimeStringToSeconds(timeStr: string): number {
     if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
     if (parts.length === 2) return parts[0] * 60 + parts[1]
     return 0
-}
-
-// Calculate content-aware font size for the studio monitor (vw units, more aggressive than the full-screen version)
-function monitorFontSize(content: string): number {
-    const len = content?.length || 0
-    if (len === 0) return 2.5
-    if (len < 50) return 3.5
-    if (len < 100) return 3
-    if (len < 200) return 2.5
-    if (len < 400) return 2
-    if (len < 700) return 1.6
-    if (len < 1000) return 1.3
-    if (len < 1500) return 1.1
-    return 0.9
 }
 
 // Helper: format total seconds to "HH:MM:SS" or "MM:SS"
@@ -87,6 +74,8 @@ export function LiveOutput() {
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
     const openModal = useAppStore((state) => state.openModal)
+    // Global default for verse reference position (per-slide setting overrides this at render time).
+    const globalVerseRefPosition = useAppStore((state) => state.settings.slideStyles?.verseRefPosition)
 
     // Shared live session — operator controls
     const {
@@ -177,16 +166,13 @@ export function LiveOutput() {
     // Determine the background URL for next slide preview
     const nextSlideBackground = nextSlideFileUrl || nextSlideLocalBg
     const isNextSlideVideo = nextSlide?.backgroundType === 'video' && nextSlideBackground
-    const liveHtml = liveSlide
-        ? (liveSlide.type === 'bible' && liveSlide.contents[1]
-            ? `${liveSlide.contents[0] || ''}${liveSlide.contents[1] || ''}`
-            : (liveSlide.contents[0] || ''))
-        : ''
-    const nextUpHtml = nextSlide
-        ? (nextSlide.type === 'bible' && nextSlide.contents[1]
-            ? `${nextSlide.contents[0] || ''}${nextSlide.contents[1] || ''}`
-            : (nextSlide.contents[0] || ''))
-        : ''
+
+    // Split slide HTML into body + reference for two-zone layout (matches LiveView).
+    // For bible slides contents[1] is the "Book Chapter:Verse · Version" label.
+    const liveBodyHtml = liveSlide?.contents[0] || ''
+    const liveRefHtml = liveSlide?.type === 'bible' ? (liveSlide.contents[1] || '') : ''
+    const nextUpBodyHtml = nextSlide?.contents[0] || ''
+    const nextUpRefHtml = nextSlide?.type === 'bible' ? (nextSlide.contents[1] || '') : ''
 
     const handleSetLiveSlide = useCallback((slideId: string) => {
         if (isConnected && !isOperator && !isOpen) {
@@ -427,13 +413,12 @@ export function LiveOutput() {
                         </h2>
                     </div>
                     {isConnected && roleLabel && (
-                        <span className={`flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${
-                            isOperator
-                                ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                                : isContributor
+                        <span className={`flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${isOperator
+                            ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                            : isContributor
                                 ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
                                 : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-                        }`}>
+                            }`}>
                             {isOperator && <Crown className="w-2.5 h-2.5" />}
                             {isContributor && <Shield className="w-2.5 h-2.5" />}
                             {roleLabel}
@@ -501,13 +486,84 @@ export function LiveOutput() {
                                                 autoPlay loop muted playsInline
                                             />
                                         )}
-                                        <div className="absolute inset-0 flex items-center justify-center p-4 bg-black/40">
-                                            <div
-                                                className="text-white/70 text-center drop-shadow-lg overflow-hidden"
-                                                style={{ fontSize: `${monitorFontSize(nextUpHtml) * 0.35}vw`, lineHeight: 1.2 }}
-                                                dangerouslySetInnerHTML={{ __html: nextUpHtml }}
-                                            />
-                                        </div>
+                                        {nextSlide.layout === 'lower-third' ? (
+                                            /* Lower-third Next Up — body in a bottom strip, reference/subtitle as caption */
+                                            (() => {
+                                                const isBibleNU = nextSlide.type === 'bible'
+                                                const subtitleNU = nextSlide.slideStyle?.lowerThirdSubtitle || ''
+                                                const captionNU = isBibleNU ? nextUpRefHtml : ''
+                                                const captionOnTopNU = isBibleNU &&
+                                                    (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top'
+
+                                                const alignItemsNU = nextSlide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
+                                                    : nextSlide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
+                                                        : 'flex-start'
+                                                const textAlignNU = (nextSlide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left'
+
+                                                const styleBarNU: React.CSSProperties =
+                                                    nextSlide.slideStyle?.lowerThirdStyle === 'minimalist'
+                                                        ? { background: 'transparent' }
+                                                        : nextSlide.slideStyle?.lowerThirdStyle === 'accent-bar'
+                                                            ? {
+                                                                background: 'rgba(0,0,0,0.75)',
+                                                                borderLeft: `2px solid ${nextSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
+                                                            }
+                                                            : nextSlide.slideStyle?.lowerThirdStyle === 'gradient-bar'
+                                                                ? {
+                                                                    background: `linear-gradient(135deg, ${nextSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${nextSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
+                                                                }
+                                                                : { background: 'rgba(0,0,0,0.75)' }
+
+                                                const captionElNU = (captionNU || subtitleNU) && (
+                                                    <div
+                                                        className="shrink-0 text-white/80 text-[8px] line-clamp-1 truncate"
+                                                        style={{ width: '100%', textAlign: textAlignNU }}
+                                                        {...(captionNU
+                                                            ? { dangerouslySetInnerHTML: { __html: captionNU } }
+                                                            : { children: subtitleNU })}
+                                                    />
+                                                )
+
+                                                return (
+                                                    <div className="absolute inset-x-0 bottom-0" style={{ height: '32%' }}>
+                                                        <div
+                                                            className="w-full h-full flex flex-col px-2 py-1"
+                                                            style={{ alignItems: alignItemsNU, gap: '2px', ...styleBarNU }}
+                                                        >
+                                                            {captionOnTopNU && captionElNU}
+                                                            <div
+                                                                className="flex-1 min-h-0 text-white text-[10px] font-semibold drop-shadow-lg tiptap-preview line-clamp-2 leading-tight"
+                                                                style={{ width: '100%', textAlign: textAlignNU }}
+                                                                dangerouslySetInnerHTML={{ __html: nextUpBodyHtml }}
+                                                            />
+                                                            {!captionOnTopNU && captionElNU}
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })()
+                                        ) : (
+                                            <div className="absolute inset-0 flex flex-col p-3 bg-black/40">
+                                                {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
+                                                    <div
+                                                        className="shrink-0 text-center text-white/65 text-[9px] pb-1 truncate"
+                                                        dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
+                                                    />
+                                                )}
+                                                <AutoFitText
+                                                    html={nextUpBodyHtml}
+                                                    className="flex-1 min-h-0 text-white/80 text-center drop-shadow-lg"
+                                                    minPx={8}
+                                                    maxPx={32}
+                                                    style={{ lineHeight: 1.2 }}
+                                                />
+                                                {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
+                                                    <div
+                                                        className="shrink-0 text-center text-white/55 text-[9px] pt-1 truncate"
+                                                        dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
+                                                    />
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center bg-black/30 text-[var(--text-muted)] italic text-[10px]">
@@ -617,19 +673,139 @@ export function LiveOutput() {
                                                 autoPlay loop muted playsInline
                                             />
                                         )}
-                                        <div className="absolute inset-0 flex items-center justify-center p-[5%]">
-                                            {liveSlide.type === 'countdown' ? (
-                                                <div className="text-white font-mono font-bold tabular-nums drop-shadow-2xl" style={{ fontSize: '8vw' }}>
-                                                    {formatSecondsToTime(previewCountdownSeconds)}
-                                                </div>
-                                            ) : (
-                                                <div
-                                                    className="text-white text-center drop-shadow-2xl tiptap-preview w-full max-w-full max-h-full overflow-hidden"
-                                                    style={{ fontSize: `${monitorFontSize(liveHtml)}vw`, lineHeight: 1.3 }}
-                                                    dangerouslySetInnerHTML={{ __html: liveHtml }}
+                                        {liveSlide.type === 'countdown' ? (
+                                            <div className="absolute inset-0 flex items-center justify-center p-6">
+                                                <AutoFitText
+                                                    html={formatSecondsToTime(previewCountdownSeconds)}
+                                                    className="w-full h-full text-white font-mono font-bold tabular-nums drop-shadow-2xl"
+                                                    minPx={24}
+                                                    maxPx={320}
+                                                    style={{ lineHeight: 1 }}
                                                 />
-                                            )}
-                                        </div>
+                                            </div>
+                                        ) : liveSlide.layout === 'lower-third' ? (
+                                            /* Lower Third Preview — body auto-fits inside a bottom strip, reference as caption */
+                                            (() => {
+                                                const isBibleLT = liveSlide.type === 'bible'
+                                                const subtitleLT = liveSlide.slideStyle?.lowerThirdSubtitle || ''
+                                                const captionLT = isBibleLT ? liveRefHtml : ''
+                                                const captionOnTopLT = isBibleLT &&
+                                                    (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top'
+
+                                                const alignItemsLT = liveSlide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
+                                                    : liveSlide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
+                                                        : 'flex-start'
+                                                const textAlignLT = (liveSlide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left'
+
+                                                const styleBarLT: React.CSSProperties =
+                                                    liveSlide.slideStyle?.lowerThirdStyle === 'minimalist'
+                                                        ? { background: 'transparent' }
+                                                        : liveSlide.slideStyle?.lowerThirdStyle === 'accent-bar'
+                                                            ? {
+                                                                background: 'rgba(0,0,0,0.75)',
+                                                                backdropFilter: 'blur(8px)',
+                                                                borderLeft: `3px solid ${liveSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
+                                                            }
+                                                            : liveSlide.slideStyle?.lowerThirdStyle === 'gradient-bar'
+                                                                ? {
+                                                                    background: `linear-gradient(135deg, ${liveSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${liveSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
+                                                                    backdropFilter: 'blur(8px)',
+                                                                }
+                                                                : {
+                                                                    background: 'rgba(0,0,0,0.75)',
+                                                                    backdropFilter: 'blur(8px)',
+                                                                }
+
+                                                const captionNodeLT = (captionLT || subtitleLT) && (
+                                                    <div
+                                                        className="shrink-0 text-white/85 drop-shadow-lg"
+                                                        style={{
+                                                            fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                            fontSize: 'clamp(10px, 2cqw, 22px)',
+                                                            lineHeight: 1.25,
+                                                            fontWeight: 500,
+                                                            width: '100%',
+                                                            textAlign: textAlignLT,
+                                                        }}
+                                                        {...(captionLT
+                                                            ? { dangerouslySetInnerHTML: { __html: captionLT } }
+                                                            : { children: subtitleLT })}
+                                                    />
+                                                )
+
+                                                return (
+                                                    <div
+                                                        className="absolute inset-x-0 bottom-0"
+                                                        style={{ height: '30cqh' }}
+                                                    >
+                                                        <div
+                                                            className="w-full h-full flex flex-col"
+                                                            style={{
+                                                                alignItems: alignItemsLT,
+                                                                padding: '10px 18px',
+                                                                gap: '4px',
+                                                                ...styleBarLT,
+                                                            }}
+                                                        >
+                                                            {captionOnTopLT && captionNodeLT}
+                                                            <AutoFitText
+                                                                html={liveBodyHtml}
+                                                                className="w-full flex-1 min-h-0 text-white drop-shadow-lg tiptap-preview"
+                                                                minPx={10}
+                                                                maxPx={120}
+                                                                style={{
+                                                                    fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                                    textAlign: textAlignLT,
+                                                                    fontWeight: 600,
+                                                                    lineHeight: 1.2,
+                                                                }}
+                                                            />
+                                                            {!captionOnTopLT && captionNodeLT}
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })()
+                                        ) : (
+                                            <div className="absolute inset-0 flex flex-col p-6">
+                                                {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
+                                                    <div
+                                                        className="shrink-0 text-center text-white/85 pb-2 drop-shadow-lg"
+                                                        style={{
+                                                            fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                            fontSize: 'clamp(12px, 2.2cqw, 32px)',
+                                                            lineHeight: 1.3,
+                                                            fontWeight: 600,
+                                                        }}
+                                                        dangerouslySetInnerHTML={{ __html: liveRefHtml }}
+                                                    />
+                                                )}
+                                                <AutoFitText
+                                                    html={liveBodyHtml}
+                                                    className="flex-1 min-h-0 text-white text-center drop-shadow-2xl tiptap-preview"
+                                                    minPx={14}
+                                                    maxPx={240}
+                                                    style={{
+                                                        fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                        textAlign: (liveSlide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
+                                                        textTransform: (liveSlide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
+                                                        lineHeight: 1.2,
+                                                        textShadow: liveSlide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
+                                                    }}
+                                                />
+                                                {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
+                                                    <div
+                                                        className="shrink-0 text-center text-white/85 pt-2 drop-shadow-lg"
+                                                        style={{
+                                                            fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                            fontSize: 'clamp(12px, 2.2cqw, 32px)',
+                                                            lineHeight: 1.3,
+                                                            fontWeight: 600,
+                                                        }}
+                                                        dangerouslySetInnerHTML={{ __html: liveRefHtml }}
+                                                    />
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">

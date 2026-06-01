@@ -8,6 +8,7 @@ import type { Slide, Countdown } from '../types'
 import { useFileUrl } from '../hooks/useTemplates'
 import { useLocalBackground } from '../hooks/useLocalBackground'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
+import { AutoFitText } from '../components/live/AutoFitText'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -18,6 +19,7 @@ interface LiveState {
         liveWindowFullscreen: boolean
         songAndHymnLabelsVisibility: boolean
         defaultFont: string
+        verseRefPosition?: 'top' | 'bottom'
     }
     overlay?: string
     alert?: unknown
@@ -403,75 +405,91 @@ export default function LiveView() {
 
             {/* Content */}
             {slide.layout === 'lower-third' ? (
-                /* Lower Third Layout */
-                <div
-                    className="absolute inset-x-0 bottom-0"
-                    style={{
-                        padding: '0',
-                    }}
-                >
-                    <div
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'center',
-                            alignItems: slide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
-                                : slide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
-                                    : 'flex-start',
-                            padding: '24px 48px',
-                            ...(slide.slideStyle?.lowerThirdStyle === 'standard' ? {
-                                background: 'rgba(0, 0, 0, 0.75)',
-                                backdropFilter: 'blur(12px)',
-                            } : slide.slideStyle?.lowerThirdStyle === 'minimalist' ? {
-                                background: 'transparent',
-                            } : slide.slideStyle?.lowerThirdStyle === 'accent-bar' ? {
-                                background: 'rgba(0, 0, 0, 0.75)',
-                                backdropFilter: 'blur(12px)',
-                                borderLeft: `6px solid ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
-                            } : slide.slideStyle?.lowerThirdStyle === 'gradient-bar' ? {
-                                background: `linear-gradient(135deg, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
-                                backdropFilter: 'blur(12px)',
-                            } : {
-                                background: 'rgba(0, 0, 0, 0.75)',
-                                backdropFilter: 'blur(12px)',
-                            }),
-                        }}
-                    >
+                /* Lower Third Layout — strip anchored to the bottom; body auto-fits, caption stays small */
+                (() => {
+                    const isBible = slide.type === 'bible'
+                    const bodyHtml = slide.contents[0] || ''
+                    const captionHtml = isBible ? (slide.contents[1] || '') : ''
+                    const subtitle = slide.slideStyle?.lowerThirdSubtitle || ''
+                    // Per-slide setting wins, then global default from settings, then 'bottom'.
+                    const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? settings.verseRefPosition ?? 'bottom'
+                    const captionOnTop = isBible && effectiveRefPos === 'top'
+
+                    const alignItems = slide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
+                        : slide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
+                            : 'flex-start'
+                    const textAlign = (slide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left'
+
+                    const styleBar: React.CSSProperties =
+                        slide.slideStyle?.lowerThirdStyle === 'minimalist'
+                            ? { background: 'transparent' }
+                            : slide.slideStyle?.lowerThirdStyle === 'accent-bar'
+                                ? {
+                                    background: 'rgba(0, 0, 0, 0.75)',
+                                    backdropFilter: 'blur(12px)',
+                                    borderLeft: `6px solid ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
+                                }
+                                : slide.slideStyle?.lowerThirdStyle === 'gradient-bar'
+                                    ? {
+                                        background: `linear-gradient(135deg, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
+                                        backdropFilter: 'blur(12px)',
+                                    }
+                                    : {
+                                        background: 'rgba(0, 0, 0, 0.75)',
+                                        backdropFilter: 'blur(12px)',
+                                    }
+
+                    const captionNode = (captionHtml || subtitle) && (
                         <div
-                            className="tiptap-preview"
+                            className="shrink-0 text-white/85 drop-shadow-lg"
                             style={{
                                 fontFamily: slide.slideStyle?.font || 'Inter',
-                                textAlign: (slide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left',
+                                fontSize: 'clamp(14px, 1.6vw, 32px)',
+                                lineHeight: 1.25,
+                                fontWeight: 500,
+                                letterSpacing: '0.02em',
+                                width: '100%',
+                                textAlign,
                             }}
+                            // Bible reference uses raw HTML so the `<b>` book title renders; subtitle is plain.
+                            {...(captionHtml
+                                ? { dangerouslySetInnerHTML: { __html: captionHtml } }
+                                : { children: subtitle })}
+                        />
+                    )
+
+                    return (
+                        <div
+                            className="absolute inset-x-0 bottom-0"
+                            style={{ height: '30vh' }}
                         >
-                            {slide.contents.map((content, index) => (
-                                <div
-                                    key={index}
-                                    className="text-white drop-shadow-lg"
+                            <div
+                                className="w-full h-full flex flex-col"
+                                style={{
+                                    alignItems,
+                                    padding: '20px 48px',
+                                    gap: '8px',
+                                    ...styleBar,
+                                }}
+                            >
+                                {captionOnTop && captionNode}
+                                <AutoFitText
+                                    html={bodyHtml}
+                                    className="w-full flex-1 min-h-0 text-white drop-shadow-lg tiptap-preview"
+                                    minPx={18}
+                                    maxPx={160}
                                     style={{
-                                        fontSize: `${slide.slideStyle?.fontSize || 3.5}vw`,
+                                        fontFamily: slide.slideStyle?.font || 'Inter',
+                                        textAlign,
                                         fontWeight: 600,
-                                        lineHeight: 1.3,
+                                        lineHeight: 1.2,
                                     }}
-                                    dangerouslySetInnerHTML={{ __html: content }}
                                 />
-                            ))}
-                            {slide.slideStyle?.lowerThirdSubtitle && (
-                                <div
-                                    className="text-white/80 drop-shadow-lg"
-                                    style={{
-                                        fontSize: `${(slide.slideStyle?.fontSize || 3.5) * 0.55}vw`,
-                                        marginTop: '0.3em',
-                                        fontWeight: 400,
-                                        letterSpacing: '0.02em',
-                                    }}
-                                >
-                                    {slide.slideStyle.lowerThirdSubtitle}
-                                </div>
-                            )}
+                                {!captionOnTop && captionNode}
+                            </div>
                         </div>
-                    </div>
-                </div>
+                    )
+                })()
             ) : slide.type === 'countdown' ? (
                 /* Countdown Layout - live ticking timer */
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -529,39 +547,73 @@ export default function LiveView() {
                     </button>
                 </div>
             ) : (
-                /* Default Centered Layout */
-                <div
-                    className="absolute inset-0 flex items-center justify-center"
-                    style={{
-                        paddingLeft: `${slide.slideStyle?.windowPadding?.left || 64}px`,
-                        paddingRight: `${slide.slideStyle?.windowPadding?.right || 64}px`,
-                        paddingTop: `${slide.slideStyle?.windowPadding?.top || 64}px`,
-                        paddingBottom: `${slide.slideStyle?.windowPadding?.bottom || 64}px`,
-                    }}
-                >
-                    <div
-                        className="text-center max-w-full tiptap-preview"
-                        style={{
-                            fontSize: `${slide.slideStyle?.fontSize || 4.5}vw`,
-                            fontFamily: slide.slideStyle?.font || 'Inter',
-                            textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
-                            textTransform: slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none' || 'none',
-                            lineHeight: 1.4,
-                            textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
-                        }}
-                    >
-                        {slide.contents.map((content, index) => (
-                            <div
-                                key={index}
-                                className="text-white drop-shadow-lg"
+                /* Default Centered Layout — auto-fit body fills the screen, references pinned above/below */
+                (() => {
+                    // Per-slide setting wins, then broadcasted global default, then 'bottom'.
+                    const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? settings.verseRefPosition ?? 'bottom'
+                    const hasRef = slide.contents.length > 1
+                    const refOnTop = hasRef && effectiveRefPos === 'top'
+                    const refOnBottom = hasRef && effectiveRefPos !== 'top'
+                    return (
+                        <div
+                            className="absolute inset-0 flex flex-col"
+                            style={{
+                                paddingLeft: `${slide.slideStyle?.windowPadding?.left ?? 32}px`,
+                                paddingRight: `${slide.slideStyle?.windowPadding?.right ?? 32}px`,
+                                paddingTop: `${slide.slideStyle?.windowPadding?.top ?? 32}px`,
+                                paddingBottom: `${slide.slideStyle?.windowPadding?.bottom ?? 32}px`,
+                            }}
+                        >
+                            {refOnTop && (
+                                <div
+                                    className="shrink-0 text-center pb-3 text-white/85 drop-shadow-lg"
+                                    style={{
+                                        fontFamily: slide.slideStyle?.font || 'Inter',
+                                        fontSize: 'clamp(20px, 2.4vw, 56px)',
+                                        lineHeight: 1.3,
+                                        fontWeight: 600,
+                                        letterSpacing: '0.01em',
+                                        textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
+                                    }}
+                                >
+                                    {slide.contents.slice(1).map((ref, i) => (
+                                        <div key={i} dangerouslySetInnerHTML={{ __html: ref }} />
+                                    ))}
+                                </div>
+                            )}
+                            <AutoFitText
+                                html={slide.contents[0] || ''}
+                                className="flex-1 min-h-0 text-white drop-shadow-lg tiptap-preview"
+                                minPx={24}
+                                maxPx={640}
                                 style={{
-                                    marginBottom: index < slide.contents.length - 1 ? '0.4em' : 0
+                                    fontFamily: slide.slideStyle?.font || 'Inter',
+                                    textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
+                                    textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
+                                    lineHeight: 1.2,
+                                    textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
                                 }}
-                                dangerouslySetInnerHTML={{ __html: content }}
                             />
-                        ))}
-                    </div>
-                </div>
+                            {refOnBottom && (
+                                <div
+                                    className="shrink-0 text-center pt-3 text-white/85 drop-shadow-lg"
+                                    style={{
+                                        fontFamily: slide.slideStyle?.font || 'Inter',
+                                        fontSize: 'clamp(20px, 2.4vw, 56px)',
+                                        lineHeight: 1.3,
+                                        fontWeight: 600,
+                                        letterSpacing: '0.01em',
+                                        textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
+                                    }}
+                                >
+                                    {slide.contents.slice(1).map((ref, i) => (
+                                        <div key={i} dangerouslySetInnerHTML={{ __html: ref }} />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )
+                })()
             )}
 
             {/* Title overlay for hymns/songs */}
