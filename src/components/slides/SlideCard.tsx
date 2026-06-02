@@ -50,6 +50,11 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     // Determine the background to use
     const backgroundUrl = fileUrl || localBg
 
+    // Per-slide font, falling back to the user's global default so the
+    // queue preview actually reflects the font they'll see on stage.
+    const defaultFont = useAppStore((state) => state.settings.defaultFont)
+    const slideFont = slide.slideStyle?.font || defaultFont || 'Inter'
+
     // Check if this is a video background
     const isVideoBackground = slide.backgroundType === 'video' && backgroundUrl
 
@@ -161,12 +166,13 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                             >
                                 <div
                                     className="text-white text-[10px] font-semibold line-clamp-2 drop-shadow-lg tiptap-preview"
-                                    style={{ lineHeight: 1.2 }}
+                                    style={{ lineHeight: 1.2, fontFamily: slideFont }}
                                     dangerouslySetInnerHTML={{ __html: previewBodyHtml }}
                                 />
                                 {previewRefHtml && (
                                     <div
                                         className="text-white/80 text-[8px] line-clamp-1 drop-shadow-lg tiptap-preview"
+                                        style={{ fontFamily: slideFont }}
                                         dangerouslySetInnerHTML={{ __html: previewRefHtml }}
                                     />
                                 )}
@@ -182,19 +188,19 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                             {refOnTop && previewRefHtml && (
                                 <div
                                     className="text-white/80 text-center drop-shadow-lg tiptap-preview line-clamp-1 font-semibold"
-                                    style={{ fontSize: `calc(${cardFontSize} * 0.85)` }}
+                                    style={{ fontSize: `calc(${cardFontSize} * 0.85)`, fontFamily: slideFont }}
                                     dangerouslySetInnerHTML={{ __html: previewRefHtml }}
                                 />
                             )}
                             <div
                                 className="text-white text-center drop-shadow-lg tiptap-preview"
-                                style={{ fontSize: cardFontSize }}
+                                style={{ fontSize: cardFontSize, fontFamily: slideFont }}
                                 dangerouslySetInnerHTML={{ __html: previewBodyHtml }}
                             />
                             {!refOnTop && previewRefHtml && (
                                 <div
                                     className="text-white/80 text-center drop-shadow-lg tiptap-preview line-clamp-1 font-semibold"
-                                    style={{ fontSize: `calc(${cardFontSize} * 0.85)` }}
+                                    style={{ fontSize: `calc(${cardFontSize} * 0.85)`, fontFamily: slideFont }}
                                     dangerouslySetInnerHTML={{ __html: previewRefHtml }}
                                 />
                             )}

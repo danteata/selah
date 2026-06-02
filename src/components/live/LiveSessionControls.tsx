@@ -36,12 +36,11 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const { isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
     const { activeSchedule, schedules, setActiveSchedule } = useSchedules()
-    const defaultCollaborationMode = useAppStore((s) => s.settings.defaultCollaborationMode) || 'moderated'
+    const defaultCollaborationMode = (useAppStore((s) => s.settings.defaultCollaborationMode) || 'moderated') as CollaborationMode
 
     const [isStarting, setIsStarting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [showTransferMenu, setShowTransferMenu] = useState(false)
-    const [collabMode, setCollabMode] = useState<CollaborationMode>(defaultCollaborationMode)
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
@@ -79,21 +78,6 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const joinSession = useMutation(api.liveSessions.joinSession)
     const leaveSession = useMutation(api.liveSessions.leaveSession)
     const transferOperator = useMutation(api.liveSessions.transferOperator)
-    const updateCollabMode = useMutation(api.liveSessions.updateCollaborationMode)
-
-    const isOperatorSession = effectiveSession?.operatorId === currentUser?._id
-
-    const handleUpdateCollabMode = useCallback(async (mode: CollaborationMode) => {
-        if (!effectiveSession?._id || !isOperatorSession || isOffline) return
-        try {
-            await updateCollabMode({
-                sessionId: effectiveSession._id as Id<'liveSessions'>,
-                collaborationMode: mode,
-            })
-        } catch (err) {
-            console.error('[LiveSessionControls] Failed to update collaboration mode:', err)
-        }
-    }, [effectiveSession?._id, isOperatorSession, isOffline, updateCollabMode])
 
     const handleStartSession = async () => {
         if (!activeSchedule?._id || !churchId || isOffline) return
@@ -104,7 +88,7 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
             await startSession({
                 scheduleId: activeSchedule._id as string,
                 churchId,
-                collaborationMode: collabMode,
+                collaborationMode: defaultCollaborationMode,
             })
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : 'Failed to start session')
@@ -197,14 +181,8 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                     )}
                     {effectiveSession.collaborationMode && (
                         <span
-                            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600/70 dark:text-emerald-400/70 cursor-pointer hover:bg-emerald-500/20 transition-colors"
-                            title={isOperatorSession ? 'Click to change collaboration mode' : MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.description}
-                            onClick={isOperatorSession ? () => {
-                                const modes: CollaborationMode[] = ['strict', 'moderated', 'open']
-                                const currentIdx = modes.indexOf(effectiveSession.collaborationMode as CollaborationMode)
-                                const nextMode = modes[(currentIdx + 1) % modes.length]
-                                handleUpdateCollabMode(nextMode)
-                            } : undefined}
+                            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600/70 dark:text-emerald-400/70"
+                            title={MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.description}
                         >
                             {(() => { const ModeIcon = MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.icon; return ModeIcon ? <ModeIcon className="w-2.5 h-2.5" /> : null })()}
                             {MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.label}
@@ -316,32 +294,13 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
 
     return (
         <div className="flex items-center gap-2">
-            <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-default)] overflow-hidden">
-                {(Object.keys(MODE_INFO) as CollaborationMode[]).map((mode) => {
-                    const info = MODE_INFO[mode]
-                    const Icon = info.icon
-                    return (
-                        <button
-                            key={mode}
-                            onClick={() => setCollabMode(mode)}
-                            className={`flex items-center gap-1 px-1.5 py-1 text-[10px] font-medium transition-colors ${
-                                collabMode === mode
-                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
-                            }`}
-                            title={info.description}
-                        >
-                            <Icon className="w-3 h-3" />
-                            <span className="hidden sm:inline">{info.label}</span>
-                        </button>
-                    )
-                })}
-            </div>
             <button
                 onClick={handleStartSession}
                 disabled={isStarting || !activeSchedule?._id}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] border border-[var(--accent-teal)]/20 hover:bg-[var(--accent-teal)]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title={!activeSchedule?._id ? 'Select a schedule first' : `Start ${MODE_INFO[collabMode].label.toLowerCase()} session`}
+                title={!activeSchedule?._id
+                    ? 'Select a schedule first'
+                    : `Start a ${MODE_INFO[defaultCollaborationMode].label.toLowerCase()} session`}
             >
                 {isStarting ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

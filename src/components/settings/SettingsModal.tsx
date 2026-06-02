@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
@@ -11,7 +11,7 @@ import { SongMigrationWizard } from '../admin/SongMigrationWizard'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 
-type SettingsTab = 'display' | 'templates' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
+type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -24,6 +24,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
     const { isAdmin, isSuperadmin, currentUser } = useUserRole()
 
     const settings = useAppStore((state) => state.settings)
+    const setAppSettings = useAppStore((state) => state.setAppSettings)
     const setSlideStyles = useAppStore((state) => state.setSlideStyles)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
     const setDefaultFont = useAppStore((state) => state.setDefaultFont)
@@ -61,6 +62,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
 
     const tabs = [
         { id: 'display' as const, label: 'Display', icon: Monitor },
+        { id: 'live' as const, label: 'Live Session', icon: Cast },
         { id: 'templates' as const, label: 'Templates', icon: Palette },
         { id: 'bible' as const, label: 'Bible', icon: Book },
         { id: 'migration' as const, label: 'Import Songs', icon: Upload },
@@ -158,6 +160,12 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 }}
                             />
                         )}
+                        {activeTab === 'live' && (
+                            <LiveSessionSettings
+                                settings={settings}
+                                setAppSettings={setAppSettings}
+                            />
+                        )}
                         {activeTab === 'templates' && <TemplatesSettings />}
                         {activeTab === 'bible' && (
                             <BibleSettings
@@ -198,7 +206,6 @@ function DisplaySettings({
     }
 }) {
     const setLiveOutputMonitorId = useAppStore((state) => state.setLiveOutputMonitorId)
-    const setAppSettings = useAppStore((state) => state.setAppSettings)
     const savedMonitorId = useAppStore((state) => state.settings.liveOutputMonitorId)
     const {
         monitors,
@@ -419,39 +426,6 @@ function DisplaySettings({
                 </button>
             </div>
 
-            {/* Collaboration Mode */}
-            <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Default Collaboration Mode
-                </label>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    Default collaboration mode when starting a live session. Can be changed per session.
-                </p>
-                <div className="flex gap-2">
-                    {(['strict', 'moderated', 'open'] as const).map((mode) => (
-                        <button
-                            key={mode}
-                            onClick={() => setAppSettings({
-                                ...settings,
-                                defaultCollaborationMode: mode,
-                            })}
-                            className={`px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                                (settings.defaultCollaborationMode || 'moderated') === mode
-                                    ? 'bg-[var(--accent-teal)] text-white'
-                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--accent-teal)]/10'
-                            }`}
-                        >
-                            {mode.charAt(0).toUpperCase() + mode.slice(1)}
-                        </button>
-                    ))}
-                </div>
-                <div className="mt-1 text-[10px] text-[var(--text-muted)]">
-                    {(settings.defaultCollaborationMode || 'moderated') === 'strict' && 'Only the operator can control slides.'}
-                    {(settings.defaultCollaborationMode || 'moderated') === 'moderated' && 'Suggestions need operator approval.'}
-                    {(settings.defaultCollaborationMode || 'moderated') === 'open' && 'All team members can advance slides.'}
-                </div>
-            </div>
-
             {/* NDI Output */}
             <div>
                 <div className="flex items-center justify-between mb-2">
@@ -523,6 +497,73 @@ function DisplaySettings({
                         )}
                     </div>
                 )}
+            </div>
+        </div>
+    )
+}
+
+// Live Session Settings Tab — settings that govern a live presentation
+// (collaboration mode, live window behavior). Display/monitor/NDI stay in Display.
+function LiveSessionSettings({
+    settings,
+    setAppSettings,
+}: {
+    settings: any
+    setAppSettings: (s: any) => void
+}) {
+    type CollabMode = 'strict' | 'moderated' | 'open'
+    const currentMode: CollabMode = settings.defaultCollaborationMode || 'moderated'
+
+    const COLLAB_INFO: Record<CollabMode, { label: string; description: string }> = {
+        strict: { label: 'Strict', description: 'Only the operator can advance slides or change the live output.' },
+        moderated: { label: 'Review', description: 'Team members can suggest slides; operator approves each one.' },
+        open: { label: 'Open', description: 'All team members can advance slides directly.' },
+    }
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1">
+                    Live Session
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Defaults that apply each time you start a collaborative presentation. You can override these per session.
+                </p>
+            </div>
+
+            {/* Default Collaboration Mode */}
+            <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Default Collaboration Mode
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {(Object.keys(COLLAB_INFO) as CollabMode[]).map((mode) => {
+                        const info = COLLAB_INFO[mode]
+                        const isSelected = currentMode === mode
+                        return (
+                            <button
+                                key={mode}
+                                onClick={() => setAppSettings({ ...settings, defaultCollaborationMode: mode })}
+                                className={`text-left px-3 py-2.5 rounded-lg border text-xs transition-all ${
+                                    isSelected
+                                        ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 text-[var(--text-primary)]'
+                                        : 'border-gray-200 dark:border-gray-700 text-[var(--text-secondary)] hover:border-[var(--accent-teal)]/40'
+                                }`}
+                            >
+                                <div className="font-medium flex items-center gap-1.5">
+                                    {isSelected && <Check className="w-3.5 h-3.5 text-[var(--accent-teal)]" />}
+                                    {info.label}
+                                </div>
+                                <div className="mt-0.5 text-[10px] text-[var(--text-muted)] leading-snug">
+                                    {info.description}
+                                </div>
+                            </button>
+                        )
+                    })}
+                </div>
+                <p className="text-[10px] text-[var(--text-muted)] mt-2">
+                    The TopBar shows your selection as soon as you start a session. Operators can change the mode mid-session by clicking the active mode pill.
+                </p>
             </div>
         </div>
     )
@@ -719,15 +760,31 @@ function BibleSettings({
 
 // Profile Settings Tab
 function ProfileSettings() {
+    const { currentUser } = useUserRole()
     return (
-        <div className="space-y-6">
-            <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-                Profile settings are managed through your Clerk account.
-                <br />
-                <a href="#" className="text-primary-600 hover:text-primary-700 mt-2 inline-block">
-                    Manage Profile
-                </a>
+        <div className="space-y-4">
+            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300">
+                Profile settings (name, email, avatar, password) are managed through your Clerk account.
             </div>
+            {currentUser && (
+                <dl className="text-sm space-y-2">
+                    <div className="flex justify-between border-b border-gray-100 dark:border-gray-700 pb-2">
+                        <dt className="text-[var(--text-muted)]">Name</dt>
+                        <dd className="font-medium">{currentUser.fullname || '—'}</dd>
+                    </div>
+                    <div className="flex justify-between border-b border-gray-100 dark:border-gray-700 pb-2">
+                        <dt className="text-[var(--text-muted)]">Email</dt>
+                        <dd className="font-medium">{currentUser.email || '—'}</dd>
+                    </div>
+                    <div className="flex justify-between pb-1">
+                        <dt className="text-[var(--text-muted)]">Role</dt>
+                        <dd className="font-medium capitalize">{currentUser.role || '—'}</dd>
+                    </div>
+                </dl>
+            )}
+            <p className="text-xs text-[var(--text-muted)]">
+                To change your name, email, or password, use the sign-out menu in the top bar and visit your Clerk account settings.
+            </p>
         </div>
     )
 }

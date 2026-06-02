@@ -120,12 +120,17 @@ export function StatusBar() {
                     <span>{sermonListener?.isListening ? (activeNavSection === 'sermon' ? 'Recording' : 'Listening…') : 'Sermon'}</span>
                 </button>
 
-                {/* Search status indicator */}
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded transition-colors text-[var(--text-muted)]" title={searchStatus === 'ready' ? 'Search ready' : searchStatus === 'loading' ? 'Building search index...' : 'Search not cached'}>
-                    <StatusDot level={searchStatus} />
-                    <Search className="w-3 h-3" />
-                    <span>{searchStatus === 'ready' ? 'Search' : searchStatus === 'loading' ? 'Indexing' : 'Search'}</span>
-                </div>
+                {/* Search status indicator — only shown when there's something meaningful to report */}
+                {(searchStatus === 'ready' || searchStatus === 'loading') && (
+                    <div
+                        className="flex items-center gap-1.5 px-2 py-0.5 rounded transition-colors text-[var(--text-muted)]"
+                        title={searchStatus === 'ready' ? 'Bible search index is ready' : 'Building bible search index…'}
+                    >
+                        <StatusDot level={searchStatus} />
+                        <Search className="w-3 h-3" />
+                        <span>{searchStatus === 'ready' ? 'Search' : 'Indexing'}</span>
+                    </div>
+                )}
             </div>
 
             {/* Right — Controls */}

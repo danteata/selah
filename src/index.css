@@ -826,3 +826,22 @@ h6 {
     background: var(--border-subtle);
     border-radius: 10px;
 }
+
+/* ============================================================
+   Live slide transition (settings.animations + settings.transitionInterval)
+   — applied with `key={liveSlideId}` so React re-mounts the container
+   — when `.no-transition` is set on the element, the keyframe is skipped
+   ============================================================ */
+@keyframes studio-slide-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.studio-slide-transition {
+    animation: studio-slide-fade-in var(--studio-transition-duration, 0.7s) ease-out;
+    animation-fill-mode: both;
+}
+
+.studio-slide-transition.no-transition {
+    animation: none;
+}

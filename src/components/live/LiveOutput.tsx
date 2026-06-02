@@ -76,6 +76,9 @@ export function LiveOutput() {
     const openModal = useAppStore((state) => state.openModal)
     // Global default for verse reference position (per-slide setting overrides this at render time).
     const globalVerseRefPosition = useAppStore((state) => state.settings.slideStyles?.verseRefPosition)
+    const animationsEnabled = useAppStore((state) => state.settings.animations ?? true)
+    const transitionInterval = useAppStore((state) => state.settings.transitionInterval ?? 0.7)
+    const defaultFont = useAppStore((state) => state.settings.defaultFont || 'Inter')
 
     // Shared live session — operator controls
     const {
@@ -662,12 +665,14 @@ export function LiveOutput() {
                             <div className={`flex-1 min-h-0 studio-live-monitor ${liveSlide ? 'is-live' : ''}`}>
                                 {liveSlide ? (
                                     <div
-                                        className="w-full h-full relative"
+                                        key={liveSlide.id}
+                                        className={`w-full h-full relative studio-slide-transition ${animationsEnabled ? '' : 'no-transition'}`}
                                         style={{
+                                            '--studio-transition-duration': `${transitionInterval}s`,
                                             backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
                                             backgroundSize: 'cover',
                                             backgroundPosition: 'center',
-                                        }}
+                                        } as React.CSSProperties}
                                     >
                                         {isLiveSlideVideo && (
                                             <video
@@ -722,8 +727,8 @@ export function LiveOutput() {
                                                 const captionNodeLT = (captionLT || subtitleLT) && (
                                                     <div
                                                         className="shrink-0 text-white/85 drop-shadow-lg"
-                                                        style={{
-                                                            fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                         style={{
+                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(14px, 3cqw, 36px)',
                                                             lineHeight: 1.25,
                                                             fontWeight: 500,
@@ -757,7 +762,7 @@ export function LiveOutput() {
                                                                 minPx={10}
                                                                 maxPx={120}
                                                                 style={{
-                                                                    fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                                    fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                                     textAlign: textAlignLT,
                                                                     fontWeight: 600,
                                                                     lineHeight: 1.2,
@@ -773,8 +778,8 @@ export function LiveOutput() {
                                                 {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
                                                     <div
                                                         className="shrink-0 text-center text-white/85 pb-2 drop-shadow-lg"
-                                                        style={{
-                                                            fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                         style={{
+                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.3,
                                                             fontWeight: 600,
@@ -788,7 +793,7 @@ export function LiveOutput() {
                                                     minPx={14}
                                                     maxPx={240}
                                                     style={{
-                                                        fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                        fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                         textAlign: (liveSlide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
                                                         textTransform: (liveSlide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
                                                         lineHeight: 1.2,
@@ -798,8 +803,8 @@ export function LiveOutput() {
                                                 {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
                                                     <div
                                                         className="shrink-0 text-center text-white/85 pt-2 drop-shadow-lg"
-                                                        style={{
-                                                            fontFamily: liveSlide.slideStyle?.font || 'Inter',
+                                                         style={{
+                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.3,
                                                             fontWeight: 600,

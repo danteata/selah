@@ -15,7 +15,7 @@ import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, AlertTriangle, Copy } from 'lucide-react'
+import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, AlertTriangle, Copy, MoreHorizontal } from 'lucide-react'
 import type { Scripture } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
@@ -68,6 +68,7 @@ function SermonListenerPanelInner({
     const [showSavedTranscripts, setShowSavedTranscripts] = useState(false)
     const [showSaveDialog, setShowSaveDialog] = useState(false)
     const [showExportPicker, setShowExportPicker] = useState(false)
+    const [showOverflowMenu, setShowOverflowMenu] = useState(false)
     const [transcriptTitle, setTranscriptTitle] = useState('')
     const [isSaving, setIsSaving] = useState(false)
     const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error' | 'offline'; text: string } | null>(null)
@@ -185,15 +186,16 @@ function SermonListenerPanelInner({
     }, [transcript, interimTranscript])
 
     useEffect(() => {
-        if (!showExportPicker) return
+        if (!showExportPicker && !showOverflowMenu) return
         const handleClickOutside = (e: MouseEvent) => {
             if (exportPickerRef.current && !exportPickerRef.current.contains(e.target as Node)) {
                 setShowExportPicker(false)
+                setShowOverflowMenu(false)
             }
         }
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [showExportPicker])
+    }, [showExportPicker, showOverflowMenu])
 
     const handleSaveTranscript = async () => {
         if (!transcript.trim()) return
@@ -547,85 +549,72 @@ function SermonListenerPanelInner({
                             )}
                         </div>
                         <div className="flex items-center gap-1">
+                            {/* Notes is the only always-visible action — it's a unique workflow
+                                (AI summary) so it deserves prime placement. Export/Copy/Save/Clear
+                                live in a "⋯" menu to keep the header from overflowing. */}
                             {transcript && (
-                                    <button
-                                        onClick={handleGenerateNotes}
-                                        disabled={isGeneratingNotes}
-                                        className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110 disabled:opacity-50"
-                                        title="Generate sermon notes"
-                                    >
-                                        {isGeneratingNotes ? <Loader2 className="w-3 h-3 animate-spin" /> : <NotebookPen className="w-3 h-3" />}
-                                        {isGeneratingNotes ? 'Generating...' : 'Notes'}
-                                    </button>
+                                <button
+                                    onClick={handleGenerateNotes}
+                                    disabled={isGeneratingNotes}
+                                    className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110 disabled:opacity-50"
+                                    title="Generate sermon notes"
+                                >
+                                    {isGeneratingNotes ? <Loader2 className="w-3 h-3 animate-spin" /> : <NotebookPen className="w-3 h-3" />}
+                                    {isGeneratingNotes ? 'Generating…' : 'Notes'}
+                                </button>
                             )}
                             {transcript && (
                                 <div className="relative" ref={exportPickerRef}>
                                     <button
-                                        onClick={() => setShowExportPicker(!showExportPicker)}
-                                        className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110"
-                                        title="Export transcript"
+                                        onClick={() => setShowOverflowMenu(!showOverflowMenu)}
+                                        className="flex items-center justify-center w-6 h-6 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                                        title="More actions"
+                                        aria-label="More transcript actions"
                                     >
-                                        <Download className="w-3 h-3" />
-                                        Export
+                                        <MoreHorizontal className="w-3.5 h-3.5" />
                                     </button>
-                                    {showExportPicker && (
-                                        <div className="absolute right-0 top-6 z-20 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 py-1 min-w-[100px]">
-                                            {(['txt', 'srt', 'vtt', 'json'] as ExportFormat[]).map((fmt) => (
-                                                <button
-                                                    key={fmt}
-                                                    onClick={() => {
-                                                        downloadTranscript(
-                                                            fmt,
-                                                            sermonListener.transcriptSegments,
-                                                            {
-                                                                title: transcriptTitle || `Sermon ${new Date().toLocaleDateString()}`,
-                                                                date: new Date().toISOString(),
-                                                                provider: sermonListener.provider,
-                                                            },
-                                                            detectedVerses
-                                                        )
-                                                        setShowExportPicker(false)
-                                                    }}
-                                                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-700 uppercase tracking-wide font-medium"
-                                                >
-                                                    .{fmt}
-                                                </button>
-                                            ))}
+                                    {showOverflowMenu && (
+                                        <div className="absolute right-0 top-7 z-20 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 py-1 min-w-[160px]">
+                                            <button
+                                                onClick={() => { setShowOverflowMenu(false); setShowExportPicker(!showExportPicker) }}
+                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+                                            >
+                                                <Download className="w-3 h-3" />
+                                                Export…
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(transcript)
+                                                        .then(() => {
+                                                            setShowOverflowMenu(false)
+                                                            setSaveMessage({ type: 'success', text: 'Transcript copied' })
+                                                            setTimeout(() => setSaveMessage(null), 2000)
+                                                        })
+                                                        .catch(() => {})
+                                                }}
+                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+                                            >
+                                                <Copy className="w-3 h-3" />
+                                                Copy to clipboard
+                                            </button>
+                                            <button
+                                                onClick={() => { setShowOverflowMenu(false); setShowSaveDialog(true) }}
+                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-gray-100 dark:hover:bg-gray-700"
+                                            >
+                                                <Save className="w-3 h-3" />
+                                                Save…
+                                            </button>
+                                            <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+                                            <button
+                                                onClick={() => { setShowOverflowMenu(false); reset() }}
+                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/5"
+                                            >
+                                                <Trash2 className="w-3 h-3" />
+                                                Clear transcript
+                                            </button>
                                         </div>
                                     )}
                                 </div>
-                            )}
-                            {transcript && (
-                                <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(transcript)
-                                            .then(() => alert('Transcript copied to clipboard'))
-                                            .catch(() => {})
-                                    }}
-                                    className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110"
-                                    title="Copy transcript"
-                                >
-                                    <Copy className="w-3 h-3" />
-                                    Copy
-                                </button>
-                            )}
-                            {transcript && (
-                                <button
-                                    onClick={() => setShowSaveDialog(true)}
-                                    className="flex items-center gap-1 text-[10px] text-[var(--accent-teal)] hover:brightness-110"
-                                    title="Save transcript"
-                                >
-                                    <Save className="w-3 h-3" />
-                                    Save
-                                </button>
-                            )}
-                            {transcript && (
-                                <button
-                                    onClick={reset}
-                                    className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 ml-2"
-                                >
-                                    Clear
-                                </button>
                             )}
                         </div>
                     </div>

@@ -20,6 +20,8 @@ interface LiveState {
         songAndHymnLabelsVisibility: boolean
         defaultFont: string
         verseRefPosition?: 'top' | 'bottom'
+        animations?: boolean
+        transitionInterval?: number
     }
     overlay?: string
     alert?: unknown
@@ -212,6 +214,8 @@ export default function LiveView() {
         liveWindowFullscreen: false,
         songAndHymnLabelsVisibility: true,
         defaultFont: 'Inter',
+        animations: true,
+        transitionInterval: 0.7,
     }
 
     // Toggle fullscreen
@@ -374,8 +378,14 @@ export default function LiveView() {
 
     return (
         <div
-            className="h-screen w-screen bg-black relative overflow-hidden"
-            style={monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : undefined}
+            key={slide?.id}
+            className={`h-screen w-screen bg-black relative overflow-hidden studio-slide-transition ${settings.animations === false ? 'no-transition' : ''}`}
+            style={
+                {
+                    ...(monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : {}),
+                    '--studio-transition-duration': `${settings.transitionInterval ?? 0.7}s`,
+                } as React.CSSProperties
+            }
             onDoubleClick={toggleFullscreen}
         >
             {/* Background */}
@@ -443,7 +453,7 @@ export default function LiveView() {
                         <div
                             className="shrink-0 text-white/85 drop-shadow-lg"
                             style={{
-                                fontFamily: slide.slideStyle?.font || 'Inter',
+                                fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                 fontSize: 'clamp(20px, 2.4vw, 48px)',
                                 lineHeight: 1.25,
                                 fontWeight: 500,
@@ -479,7 +489,7 @@ export default function LiveView() {
                                     minPx={18}
                                     maxPx={160}
                                     style={{
-                                        fontFamily: slide.slideStyle?.font || 'Inter',
+                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                         textAlign,
                                         fontWeight: 600,
                                         lineHeight: 1.2,
@@ -499,7 +509,7 @@ export default function LiveView() {
                             className="text-white/80 drop-shadow-lg mb-6 text-center"
                             style={{
                                 fontSize: '4vw',
-                                fontFamily: slide.slideStyle?.font || 'Inter',
+                                fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                 fontWeight: 400,
                                 letterSpacing: '0.04em',
                             }}
@@ -528,7 +538,7 @@ export default function LiveView() {
                             className="text-white/60 mt-8 text-center"
                             style={{
                                 fontSize: '3vw',
-                                fontFamily: slide.slideStyle?.font || 'Inter',
+                                fontFamily: slide.slideStyle?.font || settings.defaultFont,
                             }}
                         >
                             Time's up!
@@ -568,7 +578,7 @@ export default function LiveView() {
                                 <div
                                     className="shrink-0 text-center pb-3 text-white/85 drop-shadow-lg"
                                     style={{
-                                        fontFamily: slide.slideStyle?.font || 'Inter',
+                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                         fontSize: 'clamp(28px, 3.2vw, 80px)',
                                         lineHeight: 1.3,
                                         fontWeight: 600,
@@ -587,7 +597,7 @@ export default function LiveView() {
                                 minPx={24}
                                 maxPx={640}
                                 style={{
-                                    fontFamily: slide.slideStyle?.font || 'Inter',
+                                    fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                     textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
                                     textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
                                     lineHeight: 1.2,
@@ -598,7 +608,7 @@ export default function LiveView() {
                                 <div
                                     className="shrink-0 text-center pt-3 text-white/85 drop-shadow-lg"
                                     style={{
-                                        fontFamily: slide.slideStyle?.font || 'Inter',
+                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                         fontSize: 'clamp(28px, 3.2vw, 80px)',
                                         lineHeight: 1.3,
                                         fontWeight: 600,
