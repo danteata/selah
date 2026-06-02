@@ -40,6 +40,14 @@ export interface CachedChurch {
     cachedAt: string
 }
 
+export interface CachedTemplateBlob {
+    storageId: string
+    blob: Blob
+    contentType: string
+    size: number
+    cachedAt: number
+}
+
 export interface CachedSetting {
     id: string
     data: any
@@ -68,6 +76,39 @@ export interface LocalSermonCorrection {
     createdAt: string
 }
 
+export interface PersistedLiveSermonState {
+    id: 'current'
+    transcript: string
+    segments: unknown[]
+    detectedVerses: unknown[]
+    currentVerse: unknown | null
+    activeBibleVersion: string
+    savedAt: string
+}
+
+export interface SavedSermonTranscriptRecord {
+    id: string
+    title: string
+    transcript: string
+    segments?: unknown[]
+    detectedVerses?: unknown[]
+    provider: string
+    createdAt: string
+}
+
+export interface OfflineTranscriptRecord {
+    id: string
+    title: string
+    transcript: string
+    segments?: unknown[]
+    detectedVerses?: unknown[]
+    provider: string
+    language?: string
+    scheduleId?: string
+    createdAt: string
+    updatedAt: string
+}
+
 class WorshipCloudDatabase extends Dexie {
     songs!: Table<Song>
     media!: Table<Media>
@@ -85,6 +126,10 @@ class WorshipCloudDatabase extends Dexie {
     pendingMutations!: Table<PendingMutation, number>
     localTemplates!: Table<LocalTemplate, string>
     sermonCorrections!: Table<LocalSermonCorrection, string>
+    sermonLiveState!: Table<PersistedLiveSermonState, 'current'>
+    sermonSavedTranscripts!: Table<SavedSermonTranscriptRecord, string>
+    sermonOfflineTranscripts!: Table<OfflineTranscriptRecord, string>
+    templateBlobs!: Table<CachedTemplateBlob, string>
 
     constructor() {
         super('WorshipCloudDatabase')
@@ -120,6 +165,19 @@ class WorshipCloudDatabase extends Dexie {
         })
         this.version(5).stores({
             sermonCorrections: 'id,synced,createdAt,sermonSessionId'
+        })
+        this.version(6).stores({
+            sermonCorrections: 'id,synced,createdAt,sermonSessionId',
+            sermonLiveState: 'id,savedAt',
+            sermonSavedTranscripts: 'id,createdAt',
+            sermonOfflineTranscripts: 'id,scheduleId,createdAt'
+        })
+        this.version(7).stores({
+            sermonCorrections: 'id,synced,createdAt,sermonSessionId',
+            sermonLiveState: 'id,savedAt',
+            sermonSavedTranscripts: 'id,createdAt',
+            sermonOfflineTranscripts: 'id,scheduleId,createdAt',
+            templateBlobs: 'storageId,cachedAt'
         })
     }
 }
@@ -379,4 +437,218 @@ export async function deleteSermonCorrection(id: string): Promise<void> {
 export async function clearSermonCorrections(): Promise<void> {
     const db = getIndexedDB()
     await db.sermonCorrections.clear()
+}
+
+// Sermon live state (refresh-recovery journal) ----------------
+
+export async function getLiveSermonState(): Promise<PersistedLiveSermonState | undefined> {
+    const db = getIndexedDB()
+    return await db.sermonLiveState.get('current')
+}
+
+export async function saveLiveSermonState(
+    state: Omit<PersistedLiveSermonState, 'id' | 'savedAt'>
+): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonLiveState.put({
+        id: 'current',
+        savedAt: new Date().toISOString(),
+        ...state,
+    })
+}
+
+export async function clearLiveSermonState(): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonLiveState.clear()
+}
+
+// Saved transcripts (manual "Save…" + offline auto-save queue) -
+
+export async function getSavedSermonTranscripts(): Promise<SavedSermonTranscriptRecord[]> {
+    const db = getIndexedDB()
+    return await db.sermonSavedTranscripts.orderBy('createdAt').reverse().toArray()
+}
+
+export async function saveSermonTranscript(
+    record: SavedSermonTranscriptRecord
+): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonSavedTranscripts.put(record)
+}
+
+export async function deleteSavedSermonTranscript(id: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonSavedTranscripts.delete(id)
+}
+
+export async function clearSavedSermonTranscripts(): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonSavedTranscripts.clear()
+}
+
+// Offline transcripts queue (failed Convex writes) -------------
+
+export async function getOfflineTranscripts(): Promise<OfflineTranscriptRecord[]> {
+    const db = getIndexedDB()
+    return await db.sermonOfflineTranscripts.orderBy('createdAt').reverse().toArray()
+}
+
+export async function addOfflineTranscript(record: OfflineTranscriptRecord): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonOfflineTranscripts.put(record)
+}
+
+export async function deleteOfflineTranscript(id: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonOfflineTranscripts.delete(id)
+}
+
+export async function findOfflineTranscriptByScheduleId(
+    scheduleId: string
+): Promise<OfflineTranscriptRecord | undefined> {
+    const db = getIndexedDB()
+    return await db.sermonOfflineTranscripts.where('scheduleId').equals(scheduleId).first()
+}
+
+export async function clearOfflineTranscripts(): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonOfflineTranscripts.clear()
+}
+
+// Template background blob cache ---------------------------------
+// After the first download from Convex, a template's background image/video
+// is stored here as a Blob. Subsequent renders of the same storageId hit
+// this cache and serve a local URL.createObjectURL(blob) — no Convex traffic.
+
+export async function getCachedTemplateBlob(storageId: string): Promise<Blob | null> {
+    const db = getIndexedDB()
+    const entry = await db.templateBlobs.get(storageId)
+    return entry?.blob ?? null
+}
+
+export async function cacheTemplateBlob(
+    storageId: string,
+    blob: Blob,
+): Promise<void> {
+    const db = getIndexedDB()
+    await db.templateBlobs.put({
+        storageId,
+        blob,
+        contentType: blob.type || 'application/octet-stream',
+        size: blob.size,
+        cachedAt: Date.now(),
+    })
+}
+
+export async function deleteCachedTemplateBlob(storageId: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.templateBlobs.delete(storageId)
+}
+
+// One-shot migration from old localStorage keys to IDB ----------
+// Runs lazily the first time any of the new helpers are called.
+// Safe to invoke multiple times: it short-circuits if the old key is gone.
+
+const LEGACY_KEYS = {
+    live: 'sermon-listener:live-state',
+    saved: 'sermon-listener:saved-transcripts',
+    offline: 'sermon-listener:offline-transcripts',
+} as const
+
+let migrationPromise: Promise<void> | null = null
+
+export function migrateLegacySermonStorage(): Promise<void> {
+    if (typeof window === 'undefined') return Promise.resolve()
+    if (migrationPromise) return migrationPromise
+    migrationPromise = (async () => {
+        try {
+            await migrateLiveState()
+            await migrateSavedTranscripts()
+            await migrateOfflineTranscripts()
+        } catch (err) {
+            console.warn('[IDB] Legacy sermon storage migration failed:', err)
+            // Reset so a future call can retry
+            migrationPromise = null
+        }
+    })()
+    return migrationPromise
+}
+
+async function migrateLiveState(): Promise<void> {
+    const raw = localStorage.getItem(LEGACY_KEYS.live)
+    if (!raw) return
+    try {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object') {
+            const existing = await getLiveSermonState()
+            if (!existing) {
+                await saveLiveSermonState({
+                    transcript: typeof parsed.transcript === 'string' ? parsed.transcript : '',
+                    segments: Array.isArray(parsed.segments) ? parsed.segments : [],
+                    detectedVerses: Array.isArray(parsed.detectedVerses) ? parsed.detectedVerses : [],
+                    currentVerse: parsed.currentVerse ?? null,
+                    activeBibleVersion:
+                        typeof parsed.activeBibleVersion === 'string' ? parsed.activeBibleVersion : '',
+                })
+            }
+        }
+    } catch (err) {
+        console.warn('[IDB] Failed to parse legacy live state, skipping:', err)
+    }
+    localStorage.removeItem(LEGACY_KEYS.live)
+}
+
+async function migrateSavedTranscripts(): Promise<void> {
+    const raw = localStorage.getItem(LEGACY_KEYS.saved)
+    if (!raw) return
+    try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+                if (item && item.id) {
+                    await saveSermonTranscript({
+                        id: item.id,
+                        title: item.title || 'Untitled',
+                        transcript: item.transcript || '',
+                        segments: item.segments,
+                        detectedVerses: item.detectedVerses,
+                        provider: item.provider || 'web-speech',
+                        createdAt: item.createdAt || new Date().toISOString(),
+                    })
+                }
+            }
+        }
+    } catch (err) {
+        console.warn('[IDB] Failed to parse legacy saved transcripts, skipping:', err)
+    }
+    localStorage.removeItem(LEGACY_KEYS.saved)
+}
+
+async function migrateOfflineTranscripts(): Promise<void> {
+    const raw = localStorage.getItem(LEGACY_KEYS.offline)
+    if (!raw) return
+    try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+                if (item && item.id) {
+                    await addOfflineTranscript({
+                        id: item.id,
+                        title: item.title || 'Untitled',
+                        transcript: item.transcript || '',
+                        segments: item.segments,
+                        detectedVerses: item.detectedVerses,
+                        provider: item.provider || 'web-speech',
+                        language: item.language,
+                        scheduleId: item.scheduleId,
+                        createdAt: item.createdAt || new Date().toISOString(),
+                        updatedAt: item.updatedAt || new Date().toISOString(),
+                    })
+                }
+            }
+        }
+    } catch (err) {
+        console.warn('[IDB] Failed to parse legacy offline transcripts, skipping:', err)
+    }
+    localStorage.removeItem(LEGACY_KEYS.offline)
 }

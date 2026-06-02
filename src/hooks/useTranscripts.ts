@@ -1,8 +1,9 @@
 /**
  * useTranscripts Hook
- * Manages sermon transcripts with Convex persistence and offline localStorage fallback
+ * Manages sermon transcripts with Convex persistence and offline IndexedDB fallback
  */
 
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import type { Id } from '../../convex/_generated/dataModel'
@@ -10,8 +11,13 @@ import { useUserRole } from './useUserRole'
 import type { DetectedVerse } from '../services/sermon-listener/verseDetection'
 import type { TranscriptionProvider } from '../services/sermon-listener'
 import type { TranscriptSegment } from '../types/sermon-listener'
-
-const OFFLINE_TRANSCRIPTS_KEY = 'sermon-listener:offline-transcripts'
+import {
+    getOfflineTranscripts,
+    addOfflineTranscript,
+    deleteOfflineTranscript,
+    findOfflineTranscriptByScheduleId,
+    migrateLegacySermonStorage,
+} from './useIndexedDB'
 
 export interface TranscriptVerse {
     reference: string
@@ -34,6 +40,21 @@ interface OfflineTranscript {
     createdAt: string
     updatedAt: string
     _isOffline: true
+}
+
+function offlineToRecord(t: OfflineTranscript) {
+    return {
+        id: t.id,
+        title: t.title,
+        transcript: t.transcript,
+        segments: t.segments,
+        detectedVerses: t.detectedVerses,
+        provider: t.provider,
+        language: t.language,
+        scheduleId: t.scheduleId,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+    }
 }
 
 export interface Transcript {
@@ -78,18 +99,42 @@ export interface UseTranscriptsReturn {
 }
 
 function readOfflineTranscripts(): OfflineTranscript[] {
-    if (typeof window === 'undefined') return []
-    try {
-        const raw = localStorage.getItem(OFFLINE_TRANSCRIPTS_KEY)
-        return raw ? JSON.parse(raw) : []
-    } catch {
-        return []
-    }
+    // Synchronous shim kept for type compatibility with the existing
+    // mutation signatures. The actual IDB read happens in the hook body
+    // and the result is mirrored into this ref-like state.
+    return offlineCache
 }
 
-function writeOfflineTranscripts(items: OfflineTranscript[]): void {
-    if (typeof window === 'undefined') return
-    localStorage.setItem(OFFLINE_TRANSCRIPTS_KEY, JSON.stringify(items))
+let offlineCache: OfflineTranscript[] = []
+const offlineListeners = new Set<() => void>()
+
+function notifyOffline() {
+    for (const fn of offlineListeners) fn()
+}
+
+async function persistOffline(transcript: OfflineTranscript) {
+    await addOfflineTranscript(offlineToRecord(transcript))
+    offlineCache = [transcript, ...offlineCache.filter(t => t.id !== transcript.id)]
+    notifyOffline()
+}
+
+async function updateOfflineRecord(id: string, patch: Partial<OfflineTranscript>) {
+    const existing = offlineCache.find(t => t.id === id)
+    if (!existing) return
+    const updated: OfflineTranscript = {
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+    }
+    await addOfflineTranscript(offlineToRecord(updated))
+    offlineCache = offlineCache.map(t => (t.id === id ? updated : t))
+    notifyOffline()
+}
+
+async function removeOffline(id: string) {
+    await deleteOfflineTranscript(id)
+    offlineCache = offlineCache.filter(t => t.id !== id)
+    notifyOffline()
 }
 
 /**
@@ -97,6 +142,35 @@ function writeOfflineTranscripts(items: OfflineTranscript[]): void {
  */
 export function useTranscripts(): UseTranscriptsReturn {
     const { currentUser } = useUserRole()
+
+    // Mirror of the IDB-backed offline queue so synchronous reads work.
+    const [, forceUpdate] = useState(0)
+
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            try {
+                await migrateLegacySermonStorage()
+                const records = await getOfflineTranscripts()
+                if (cancelled) return
+                offlineCache = records.map(r => ({
+                    ...r,
+                    segments: r.segments as TranscriptSegment[] | undefined,
+                    detectedVerses: r.detectedVerses as TranscriptVerse[] | undefined,
+                    _isOffline: true as const,
+                }))
+                forceUpdate(n => n + 1)
+            } catch (err) {
+                console.warn('[useTranscripts] Failed to load offline transcripts from IDB:', err)
+            }
+        })()
+        const onChange = () => forceUpdate(n => n + 1)
+        offlineListeners.add(onChange)
+        return () => {
+            cancelled = true
+            offlineListeners.delete(onChange)
+        }
+    }, [])
 
     // Queries
     const transcripts = useQuery(
@@ -144,9 +218,7 @@ export function useTranscripts(): UseTranscriptsReturn {
                 updatedAt: new Date().toISOString(),
                 _isOffline: true,
             }
-            const offline = readOfflineTranscripts()
-            offline.unshift(offlineTranscript)
-            writeOfflineTranscripts(offline)
+            await persistOffline(offlineTranscript)
             return offlineId
         }
 
@@ -180,9 +252,7 @@ export function useTranscripts(): UseTranscriptsReturn {
                 updatedAt: new Date().toISOString(),
                 _isOffline: true,
             }
-            const offline = readOfflineTranscripts()
-            offline.unshift(offlineTranscript)
-            writeOfflineTranscripts(offline)
+            await persistOffline(offlineTranscript)
             return offlineId
         }
     }
@@ -205,18 +275,10 @@ export function useTranscripts(): UseTranscriptsReturn {
         }))
 
         if (id.startsWith('offline-')) {
-            const offline = readOfflineTranscripts()
-            const idx = offline.findIndex(t => t.id === id)
-            if (idx !== -1) {
-                offline[idx] = {
-                    ...offline[idx],
-                    ...data,
-                    detectedVerses: convertedVerses ?? offline[idx].detectedVerses,
-                    segments: data.segments ?? offline[idx].segments,
-                    updatedAt: new Date().toISOString(),
-                }
-                writeOfflineTranscripts(offline)
-            }
+            await updateOfflineRecord(id, {
+                ...data,
+                detectedVerses: convertedVerses as TranscriptVerse[] | undefined,
+            })
             return id
         }
 
@@ -233,18 +295,15 @@ export function useTranscripts(): UseTranscriptsReturn {
             return id
         } catch (error) {
             console.error('[useTranscripts] Failed to update transcript online — updating offline copy:', error)
-            const offline = readOfflineTranscripts()
-            const offlineCopy = offline.find(t => t.scheduleId === data.scheduleId)
+            // Look up by scheduleId for a same-schedule offline copy
+            const offlineCopy = data.scheduleId
+                ? await findOfflineTranscriptByScheduleId(data.scheduleId)
+                : undefined
             if (offlineCopy) {
-                const idx = offline.indexOf(offlineCopy)
-                offline[idx] = {
-                    ...offline[idx],
+                await updateOfflineRecord(offlineCopy.id, {
                     ...data,
-                    detectedVerses: convertedVerses ?? offline[idx].detectedVerses,
-                    segments: data.segments ?? offline[idx].segments,
-                    updatedAt: new Date().toISOString(),
-                }
-                writeOfflineTranscripts(offline)
+                    detectedVerses: convertedVerses as TranscriptVerse[] | undefined,
+                })
             }
             return id
         }
@@ -253,9 +312,7 @@ export function useTranscripts(): UseTranscriptsReturn {
     // Delete transcript
     const deleteTranscript = async (id: string): Promise<string | null> => {
         if (id.startsWith('offline-')) {
-            const offline = readOfflineTranscripts()
-            const filtered = offline.filter(t => t.id !== id)
-            writeOfflineTranscripts(filtered)
+            await removeOffline(id)
             return id
         }
 
@@ -300,5 +357,3 @@ export function useTranscripts(): UseTranscriptsReturn {
         deleteTranscript,
     }
 }
-
-export default useTranscripts
