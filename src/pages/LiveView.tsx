@@ -9,6 +9,7 @@ import { useFileUrl } from '../hooks/useTemplates'
 import { useLocalBackground } from '../hooks/useLocalBackground'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import { AutoFitText } from '../components/live/AutoFitText'
+import { VideoBackground } from '../components/live/VideoBackground'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -390,16 +391,12 @@ export default function LiveView() {
         >
             {/* Background */}
             {isVideoBackground && backgroundUrl ? (
-                <video
+                <VideoBackground
                     src={backgroundUrl}
                     className="absolute inset-0 w-full h-full object-cover"
                     style={{
                         filter: `blur(${slide.slideStyle?.blur || 0}px) brightness(${slide.slideStyle?.brightness || 50}%)`
                     }}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
                 />
             ) : backgroundUrl ? (
                 <div

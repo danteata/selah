@@ -14,6 +14,7 @@ import { AutoFitText } from './AutoFitText'
 import { BibleVerseNavigator } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
+import { VideoBackground } from './VideoBackground'
 
 // Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
 function parseTimeStringToSeconds(timeStr: string): number {
@@ -483,10 +484,9 @@ export function LiveOutput() {
                                         }}
                                     >
                                         {isNextSlideVideo && (
-                                            <video
+                                            <VideoBackground
                                                 src={nextSlideBackground}
                                                 className="absolute inset-0 w-full h-full object-cover"
-                                                autoPlay loop muted playsInline
                                             />
                                         )}
                                         {nextSlide.layout === 'lower-third' ? (
@@ -675,10 +675,9 @@ export function LiveOutput() {
                                         } as React.CSSProperties}
                                     >
                                         {isLiveSlideVideo && (
-                                            <video
+                                            <VideoBackground
                                                 src={liveSlideBackground}
                                                 className="absolute inset-0 w-full h-full object-cover"
-                                                autoPlay loop muted playsInline
                                             />
                                         )}
                                         {liveSlide.type === 'countdown' ? (
