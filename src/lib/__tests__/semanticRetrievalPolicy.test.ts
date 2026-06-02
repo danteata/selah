@@ -12,43 +12,43 @@ describe('semanticRetrievalPolicy', () => {
     // Dynamic thresholds
     // -----------------------------------------------------------------------
     describe('getDynamicThreshold', () => {
-        it('returns 0.35 for very short queries (<=4 words)', () => {
-            expect(getDynamicThreshold(1)).toBe(0.35)
-            expect(getDynamicThreshold(4)).toBe(0.35)
+        it('returns 0.60 for very short queries (<=4 words)', () => {
+            expect(getDynamicThreshold(1)).toBe(0.60)
+            expect(getDynamicThreshold(4)).toBe(0.60)
         })
 
-        it('returns 0.40 for short queries (5-8 words)', () => {
-            expect(getDynamicThreshold(5)).toBe(0.40)
-            expect(getDynamicThreshold(8)).toBe(0.40)
+        it('returns 0.65 for short queries (5-8 words)', () => {
+            expect(getDynamicThreshold(5)).toBe(0.65)
+            expect(getDynamicThreshold(8)).toBe(0.65)
         })
 
-        it('returns 0.45 for medium queries (9-14 words)', () => {
-            expect(getDynamicThreshold(9)).toBe(0.45)
-            expect(getDynamicThreshold(14)).toBe(0.45)
+        it('returns 0.68 for medium queries (9-14 words)', () => {
+            expect(getDynamicThreshold(9)).toBe(0.68)
+            expect(getDynamicThreshold(14)).toBe(0.68)
         })
 
-        it('returns 0.50 for long queries (>14 words)', () => {
-            expect(getDynamicThreshold(15)).toBe(0.50)
-            expect(getDynamicThreshold(50)).toBe(0.50)
+        it('returns 0.70 for long queries (>14 words)', () => {
+            expect(getDynamicThreshold(15)).toBe(0.70)
+            expect(getDynamicThreshold(50)).toBe(0.70)
         })
 
-        it('clamps to the floor (0.32) and ceiling (0.55)', () => {
+        it('clamps to the floor (0.55) and ceiling (0.72)', () => {
             const t = getDynamicThreshold(4)
-            expect(t).toBeGreaterThanOrEqual(0.32)
-            expect(t).toBeLessThanOrEqual(0.55)
+            expect(t).toBeGreaterThanOrEqual(0.55)
+            expect(t).toBeLessThanOrEqual(0.72)
         })
 
-        it('returns minimum 0.58 for window mode', () => {
-            expect(getDynamicThreshold(1, 'window')).toBe(0.58)
-            expect(getDynamicThreshold(4, 'window')).toBe(0.58)
-            expect(getDynamicThreshold(8, 'window')).toBe(0.58)
-            expect(getDynamicThreshold(50, 'window')).toBe(0.58)
+        it('returns minimum 0.72 for window mode', () => {
+            expect(getDynamicThreshold(1, 'window')).toBe(0.72)
+            expect(getDynamicThreshold(4, 'window')).toBe(0.72)
+            expect(getDynamicThreshold(8, 'window')).toBe(0.72)
+            expect(getDynamicThreshold(50, 'window')).toBe(0.72)
         })
 
         it('does not alter sentence mode thresholds', () => {
-            expect(getDynamicThreshold(1, 'sentence')).toBe(0.35)
-            expect(getDynamicThreshold(8, 'sentence')).toBe(0.40)
-            expect(getDynamicThreshold(50, 'sentence')).toBe(0.50)
+            expect(getDynamicThreshold(1, 'sentence')).toBe(0.60)
+            expect(getDynamicThreshold(8, 'sentence')).toBe(0.65)
+            expect(getDynamicThreshold(50, 'sentence')).toBe(0.70)
         })
     })
 
@@ -218,6 +218,40 @@ describe('semanticRetrievalPolicy', () => {
             const query = 'And I will pray the Father and he shall give you another Comforter'
             const verse = 'And I will pray the Father and he shall give you another Comforter that he may abide with you for ever'
             expect(validateSemanticMatch(query, verse, 14)).toBe(true)
+        })
+
+        // -------------------------------------------------------------------
+        // Regression tests for false-positive shapes seen in production
+        // -------------------------------------------------------------------
+        it('rejects "God has left" matching Numbers 10:31 (theological-only overlap)', () => {
+            // "I asked you never. Are you God? So when you leave, everything is
+            //  finished because God has left." matched Numbers 10:31 with score
+            //  0.513 because both texts contain "leave" — but every word is
+            //  either a stopword or a theological-common word.
+            const query = 'Are you God So when you leave everything is finished because God has left'
+            const verse = 'And he said unto them Tarry ye here until we return unto you and pray for you unto the LORD'
+            expect(validateSemanticMatch(query, verse, 14)).toBe(false)
+        })
+
+        it('rejects "finished" matching John 19:30 (single distinctive word, theological rest)', () => {
+            // "Hi, my name is Dag, he's a dog, he's finished" matched John 19:30
+            // (the "it is finished" verse) at 0.579. Real overlap here is only
+            //  the word "finished" — not enough to validate a quote match.
+            const query = 'his name finished'
+            const verse = 'When Jesus therefore had received the vinegar he said It is finished and he bowed his head and gave up the ghost'
+            // "finished" is a single content word in the query — overlapCount
+            // will be 1 which fails the >=2 floor.
+            expect(validateSemanticMatch(query, verse, 3)).toBe(false)
+        })
+
+        it('rejects long query whose only overlaps are god/lord synonyms', () => {
+            // The original bug: "god" and "lord" are in BIBLICAL_SYNONYMS as
+            //  synonyms of each other, so a query like "...of God" and a verse
+            //  like "...the Lord" used to count as 2 distinctive overlaps.
+            const query = 'The covenant of God and the kingdom of God and the Spirit of God'
+            const verse = 'For the Lord is great and greatly to be praised he is to be feared above all gods'
+            // "lord"/"god" matches are theological-common synonyms only.
+            expect(validateSemanticMatch(query, verse, 14)).toBe(false)
         })
     })
 })

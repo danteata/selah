@@ -1,11 +1,15 @@
-const THRESHOLD_FLOOR = 0.32
-const THRESHOLD_CEILING = 0.55
+// all-MiniLM-L6-v2 returns real verse paraphrases in the 0.70-0.85 range.
+// Anything below 0.65 is surface overlap on common theological words and
+// produces false positives like "finished" → John 19:30, "God has left" →
+// Numbers 10:31, "monkey" → Revelation 10:7. Tune to reject noise.
+const THRESHOLD_FLOOR = 0.55
+const THRESHOLD_CEILING = 0.72
 
 const BANDS: Array<{ maxWords: number; threshold: number }> = [
-    { maxWords: 4, threshold: 0.35 },
-    { maxWords: 8, threshold: 0.40 },
-    { maxWords: 14, threshold: 0.45 },
-    { maxWords: Infinity, threshold: 0.50 },
+    { maxWords: 4, threshold: 0.60 },
+    { maxWords: 8, threshold: 0.65 },
+    { maxWords: 14, threshold: 0.68 },
+    { maxWords: Infinity, threshold: 0.70 },
 ]
 
 export function getDynamicThreshold(wordCount: number, mode?: 'sentence' | 'window'): number {
@@ -25,7 +29,7 @@ export function getDynamicThreshold(wordCount: number, mode?: 'sentence' | 'wind
     return clampThreshold(threshold)
 }
 
-const WINDOW_THRESHOLD_FLOOR = 0.58
+const WINDOW_THRESHOLD_FLOOR = 0.72
 
 function clampThreshold(t: number): number {
     return Math.max(THRESHOLD_FLOOR, Math.min(THRESHOLD_CEILING, t))
@@ -270,8 +274,12 @@ export function validateSemanticMatch(
         const synonymMatch = !exactMatch && verseContentWords.some(v => isSynonymMatch(w, v))
         if (exactMatch || synonymMatch) {
             overlapCount++
-            const isCommon = isTheologicalCommon(w)
-            if (!isCommon || synonymMatch) {
+            // Distinctive = the matched word is itself non-theological.
+            // Synonym matches on theological-common words (god/lord/spirit/holy/...)
+            // do NOT count as distinctive — their synonym map is so broad
+            // that almost any verse will match. e.g. "God" ↔ "Lord" should not
+            // be enough to validate Numbers 10:31 against an unrelated utterance.
+            if (!isTheologicalCommon(w)) {
                 distinctiveOverlap++
             }
         }
