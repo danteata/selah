@@ -38,9 +38,17 @@ import type { TranscriptSegment } from '../types/sermon-listener'
 import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
 import { startKeepAwake, stopKeepAwake, setupVisibilityKeepAwake } from '../services/sermon-listener/keepAwake'
 import { getNextChapter, getPreviousChapter } from '../utils/bibleReference'
+import {
+    getLiveSermonState,
+    saveLiveSermonState,
+    clearLiveSermonState,
+    getSavedSermonTranscripts,
+    saveSermonTranscript,
+    deleteSavedSermonTranscript as deleteSavedTranscriptFromIDB,
+    clearSavedSermonTranscripts as clearSavedTranscriptsInIDB,
+    migrateLegacySermonStorage,
+} from './useIndexedDB'
 
-const SERMON_TRANSCRIPT_STORAGE_KEY = 'sermon-listener:saved-transcripts'
-const SERMON_LIVE_STATE_STORAGE_KEY = 'sermon-listener:live-state'
 const MAX_DETECTED_VERSES_PER_QUERY = 3 // Max verses per semantic search query
 
 export interface SavedSermonTranscript {
@@ -169,47 +177,6 @@ export interface SermonListenerActions {
 
 export type UseSermonListenerReturn = SermonListenerState & SermonListenerActions
 
-// Helper functions for localStorage persistence
-function readSavedTranscripts(): SavedSermonTranscript[] {
-    if (typeof window === 'undefined') return []
-    try {
-        const raw = localStorage.getItem(SERMON_TRANSCRIPT_STORAGE_KEY)
-        if (!raw) return []
-        const parsed = JSON.parse(raw) as SavedSermonTranscript[]
-        return Array.isArray(parsed) ? parsed : []
-    } catch {
-        return []
-    }
-}
-
-function writeSavedTranscripts(items: SavedSermonTranscript[]): void {
-    if (typeof window === 'undefined') return
-    localStorage.setItem(SERMON_TRANSCRIPT_STORAGE_KEY, JSON.stringify(items))
-}
-
-interface PersistedLiveState {
-    transcript: string
-    segments: TranscriptSegment[]
-    detectedVerses: DetectedVerse[]
-    currentVerse: DetectedVerse | null
-    activeBibleVersion: string
-}
-
-function readLiveState(): PersistedLiveState | null {
-    if (typeof window === 'undefined') return null
-    try {
-        const raw = localStorage.getItem(SERMON_LIVE_STATE_STORAGE_KEY)
-        return raw ? (JSON.parse(raw) as PersistedLiveState) : null
-    } catch {
-        return null
-    }
-}
-
-function writeLiveState(state: PersistedLiveState): void {
-    if (typeof window === 'undefined') return
-    localStorage.setItem(SERMON_LIVE_STATE_STORAGE_KEY, JSON.stringify(state))
-}
-
 /**
  * Hook for listening to sermons and detecting Bible verse references
  */
@@ -261,19 +228,22 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // State
     const [isListening, setIsListening] = useState(false)
     const [isSupported, setIsSupported] = useState(false)
-    const [transcript, setTranscript] = useState(() => readLiveState()?.transcript || '')
-    const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>(() => readLiveState()?.segments || [])
+    const [transcript, setTranscript] = useState('')
+    const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([])
     const [interimTranscript, setInterimTranscript] = useState('')
-    const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>(() => readLiveState()?.detectedVerses || [])
+    const [detectedVerses, setDetectedVerses] = useState<DetectedVerse[]>([])
     const detectedVersesRef = useRef<DetectedVerse[]>(detectedVerses)
-    const [currentVerse, setCurrentVerse] = useState<DetectedVerse | null>(() => readLiveState()?.currentVerse || null)
+    const [currentVerse, setCurrentVerse] = useState<DetectedVerse | null>(null)
     const [currentScripture, setCurrentScripture] = useState<Scripture | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [provider, setProvider] = useState<TranscriptionProvider>(getInitialProvider)
     const [isModelLoading, setIsModelLoading] = useState(false)
     const [modelLoadingProgress, setModelLoadingProgress] = useState(0)
-    const [savedTranscripts, setSavedTranscripts] = useState<SavedSermonTranscript[]>(() => readSavedTranscripts())
+    const [savedTranscripts, setSavedTranscripts] = useState<SavedSermonTranscript[]>([])
+    // Becomes true once we've finished hydrating from IndexedDB. Used to
+    // gate the persistence useEffect so we don't write back what we just read.
+    const [hydrated, setHydrated] = useState(false)
 
     // Provider initialization state
     const [isInitializingProvider, setIsInitializingProvider] = useState(false)
@@ -295,7 +265,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const audioLevelRafRef = useRef<number | null>(null)
 
     // Voice command state
-    const [activeBibleVersion, setActiveBibleVersion] = useState(() => readLiveState()?.activeBibleVersion || defaultBibleVersion)
+    const [activeBibleVersion, setActiveBibleVersion] = useState(defaultBibleVersion)
     const activeBibleVersionRef = useRef(activeBibleVersion)
     const currentVerseRef = useRef<DetectedVerse | null>(currentVerse)
     const currentScriptureRef = useRef<Scripture | null>(null)
@@ -315,7 +285,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     optionsRef.current = options
 
     // Track transcript buffer for context
-    const transcriptBufferRef = useRef(readLiveState()?.transcript || '')
+    const transcriptBufferRef = useRef('')
 
     // Session-relative timer for segment timestamps
     const sessionStartTimeRef = useRef<number>(0)
@@ -331,6 +301,29 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Cooldown map for re-triggering already-detected verses (reference → last activated timestamp)
     const reactivationCooldownRef = useRef<Map<string, number>>(new Map())
     const REACTIVATION_COOLDOWN_MS = 30_000 // 30 seconds
+
+    // Per-verse "last time the rolling transcript window matched this verse" timestamp.
+    // Used to distinguish a genuine re-reference (the verse stopped matching for a
+    // while, then re-appeared) from rolling-window noise (the verse is matching on
+    // every chunk because its keywords are still in the window). A genuine re-reference
+    // re-shows the verse; rolling-window noise only bumps the retriggerCount.
+    const lastMatchTimeRef = useRef<Map<string, number>>(new Map())
+    const REACTIVATE_AFTER_SILENCE_MS = 60_000 // 60 seconds of silence before a re-match is treated as a re-reference
+
+    // Per-verse score of the most recent match. Regex matches are recorded as
+    // 1.0 (the preacher said the reference explicitly). Semantic matches are
+    // recorded as the cosine score. Used by the chapter-level dedup to
+    // decide whether a new semantic match is strong enough to override an
+    // existing chapter sibling.
+    const lastScoreByReferenceRef = useRef<Map<string, number>>(new Map())
+    const CHAPTER_DEDUP_DELTA = 0.10 // A new semantic match must beat the existing chapter sibling by this much
+
+    // Scripture-marker words. If the matched query contains one of these, the
+    // match is more likely a real Bible reference and we accept lower scores.
+    // If none are present, we require a higher score to compensate for the
+    // lack of an explicit reference signal.
+    const SCRIPTURE_MARKER_RE = /\b(verse|verses|chapter|chapters|scripture|scriptures|the bible|the word|it is written|the lord said|god said|according to)\b/i
+    const SCRIPTURE_MARKER_MIN_SCORE = 0.75 // Below this AND no marker → likely incidental match
 
     // Debounce timer for interim transcript processing
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -588,21 +581,66 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Semantic detector ref
     const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
-    // Persist live state to localStorage so a refresh restores the sermon in
+    // Hydrate live state + saved transcripts from IndexedDB on mount.
+    // One-shot, runs once per hook instance. Triggers the legacy localStorage
+    // → IDB migration on first ever invocation. ~50–200 ms in practice.
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            try {
+                await migrateLegacySermonStorage()
+
+                const [live, saved] = await Promise.all([
+                    getLiveSermonState(),
+                    getSavedSermonTranscripts(),
+                ])
+
+                if (cancelled) return
+
+                if (live) {
+                    if (typeof live.transcript === 'string') setTranscript(live.transcript)
+                    if (Array.isArray(live.segments)) setTranscriptSegments(live.segments as TranscriptSegment[])
+                    if (Array.isArray(live.detectedVerses)) setDetectedVerses(live.detectedVerses as DetectedVerse[])
+                    if (live.currentVerse) setCurrentVerse(live.currentVerse as DetectedVerse)
+                    if (typeof live.activeBibleVersion === 'string' && live.activeBibleVersion) {
+                        setActiveBibleVersion(live.activeBibleVersion)
+                    }
+                    transcriptBufferRef.current = live.transcript || ''
+                }
+
+                if (saved.length > 0) {
+                    setSavedTranscripts(saved as SavedSermonTranscript[])
+                }
+            } catch (err) {
+                console.warn('[useSermonListener] Hydration from IDB failed:', err)
+            } finally {
+                if (!cancelled) setHydrated(true)
+            }
+        })()
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    // Persist live state to IndexedDB so a refresh restores the sermon in
     // progress. Debounced because transcript updates fire on every token —
     // serializing 30+ KB of JSON on every keystroke pegs the main thread.
+    // Gated on `hydrated` so we don't echo back what we just loaded.
     useEffect(() => {
+        if (!hydrated) return
         const timer = setTimeout(() => {
-            writeLiveState({
+            saveLiveSermonState({
                 transcript,
                 segments: transcriptSegments,
                 detectedVerses,
                 currentVerse,
                 activeBibleVersion,
+            }).catch((err) => {
+                console.warn('[useSermonListener] IDB live state write failed:', err)
             })
         }, 400)
         return () => clearTimeout(timer)
-    }, [transcript, transcriptSegments, detectedVerses, currentVerse, activeBibleVersion])
+    }, [hydrated, transcript, transcriptSegments, detectedVerses, currentVerse, activeBibleVersion])
 
     useEffect(() => {
         activeBibleVersionRef.current = activeBibleVersion
@@ -1293,6 +1331,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }))
             for (const v of versesWithTimestamp) {
                 reactivationCooldownRef.current.set(v.reference, now)
+                lastMatchTimeRef.current.set(v.reference, now)
+                // Regex matches are explicit references — treat as 1.0 for
+                // chapter-dedup comparison purposes so semantic matches in the
+                // same chapter never override an explicit regex hit.
+                lastScoreByReferenceRef.current.set(v.reference, 1.0)
             }
             setDetectedVerses(prev => dedupeVerses([...prev, ...versesWithTimestamp]))
             const latestVerse = versesWithTimestamp[0]
@@ -1320,21 +1363,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 optionsRef.current.onVerseDetected?.(latestVerse, null)
             }
         } else if (hasReActivated) {
-            // No new verses, but a previously detected verse was mentioned again — re-activate it
+            // The previously-detected verse re-matched. Decide whether this is a
+            // genuine re-reference (verse was silent for >= REACTIVATE_AFTER_SILENCE_MS)
+            // or rolling-window noise (verse is still matching every chunk because
+            // its keywords are in the sliding transcript).
             const reActivatedRef = reActivatedRefs[0]
             const existing = detectedVersesRef.current.find(v => v.reference === reActivatedRef)
             if (existing) {
                 const now = Date.now()
-                const lastActivated = reactivationCooldownRef.current.get(reActivatedRef) || 0
-                const isOffCooldown = now - lastActivated >= REACTIVATION_COOLDOWN_MS
+                const lastMatch = lastMatchTimeRef.current.get(reActivatedRef) || 0
+                const hasBeenSilent = lastMatch > 0 && (now - lastMatch) >= REACTIVATE_AFTER_SILENCE_MS
+                lastMatchTimeRef.current.set(reActivatedRef, now)
 
-                setCurrentVerse({
-                    ...existing,
-                    retriggerCount: (existing.retriggerCount || 0) + 1,
-                    lastActivatedAt: now,
-                })
-
-                if (isOffCooldown) {
+                if (hasBeenSilent) {
+                    // Genuine re-reference — the speaker has moved on and come back.
+                    // Re-show: set LIVE, re-fetch scripture, re-append the slide.
+                    setCurrentVerse({
+                        ...existing,
+                        retriggerCount: (existing.retriggerCount || 0) + 1,
+                        lastActivatedAt: now,
+                    })
                     reactivationCooldownRef.current.set(reActivatedRef, now)
                     if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                         lookupVerse(existing).then(scripture => {
@@ -1345,8 +1393,28 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 setLiveSlide(slide.id)
                             }
                         })
-                    } else {
-                        optionsRef.current.onVerseDetected?.(existing, null)
+                    }
+                } else {
+                    // Rolling-window noise — the verse keywords are still in the
+                    // sliding transcript. Just bump the retriggerCount so the
+                    // operator can see the verse is still being discussed; do
+                    // NOT touch the LIVE display or the slide queue.
+                    detectedVersesRef.current = detectedVersesRef.current.map(v =>
+                        v.reference === reActivatedRef
+                            ? {
+                                  ...v,
+                                  retriggerCount: (v.retriggerCount || 0) + 1,
+                                  lastActivatedAt: now,
+                              }
+                            : v,
+                    )
+                    reactivationCooldownRef.current.set(reActivatedRef, now)
+
+                    if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
+                        // Fire the lookup callback for analytics / external integrations.
+                        lookupVerse(existing).then(scripture => {
+                            optionsRef.current.onVerseDetected?.(existing, scripture)
+                        })
                     }
                 }
             }
@@ -1394,10 +1462,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
                     const properReference = `${bookName} ${match.chapter}:${match.verse}`
 
-                    // Semantic paraphrases naturally score lower than exact regex matches;
-                    // use a more forgiving scale so verses like "kingdom of heaven... ten virgins"
-                    // (Matthew 25) are not discarded.
-                    const confidence = match.score >= 0.70 ? 'high' : match.score >= 0.55 ? 'medium' : 'low'
+                    // Real verse paraphrases against KJV with all-MiniLM-L6-v2
+                    // score in the 0.70-0.85 range. Anything below 0.65 is almost
+                    // always surface overlap on common theological words, which
+                    // produced false positives like "finished" → John 19:30.
+                    const confidence =
+                        match.score >= 0.78 ? 'high' :
+                        match.score >= 0.65 ? 'medium' :
+                        'low'
                     const matchConfidenceLevel = confidenceOrder[confidence]
 
                     if (matchConfidenceLevel < minConfidenceLevel) {
@@ -1407,6 +1479,39 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // Re-activate if already detected, don't add duplicate to list
                     if (detectedRefsRef.current.has(properReference)) {
                         semanticReActivatedRefs.push(properReference)
+                        continue
+                    }
+
+                    // Chapter-level dedup. If a verse in the same book+chapter is
+                    // already in the detected list (from a regex or a previous
+                    // semantic match), suppress this new match unless its score
+                    // beats the existing one by CHAPTER_DEDUP_DELTA. The 384-dim
+                    // embedding model flags every nearby verse in a chapter
+                    // above threshold, and we only want to surface one verse per
+                    // chapter (the strongest one) unless a later paraphrase is
+                    // much stronger.
+                    const sameChapterExisting = detectedVersesRef.current.find(v =>
+                        v.book === bookName && v.chapter === match.chapter
+                    )
+                    if (sameChapterExisting) {
+                        const existingScore = lastScoreByReferenceRef.current.get(sameChapterExisting.reference) ?? 0
+                        if (match.score < existingScore + CHAPTER_DEDUP_DELTA) {
+                            // Skip — the existing chapter sibling is strong enough.
+                            // We still record the score so a future much-stronger
+                            // match can override, but we don't add this match.
+                            lastScoreByReferenceRef.current.set(properReference, match.score)
+                            continue
+                        }
+                    }
+
+                    // Scripture-marker check. If the matched query has no marker
+                    // word (verse, chapter, scripture, etc.) and the score is
+                    // below SCRIPTURE_MARKER_MIN_SCORE, it's likely an
+                    // incidental embedding match — the embedding model can hit
+                    // a verse that uses a similar idiom or topic without the
+                    // preacher actually quoting it. Reject unless the score is
+                    // convincingly high.
+                    if (!SCRIPTURE_MARKER_RE.test(match.text) && match.score < SCRIPTURE_MARKER_MIN_SCORE) {
                         continue
                     }
 
@@ -1452,6 +1557,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     }))
                     for (const v of versesWithTimestamp) {
                         reactivationCooldownRef.current.set(v.reference, now)
+                        lastMatchTimeRef.current.set(v.reference, now)
+                        // Record the original cosine score for the chapter-dedup
+                        // comparison. confidence is a bucketed label; the score
+                        // itself is what matters for "is this a stronger match
+                        // than what's already in the chapter".
+                        const originalScore = (semanticMatches ?? []).find(m => {
+                            const bn = (() => {
+                                const n = parseInt(m.book, 10)
+                                return !isNaN(n) && n >= 1 && n <= 66 && /^\d+$/.test(m.book)
+                                    ? (NUMBER_TO_BOOK[n] || m.book)
+                                    : m.book
+                            })()
+                            return bn === v.book && m.chapter === v.chapter && m.verse === v.verseStart
+                        })?.score ?? 0
+                        lastScoreByReferenceRef.current.set(v.reference, originalScore)
                     }
                     setDetectedVerses(prev => dedupeVerses([...prev, ...versesWithTimestamp]))
 
@@ -1464,7 +1584,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                             lookupVerse(bestSemanticVerse).then(scripture => {
                                 optionsRef.current.onVerseDetected?.(bestSemanticVerse, scripture)
-                                if (autoDisplay && scripture) {
+                                // Only auto-project if the match cleared the medium
+                                // confidence bar. Low-confidence matches (e.g. score
+                                // 0.55-0.65 with only theological-common overlap) stay
+                                // in the detected list for operator review.
+                                if (autoDisplay && scripture && bestSemanticVerse.confidence !== 'low') {
                                     const slide = createBibleSlide(scripture)
                                     appendActiveSlide(slide)
                                     setLiveSlide(slide.id)
@@ -1476,31 +1600,53 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     }
                 }
 
-                // Re-activate previously detected semantic verses as current
+                // Re-activation of a previously-detected semantic verse. Same
+                // silence-threshold rule as the regex path: if the verse has
+                // been absent from the rolling window for at least
+                // REACTIVATE_AFTER_SILENCE_MS, treat this as a genuine
+                // re-reference and re-show. Otherwise it's rolling-window noise —
+                // bump metadata only.
                 if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0 && !isStale) {
                     const reActivatedRef = semanticReActivatedRefs[0]
                     const existing = detectedVersesRef.current.find(v => v.reference === reActivatedRef)
                     if (existing) {
                         const now = Date.now()
-                        const lastActivated = reactivationCooldownRef.current.get(reActivatedRef) || 0
-                        const isOffCooldown = now - lastActivated >= REACTIVATION_COOLDOWN_MS
+                        const lastMatch = lastMatchTimeRef.current.get(reActivatedRef) || 0
+                        const hasBeenSilent = lastMatch > 0 && (now - lastMatch) >= REACTIVATE_AFTER_SILENCE_MS
+                        lastMatchTimeRef.current.set(reActivatedRef, now)
+                        reactivationCooldownRef.current.set(reActivatedRef, now)
 
-                        setCurrentVerse({
-                            ...existing,
-                            retriggerCount: (existing.retriggerCount || 0) + 1,
-                            lastActivatedAt: now,
-                        })
-
-                        if (isOffCooldown) {
-                            reactivationCooldownRef.current.set(reActivatedRef, now)
+                        if (hasBeenSilent) {
+                            // Genuine re-reference. Re-show LIVE, re-fetch, re-append.
+                            setCurrentVerse({
+                                ...existing,
+                                retriggerCount: (existing.retriggerCount || 0) + 1,
+                                lastActivatedAt: now,
+                            })
                             if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                                 lookupVerse(existing).then(scripture => {
                                     optionsRef.current.onVerseDetected?.(existing, scripture)
-                                    if (autoDisplay && scripture) {
+                                    if (autoDisplay && scripture && existing.confidence !== 'low') {
                                         const slide = createBibleSlide(scripture)
                                         appendActiveSlide(slide)
                                         setLiveSlide(slide.id)
                                     }
+                                })
+                            }
+                        } else {
+                            // Rolling-window noise. Metadata only.
+                            detectedVersesRef.current = detectedVersesRef.current.map(v =>
+                                v.reference === reActivatedRef
+                                    ? {
+                                          ...v,
+                                          retriggerCount: (v.retriggerCount || 0) + 1,
+                                          lastActivatedAt: now,
+                                      }
+                                    : v,
+                            )
+                            if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
+                                lookupVerse(existing).then(scripture => {
+                                    optionsRef.current.onVerseDetected?.(existing, scripture)
                                 })
                             }
                         }
@@ -1848,6 +1994,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             interimDebounceRef.current = null
         }
         unifiedTranscriptionService.clearTranscript()
+        clearLiveSermonState().catch((err) => {
+            console.warn('[useSermonListener] IDB clear live state failed:', err)
+        })
     }, [defaultBibleVersion])
 
     /**
@@ -1872,23 +2021,28 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             createdAt: new Date().toISOString(),
         }
 
-        setSavedTranscripts(prev => {
-            const updated = [...prev, saved]
-            writeSavedTranscripts(updated)
-            return updated
+        setSavedTranscripts(prev => [saved, ...prev])
+        saveSermonTranscript({
+            id: saved.id,
+            title: saved.title,
+            transcript: saved.transcript,
+            segments: saved.segments,
+            provider: saved.provider,
+            createdAt: saved.createdAt,
+        }).catch((err) => {
+            console.warn('[useSermonListener] IDB save transcript failed:', err)
         })
 
         return saved
-    }, [transcript, provider])
+    }, [transcript, transcriptSegments, provider])
 
     /**
      * Delete a saved transcript
      */
     const deleteSavedTranscript = useCallback((id: string) => {
-        setSavedTranscripts(prev => {
-            const updated = prev.filter(t => t.id !== id)
-            writeSavedTranscripts(updated)
-            return updated
+        setSavedTranscripts(prev => prev.filter(t => t.id !== id))
+        deleteSavedTranscriptFromIDB(id).catch((err) => {
+            console.warn('[useSermonListener] IDB delete transcript failed:', err)
         })
     }, [])
 
@@ -1897,7 +2051,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      */
     const clearSavedTranscripts = useCallback(() => {
         setSavedTranscripts([])
-        writeSavedTranscripts([])
+        clearSavedTranscriptsInIDB().catch((err) => {
+            console.warn('[useSermonListener] IDB clear transcripts failed:', err)
+        })
     }, [])
 
     /**
