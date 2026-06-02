@@ -3,7 +3,7 @@ import { Loader2, Database, Search, RefreshCw, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useScripture } from '../../hooks/useScripture'
 import type { BibleVersion } from '../../types'
-import { useConvex, useQuery } from 'convex/react'
+import { useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useEmbeddingStatus } from '../../hooks/useEmbeddingStatus'
 import type { SyncStage } from '../../services/sermon-listener/embeddingSyncManager'
@@ -21,7 +21,6 @@ const STAGE_LABELS: Record<SyncStage, string> = {
 }
 
 export function BibleVersionSettings() {
-    const convex = useConvex()
     const [bibleVersionOptions, setBibleVersionOptions] = useState<BibleVersion[]>([])
 
     const {
@@ -72,26 +71,15 @@ export function BibleVersionSettings() {
     }, [bibleVersions, refreshDownloadStatuses, checkAllStatuses])
 
     const handleEnableSearch = useCallback(async (versionId: string, withFragments = false) => {
-        const version = bibleVersionOptions.find(v => v.id === versionId)
-        const needsDownload = version && !version.isDownloaded
+        const getBibleVerses = async () => {
+            const data = await downloadBibleVersion(versionId)
+            if (data) {
+                await refreshDownloadStatuses()
+            }
+            return data
+        }
 
-        const result = await startSync(
-            versionId,
-            async () => {
-                const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
-                return fileInfo?.url ?? null
-            },
-            needsDownload
-                ? async () => {
-                    const result = await downloadBibleVersion(versionId)
-                    if (result) {
-                        await refreshDownloadStatuses()
-                    }
-                    return !!result
-                }
-                : undefined,
-            withFragments,
-        )
+        const result = await startSync(versionId, getBibleVerses, withFragments)
         if (!result.success && !result.cancelled) {
             // Error message is rendered from shared embedding status state
             console.error(`[EmbeddingSync] Failed for ${versionId}: ${result.error ?? 'Unknown error'}`)
@@ -102,13 +90,10 @@ export function BibleVersionSettings() {
         if (result.success && !withFragments) {
             // Small delay so the UI shows "Complete" briefly before switching to upgrading
             setTimeout(() => {
-                upgradeToFragments(versionId, async () => {
-                    const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
-                    return fileInfo?.url ?? null
-                })
+                upgradeToFragments(versionId, getBibleVerses)
             }, 500)
         }
-    }, [bibleVersionOptions, startSync, upgradeToFragments, convex, downloadBibleVersion, refreshDownloadStatuses])
+    }, [startSync, upgradeToFragments, downloadBibleVersion, refreshDownloadStatuses])
 
     const handleClear = useCallback(async (versionId: string) => {
         await clearEmbeddings(versionId)

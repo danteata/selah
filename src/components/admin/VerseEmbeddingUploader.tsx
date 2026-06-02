@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useConvex, useAction, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useUserRole } from '../../hooks/useUserRole'
+import { useScripture } from '../../hooks/useScripture'
 import {
     initializeEmbedder,
     embedBatch,
@@ -64,6 +65,7 @@ export function VerseEmbeddingUploader({ onClose }: VerseEmbeddingUploaderProps)
     const convex = useConvex()
     const { isSuperadmin, isLoading: roleLoading } = useUserRole()
     const seedEmbeddingsFromClient = useAction(api.verseEmbeddings.seedEmbeddingsFromClient)
+    const { downloadBibleVersion } = useScripture()
 
     const [statuses, setStatuses] = useState<UploadStatus[]>([])
     const [isModelLoading, setIsModelLoading] = useState(false)
@@ -233,18 +235,9 @@ export function VerseEmbeddingUploader({ onClose }: VerseEmbeddingUploaderProps)
                 )
             )
 
-            // Get Bible data from file storage
-            const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
-            if (!fileInfo?.url) {
-                throw new Error('Bible version file not found')
-            }
-
-            // Fetch the Bible JSON file
-            const response = await fetch(fileInfo.url)
-            if (!response.ok) {
-                throw new Error(`Failed to fetch Bible file: ${response.status}`)
-            }
-            const verses = await response.json() as Array<{ book: string; chapter: string; verse: string; scripture: string }>
+            // Get Bible data from the local cache (IndexedDB → bundled asset → CDN).
+            // The admin uploader never reads from Convex storage.
+            const verses = await downloadBibleVersion(versionId)
             if (!verses || verses.length === 0) {
                 throw new Error('Bible version data is empty')
             }

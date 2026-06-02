@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useConvex, useQuery } from 'convex/react'
+import { useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useEmbeddingStatus } from '../../hooks/useEmbeddingStatus'
+import { useScripture } from '../../hooks/useScripture'
 import { isEmbedderReady } from '../../services/sermon-listener/localEmbeddings'
 import type { SyncStage } from '../../services/sermon-listener/embeddingSyncManager'
 import { Check, Loader2, Download, Trash2, RefreshCw, Bell, BellOff } from 'lucide-react'
@@ -23,8 +24,8 @@ interface LocalEmbeddingSyncProps {
 }
 
 export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
-    const convex = useConvex()
     const bibleVersions = useQuery(api.bibleVersions.listBibleVersions)
+    const { downloadBibleVersion } = useScripture()
 
     const {
         states: embeddingStatuses,
@@ -68,11 +69,9 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
 
     const handleSeed = useCallback(async (versionId: string, withFragments = false) => {
         const versionName = bibleVersions?.find(v => v.id === versionId)?.name ?? versionId
+        const getBibleVerses = () => downloadBibleVersion(versionId)
         try {
-            const result = await startSync(versionId, async () => {
-                const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
-                return fileInfo?.url ?? null
-            }, undefined, withFragments)
+            const result = await startSync(versionId, getBibleVerses, withFragments)
             if (result.success) {
                 showNotification('Search ready', `You can now find verses in ${versionName}`)
                 setShowSuccess(versionId)
@@ -81,10 +80,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                 // Auto-upgrade to fragments in the background after fast full-verse seed completes
                 if (!withFragments) {
                     setTimeout(() => {
-                        upgradeToFragments(versionId, async () => {
-                            const fileInfo = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId })
-                            return fileInfo?.url ?? null
-                        })
+                        upgradeToFragments(versionId, getBibleVerses)
                     }, 500)
                 }
             } else if (!result.cancelled) {
@@ -93,7 +89,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
         } catch {
             showNotification('Setup failed', `Could not prepare ${versionName} for search`)
         }
-    }, [bibleVersions, startSync, upgradeToFragments, convex, showNotification])
+    }, [bibleVersions, startSync, upgradeToFragments, downloadBibleVersion, showNotification])
 
     const handleClear = useCallback(async (versionId: string) => {
         await clearEmbeddings(versionId)

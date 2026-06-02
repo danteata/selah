@@ -13,6 +13,7 @@ import {
     clearSyncProgress,
 } from './localEmbeddings'
 import { extractVerseFragments } from '../../lib/extractVerseFragments'
+import type { BibleVerse } from '../../types'
 
 const BOOK_TO_NUMBER: Record<string, number> = {
     'Genesis': 1, 'Exodus': 2, 'Leviticus': 3, 'Numbers': 4, 'Deuteronomy': 5,
@@ -196,8 +197,7 @@ class EmbeddingSyncManager {
 
     async startSync(
         versionId: string,
-        getBibleFileUrl: () => Promise<string | null>,
-        downloadFn?: () => Promise<boolean>,
+        getBibleVerses: () => Promise<BibleVerse[] | null>,
         withFragments = false,
     ): Promise<SyncResult> {
         if (this.isSyncingVersion(versionId)) return { success: false, error: 'Sync already in progress' }
@@ -208,25 +208,11 @@ class EmbeddingSyncManager {
         const startedAt = Date.now()
 
         try {
-                if (downloadFn) {
-                this.updateState(versionId, {
-                    stage: 'downloading',
-                    progress: 0,
-                    total: 0,
-                    startedAt,
-                    eta: null,
-                    error: null,
-                })
-                const downloaded = await downloadFn()
-                if (!downloaded) throw new Error('Failed to download Bible version')
-                if (signal.aborted) throw new Error('Sync cancelled')
-            }
-
             this.updateState(versionId, {
                 stage: 'loading-model',
                 progress: 0,
                 total: 0,
-                startedAt: downloadFn ? startedAt : Date.now(),
+                startedAt,
                 eta: null,
                 error: null,
             })
@@ -245,19 +231,11 @@ class EmbeddingSyncManager {
 
             this.updateState(versionId, { stage: 'importing' })
 
-            const url = await getBibleFileUrl()
-            if (!url) throw new Error('Bible version file not found')
-
-            const response = await fetch(url)
-            if (!response.ok) throw new Error(`Failed to fetch Bible file: ${response.status}`)
-
-            const verses = await response.json() as Array<{
-                book: string
-                chapter: string
-                verse: string
-                scripture: string
-            }>
-            if (!verses || verses.length === 0) throw new Error('Bible version data is empty')
+            // Read Bible verses from the caller's local cache (IndexedDB →
+            // bundled asset → CDN chain in useScripture). The sync manager
+            // never fetches from the network or touches Convex.
+            const verses = await getBibleVerses()
+            if (!verses || verses.length === 0) throw new Error('Bible version file not found')
 
             // Check for resumable progress before clearing
             const savedProgress = await getSyncProgress(versionId)
@@ -429,7 +407,7 @@ class EmbeddingSyncManager {
 
     async upgradeToFragments(
         versionId: string,
-        getBibleFileUrl: () => Promise<string | null>,
+        getBibleVerses: () => Promise<BibleVerse[] | null>,
     ): Promise<SyncResult> {
         if (this.isSyncingVersion(versionId)) return { success: false, error: 'Sync already in progress' }
         const hasFrags = await hasFragmentEmbeddings(versionId)
@@ -455,19 +433,9 @@ class EmbeddingSyncManager {
 
             if (signal.aborted) throw new Error('Sync cancelled')
 
-            const url = await getBibleFileUrl()
-            if (!url) throw new Error('Bible version file not found')
-
-            const response = await fetch(url)
-            if (!response.ok) throw new Error(`Failed to fetch Bible file: ${response.status}`)
-
-            const verses = await response.json() as Array<{
-                book: string
-                chapter: string
-                verse: string
-                scripture: string
-            }>
-            if (!verses || verses.length === 0) throw new Error('Bible version data is empty')
+            // Read Bible verses from the caller's local cache.
+            const verses = await getBibleVerses()
+            if (!verses || verses.length === 0) throw new Error('Bible version file not found')
 
             if (signal.aborted) throw new Error('Sync cancelled')
 

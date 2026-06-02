@@ -1,33 +1,56 @@
 import { useCallback } from 'react'
 import { useAppStore } from '../store/appStore'
 import { getIndexedDB } from './useIndexedDB'
-import { useConvex } from 'convex/react'
-import { api } from '../../convex/_generated/api'
 import type { BibleVerse, Scripture, Hymn } from '../types'
 
-// Bible data URL from Vue app (CDN fallback)
+// Bible data served as a static asset bundled with the app (web + Tauri).
+// Vite copies `public/bibles/{version}.json` into the build output as-is.
+// The browser/Tauri webview serves the file with normal HTTP cache headers,
+// so subsequent visits skip the network entirely.
+const BUNDLED_BIBLE_URL = '/bibles'
+
+// Public CDN fallback — only hit if the bundled asset is missing (e.g. a
+// version was added to the system after the last build). This is a
+// third-party CloudFront URL, not Convex.
 const BIBLE_DATA_URL = 'https://d37gopmfkl2m2z.cloudfront.net/open/bible-versions'
 
 // Data source tracking
-export type BibleDataSource = 'indexeddb' | 'convex' | 'cdn'
+export type BibleDataSource = 'indexeddb' | 'bundled' | 'cdn'
 
 export interface BibleVersionStatus {
     id: string
     downloaded: boolean
     source: BibleDataSource | null
-    availableOnConvex: boolean
+    availableBundled: boolean
     availableOnCdn: boolean
 }
 
 export function useScripture() {
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
-    const convex = useConvex()
 
-    // Fetch Bible data from CDN (fallback)
+    // Fetch Bible data from the bundled static asset (Vite/Tauri).
+    // Served as `/bibles/{version}.json` — cached by the browser forever after first load.
+    const fetchFromBundled = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
+        try {
+            const response = await fetch(`${BUNDLED_BIBLE_URL}/${version.toLowerCase()}.json`)
+
+            if (!response.ok) {
+                // Bundled asset is missing (e.g. the version was added after this build).
+                // Don't warn loudly — this is expected for not-yet-bundled versions.
+                return null
+            }
+
+            const bibleData = await response.json() as BibleVerse[]
+            return bibleData
+        } catch {
+            return null
+        }
+    }, [])
+
+    // Fetch Bible data from public CDN (last-resort fallback if bundled missing).
     const fetchFromCdn = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
         try {
-            console.log(`Fetching Bible version ${version} from CDN...`)
             const response = await fetch(`${BIBLE_DATA_URL}/${version.toLowerCase()}.json`)
 
             if (!response.ok) {
@@ -43,37 +66,6 @@ export function useScripture() {
             return null
         }
     }, [])
-
-    // Fetch Bible data from Convex
-    const fetchFromConvex = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
-        try {
-            console.log(`Fetching Bible version ${version} from Convex...`)
-
-            // Get the file URL from Convex storage
-            const fileResult = await convex.query(api.bibleVersions.getBibleFileUrl, { versionId: version })
-
-            if (!fileResult?.url) {
-                console.warn(`Version ${version} file not found on Convex`)
-                return null
-            }
-
-            console.log(`Found ${version} on Convex, fetching from storage: ${fileResult.url}`)
-
-            // Fetch the actual Bible data from Convex storage
-            const response = await fetch(fileResult.url)
-            if (!response.ok) {
-                console.warn(`Failed to fetch ${version} from Convex storage: ${response.status}`)
-                return null
-            }
-
-            const bibleData = await response.json() as BibleVerse[]
-            console.log(`Successfully fetched ${version} from Convex (${bibleData.length} verses)`)
-            return bibleData
-        } catch (error) {
-            console.error('Error fetching from Convex:', error)
-            return null
-        }
-    }, [convex])
 
     // Cache Bible data in IndexedDB
     const cacheInIndexedDB = useCallback(async (version: string, data: BibleVerse[]): Promise<void> => {
@@ -100,7 +92,9 @@ export function useScripture() {
         return null
     }, [])
 
-    // Download Bible version with fallback chain: IndexedDB → Convex → CDN
+    // Download Bible version with fallback chain: IndexedDB → bundled → CDN.
+    // Convex is intentionally NOT in this chain. The Bible files stored in
+    // Convex storage are cold backup only — the client never reads them.
     const downloadBibleVersion = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
         // 1. Check IndexedDB cache first
         const cached = await getFromIndexedDB(version)
@@ -108,25 +102,23 @@ export function useScripture() {
             return cached
         }
 
-        // 2. Try Convex
-        const convexData = await fetchFromConvex(version)
-        if (convexData) {
-            // Cache in IndexedDB for future use
-            await cacheInIndexedDB(version, convexData)
-            return convexData
+        // 2. Try the bundled static asset (served with the app, HTTP-cached)
+        const bundledData = await fetchFromBundled(version)
+        if (bundledData) {
+            await cacheInIndexedDB(version, bundledData)
+            return bundledData
         }
 
-        // 3. Fallback to CDN
+        // 3. Last-resort fallback: public CDN
         const cdnData = await fetchFromCdn(version)
         if (cdnData) {
-            // Cache in IndexedDB for future use
             await cacheInIndexedDB(version, cdnData)
             return cdnData
         }
 
         console.error(`Failed to fetch Bible version ${version} from any source`)
         return null
-    }, [getFromIndexedDB, fetchFromConvex, fetchFromCdn, cacheInIndexedDB])
+    }, [getFromIndexedDB, fetchFromBundled, fetchFromCdn, cacheInIndexedDB])
 
     // Check if a bible version is downloaded (in IndexedDB)
     const isVersionDownloaded = useCallback(async (version: string): Promise<boolean> => {
@@ -138,12 +130,7 @@ export function useScripture() {
     const getVersionStatus = useCallback(async (version: string): Promise<BibleVersionStatus> => {
         const downloaded = await isVersionDownloaded(version)
 
-        let availableOnConvex = false
-        try {
-            availableOnConvex = await convex.query(api.bibleVersions.hasBibleVersion, { id: version })
-        } catch {
-            // Convex not available
-        }
+        // Bundled asset is always available when served from the app — no probe needed.
 
         // Check CDN availability (just check if the URL responds with OK)
         let availableOnCdn = false
@@ -158,10 +145,10 @@ export function useScripture() {
             id: version,
             downloaded,
             source: downloaded ? 'indexeddb' : null,
-            availableOnConvex,
+            availableBundled: true,
             availableOnCdn,
         }
-    }, [isVersionDownloaded, convex])
+    }, [isVersionDownloaded])
 
     const fetchScripture = useCallback(async (
         label: string = '1:1:1',
@@ -190,7 +177,7 @@ export function useScripture() {
                 verses.push(Number(verseStr))
             }
 
-            // Fetch bible data - downloadBibleVersion checks IndexedDB cache first, then Convex/CDN
+            // Fetch bible data - downloadBibleVersion checks IndexedDB → bundled asset → CDN
             let bibleData = await downloadBibleVersion(selectedVersion)
 
             if (!bibleData) {
@@ -263,7 +250,7 @@ export function useScripture() {
         downloadBibleVersion,
         isVersionDownloaded,
         getVersionStatus,
-        fetchFromConvex,
+        fetchFromBundled,
         fetchFromCdn,
         cacheInIndexedDB,
     }
