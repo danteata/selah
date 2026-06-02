@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useQuery, useMutation } from 'convex/react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useConvex, useQuery, useMutation } from 'convex/react'
+import type { ConvexReactClient } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import {
@@ -8,6 +9,8 @@ import {
     getLocalTemplate,
     deleteLocalTemplate as deleteLocalTemplateFromDB,
     updateLocalTemplate as updateLocalTemplateFromDB,
+    getCachedTemplateBlob,
+    cacheTemplateBlob,
     type LocalTemplate,
 } from './useIndexedDB'
 
@@ -94,13 +97,158 @@ function localTemplateToTemplateItem(local: LocalTemplate): TemplateItem {
     }
 }
 
-export function useFileUrl(storageId: string | null) {
-    const result = useQuery(
-        api.templates.getFileUrl,
-        storageId ? { storageId } : 'skip'
-    )
+// ---------------------------------------------------------------------------
+// Local-first file URL resolver
+// ---------------------------------------------------------------------------
+// Resolves a Convex storageId to a usable URL with the following cache chain:
+//
+//   1. In-memory signed-URL cache (50-min TTL, slightly shorter than the
+//      Convex signed-URL expiry of ~1 hour) — avoids refiring the query on
+//      re-renders and stops the browser from re-downloading the file when
+//      the URL rotates between subscriptions.
+//   2. IndexedDB blob cache — bytes fetched on the first Convex hit, then
+//      served via URL.createObjectURL(blob) forever after. Convex never
+//      touched again on the same browser.
+//   3. Convex `getFileUrl` query — fires AT MOST ONCE per storageId per
+//      browser. The resolved URL is memoised in (1) and the bytes are
+//      background-fetched and cached in (2) for subsequent renders.
 
-    return storageId ? result : null
+const SIGNED_URL_CACHE_TTL_MS = 50 * 60 * 1000
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>()
+const inFlightSignedUrls = new Map<string, Promise<string | null>>()
+
+function getCachedSignedUrl(storageId: string): string | null {
+    const cached = signedUrlCache.get(storageId)
+    if (!cached) return null
+    if (cached.expiresAt <= Date.now()) {
+        signedUrlCache.delete(storageId)
+        return null
+    }
+    return cached.url
+}
+
+function setCachedSignedUrl(storageId: string, url: string) {
+    signedUrlCache.set(storageId, { url, expiresAt: Date.now() + SIGNED_URL_CACHE_TTL_MS })
+}
+
+async function fetchSignedUrlFromConvex(
+    convex: ConvexReactClient,
+    storageId: string,
+): Promise<string | null> {
+    const existing = inFlightSignedUrls.get(storageId)
+    if (existing) return existing
+
+    const promise = convex
+        .query(api.templates.getFileUrl, { storageId })
+        .then((url) => {
+            inFlightSignedUrls.delete(storageId)
+            return url ?? null
+        })
+        .catch((err) => {
+            inFlightSignedUrls.delete(storageId)
+            throw err
+        })
+
+    inFlightSignedUrls.set(storageId, promise)
+    return promise
+}
+
+async function backgroundCacheBlob(storageId: string, signedUrl: string) {
+    try {
+        const response = await fetch(signedUrl)
+        if (!response.ok) return
+        const blob = await response.blob()
+        if (blob.size === 0) return
+        await cacheTemplateBlob(storageId, blob)
+    } catch {
+        // Non-fatal: if the bytes can't be cached we still have the signed URL
+        // for the rest of its TTL.
+    }
+}
+
+export function useFileUrl(storageId: string | null) {
+    const convex = useConvex()
+    const [url, setUrl] = useState<string | null>(null)
+    const objectUrlRef = useRef<string | null>(null)
+    // Tracks the storageId the in-flight resolver is operating on so we
+    // ignore stale resolutions when storageId changes mid-fetch.
+    const resolvingForRef = useRef<string | null>(null)
+
+    useEffect(() => {
+        if (!storageId) {
+            setUrl(null)
+            return
+        }
+
+        // Narrow storageId for the closure — TypeScript's flow analysis
+        // doesn't always propagate the post-`if (!storageId) return` narrowing
+        // into inner async functions, so we use a typed local.
+        const sid: string = storageId
+
+        let cancelled = false
+        resolvingForRef.current = sid
+
+        // Revoke any previously-created object URL — the storageId changed.
+        if (objectUrlRef.current) {
+            URL.revokeObjectURL(objectUrlRef.current)
+            objectUrlRef.current = null
+        }
+
+        async function resolve() {
+            // 1. In-memory signed-URL cache
+            const urlCacheHit = getCachedSignedUrl(sid)
+            if (urlCacheHit) {
+                if (!cancelled) setUrl(urlCacheHit)
+                return
+            }
+
+            // 2. IndexedDB blob cache → object URL (zero Convex traffic)
+            const blob = await getCachedTemplateBlob(sid)
+            if (cancelled || resolvingForRef.current !== sid) return
+            if (blob) {
+                const objectUrl = URL.createObjectURL(blob)
+                objectUrlRef.current = objectUrl
+                setUrl(objectUrl)
+                return
+            }
+
+            // 3. Convex query — one signed-URL op per storageId per browser
+            try {
+                const signedUrl = await fetchSignedUrlFromConvex(convex, sid)
+                if (cancelled || resolvingForRef.current !== sid) return
+                if (signedUrl) {
+                    setCachedSignedUrl(sid, signedUrl)
+                    setUrl(signedUrl)
+                    // Background: fetch the bytes so the NEXT mount is fully local
+                    backgroundCacheBlob(sid, signedUrl)
+                } else {
+                    setUrl(null)
+                }
+            } catch (err) {
+                if (cancelled) return
+                console.warn('[useFileUrl] Convex query failed for', sid, err)
+                setUrl(null)
+            }
+        }
+
+        resolve()
+
+        return () => {
+            cancelled = true
+        }
+    }, [storageId, convex])
+
+    // Cleanup the object URL when the consumer unmounts entirely
+    useEffect(() => {
+        return () => {
+            if (objectUrlRef.current) {
+                URL.revokeObjectURL(objectUrlRef.current)
+                objectUrlRef.current = null
+            }
+        }
+    }, [])
+
+    return url
 }
 
 export function useTemplates(): UseTemplatesReturn {
