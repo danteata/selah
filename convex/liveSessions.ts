@@ -314,6 +314,52 @@ export const addToQueue = mutation({
     },
 });
 
+export const addToOperatorDeck = mutation({
+    args: {
+        sessionId: v.id("liveSessions"),
+        slideIds: v.array(v.string()),
+        position: v.optional(v.number()),
+    },
+    handler: async (ctx, args) => {
+        const user = await getAuthenticatedUser(ctx);
+
+        const session = await ctx.db.get(args.sessionId);
+        if (!session || session.status !== "active") {
+            throw new Error("No active session found");
+        }
+
+        if (user.churchId !== session.churchId) {
+            throw new Error("Unauthorized");
+        }
+
+        const mode = session.collaborationMode || "moderated";
+        const isAdmin = user.role === "superadmin" || user.role === "admin";
+
+        if (mode === "strict" && session.operatorId !== user._id && !isAdmin) {
+            throw new Error("Only the operator can add slides in strict mode");
+        }
+
+        const currentSlides = session.operatorSlideIds || [];
+        const newSlideIds = args.slideIds.filter(id => !currentSlides.includes(id));
+        if (newSlideIds.length === 0) return true;
+
+        let updatedSlides;
+        if (args.position !== undefined && args.position >= 0 && args.position <= currentSlides.length) {
+            updatedSlides = [...currentSlides];
+            updatedSlides.splice(args.position, 0, ...newSlideIds);
+        } else {
+            updatedSlides = [...currentSlides, ...newSlideIds];
+        }
+
+        await ctx.db.patch(args.sessionId, {
+            operatorSlideIds: updatedSlides,
+            updatedAt: new Date().toISOString(),
+        });
+
+        return true;
+    },
+});
+
 export const removeFromQueue = mutation({
     args: {
         sessionId: v.id("liveSessions"),

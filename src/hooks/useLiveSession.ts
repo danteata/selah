@@ -41,6 +41,69 @@ function mergePendingQueue(serverQueue: string[], pendingQueue: string[]) {
     }
 }
 
+/**
+ * Unified queue sync used by both the activeSession and liveSession
+ * effects. Reads the server queue (either the new `queue` entries or
+ * the legacy `queuedSlideIds` flat array), merges with the local
+ * optimistic pending list, and writes the resulting display queue to
+ * the store — but only when the value actually changes. The pending
+ * ref is drained of any items that the server has now confirmed.
+ *
+ * Returns true if a write happened, so callers can chain extra
+ * notifications if they want to.
+ */
+function syncQueueFromServer(params: {
+    queue: unknown
+    queuedSlideIds: unknown
+    pendingRef: string[]
+}): boolean {
+    const { queue, queuedSlideIds, pendingRef } = params
+
+    if (Array.isArray(queue)) {
+        const serverIds = queue
+            .map(entry => (entry && typeof entry === 'object' ? (entry as { slideId?: string }).slideId : undefined))
+            .filter((id): id is string => typeof id === 'string')
+        const { stillPending, displayQueue } = mergePendingQueue(serverIds, pendingRef)
+        pendingRef.length = 0
+        pendingRef.push(...stillPending)
+        const currentQueue = useAppStore.getState().sharedQueueSlideIds
+        if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
+            useAppStore.getState().setSharedQueueSlideIds(displayQueue)
+            return true
+        }
+        return false
+    }
+
+    if (Array.isArray(queuedSlideIds)) {
+        const { stillPending, displayQueue } = mergePendingQueue(queuedSlideIds, pendingRef)
+        pendingRef.length = 0
+        pendingRef.push(...stillPending)
+        const currentQueue = useAppStore.getState().sharedQueueSlideIds
+        if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
+            useAppStore.getState().setSharedQueueSlideIds(displayQueue)
+            return true
+        }
+        return false
+    }
+
+    // queue/queuedSlideIds is explicitly null (not just an empty
+    // array) and there are no optimistic pending items. Clear the
+    // local store so the operator's view doesn't get stuck.
+    if (queue === null || queuedSlideIds === null) {
+        const currentQueue = useAppStore.getState().sharedQueueSlideIds
+        if (pendingRef.length > 0) {
+            useAppStore.getState().setSharedQueueSlideIds([...pendingRef])
+            pendingRef.length = 0
+            return true
+        }
+        if (currentQueue.length > 0) {
+            useAppStore.getState().setSharedQueueSlideIds([])
+            return true
+        }
+    }
+    return false
+}
+
 interface UseLiveSessionReturn {
     sessionId: Id<"liveSessions"> | null
     sessionScheduleId: string | null
@@ -123,6 +186,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const setLiveSlideMutation = useMutation(api.liveSessions.setLiveSlide)
     const setOperatorSlidesMutation = useMutation(api.liveSessions.setOperatorSlides)
     const addToQueueMutation = useMutation(api.liveSessions.addToQueue)
+    const addToOperatorDeckMutation = useMutation(api.liveSessions.addToOperatorDeck)
     const removeFromQueueMutation = useMutation(api.liveSessions.removeFromQueue)
     const acceptFromQueueMutation = useMutation(api.liveSessions.acceptFromQueue)
     const reorderQueueMutation = useMutation(api.liveSessions.reorderQueue)
@@ -163,25 +227,11 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
             // Also sync queue and operatorSlideIds from activeSession
             // so they're available immediately even before getSession resolves
-            const queue = (resolvedActiveSession as any).queue
-            if (queue && Array.isArray(queue)) {
-                const queueSlideIds = queue.map((entry: QueueEntry) => entry.slideId)
-                const { stillPending, displayQueue } = mergePendingQueue(queueSlideIds, pendingQueueSlideIdsRef.current)
-                pendingQueueSlideIdsRef.current = stillPending
-                const currentQueue = useAppStore.getState().sharedQueueSlideIds
-                if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
-                    setSharedQueueSlideIds(displayQueue)
-                }
-            } else if ((resolvedActiveSession as any).queuedSlideIds) {
-                // Backward compat with old schema
-                const queuedIds = (resolvedActiveSession as any).queuedSlideIds as string[]
-                const { stillPending, displayQueue } = mergePendingQueue(queuedIds, pendingQueueSlideIdsRef.current)
-                pendingQueueSlideIdsRef.current = stillPending
-                const currentQueue = useAppStore.getState().sharedQueueSlideIds
-                if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
-                    setSharedQueueSlideIds(displayQueue)
-                }
-            }
+            syncQueueFromServer({
+                queue: (resolvedActiveSession as any).queue,
+                queuedSlideIds: (resolvedActiveSession as any).queuedSlideIds,
+                pendingRef: pendingQueueSlideIdsRef.current,
+            })
 
             const operatorSlides = (resolvedActiveSession as any).operatorSlideIds as string[] | undefined
             if (operatorSlides && operatorSlides.length > 0) {
@@ -245,44 +295,33 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }
 
         // Sync structured queue — handle both new `queue` field and legacy `queuedSlideIds`
-        const queue = (liveSession as any).queue
-        const queuedSlideIds = (liveSession as any).queuedSlideIds
-        if (queue && Array.isArray(queue)) {
-            const queueSlideIds = queue.map((entry: QueueEntry) => entry.slideId)
-            const { stillPending, displayQueue } = mergePendingQueue(queueSlideIds, pendingQueueSlideIdsRef.current)
-            pendingQueueSlideIdsRef.current = stillPending
-            const currentQueue = useAppStore.getState().sharedQueueSlideIds
-            if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
-                setSharedQueueSlideIds(displayQueue)
-            }
-        } else if (queuedSlideIds && Array.isArray(queuedSlideIds)) {
-            // Backward compat with sessions that still use queuedSlideIds
-            const { stillPending, displayQueue } = mergePendingQueue(queuedSlideIds, pendingQueueSlideIdsRef.current)
-            pendingQueueSlideIdsRef.current = stillPending
-            const currentQueue = useAppStore.getState().sharedQueueSlideIds
-            if (JSON.stringify(currentQueue) !== JSON.stringify(displayQueue)) {
-                setSharedQueueSlideIds(displayQueue)
-            }
-        } else if (queue !== undefined || queuedSlideIds !== undefined) {
-            // queue/queuedSlideIds is explicitly empty (null/[]), clear local
-            const currentQueue = useAppStore.getState().sharedQueueSlideIds
-            if (pendingQueueSlideIdsRef.current.length > 0) {
-                setSharedQueueSlideIds(pendingQueueSlideIdsRef.current)
-            } else if (currentQueue.length > 0) {
-                setSharedQueueSlideIds([])
-            }
-        }
+        syncQueueFromServer({
+            queue: (liveSession as any).queue,
+            queuedSlideIds: (liveSession as any).queuedSlideIds,
+            pendingRef: pendingQueueSlideIdsRef.current,
+        })
 
         // Sync operator's slide order — only for non-operators to prevent
-        // overwriting the operator's local deck changes. The operator pushes
-        // their deck to Convex via syncOperatorSlides, so contributors stay in sync.
+        // Sync the operator's deck from the server. For non-operators
+        // the server is authoritative — they always pull. For the operator
+        // we only merge NEW server-side additions (slides a contributor
+        // added via addToOperatorDeck) so the operator's own reordering
+        // or removal isn't clobbered. Existing local ids are preserved;
+        // ids that appear on the server but not locally are appended.
         const isOperatorRemote = liveSession.operatorId === currentUser?._id
         const operatorSlides = (liveSession as any).operatorSlideIds as string[] | undefined
-        if (operatorSlides && operatorSlides.length > 0 && !isOperatorRemote) {
-            const currentIds = useAppStore.getState().liveOutputSlidesId
-            if (JSON.stringify(currentIds) !== JSON.stringify(operatorSlides)) {
-                setLiveOutputSlidesId(operatorSlides)
-                lastSyncedSlidesRef.current = JSON.stringify(operatorSlides)
+        if (operatorSlides && operatorSlides.length > 0) {
+            const currentIds = useAppStore.getState().liveOutputSlidesId || []
+            if (!isOperatorRemote) {
+                if (JSON.stringify(currentIds) !== JSON.stringify(operatorSlides)) {
+                    setLiveOutputSlidesId(operatorSlides)
+                    lastSyncedSlidesRef.current = JSON.stringify(operatorSlides)
+                }
+            } else {
+                const missingOnLocal = operatorSlides.filter((id: string) => !currentIds.includes(id))
+                if (missingOnLocal.length > 0) {
+                    setLiveOutputSlidesId([...currentIds, ...missingOnLocal])
+                }
             }
         }
 
@@ -419,6 +458,9 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, liveSession?.collaborationMode, liveSession?.liveSlideId, resolvedActiveSession?.collaborationMode, activeSlides, sessionScheduleId, upsertScheduleSlideMutation, setLiveSlideMutation, setLiveSlideStore])
 
+    const effectiveMode = (liveSession?.collaborationMode || resolvedActiveSession?.collaborationMode || collaborationMode) as CollaborationMode | null
+    const isOpenMode = effectiveMode === 'open'
+
     const handleAddToQueue = useCallback(async (slideIds: string[], position?: number) => {
         const isSharedSessionConnected = !!resolvedSessionId && isConvexConnected && !isOffline
 
@@ -434,6 +476,83 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             return
         }
 
+        const currentLiveOutputIds = useAppStore.getState().liveOutputSlidesId || []
+        // Filter for LOCAL optimistic update only — slides already in the
+        // contributor's local liveOutputSlidesId don't need re-adding there.
+        // Note: `appendActiveSlide` is typically called BEFORE `addToQueue`,
+        // so the new slide will already be in `currentLiveOutputIds`. This
+        // is expected — the local deck is already up-to-date. The important
+        // work (upserting content + patching operatorSlideIds on the server)
+        // must happen for ALL incoming slideIds regardless.
+        const locallyNewSlideIds = slideIds.filter(id => !currentLiveOutputIds.includes(id))
+        console.log('[useLiveSession] handleAddToQueue', { isOpenMode, mode: effectiveMode, slideIds, isSharedSessionConnected, locallyNewSlideIds, currentLiveOutputIds })
+
+        if (isOpenMode) {
+            // In open mode, contributors add directly to the operator's deck.
+            // We upsert each slide's content to the schedule so other devices
+            // can render it (one slide at a time — the destructive
+            // syncScheduleSlides variant would delete slides the contributor
+            // doesn't have locally, e.g. slides the operator has loaded but
+            // the contributor hasn't). We upsert ALL incoming slideIds, not
+            // just locally-new ones, because `appendActiveSlide` may have
+            // already added the id to liveOutputSlidesId before this runs
+            // — the server still needs the slide data.
+            if (sessionScheduleId && isConvexConnected && !isOffline) {
+                const stateActiveSlides = useAppStore.getState().activeSlides
+                for (const id of slideIds) {
+                    const slide = stateActiveSlides.find(s => s.id === id)
+                    if (!slide) continue
+                    try {
+                        await upsertScheduleSlideMutation({
+                            scheduleId: sessionScheduleId,
+                            slide: {
+                                id: slide.id,
+                                index: typeof slide.index === 'number' ? slide.index : 0,
+                                name: slide.name || 'Untitled',
+                                type: slide.type,
+                                layout: slide.layout,
+                                contents: slide.contents || [],
+                                backgroundType: slide.backgroundType,
+                                background: slide.background,
+                                backgroundVideoKey: slide.backgroundVideoKey ?? undefined,
+                                backgroundStorageId: slide.backgroundStorageId ?? undefined,
+                                title: slide.title,
+                                songId: slide.songId,
+                                hasChorus: slide.hasChorus,
+                                data: slide.data,
+                                slideStyle: slide.slideStyle,
+                                saved: slide.saved,
+                                verseIndex: slide.verseIndex,
+                                totalVerses: slide.totalVerses,
+                                verseLabel: slide.verseLabel,
+                            },
+                        })
+                    } catch (err) {
+                        console.error('[useLiveSession] Failed to upsert slide content:', err)
+                    }
+                }
+            }
+
+            // Only update local deck if there are truly new ids not yet present
+            if (locallyNewSlideIds.length > 0) {
+                setLiveOutputSlidesId([...currentLiveOutputIds, ...locallyNewSlideIds])
+            }
+            try {
+                console.log('[useLiveSession] open-mode add to operator deck:', { sessionId: resolvedSessionId, slideIds, isOpenMode })
+                await addToOperatorDeckMutation({
+                    sessionId: resolvedSessionId,
+                    slideIds,
+                    position,
+                })
+                console.log('[useLiveSession] open-mode add to operator deck: success')
+            } catch (err) {
+                console.error('[useLiveSession] Failed to add to operator deck:', err)
+            }
+            return
+        }
+
+        // Moderated/strict mode: slide enters the shared suggestion queue
+        // and the operator reviews it before adding to the deck.
         const addLocally = useAppStore.getState().addSharedQueueSlideIds
         pendingQueueSlideIdsRef.current = [...pendingQueueSlideIdsRef.current, ...slideIds]
         addLocally(slideIds)
@@ -445,7 +564,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             useAppStore.getState().removeSharedQueueSlideIds(slideIds)
             console.error('[useLiveSession] Failed to add to queue:', err)
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, addToQueueMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, addToQueueMutation, addToOperatorDeckMutation, isOpenMode, setLiveOutputSlidesId, sessionScheduleId, upsertScheduleSlideMutation])
 
     const handleRemoveFromQueue = useCallback(async (slideIds: string[]) => {
         const prevQueue = useAppStore.getState().sharedQueueSlideIds
