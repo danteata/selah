@@ -421,7 +421,15 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
         if (resolvedSessionId && isConvexConnected && !isOffline) {
             try {
-                const localSlide = slideId ? activeSlides.find((slide) => slide.id === slideId) : null
+                // Read activeSlides from the store at call-time, NOT from
+                // the closure. Callers often run `appendActiveSlide(slide)`
+                // then immediately `setLiveSlide(slide.id)` in the same
+                // synchronous tick. The Zustand store is updated instantly,
+                // but the React-subscribed `activeSlides` captured in this
+                // callback's closure is still the pre-append value. Using
+                // `getState()` ensures we always find the freshly-added slide.
+                const currentActiveSlides = useAppStore.getState().activeSlides
+                const localSlide = slideId ? currentActiveSlides.find((slide) => slide.id === slideId) : null
                 if (localSlide && sessionScheduleId) {
                     await upsertScheduleSlideMutation({
                         scheduleId: sessionScheduleId,
@@ -456,7 +464,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
                 console.error('[useLiveSession] Failed to set live slide:', err)
             }
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, liveSession?.collaborationMode, liveSession?.liveSlideId, resolvedActiveSession?.collaborationMode, activeSlides, sessionScheduleId, upsertScheduleSlideMutation, setLiveSlideMutation, setLiveSlideStore])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, liveSession?.collaborationMode, liveSession?.liveSlideId, resolvedActiveSession?.collaborationMode, sessionScheduleId, upsertScheduleSlideMutation, setLiveSlideMutation, setLiveSlideStore])
 
     const effectiveMode = (liveSession?.collaborationMode || resolvedActiveSession?.collaborationMode || collaborationMode) as CollaborationMode | null
     const isOpenMode = effectiveMode === 'open'
