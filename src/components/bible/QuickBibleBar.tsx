@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Zap, Plus, X, Loader2, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
+import { useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 import type { Scripture, BibleVerse } from '../../types'
@@ -11,13 +11,24 @@ export function QuickBibleBar() {
     const quickBibleBarOpen = useAppStore((s) => s.quickBibleBarOpen)
     const setQuickBibleBarOpen = useAppStore((s) => s.setQuickBibleBarOpen)
     const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
-    const setLiveSlide = useAppStore((s) => s.setLiveSlide)
+    // Same dual-setter pattern as BibleList: route the live update
+    // through useLiveSession().setLiveSlide when a live session is
+    // connected so contributors' 'Go Live' actions broadcast to
+    // every other device in the session, not just their own.
+    const setLiveSlideLocal = useAppStore((s) => s.setLiveSlide)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const setContextPanelOpen = useAppStore((s) => s.setContextPanelOpen)
     const setBiblePanelQuery = useAppStore((s) => s.setBiblePanelQuery)
     const defaultBibleVersion = useAppStore((s) => s.settings.defaultBibleVersion)
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
+    const {
+        setLiveSlide: setLiveSlideShared,
+        isConnected,
+        isOperator,
+        isOpen,
+    } = useLiveSession()
+    const setLiveSlide = isConnected ? setLiveSlideShared : setLiveSlideLocal
 
     const [query, setQuery] = useState('')
     const [loading, setLoading] = useState(false)
@@ -97,8 +108,16 @@ export function QuickBibleBar() {
     const handleGoLive = useCallback(async (scripture: Scripture) => {
         const slide = createBibleSlide(scripture)
         if (slide) {
+            // Gate on collaboration mode: in non-open modes a non-operator
+            // cannot push to live (they can only queue via the sibling
+            // 'Add' button).
+            if (isConnected && !isOperator && !isOpen) return
+
             appendActiveSlide(slide)
             setLiveSlide(slide.id)
+            // Cross-window sync — same event LiveOutput dispatches so the
+            // operator/projection windows reflect the change immediately.
+            window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: slide }))
         }
         if (currentPosition) {
             setBiblePanelQuery(`${currentPosition.bookName} ${currentPosition.chapter}:${currentPosition.startVerse}`)
@@ -108,7 +127,7 @@ export function QuickBibleBar() {
         setQuickBibleBarOpen(false)
         setActiveNavSection('bible')
         setContextPanelOpen(true)
-    }, [createBibleSlide, appendActiveSlide, setLiveSlide, setQuickBibleBarOpen, setActiveNavSection, setContextPanelOpen, setBiblePanelQuery, currentPosition, query])
+    }, [createBibleSlide, appendActiveSlide, setLiveSlide, setQuickBibleBarOpen, setActiveNavSection, setContextPanelOpen, setBiblePanelQuery, currentPosition, query, isConnected, isOperator, isOpen])
 
     const handleAddToQueue = useCallback(async (scripture: Scripture) => {
         const slide = createBibleSlide(scripture)
@@ -331,7 +350,7 @@ export function QuickBibleBar() {
                                         className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${focusedIndex === i
                                             ? 'bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30'
                                             : 'hover:bg-[var(--accent-teal)]/5 border border-transparent'
-                                        }`}
+                                            }`}
                                     >
                                         <div className="flex items-center justify-between">
                                             <span className="text-sm font-medium text-[var(--text-primary)]">{verse.reference}</span>

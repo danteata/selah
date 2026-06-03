@@ -34,6 +34,12 @@ vi.mock('../../../hooks', () => ({
         search: vi.fn(),
         clearResults: vi.fn(),
     })),
+    useLiveSession: vi.fn(() => ({
+        setLiveSlide: vi.fn(),
+        isConnected: false,
+        isOperator: false,
+        isOpen: false,
+    })),
 }))
 
 vi.mock('framer-motion', () => ({
