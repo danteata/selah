@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Mic } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Mic, Plus } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -125,20 +125,33 @@ export function LiveOutput() {
         return slides.filter(slide => !slide.scheduleId || slide.scheduleId === '')
     }, [liveOutputSlidesId, activeSlides, activeSchedule?._id, sessionScheduleId])
 
-    // Shared queue slides — contributed by non-operators
+    // Shared queue slides — contributed by non-operators.
+    //
+    // We keep the entry even if the slide isn't in `activeSlides` so the
+    // operator always sees a contributor's queue update — including for
+    // slides the contributor just created locally that haven't yet
+    // round-tripped through Convex. When the slide data is missing we
+    // render a lightweight placeholder instead of silently dropping the
+    // entry (which is what previously made the queue look "stuck" on the
+    // operator's side).
     const sharedQueueSlides = useMemo(() => {
         if (!sharedQueueSlideIds || sharedQueueSlideIds.length === 0) return []
         return sharedQueueSlideIds
             .map((id, idx) => {
                 const slide = activeSlides.find(s => s.id === id)
-                if (!slide) return null
+                if (slide) {
+                    return {
+                        queueKey: `${id}-${idx}`,
+                        slideId: id,
+                        slide,
+                    }
+                }
                 return {
                     queueKey: `${id}-${idx}`,
                     slideId: id,
-                    slide,
+                    slide: null,
                 }
             })
-            .filter((entry): entry is { queueKey: string; slideId: string; slide: Slide } => entry !== null)
     }, [sharedQueueSlideIds, activeSlides])
 
     // Get live slide
@@ -200,9 +213,13 @@ export function LiveOutput() {
         }
     }, [setLiveSlide, activeSlides, isDesktop, sendSlideToLive, isConnected, isOperator, isOpen, setLiveSlideShared])
 
-    const handleSuggestNext = useCallback((slideId: string) => {
+    const handleSuggestNext = useCallback(async (slideId: string) => {
         if (!isConnected || isOperator) return
-        addToQueue([slideId])
+        try {
+            await addToQueue([slideId])
+        } catch (err) {
+            console.error('[LiveOutput] Failed to queue slide:', err)
+        }
     }, [isConnected, isOperator, addToQueue])
 
     // Keyboard shortcuts for navigation
@@ -374,36 +391,26 @@ export function LiveOutput() {
 
     // Handle verse selection from BibleVerseNavigator
     const handleVerseSelect = useCallback((scripture: Scripture) => {
-        if (!liveSlide) return
+        if (!liveSlide || liveSlide.type !== 'bible') return
 
-        // Update the live slide with new scripture content
         const updatedSlide = {
             ...liveSlide,
+            name: scripture.label || liveSlide.name,
             data: scripture,
             contents: generateSlideContent(liveSlide, scripture),
         }
 
-        // Update the slide in activeSlides
-        const setActiveSlides = useAppStore.getState().setActiveSlides
-        const activeSlides = useAppStore.getState().activeSlides
-        const updatedSlides = activeSlides.map(s =>
-            s.id === liveSlide.id ? updatedSlide : s
-        )
-        setActiveSlides(updatedSlides)
+        const updateActiveSlide = useAppStore.getState().updateActiveSlide
+        updateActiveSlide(updatedSlide)
 
-        // Broadcast the updated slide
         window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
 
-        // Send to native live window
         if (isDesktop) {
             sendSlideToLive(liveSlide.id, updatedSlide as unknown as Record<string, unknown>)
         }
 
         void syncSlideContent(updatedSlide)
-        if (isConnected) {
-            void setLiveSlideShared(updatedSlide.id)
-        }
-    }, [liveSlide, generateSlideContent, isDesktop, sendSlideToLive, syncSlideContent, isConnected, setLiveSlideShared])
+    }, [liveSlide, generateSlideContent, isDesktop, sendSlideToLive, syncSlideContent])
 
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
@@ -603,14 +610,23 @@ export function LiveOutput() {
                                 >
                                     <ChevronUp className="w-4 h-4 mx-auto" />
                                 </button>
-                                {isConnected && !isOperator && !isOpen && !isStrict && nextSlide && (
+                                {isConnected && !isOperator && !isStrict && nextSlide && (
                                     <button
                                         onClick={() => handleSuggestNext(nextSlide.id)}
                                         className="flex-1 py-1.5 bg-[var(--accent-teal)]/15 hover:bg-[var(--accent-teal)] text-[var(--accent-teal)] hover:text-white rounded-lg text-[10px] font-medium transition-colors flex items-center justify-center gap-1"
-                                        title="Suggest this slide be queued next"
+                                        title={isOpen ? 'Add this slide to the shared queue' : 'Suggest this slide for the operator to review'}
                                     >
-                                        <Lightbulb className="w-3 h-3" />
-                                        Suggest
+                                        {isOpen ? (
+                                            <>
+                                                <Plus className="w-3 h-3" />
+                                                Add
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Lightbulb className="w-3 h-3" />
+                                                Suggest
+                                            </>
+                                        )}
                                     </button>
                                 )}
                                 <button
@@ -863,10 +879,19 @@ export function LiveOutput() {
                                     key={entry.queueKey}
                                     className="flex-shrink-0 w-32 bg-gray-800/50 border border-blue-500/20 rounded-lg p-2 group relative"
                                 >
-                                    <div className="text-[10px] text-white/70 truncate">{entry.slide.name}</div>
-                                    <div className="text-[8px] text-blue-400 mt-0.5">
-                                        {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : 'Slide'}
-                                    </div>
+                                    {entry.slide ? (
+                                        <>
+                                            <div className="text-[10px] text-white/70 truncate">{entry.slide.name}</div>
+                                            <div className="text-[8px] text-blue-400 mt-0.5">
+                                                {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : 'Slide'}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="text-[10px] text-white/40 truncate italic">Pending slide</div>
+                                            <div className="text-[8px] text-blue-400/60 mt-0.5">Syncing…</div>
+                                        </>
+                                    )}
                                     {isOperator && (
                                         <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <button
