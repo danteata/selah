@@ -453,7 +453,7 @@ export async function initPayments(): Promise<void> {
     await payments.init({
         publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
         secretKey: import.meta.env.VITE_PAYSTACK_SECRET_KEY,
-        currency: import.meta.env.VITE_PAYMENT_CURRENCY || 'NGN',
+        currency: import.meta.env.VITE_PAYMENT_CURRENCY || 'GHS',
         debug: import.meta.env.DEV,
     })
 }
