@@ -8,6 +8,16 @@ primary_region = 'cdg'
 
 [build]
 
+  # Vite bakes `VITE_*` env vars into the JS bundle at BUILD time, not at
+  # runtime. These are passed into Docker as --build-arg so Vite can resolve
+  # `import.meta.env.VITE_*` calls during `vite build`. Only put values here
+  # that are safe to ship in client JS (e.g. Clerk publishable keys, which
+  # are designed to be public). Never put actual secrets (sk_*, nvapi_*, etc).
+  [build.args]
+    VITE_CLERK_PUBLISHABLE_KEY = "pk_test_cG9saXRlLWFkZGVyLTguY2xlcmsuYWNjb3VudHMuZGV2JA"
+    VITE_CONVEX_URL = "https://impressive-viper-428.convex.cloud"
+    VITE_FF_SERMON_LISTENER = "true"
+
 [http_service]
   internal_port = 8080
   force_https = true

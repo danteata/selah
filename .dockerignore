@@ -1,23 +1,64 @@
-# Fly.io config (not needed in container)
-fly.toml
+# --- VCS / tooling metadata ---
+.git/
+.gitignore
+.github/
+.kilo/
+.openclaude/
+.commandcode/
 
-# Desktop-specific (Tauri) - not needed for web deployment
+# --- Node / package managers ---
+node_modules/
+.pnpm-store/
+.npm/
+
+# --- Build artifacts (regenerated inside the image) ---
+dist/
+coverage/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# --- Environment / secrets (do NOT ship to image) ---
+.env
+.env.*
+!.env.example
+
+# --- Local databases (desktop SQLite) ---
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- Desktop / Tauri (not used by web) ---
 src-tauri/
-
-# Local Whisper server (desktop feature)
 deploy/
 
-# Development/CI artifacts
-.github/
-docs/
-plan/
-scripts/
+# --- Root-level dev junk / docs / screenshots ---
+# (Anchored to root so we don't nuke legitimate assets in public/ or src/)
+/README.md
+/BUGS_FOUND.md
+/HANDOVER-*.md
+/TEST_COVERAGE_PLAN.md
+/original_landing.tsx
+/app-icon.svg
+/*-screenshot.png
+/*.png
 
-# Root-level files not needed for web build
-README.md
-*-screenshot.png
-original_landing.tsx
-app-icon.svg
+# --- Fly.io ---
+/fly.toml
+.fly/
 
-# Build artifacts (if any exist at root)
-dist/
+# --- Local dev artifacts ---
+.DS_Store
+*.log
+.cache/
+.vite/
+.idea/
+.vscode/
+
+# --- Test source files (not needed for production web build) ---
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+.storybook/
