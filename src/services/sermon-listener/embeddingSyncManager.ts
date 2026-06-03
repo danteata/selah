@@ -257,8 +257,8 @@ class EmbeddingSyncManager {
                 progress: resumeFrom,
             })
 
-            const BATCH_SIZE = 50
-            const FLUSH_INTERVAL = 5
+            const BATCH_SIZE = 100
+            const FLUSH_INTERVAL = 3
             let batchAccumulator: Array<{
                 reference: string
                 book: string
@@ -441,8 +441,8 @@ class EmbeddingSyncManager {
 
             this.updateState(versionId, { stage: 'upgrading', total: verses.length })
 
-            const BATCH_SIZE = 50
-            const FLUSH_INTERVAL = 5
+            const BATCH_SIZE = 100
+            const FLUSH_INTERVAL = 3
             let batchAccumulator: Array<{
                 reference: string
                 book: string
