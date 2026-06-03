@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ChevronLeft, ChevronRight, RefreshCw, BookOpen } from 'lucide-react'
 import { useScripture } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
@@ -88,48 +88,58 @@ export function BibleVerseNavigator({ currentSlide, onVerseSelect }: BibleVerseN
         }
     }, [currentSlide, selectedVersion])
 
-    // Fetch neighboring verses when scripture reference changes
+    const fetchTokenRef = useRef(0)
+
     useEffect(() => {
         if (!scriptureRef) {
+            fetchTokenRef.current += 1
             setNeighboringVerses({ prev: [], next: [] })
             setCurrentVerses([])
             return
         }
 
+        const token = ++fetchTokenRef.current
+        setLoading(true)
+
         const fetchNeighbors = async () => {
-            setLoading(true)
             const { bookIndex, chapter, startVerse, endVerse, version } = scriptureRef
 
-            // Fetch current verses
             const currentLabel = `${bookIndex}:${chapter}:${startVerse}${endVerse !== startVerse ? `-${endVerse}` : ''}`
             const currentResult = await fetchScripture(currentLabel, version)
+            if (token !== fetchTokenRef.current) return
             if (currentResult && Array.isArray(currentResult.content)) {
                 setCurrentVerses(currentResult.content as BibleVerse[])
+            } else {
+                setCurrentVerses([])
             }
 
-            // Fetch previous verses (5 before)
             const prevStart = Math.max(1, startVerse - 5)
             if (prevStart < startVerse) {
                 const prevLabel = `${bookIndex}:${chapter}:${prevStart}-${startVerse - 1}`
                 const prevResult = await fetchScripture(prevLabel, version)
+                if (token !== fetchTokenRef.current) return
                 if (prevResult && Array.isArray(prevResult.content)) {
-                    setNeighboringVerses(prev => ({ ...prev, prev: prevResult.content as BibleVerse[] }))
+                    setNeighboringVerses({ prev: prevResult.content as BibleVerse[], next: [] })
+                } else {
+                    setNeighboringVerses(prev => ({ ...prev, prev: [] }))
                 }
             } else {
                 setNeighboringVerses(prev => ({ ...prev, prev: [] }))
             }
 
-            // Fetch next verses (5 after)
             const nextEnd = endVerse + 5
             const nextLabel = `${bookIndex}:${chapter}:${endVerse + 1}-${nextEnd}`
             const nextResult = await fetchScripture(nextLabel, version)
+            if (token !== fetchTokenRef.current) return
             if (nextResult && Array.isArray(nextResult.content)) {
                 setNeighboringVerses(prev => ({ ...prev, next: nextResult.content as BibleVerse[] }))
             } else {
                 setNeighboringVerses(prev => ({ ...prev, next: [] }))
             }
 
-            setLoading(false)
+            if (token === fetchTokenRef.current) {
+                setLoading(false)
+            }
         }
 
         fetchNeighbors()
@@ -245,58 +255,60 @@ export function BibleVerseNavigator({ currentSlide, onVerseSelect }: BibleVerseN
             </div>
 
             {/* Verse Grid */}
-            <div className="p-3">
-                {loading ? (
-                    <div className="flex items-center justify-center py-4">
-                        <RefreshCw className="w-5 h-5 animate-spin text-gray-400" />
-                    </div>
-                ) : (
-                    <div className="flex flex-wrap gap-1">
-                        {/* Previous verses */}
-                        {neighboringVerses.prev.map((v) => (
-                            <button
-                                key={v.verse}
-                                onClick={() => handleVerseSelect(parseInt(v.verse))}
-                                className="w-8 h-8 flex items-center justify-center text-sm rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
-                                title={`${scriptureRef.bookName} ${scriptureRef.chapter}:${v.verse}`}
-                            >
-                                {v.verse}
-                            </button>
-                        ))}
+            <div className="p-3 relative min-h-[3.25rem]">
+                <div
+                    className={`flex flex-wrap gap-1 transition-opacity ${
+                        loading ? 'opacity-50 pointer-events-none' : ''
+                    }`}
+                >
+                    {/* Previous verses */}
+                    {neighboringVerses.prev.map((v) => (
+                        <button
+                            key={v.verse}
+                            onClick={() => handleVerseSelect(parseInt(v.verse))}
+                            className="w-8 h-8 flex items-center justify-center text-sm rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
+                            title={`${scriptureRef.bookName} ${scriptureRef.chapter}:${v.verse}`}
+                        >
+                            {v.verse}
+                        </button>
+                    ))}
 
-                        {/* Current verses (highlighted) */}
-                        {currentVerses.map((v) => (
-                            <span
-                                key={v.verse}
-                                className="w-8 h-8 flex items-center justify-center text-sm rounded bg-primary-500 text-white font-medium"
-                            >
-                                {v.verse}
-                            </span>
-                        ))}
+                    {/* Current verses (highlighted) */}
+                    {currentVerses.map((v) => (
+                        <span
+                            key={v.verse}
+                            className="w-8 h-8 flex items-center justify-center text-sm rounded bg-primary-500 text-white font-medium"
+                        >
+                            {v.verse}
+                        </span>
+                    ))}
 
-                        {/* Next verses */}
-                        {neighboringVerses.next.map((v) => (
-                            <button
-                                key={v.verse}
-                                onClick={() => handleVerseSelect(parseInt(v.verse))}
-                                className="w-8 h-8 flex items-center justify-center text-sm rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
-                                title={`${scriptureRef.bookName} ${scriptureRef.chapter}:${v.verse}`}
-                            >
-                                {v.verse}
-                            </button>
-                        ))}
-                    </div>
+                    {/* Next verses */}
+                    {neighboringVerses.next.map((v) => (
+                        <button
+                            key={v.verse}
+                            onClick={() => handleVerseSelect(parseInt(v.verse))}
+                            className="w-8 h-8 flex items-center justify-center text-sm rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
+                            title={`${scriptureRef.bookName} ${scriptureRef.chapter}:${v.verse}`}
+                        >
+                            {v.verse}
+                        </button>
+                    ))}
+                </div>
+                {loading && (
+                    <RefreshCw className="w-4 h-4 animate-spin text-gray-400 absolute top-3 right-3" />
                 )}
             </div>
 
             {/* Quick verse text preview */}
             {currentVerses.length > 0 && (
                 <div className="p-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 max-h-32 overflow-y-auto">
-                    <div className="text-xs text-gray-600 dark:text-gray-400">
-                        {currentVerses.slice(0, 2).map((v, i) => (
-                            <span key={i}>
-                                <sup className="text-primary-500">{v.verse}</sup> {v.scripture.slice(0, 50)}...
-                            </span>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                        {currentVerses.slice(0, 2).map((v) => (
+                            <div key={v.verse} className="flex gap-1">
+                                <sup className="text-primary-500 shrink-0">{v.verse}</sup>
+                                <span>{v.scripture.slice(0, 80)}{v.scripture.length > 80 ? '…' : ''}</span>
+                            </div>
                         ))}
                     </div>
                 </div>

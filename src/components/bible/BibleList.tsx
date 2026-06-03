@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { generateSlideContent, useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
+import { generateSlideContent, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { TemplateSelector } from '../templates/TemplateSelector'
@@ -61,6 +61,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const defaultBibleVersion = useAppStore((s) => s.settings.defaultBibleVersion)
     const { templates, getTemplatesForSlideType } = useTemplates()
     const bibleTemplates = getTemplatesForSlideType('bible')
+    const { addToQueue: addToSharedQueue, isConnected, isOperator, isStrict } = useLiveSession()
 
     const {
         results: semanticResults,
@@ -121,7 +122,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         })
     }, [])
 
-    const goLiveWithScripture = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
+    const goLiveWithScripture = useCallback(async (bookIndex: number, chapter: number, verse: number, preText?: string) => {
         const label = `${bookIndex}:${chapter}:${verse}`
         const result = await fetchScripture(label, selectedVersion)
         if (result) {
@@ -130,6 +131,21 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 appendActiveSlide(slide)
                 setLiveSlide(slide.id)
                 addRecentVerse(result.label || '')
+            }
+            setActiveVerseKey(`${bookIndex}:${chapter}:${verse}`)
+        } else if (preText) {
+            const bookName = bibleBooks[bookIndex - 1] || 'Reference'
+            const fallback: Scripture = {
+                label: `${bookName} ${chapter}:${verse}`,
+                labelShortFormat: `${bookIndex}:${chapter}:${verse}`,
+                version: selectedVersion,
+                content: preText,
+            }
+            const slide = createBibleSlide(fallback, { template: selectedTemplate })
+            if (slide) {
+                appendActiveSlide(slide)
+                setLiveSlide(slide.id)
+                addRecentVerse(fallback.label)
             }
             setActiveVerseKey(`${bookIndex}:${chapter}:${verse}`)
         }
@@ -153,17 +169,34 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         return true
     }, [updateActiveSlide])
 
-    const addToQueue = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
+    const addToQueue = useCallback(async (bookIndex: number, chapter: number, verse: number, preText?: string) => {
         const label = `${bookIndex}:${chapter}:${verse}`
         const result = await fetchScripture(label, selectedVersion)
+        let slide = null
         if (result) {
-            const slide = createBibleSlide(result, { template: selectedTemplate })
-            if (slide) {
-                appendActiveSlide(slide)
-                addRecentVerse(result.label || '')
+            slide = createBibleSlide(result, { template: selectedTemplate })
+        } else if (preText) {
+            const bookName = bibleBooks[bookIndex - 1] || 'Reference'
+            const fallback: Scripture = {
+                label: `${bookName} ${chapter}:${verse}`,
+                labelShortFormat: `${bookIndex}:${chapter}:${verse}`,
+                version: selectedVersion,
+                content: preText,
+            }
+            slide = createBibleSlide(fallback, { template: selectedTemplate })
+        }
+        if (slide) {
+            appendActiveSlide(slide)
+            addRecentVerse(result?.label || `${bookIndex}:${chapter}:${verse}`)
+            if (isConnected && !isStrict) {
+                try {
+                    await addToSharedQueue([slide.id])
+                } catch (err) {
+                    console.error('[BibleList] Failed to add slide to shared queue:', err)
+                }
             }
         }
-    }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, addRecentVerse])
+    }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, addRecentVerse, isConnected, isStrict, addToSharedQueue])
 
     const loadVerseWithNeighbors = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
         navigatingRef.current = true
@@ -331,11 +364,11 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 const row = verseRows[focusedIndex]
                 if (row.source === 'semantic') {
                     loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
-                    if (e.shiftKey) goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
+                    if (e.shiftKey) goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
                 } else if (e.shiftKey) {
-                    goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
+                    goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
                 } else {
-                    addToQueue(row.bookIndex, row.chapter, row.verse)
+                    addToQueue(row.bookIndex, row.chapter, row.verse, row.scripture)
                 }
             } else if (!hasSearched) {
                 handleSearch()
@@ -537,7 +570,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                 row.isCurrent || isActive || isHovered ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                                             } transition-opacity`}>
                                                 <button
-                                                    onClick={(e) => { e.stopPropagation(); addToQueue(row.bookIndex, row.chapter, row.verse) }}
+                                                    onClick={(e) => { e.stopPropagation(); addToQueue(row.bookIndex, row.chapter, row.verse, row.scripture) }}
                                                     className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-md transition-colors"
                                                 >
                                                     <Plus className="w-3 h-3" /> Add
@@ -545,7 +578,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation()
-                                                        goLiveWithScripture(row.bookIndex, row.chapter, row.verse)
+                                                        goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
                                                         if (row.source === 'semantic') loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
                                                     }}
                                                     className={`flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium rounded transition-all ${

@@ -85,7 +85,7 @@ export function useScripture() {
         const cached = await db.bibleAndHymns.get(version)
 
         if (cached?.data) {
-            console.log(`Found ${version} in IndexedDB cache`)
+            console.log(`Found ${version} in IndexedDB cache, entries:`, (cached.data as any[]).length, 'first entry keys:', cached.data && (cached.data as any[])[0] ? Object.keys((cached.data as any[])[0]).join(',') : 'none')
             return cached.data as unknown as BibleVerse[]
         }
 
@@ -186,14 +186,44 @@ export function useScripture() {
             }
 
             // Find start index
-            const startIndex = bibleData.findIndex((scripture: BibleVerse) =>
+            let startIndex = bibleData.findIndex((scripture: BibleVerse) =>
                 Number(scripture.book) === book &&
                 Number(scripture.chapter) === chapter &&
                 Number(scripture.verse) === verses[0]
             )
 
+            // Some cached payloads use book name strings ("John") instead of
+            // book numbers. Fall back to scanning by name+number so the
+            // lookup still resolves regardless of the cached data shape.
             if (startIndex === -1) {
-                console.error('Scripture not found')
+                const bookNames = [
+                    '', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
+                    'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
+                    '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra',
+                    'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
+                    'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations',
+                    'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
+                    'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk',
+                    'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
+                    'Matthew', 'Mark', 'Luke', 'John', 'Acts',
+                    'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians',
+                    'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy',
+                    '2 Timothy', 'Titus', 'Philemon', 'Hebrews', 'James',
+                    '1 Peter', '2 Peter', '1 John', '2 John', '3 John',
+                    'Jude', 'Revelation',
+                ]
+                const targetBookName = bookNames[book] || ''
+                startIndex = bibleData.findIndex((s: any) => {
+                    const sb = String(s.book ?? '')
+                    const sc = Number(s.chapter)
+                    const sv = Number(s.verse)
+                    const nameMatch = sb === targetBookName || sb === String(book)
+                    return nameMatch && sc === chapter && sv === verses[0]
+                })
+            }
+
+            if (startIndex === -1) {
+                console.error('Scripture not found. Cache size:', bibleData.length, 'sample:', JSON.stringify(bibleData[0]).slice(0, 200), 'looking for', `${book}:${chapter}:${verses[0]}`)
                 return null
             }
 

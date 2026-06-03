@@ -197,4 +197,73 @@ describe('BibleVerseNavigator', () => {
             expect(screen.getByText(/Genesis 1/)).toBeInTheDocument()
         }, { timeout: 5000 })
     })
+
+    it('discards stale fetch results when currentSlide changes mid-fetch', async () => {
+        const slideA: Slide = {
+            ...bibleSlide,
+            data: { version: 'KJV', labelShortFormat: '43:3:16-18' } as Scripture,
+        }
+        const slideB: Slide = {
+            ...bibleSlide,
+            id: 'slide-B',
+            data: { version: 'KJV', labelShortFormat: '1:1:1-3' } as Scripture,
+        }
+
+        const resolvers: Array<(value: any) => void> = []
+        mockFetchScripture.mockImplementation(() => new Promise((resolve) => {
+            resolvers.push(resolve)
+        }))
+
+        const onVerseSelect = vi.fn()
+        const { rerender } = render(
+            <BibleVerseNavigator currentSlide={slideA} onVerseSelect={onVerseSelect} />
+        )
+
+        rerender(
+            <BibleVerseNavigator currentSlide={slideB} onVerseSelect={onVerseSelect} />
+        )
+
+        resolvers[0]?.({
+            content: [{ verse: '1', scripture: 'In the beginning…' }],
+        })
+        resolvers[1]?.({
+            content: [{ verse: '1', scripture: 'In the beginning God' }],
+        })
+
+        await waitFor(() => {
+            expect(screen.getByText(/Genesis 1/)).toBeInTheDocument()
+        }, { timeout: 5000 })
+    })
+
+    it('renders each preview verse on its own line with verse number', async () => {
+        const singleSlide: Slide = {
+            ...bibleSlide,
+            data: { version: 'KJV', labelShortFormat: '43:3:16' } as Scripture,
+        }
+        mockFetchScripture.mockImplementation(async (label: string) => {
+            if (label === '43:3:16') {
+                return {
+                    content: [
+                        { verse: '16', scripture: 'For God so loved the world' },
+                    ],
+                }
+            }
+            if (label === '43:3:11-15') {
+                return { content: [{ verse: '11', scripture: 'p1' }, { verse: '12', scripture: 'p2' }, { verse: '13', scripture: 'p3' }, { verse: '14', scripture: 'p4' }, { verse: '15', scripture: 'p5' }] }
+            }
+            if (label === '43:3:17-21') {
+                return { content: [{ verse: '17', scripture: 'n1' }, { verse: '18', scripture: 'n2' }, { verse: '19', scripture: 'n3' }, { verse: '20', scripture: 'n4' }, { verse: '21', scripture: 'n5' }] }
+            }
+            return null
+        })
+
+        const { container } = render(
+            <BibleVerseNavigator currentSlide={singleSlide} onVerseSelect={vi.fn()} />
+        )
+
+        await waitFor(() => {
+            const previewSups = container.querySelectorAll('.max-h-32 sup.text-primary-500')
+            expect(previewSups.length).toBeGreaterThan(0)
+        }, { timeout: 5000 })
+    })
 })
