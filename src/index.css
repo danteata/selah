@@ -512,6 +512,60 @@ h6 {
     animation: live-dot 1.6s ease-in-out infinite;
 }
 
+/* ============================================================
+   LANDING PAGE — cinematic marketing animations
+   ============================================================ */
+
+@keyframes lp-gradient-drift {
+    0% { transform: translate(0, 0) scale(1); }
+    33% { transform: translate(3%, -3%) scale(1.08); }
+    66% { transform: translate(-3%, 2%) scale(0.95); }
+    100% { transform: translate(0, 0) scale(1); }
+}
+
+@keyframes lp-mock-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-5px); }
+}
+
+@keyframes lp-marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+
+@keyframes lp-shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+@keyframes lp-card-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(20, 184, 166, 0); }
+    50% { box-shadow: 0 0 20px 0 rgba(20, 184, 166, 0.15); }
+}
+
+@keyframes lp-orbit {
+    0% { transform: rotate(0deg) translateX(80px) rotate(0deg); }
+    100% { transform: rotate(360deg) translateX(80px) rotate(-360deg); }
+}
+
+.animate-lp-gradient-drift {
+    animation: lp-gradient-drift 22s ease-in-out infinite;
+}
+
+.animate-lp-mock-float {
+    animation: lp-mock-float 7s ease-in-out infinite;
+}
+
+.animate-lp-shimmer {
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: lp-shimmer 3s ease-in-out infinite;
+}
+
+.animate-lp-orbit {
+    animation: lp-orbit 20s linear infinite;
+}
+
 /* TipTap Preview Styles (for rendered output) */
 .tiptap-preview h1 {
     font-family: 'Crimson Pro', Georgia, serif;
