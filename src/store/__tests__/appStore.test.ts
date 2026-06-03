@@ -325,6 +325,82 @@ describe('appStore', () => {
         })
     })
 
+    describe('replaceSlidesForSchedule merge behavior', () => {
+        // Regression: the old implementation filtered out ALL existing local
+        // slides for the schedule and replaced them with the server's list.
+        // That meant any optimistic local add (e.g. a contributor adding a
+        // slide) would be wiped out the moment the server's getSlides query
+        // re-fired. The new implementation preserves local-only slides.
+        const makeSlide = (overrides: Partial<Slide>): Slide => ({
+            id: 'id',
+            index: 0,
+            name: 'Test',
+            type: 'text',
+            layout: 'full-text',
+            userId: 'user-1',
+            churchId: 'church-1',
+            scheduleId: 'schedule-a',
+            contents: [],
+            ...overrides,
+        } as Slide)
+
+        it('preserves local-only slides when server response is missing them', () => {
+            const store = useAppStore.getState()
+            const localOnly = makeSlide({ id: 'local-1', name: 'Local only' })
+            const onServer = makeSlide({ id: 'server-1', name: 'Server' })
+
+            act(() => {
+                store.setActiveSlides([localOnly, onServer])
+            })
+
+            // Server returns only 'server-1' (e.g. local-1 is an optimistic
+            // add that hasn't round-tripped yet)
+            act(() => {
+                store.replaceSlidesForSchedule('schedule-a', [onServer], true)
+            })
+
+            const after = useAppStore.getState().activeSlides
+            expect(after.some((s) => s.id === 'local-1')).toBe(true)
+            expect(after.some((s) => s.id === 'server-1')).toBe(true)
+        })
+
+        it('overwrites local data with server data when slide exists on both', () => {
+            const store = useAppStore.getState()
+            const local = makeSlide({ id: 'shared-1', name: 'Old name' })
+            const server = makeSlide({ id: 'shared-1', name: 'New name' })
+
+            act(() => {
+                store.setActiveSlides([local])
+            })
+
+            act(() => {
+                store.replaceSlidesForSchedule('schedule-a', [server], true)
+            })
+
+            const after = useAppStore.getState().activeSlides
+            expect(after.find((s) => s.id === 'shared-1')?.name).toBe('New name')
+        })
+
+        it('appends new server slides that did not exist locally', () => {
+            const store = useAppStore.getState()
+            const local = makeSlide({ id: 'local-1' })
+
+            act(() => {
+                store.setActiveSlides([local])
+            })
+
+            act(() => {
+                store.replaceSlidesForSchedule('schedule-a', [
+                    makeSlide({ id: 'server-new' }),
+                ], true)
+            })
+
+            const after = useAppStore.getState().activeSlides
+            expect(after.some((s) => s.id === 'local-1')).toBe(true)
+            expect(after.some((s) => s.id === 'server-new')).toBe(true)
+        })
+    })
+
     describe('signOut', () => {
         it('should reset all state', () => {
             const store = useAppStore.getState()

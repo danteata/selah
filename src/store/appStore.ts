@@ -353,13 +353,25 @@ export const useAppStore = create<AppStore>()(
                         updatedSlides.push(slide)
                     }
 
+                    // Only append the new slide id to liveOutputSlidesId
+                    // (preserves the existing operator-ordered deck).
+                    // Previously this wholesale-rebuilt liveOutputSlidesId
+                    // from every active slide, which clobbered the
+                    // operator's curated deck and caused the new slide to
+                    // appear duplicated in the queue panel.
+                    const newId = slide?.id
+                    const currentOrder = state.liveOutputSlidesId || []
+                    const updatedOrder = newId && !currentOrder.includes(newId)
+                        ? [...currentOrder, newId]
+                        : currentOrder
+
                     return {
                         pastStates: [...state.pastStates, {
                             activeSlides: state.activeSlides,
                             liveOutputSlidesId: state.liveOutputSlidesId
                         }],
                         activeSlides: ensureUniqueIds(updatedSlides),
-                        liveOutputSlidesId: Array.from(new Set(updatedSlides.map((slide) => slide?.id))),
+                        liveOutputSlidesId: updatedOrder,
                         futureStates: []
                     }
                 })
@@ -441,9 +453,20 @@ export const useAppStore = create<AppStore>()(
                 set((state) => {
                     if (!scheduleId) return state
 
+                    // Merge: keep any existing local slides for this schedule
+                    // (they may include optimistic adds that haven't yet
+                    // round-tripped to the server) and overlay with the
+                    // server's authoritative list. Server data wins when
+                    // both exist; local-only slides are preserved so the
+                    // queue doesn't appear to "reset" after a contributor
+                    // adds a slide.
+                    const existingForSchedule = state.activeSlides.filter(
+                        (slide) => slide.scheduleId === scheduleId
+                    )
+                    const serverById = new Map(slides.map((s) => [s.id, s]))
                     const mergedSlides = [
-                        ...state.activeSlides.filter((slide) => slide.scheduleId !== scheduleId),
-                        ...slides,
+                        ...existingForSchedule.map((local) => serverById.get(local.id) || local),
+                        ...slides.filter((s) => !existingForSchedule.some((local) => local.id === s.id)),
                     ]
                     const uniqueSlides = ensureUniqueIds(mergedSlides)
 
