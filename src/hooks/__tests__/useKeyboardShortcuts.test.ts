@@ -5,6 +5,7 @@ import {
     useKeyboardShortcuts,
     useNumberShortcuts,
     useCtrlOrMetaActive,
+    useVerseNavigationShortcuts,
 } from '../useKeyboardShortcuts'
 
 function fireKeyDown(key: string, options?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean; target?: EventTarget }) {
@@ -287,5 +288,116 @@ describe('useCtrlOrMetaActive', () => {
         // handler were going to set it (it shouldn't)
         await new Promise(r => setTimeout(r, 10))
         expect(result.current).toBe(false)
+    })
+})
+
+describe('useVerseNavigationShortcuts', () => {
+    it('calls next-verse on N (lowercase) and right arrow', () => {
+        const onNext = vi.fn()
+        const onPrev = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, onPrev))
+
+        fireKeyDown('n')
+        expect(onNext).toHaveBeenCalledTimes(1)
+        expect(onPrev).not.toHaveBeenCalled()
+
+        fireKeyDown('ArrowRight')
+        expect(onNext).toHaveBeenCalledTimes(2)
+    })
+
+    it('calls prev-verse on P (lowercase) and left arrow', () => {
+        const onNext = vi.fn()
+        const onPrev = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, onPrev))
+
+        fireKeyDown('p')
+        expect(onPrev).toHaveBeenCalledTimes(1)
+        expect(onNext).not.toHaveBeenCalled()
+
+        fireKeyDown('ArrowLeft')
+        expect(onPrev).toHaveBeenCalledTimes(2)
+    })
+
+    it('also handles uppercase N and P', () => {
+        const onNext = vi.fn()
+        const onPrev = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, onPrev))
+
+        fireKeyDown('N')
+        fireKeyDown('P')
+        expect(onNext).toHaveBeenCalledTimes(1)
+        expect(onPrev).toHaveBeenCalledTimes(1)
+    })
+
+    it('does NOT call callbacks when ArrowUp/ArrowDown is pressed (reserved for slide queue)', () => {
+        const onNext = vi.fn()
+        const onPrev = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, onPrev))
+
+        fireKeyDown('ArrowDown')
+        fireKeyDown('ArrowUp')
+        expect(onNext).not.toHaveBeenCalled()
+        expect(onPrev).not.toHaveBeenCalled()
+    })
+
+    it('does NOT fire when a modifier key is held (so we never shadow Ctrl+P, etc.)', () => {
+        const onNext = vi.fn()
+        const onPrev = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, onPrev))
+
+        fireKeyDown('n', { ctrlKey: true })
+        fireKeyDown('p', { metaKey: true })
+        fireKeyDown('ArrowRight', { shiftKey: true })
+        fireKeyDown('ArrowLeft', { altKey: true })
+        expect(onNext).not.toHaveBeenCalled()
+        expect(onPrev).not.toHaveBeenCalled()
+    })
+
+    it('does NOT fire when an input is focused', () => {
+        const onNext = vi.fn()
+        const input = document.createElement('input')
+        document.body.appendChild(input)
+        input.focus()
+
+        renderHook(() => useVerseNavigationShortcuts(onNext, vi.fn()))
+
+        fireKeyDown('n')
+        fireKeyDown('ArrowRight')
+        expect(onNext).not.toHaveBeenCalled()
+
+        document.body.removeChild(input)
+    })
+
+    it('does NOT fire when enabled=false', () => {
+        const onNext = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, vi.fn(), { enabled: false }))
+
+        fireKeyDown('n')
+        fireKeyDown('ArrowRight')
+        expect(onNext).not.toHaveBeenCalled()
+    })
+
+    it('prevents default by default so arrow keys do not scroll the page', () => {
+        const onNext = vi.fn()
+        const onPrev = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, onPrev))
+
+        const next = fireKeyDown('n')
+        expect(next.defaultPrevented).toBe(true)
+
+        const prev = fireKeyDown('p')
+        expect(prev.defaultPrevented).toBe(true)
+
+        const right = fireKeyDown('ArrowRight')
+        expect(right.defaultPrevented).toBe(true)
+    })
+
+    it('does not prevent default when preventDefault=false', () => {
+        const onNext = vi.fn()
+        const onPrev = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(onNext, onPrev, { preventDefault: false }))
+
+        const evt = fireKeyDown('n')
+        expect(evt.defaultPrevented).toBe(false)
     })
 })

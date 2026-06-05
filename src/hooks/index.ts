@@ -20,6 +20,7 @@ export {
     useKeyboardShortcut,
     useKeyboardShortcuts,
     useSlideNavigationShortcuts,
+    useVerseNavigationShortcuts,
     useNumberShortcuts,
     useCtrlOrMetaActive
 } from './useKeyboardShortcuts'

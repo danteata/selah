@@ -3,7 +3,7 @@ import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Li
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
-import { useLiveSession } from '../../hooks'
+import { useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
@@ -11,7 +11,7 @@ import type { Slide, Scripture, Countdown } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
 import { AutoFitText } from './AutoFitText'
-import { BibleVerseNavigator } from '../bible/BibleVerseNavigator'
+import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import { VideoBackground } from './VideoBackground'
@@ -47,6 +47,11 @@ export function LiveOutput() {
     // Countdown preview state
     const [previewCountdownSeconds, setPreviewCountdownSeconds] = useState(0)
     const previewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+    // Ref to the live bible verse navigator — lets the global
+    // useVerseNavigationShortcuts hook trigger the navigator's `navigateVerse`
+    // function (N / P / ← / →) without the navigator needing its own listener.
+    const verseNavigatorRef = useRef<BibleVerseNavigatorHandle | null>(null)
 
     const {
         isPresenting,
@@ -258,6 +263,16 @@ export function LiveOutput() {
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [nextSlide, prevSlide, handleSetLiveSlide])
+
+    // Verse navigation (N / P / ← / →). Only active when a bible slide is
+    // currently live so it never silently swallows keystrokes for non-bible
+    // slides. Does NOT touch ArrowUp/ArrowDown, which are reserved for the
+    // slide queue above.
+    useVerseNavigationShortcuts(
+        () => verseNavigatorRef.current?.navigateVerse('next'),
+        () => verseNavigatorRef.current?.navigateVerse('prev'),
+        { enabled: liveSlide?.type === 'bible' }
+    )
 
     // Number shortcuts (Ctrl/Cmd + 0-9)
     useEffect(() => {
@@ -847,6 +862,7 @@ export function LiveOutput() {
                         {/* Bible verse navigation — only when a bible slide is live */}
                         {liveSlide?.type === 'bible' && (
                             <BibleVerseNavigator
+                                ref={verseNavigatorRef}
                                 currentSlide={liveSlide}
                                 onVerseSelect={handleVerseSelect}
                             />

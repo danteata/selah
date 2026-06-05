@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare, Rows3, Plus, GripVertical, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useSlideCreation, useLibrary, useScripture, useLiveSession } from '../../hooks'
+import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
 import { bibleBooks } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
@@ -318,6 +318,15 @@ export function PreviewContent() {
             handleVerseSelect(endVerse + 1)
         }
     }, [scriptureRef, handleVerseSelect])
+
+    // Verse navigation keyboard shortcuts (N / P / ← / →). Only active when
+    // a bible slide is selected for preview, so the keys don't get swallowed
+    // while browsing non-bible slides in the queue.
+    useVerseNavigationShortcuts(
+        () => navigateVerse('next'),
+        () => navigateVerse('prev'),
+        { enabled: activeSlide?.type === 'bible' }
+    )
 
     // Handle version change
     const handleVersionChange = useCallback(async (newVersion: string) => {

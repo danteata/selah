@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Zap, Plus, X, Loader2, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
+import { useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 import type { Scripture, BibleVerse } from '../../types'
@@ -161,6 +161,15 @@ export function QuickBibleBar() {
         const parsed = parseBibleQuery(newQuery)
         if (parsed) fetchAndSetScripture(parsed)
     }, [currentPosition, fetchAndSetScripture])
+
+    // Verse navigation keyboard shortcuts (N / P / ← / →). Only active when
+    // a scripture result is currently displayed in the bar, so it doesn't
+    // shadow the search-result keyboard navigation handled in handleKeyDown.
+    useVerseNavigationShortcuts(
+        () => navigateVerse('next'),
+        () => navigateVerse('prev'),
+        { enabled: !!currentScripture }
+    )
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {

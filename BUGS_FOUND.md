@@ -6,7 +6,7 @@
 > as `[KNOWN BUG]` so that fixing the bug in the future requires
 > intentionally updating the test.
 
-## Summary: 12 Confirmed Bugs (8 historical + 4 newly discovered)
+## Summary: 13 Confirmed Bugs (8 historical + 5 newly discovered)
 
 | # | Component | Bug | Severity | File |
 |---|-----------|-----|----------|------|
@@ -22,6 +22,7 @@
 | 10 | `voiceCommandDetection` | **NEW** Intent filter (COMMAND_KEYWORDS) excludes "pause/resume/begin listening" even though the detection regexes match them | Medium | `src/services/sermon-listener/voiceCommandDetection.ts:407-418` |
 | 11 | `voiceCommandDetection` | **NEW** `AVAILABLE_VERSIONS` alias list is out of sync with `bibleVersionObjects` (e.g. ESV is in aliases but not in objects) | Low | `src/services/sermon-listener/voiceCommandDetection.ts:19-40` |
 | 12 | `useUserRole` | (HISTORICAL) `effectiveUser` derivation only handles `undefined` vs `null` correctly since the `=== undefined` check excludes `null` (this is the **fix** in place) | ~~Info~~ | `src/hooks/useUserRole.ts:80-86` |
+| 13 | `BibleVerseNavigator` / `useKeyboardShortcuts` | **NEW** Verse navigator has no keyboard shortcut; arrow keys collide with the global slide-queue navigation so the operator has to use the mouse for every verse step | **High** | `src/components/bible/BibleVerseNavigator.tsx:183-195`, `src/pages/Dashboard.tsx:230-231`, `src/components/live/LiveOutput.tsx:251-254` |
 
 ---
 
@@ -244,6 +245,57 @@ remains clear.
 
 ---
 
+## Bug 13: NEW — Verse navigator has no keyboard shortcut, arrow keys collide with slide queue
+
+### Reproduction
+1. Open the dashboard, then make a bible slide the live slide.
+2. Notice the bible verse navigator appears at the bottom of the live output.
+3. Try to step through verses with the arrow keys. Instead of stepping
+   through the verses, the slide queue's `navigateToNextSlide` /
+   `navigateToPrevSlide` handlers fire (defined in
+   `src/pages/Dashboard.tsx:230-231` and `src/components/live/LiveOutput.tsx:251-254`).
+4. Even more confusingly, there is NO keyboard path to verse navigation at
+   all — `navigateVerse` in `BibleVerseNavigator.tsx` and `PreviewContent.tsx`
+   is only ever triggered by the chevron buttons.
+
+### Impact
+**UX / accessibility bug.** The most useful keyboard shortcut for a
+bible-presenting operator (next/previous verse) does not exist. Users
+have to grab the mouse and click the chevron buttons for every verse
+change, breaking the flow of a live presentation.
+
+### Root cause
+The `navigateVerse` callbacks exist in three components but were never
+bound to a global `useEffect`-based listener. And the obvious candidate
+keys (ArrowLeft/ArrowRight/ArrowUp/ArrowDown) were already taken by the
+slide-queue navigation.
+
+### Fix
+- Add a new `useVerseNavigationShortcuts` hook in
+  `src/hooks/useKeyboardShortcuts.ts` that listens for **N** (next),
+  **P** (previous), **←** (previous), and **→** (next) on a bible
+  slide.
+- Deliberately skip `ArrowUp` / `ArrowDown` so the slide-queue
+  navigation is never shadowed.
+- Use the `enabled: boolean` option to gate the hook to only fire when
+  a bible slide is currently selected/live, so it never silently
+  swallows keystrokes for non-bible slides.
+- `BibleVerseNavigator` now exposes `navigateVerse` via `forwardRef` so
+  the parent (LiveOutput) can drive it from a single global listener.
+- `LiveOutput`, `PreviewContent`, and `QuickBibleBar` all use the new
+  hook with an appropriate `enabled` predicate.
+- Document the new shortcuts in `ShortcutsModal.tsx`.
+
+### Tests
+`src/hooks/__tests__/useKeyboardShortcuts.test.ts` adds 8 tests for
+`useVerseNavigationShortcuts` covering N/P, ←/→, modifier-key
+suppression, the input-focus guard, the `enabled` flag, and
+`preventDefault` behavior. Critically there is a regression-guard test
+that asserts ArrowUp / ArrowDown do **not** trigger the verse callbacks
+(so the slide-queue shortcut can never be silently shadowed).
+
+---
+
 ## Test Files That Expose These Bugs
 
 | Bug | Test File | Test Name |
@@ -259,6 +311,7 @@ remains clear.
 | 9 | `src/services/sermon-listener/__tests__/verseDetection.bugs.test.ts` | `"Genesis 50:999" — documents a real implementation gap` |
 | 10 | `src/services/sermon-listener/__tests__/voiceCommandDetection.test.ts` | `"pause listening" is blocked by the intent filter (known bug)` |
 | 11 | `src/services/sermon-listener/__tests__/voiceCommandDetection.test.ts` | `rejects versions not in bibleVersionObjects (e.g. ESV)` |
+| 13 | `src/hooks/__tests__/useKeyboardShortcuts.test.ts` | `useVerseNavigationShortcuts` block (8 tests covering N/P, ←/→, modifiers, focus guard, enabled flag, preventDefault) |
 
 All tests that assert fixed behavior **pass** (regression guards).
 All tests that document current bugs **pass** (pin the buggy behavior

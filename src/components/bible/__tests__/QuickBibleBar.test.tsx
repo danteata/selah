@@ -40,6 +40,7 @@ vi.mock('../../../hooks', () => ({
         isOperator: false,
         isOpen: false,
     })),
+    useVerseNavigationShortcuts: vi.fn(),
 }))
 
 vi.mock('framer-motion', () => ({

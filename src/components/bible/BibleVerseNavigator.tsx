@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, forwardRef, useImperativeHandle } from 'react'
 import { ChevronLeft, ChevronRight, RefreshCw, BookOpen } from 'lucide-react'
 import { useScripture } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
@@ -10,7 +10,15 @@ interface BibleVerseNavigatorProps {
     onVerseSelect: (scripture: Scripture) => void
 }
 
-export function BibleVerseNavigator({ currentSlide, onVerseSelect }: BibleVerseNavigatorProps) {
+export interface BibleVerseNavigatorHandle {
+    /** Move the navigator's current verse range by one range in the given direction. */
+    navigateVerse: (direction: 'prev' | 'next') => void
+}
+
+export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVerseNavigatorProps>(function BibleVerseNavigator(
+    { currentSlide, onVerseSelect },
+    ref
+) {
     const [neighboringVerses, setNeighboringVerses] = useState<{ prev: BibleVerse[]; next: BibleVerse[] }>({ prev: [], next: [] })
     const [currentVerses, setCurrentVerses] = useState<BibleVerse[]>([])
     const [loading, setLoading] = useState(false)
@@ -194,6 +202,11 @@ export function BibleVerseNavigator({ currentSlide, onVerseSelect }: BibleVerseN
         }
     }, [scriptureRef, handleVerseRangeSelect])
 
+    // Expose the navigateVerse function to the parent via ref so it can
+    // bind keyboard shortcuts (N / P / Left / Right) at a higher level
+    // without each instance needing its own listener.
+    useImperativeHandle(ref, () => ({ navigateVerse }), [navigateVerse])
+
     // If not a bible slide, don't render
     if (!scriptureRef) {
         return null
@@ -257,9 +270,8 @@ export function BibleVerseNavigator({ currentSlide, onVerseSelect }: BibleVerseN
             {/* Verse Grid */}
             <div className="p-3 relative min-h-[3.25rem]">
                 <div
-                    className={`flex flex-wrap gap-1 transition-opacity ${
-                        loading ? 'opacity-50 pointer-events-none' : ''
-                    }`}
+                    className={`flex flex-wrap gap-1 transition-opacity ${loading ? 'opacity-50 pointer-events-none' : ''
+                        }`}
                 >
                     {/* Previous verses */}
                     {neighboringVerses.prev.map((v) => (
@@ -315,4 +327,4 @@ export function BibleVerseNavigator({ currentSlide, onVerseSelect }: BibleVerseN
             )}
         </div>
     )
-}
+})

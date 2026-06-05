@@ -56,6 +56,15 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
             ],
         },
         {
+            title: 'Bible Verses',
+            shortcuts: [
+                { keys: ['N'], description: 'Next verse (bible slide)' },
+                { keys: ['P'], description: 'Previous verse (bible slide)' },
+                { keys: ['←'], description: 'Previous verse (bible slide)' },
+                { keys: ['→'], description: 'Next verse (bible slide)' },
+            ],
+        },
+        {
             title: 'Live Presentation',
             shortcuts: [
                 { keys: ['⌘', 'P'], description: 'Promote to live' },

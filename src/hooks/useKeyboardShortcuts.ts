@@ -125,6 +125,47 @@ export function useSlideNavigationShortcuts(
     ])
 }
 
+// Hook specifically for verse navigation shortcuts (used in BibleVerseNavigator,
+// PreviewContent, QuickBibleBar). Bound to N/P and LeftArrow/RightArrow so it
+// does NOT collide with the global ArrowUp/ArrowDown slide-queue navigation.
+export function useVerseNavigationShortcuts(
+    onNextVerse: () => void,
+    onPrevVerse: () => void,
+    options: { enabled?: boolean; preventDefault?: boolean } = {}
+) {
+    const { enabled = true, preventDefault = true } = options
+    const onNextRef = useRef(onNextVerse)
+    const onPrevRef = useRef(onPrevVerse)
+
+    useEffect(() => {
+        onNextRef.current = onNextVerse
+        onPrevRef.current = onPrevVerse
+    }, [onNextVerse, onPrevVerse])
+
+    useEffect(() => {
+        if (!enabled) return
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (isInputElementFocused()) return
+
+            // Only respond to plain key presses (no modifiers) so we never
+            // shadow Ctrl+P, Cmd+LeftArrow, etc.
+            if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
+
+            if (event.key === 'n' || event.key === 'N' || event.key === 'ArrowRight') {
+                if (preventDefault) event.preventDefault()
+                onNextRef.current()
+            } else if (event.key === 'p' || event.key === 'P' || event.key === 'ArrowLeft') {
+                if (preventDefault) event.preventDefault()
+                onPrevRef.current()
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [enabled, preventDefault])
+}
+
 // Hook for number shortcuts (0-9) for quick slide access
 export function useNumberShortcuts(
     onNumberPress: (num: number) => void
