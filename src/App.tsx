@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ClerkProvider, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
@@ -8,7 +8,8 @@ import { ConvexConnectionProvider, useConvexConnection } from './providers/Conve
 import { ConvexErrorBoundary } from './components/offline/ConvexErrorBoundary'
 import { RouteErrorBoundary } from './components/offline/RouteErrorBoundary'
 import { useAppStore } from './store/appStore'
-
+import { invoke } from '@tauri-apps/api/core'
+import { getVersion } from '@tauri-apps/api/app'
 // Lazy-load all route components so the initial JS chunk stays small.
 // Each route's bundle is fetched only when the user navigates to it, which
 // matters most on desktop where the operator hits Dashboard immediately but
@@ -138,6 +139,25 @@ function AppRoutes() {
 }
 
 function App() {
+    const [version, setVersion] = useState('')
+    const [checking, setChecking] = useState(false)
+    const [status, setStatus] = useState('')
+
+    useEffect(() => { getVersion().then(setVersion) }, [])
+
+    async function check() {
+        setChecking(true)
+        setStatus('checking...')
+        try {
+            const r = await invoke<string>('check_update')
+            setStatus(r)
+        } catch (e) {
+            setStatus(`error: ${e}`)
+        } finally {
+            setChecking(false)
+        }
+    }
+
     return (
         <RouteErrorBoundary name="app-root">
             <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY!}>

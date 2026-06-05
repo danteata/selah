@@ -39,6 +39,7 @@
         "fs:allow-remove",
         "fs:allow-read-dir",
         "fs:allow-read-file",
-        "updater:default"
+        "updater:default",
+        "process:default"
     ]
 }

@@ -33,7 +33,8 @@
     "desktop:build:ndi": "tauri build -- --features ndi",
     "desktop:build:windows": "tauri build --target x86_64-pc-windows-msvc",
     "desktop:build:mac": "tauri build --target universal-apple-darwin",
-    "desktop:build:linux": "tauri build --target x86_64-unknown-linux-gnu"
+    "desktop:build:linux": "tauri build --target x86_64-unknown-linux-gnu",
+    "updater:serve": "node scripts/serve-updates.mjs"
   },
   "dependencies": {
     "@amplitude/analytics-browser": "^2.34.1",

@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "notes": "Replace `version`, every `signature` (full contents of the .sig file including comment header), and every `url` (full URL to the .app.tar.gz / .nsis.zip / .msi.zip / .AppImage / .deb / .rpm bundle on your update server). Upload this file as `latest.json` next to the bundles.",
+  "pub_date": "2026-05-06T00:00:00Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "REPLACE_WITH_CONTENTS_OF_Selah.app.tar.gz.sig",
+      "url": "https://github.com/danteata/selah/releases/download/v0.2.0/Selah.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "REPLACE_WITH_CONTENTS_OF_Selah.app.tar.gz.sig",
+      "url": "https://github.com/danteata/selah/releases/download/v0.2.0/Selah.app.tar.gz"
+    },
+    "linux-x86_64": {
+      "signature": "REPLACE_WITH_CONTENTS_OF_Selah.AppImage.tar.gz.sig",
+      "url": "https://github.com/danteata/selah/releases/download/v0.2.0/Selah.AppImage.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "REPLACE_WITH_CONTENTS_OF_Selah_0.2.0_x64-setup.nsis.zip.sig",
+      "url": "https://github.com/danteata/selah/releases/download/v0.2.0/Selah_0.2.0_x64-setup.nsis.zip"
+    },
+    "windows-aarch64": {
+      "signature": "REPLACE_WITH_CONTENTS_OF_Selah_0.2.0_arm64-setup.nsis.zip.sig",
+      "url": "https://github.com/danteata/selah/releases/download/v0.2.0/Selah_0.2.0_arm64-setup.nsis.zip"
+    }
+  }
+}

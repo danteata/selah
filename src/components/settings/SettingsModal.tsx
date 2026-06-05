@@ -10,8 +10,9 @@ import { TeamManagementPanel } from '../team/TeamManagementPanel'
 import { SongMigrationWizard } from '../admin/SongMigrationWizard'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
+import { useAppUpdater } from '../../hooks/useAppUpdater'
 
-type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'storage' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
+type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -70,6 +71,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         ...(isAdmin && currentUser?.churchId ? [{ id: 'team' as const, label: 'Team', icon: Users }] : []),
         { id: 'profile' as const, label: 'Profile', icon: User },
         { id: 'storage' as const, label: 'Storage', icon: HardDrive },
+        { id: 'updates' as const, label: 'Updates', icon: RefreshCw },
         { id: 'shortcuts' as const, label: 'Shortcuts', icon: Keyboard },
     ]
 
@@ -180,6 +182,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                         )}
                         {activeTab === 'profile' && <ProfileSettings />}
                         {activeTab === 'storage' && <StorageSettings />}
+                        {activeTab === 'updates' && <UpdatesSettings />}
                         {activeTab === 'shortcuts' && <ShortcutsSettings />}
                         {activeTab === 'admin-bible' && isSuperadmin && <BibleVersionUploader onClose={onClose} />}
                         {activeTab === 'admin-embeddings' && isSuperadmin && <VerseEmbeddingUploader onClose={onClose} />}
@@ -896,3 +899,77 @@ function ShortcutsSettings() {
         </div>
     )
 }
+
+// Updates panel — desktop app only.  Tells the user what version they're
+// running, lets them check on demand, and surfaces any update errors.
+function UpdatesSettings() {
+    const { state, message, runCheck } = useAppUpdater()
+    const appVersion =
+        (typeof window !== 'undefined' && (window as any).__TAURI__?.metadata?.version) ||
+        (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__?.metadata?.version) ||
+        '0.1.0'
+
+    const isDesktop = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+
+    if (!isDesktop) {
+        return (
+            <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-600 dark:text-gray-400">
+                Auto-updates are only available in the desktop app.
+            </div>
+        )
+    }
+
+    const buttonLabel =
+        state === 'checking' ? 'Checking\u2026'
+        : state === 'downloading' ? 'Downloading\u2026'
+        : state === 'restarting' ? 'Restarting\u2026'
+        : 'Check for updates'
+
+    const isBusy = state === 'checking' || state === 'downloading' || state === 'restarting'
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1">App Updates</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Selah checks for new versions automatically on launch. You can also trigger a manual check below.
+                </p>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <div>
+                    <div className="text-sm font-medium text-gray-900 dark:text-white">Current version</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">v{appVersion}</div>
+                </div>
+                <button
+                    onClick={runCheck}
+                    disabled={isBusy}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50"
+                >
+                    <RefreshCw className={`w-3.5 h-3.5 ${state === 'checking' ? 'animate-spin' : ''}`} />
+                    {buttonLabel}
+                </button>
+            </div>
+
+            {state === 'up_to_date' && message && (
+                <div className="flex items-start gap-2 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-sm text-green-800 dark:text-green-200">
+                    <Check className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <span>{message}</span>
+                </div>
+            )}
+
+            {state === 'restarting' && (
+                <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
+                    <span>Update downloaded. Restarting Selah\u2026</span>
+                </div>
+            )}
+
+            {state === 'error' && message && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-800 dark:text-red-200">
+                    <span>{message}</span>
+                </div>
+            )}
+        </div>
+    )
+}
+

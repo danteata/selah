@@ -9,6 +9,7 @@ mod ndi_output;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 use tracing::info;
 
 use audio_capture::{
@@ -624,6 +625,33 @@ async fn get_sermon_listener_enabled(
     Ok(state.config.lock().unwrap().enabled)
 }
 
+/// Check for an app update, and if one is available, download and install it
+/// then restart the app. The two closures passed to `download_and_install`
+/// are progress callbacks (downloaded-bytes, content-length). They are no-ops
+/// here; the frontend can listen for `tauri://update-available` /
+/// `tauri://update-download-progress` / `tauri://update-installed` events
+/// directly to drive a progress bar.
+///
+/// Errors are returned as strings so the frontend `try/catch` around
+/// `invoke("check_update")` is enough.
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<String, String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await.map_err(|e| e.to_string())? {
+        Some(update) => {
+            update
+                .download_and_install(|_, _| {}, || {})
+                .await
+                .map_err(|e| e.to_string())?;
+            // `app.restart()` (from `tauri-plugin-process`) replaces the
+            // running process with the newly installed binary. It does
+            // not return on success.
+            app.restart();
+        }
+        None => Ok("up to date".into()),
+    }
+}
+
 fn prewarm_whisper_server(app: tauri::AppHandle, child_pid: Arc<Mutex<Option<u32>>>, server_pid: Arc<Mutex<Option<u32>>>) {
     println!("[PreWarm] Starting whisper server pre-warm on app launch...");
     let state = WhisperServerState { child_pid, server_pid };
@@ -655,6 +683,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(WhisperServerState {
             child_pid: whisper_child_pid,
             server_pid: whisper_pid,
@@ -716,6 +746,7 @@ pub fn run() {
             log_message,
             get_logs,
             check_previous_crash,
+            check_update,
         ])
         .setup(move |app| {
             // Initialize file logging and crash detection

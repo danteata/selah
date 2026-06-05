@@ -1,0 +1,27 @@
+{
+    "_comment": "Local dev manifest served by scripts/serve-updates.mjs on port 8787. The Tauri updater plugin will hit this file. The signature below is a placeholder — it will fail the signature check, which is what you want for local dev: it proves the chain works (manifest fetch, version compare, signature check) without actually installing a real bundle. For an end-to-end install test, replace the signature with the real value produced by `tauri signer sign` against a real bundle and place the bundle at the same path.",
+    "version": "0.1.0",
+    "pub_date": "2026-05-06T00:00:00Z",
+    "platforms": {
+        "darwin-aarch64": {
+            "signature": "PLACEHOLDER_SIGNATURE_WILL_FAIL_VERIFICATION",
+            "url": "http://localhost:8787/Selah-0.99.0.app.tar.gz"
+        },
+        "darwin-x86_64": {
+            "signature": "PLACEHOLDER_SIGNATURE_WILL_FAIL_VERIFICATION",
+            "url": "http://localhost:8787/Selah-0.99.0.app.tar.gz"
+        },
+        "linux-x86_64": {
+            "signature": "PLACEHOLDER_SIGNATURE_WILL_FAIL_VERIFICATION",
+            "url": "http://localhost:8787/Selah-0.99.0.AppImage.tar.gz"
+        },
+        "windows-x86_64": {
+            "signature": "PLACEHOLDER_SIGNATURE_WILL_FAIL_VERIFICATION",
+            "url": "http://localhost:8787/Selah-0.99.0-setup.nsis.zip"
+        },
+        "windows-aarch64": {
+            "signature": "PLACEHOLDER_SIGNATURE_WILL_FAIL_VERIFICATION",
+            "url": "http://localhost:8787/Selah-0.99.0-setup.nsis.zip"
+        }
+    }
+}
