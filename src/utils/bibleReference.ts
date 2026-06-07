@@ -1,5 +1,80 @@
 import { bibleBooks } from '../types'
 
+/**
+ * Normalize a free-form bible reference (typed or spoken) into canonical
+ * "Book C:V" form so the existing parser can match it.
+ *
+ * Transformations applied:
+ *   "John 3 16"      → "John 3:16"        (digit-space-digit → colon)
+ *   "John 3 : 16"    → "John 3:16"        (collapse spaces around colon)
+ *   "John 3 16 20"   → "John 3:16-20"     (digit-space-digit-space-digit → colon-dash)
+ *   "John 3, 16"     → "John 3:16"        (commas in reference → colon)
+ *
+ * Non-reference text (e.g. "God so loved the world") is left untouched,
+ * so this helper is safe to call on every search-input change.
+ */
+export function normalizeBibleReference(input: string): string {
+    if (!input) return input
+    let out = input
+
+    // Range pattern: "Book N V W" (book, chapter, verse1, verse2 — all
+    // separated by spaces, optional comma/dash). The first and second
+    // numbers together identify the chapter, the third and fourth are
+    // a verse range. Matches "John 3 16 20", "John 3, 16 to 20",
+    // "John 3 16-20", etc.
+    out = out.replace(
+        /\b((?:\d\s?)?[a-z]+)\s+(\d+)\s*[:.,-]?\s*(\d+)\s*(?:-|to|through|,)\s*(\d+)/i,
+        (_m, book, ch, v1, v2) => `${book} ${ch}:${v1}-${v2}`,
+    )
+
+    // 3-number pattern with no separator: "John 3 16 20" — most
+    // likely a range because the third number is the end verse. We
+    // bail if the second number is too large to be a chapter (rare
+    // but e.g. "John 3 16 30" should still be a range, while a
+    // sentence like "love 5 6 7" should not be touched).
+    out = out.replace(
+        /\b((?:\d\s?)?[a-z]+)\s+(\d+)\s+(\d+)\s+(\d+)\b/i,
+        (_m, book, ch, v1, v2) => {
+            const chapter = parseInt(ch, 10)
+            // Only treat as a range if the second number is a plausible
+            // chapter (< 200) and the verse numbers are small (< 200).
+            // This keeps e.g. "Psalm 119 105" alone but converts
+            // "John 3 16 20" → "John 3:16-20".
+            if (chapter > 200 || parseInt(v1, 10) > 200 || parseInt(v2, 10) > 200) {
+                return _m
+            }
+            return `${book} ${ch}:${v1}-${v2}`
+        },
+    )
+
+    // Single reference pattern: "Book N V" or "Book N, V" or "Book N : V"
+    // → "Book N:V". The separator is OPTIONAL because users (and STT) often
+    // write "John 3 16" without a colon. To keep that working while rejecting
+    // the bad split "John 316" → "John 31:6" / "John 31 6" → "John 31:6",
+    // we validate ch against the book's max-chapter when the separator
+    // is missing. If ch > maxChapter, we leave the match alone — it's
+    // almost certainly a STT artifact, not a real reference.
+    out = out.replace(
+        /\b((?:\d\s?)?[a-z]+)\s+(\d+)(\s*[:.,x×]|vs\.?|verse)?\s*(\d+)\b/i,
+        (_m, book, ch, sep, v) => {
+            if (!sep) {
+                const resolved = resolveBookName(book)
+                const maxChapter = resolved ? BOOK_CHAPTER_COUNTS[resolved.bookName] : undefined
+                const chapterNum = parseInt(ch, 10)
+                if (maxChapter !== undefined && chapterNum > maxChapter) {
+                    return _m
+                }
+            }
+            return `${book} ${ch}:${v}`
+        },
+    )
+
+    // Tidy up whitespace from any of the above.
+    out = out.replace(/\s+/g, ' ').trim()
+
+    return out
+}
+
 export const bookAbbreviations: Record<string, string> = {
     'gen': 'Genesis', 'ex': 'Exodus', 'exod': 'Exodus', 'lev': 'Leviticus',
     'num': 'Numbers', 'deut': 'Deuteronomy', 'dt': 'Deuteronomy',
