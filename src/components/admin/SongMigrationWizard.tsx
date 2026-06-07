@@ -39,18 +39,30 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     const [importErrors, setImportErrors] = useState<string[]>([]);
     const [importedIds, setImportedIds] = useState<string[]>([]);
     const [isParsing, setIsParsing] = useState(false);
+    const [replaceExisting, setReplaceExisting] = useState(false);
 
-    const { createSong, songs: existingSongs } = useSongs();
+    const { createSong, updateSong, songs: existingSongs } = useSongs();
     const { isOffline } = useConvexConnection();
 
-    // Local duplicate detection — works fully offline
-    const existingTitles = useMemo(() => {
-        const set = new Set<string>();
+    // Local duplicate detection — works fully offline. We need the song's
+    // _id too so we can call updateSong() against the existing row when
+    // "Replace existing" is enabled (preserves the song id, so slides that
+    // reference it stay valid).
+    const existingByTitle = useMemo(() => {
+        const map = new Map<string, string>();
         for (const s of existingSongs) {
-            if (s.title) set.add(s.title.toLowerCase().trim());
+            if (!s.title) continue
+            const key = s.title.toLowerCase().trim()
+            const id = s._id || s.id
+            if (id) map.set(key, id)
         }
-        return set;
+        return map
     }, [existingSongs]);
+
+    const existingTitles = useMemo(
+        () => new Set(existingByTitle.keys()),
+        [existingByTitle],
+    );
 
     // Handle single file upload
     const handleSingleFileUpload = useCallback(async (file: File) => {
@@ -165,6 +177,11 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     // Handle import — offline-first via useSongs.createSong (which writes to
     // IndexedDB locally and syncs to Convex when online). Each song is imported
     // independently so a single failure doesn't abort the whole batch.
+    //
+    // When `replaceExisting` is on, a song that already exists by title is
+    // updated in place (lyrics/verses/artist replaced, id preserved) rather
+    // than skipped. This is the recovery path for re-parsing after fixing
+    // the RTF parser, and prevents duplicate rows for the same song.
     const handleImport = useCallback(async () => {
         if (selectedSongs.size === 0) return;
 
@@ -181,6 +198,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         const allImportedIds: string[] = [];
         const allErrors: string[] = [];
         let imported = 0;
+        let updated = 0;
         let skipped = 0;
 
         // Process with bounded concurrency (8 parallel) so import feels fast on
@@ -194,28 +212,46 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                 const song = songsToImport[idx];
                 if (!song) continue;
 
-                // Skip duplicates by title (case-insensitive)
+                // Duplicates by title (case-insensitive) — skip or replace
                 const titleKey = song.title.toLowerCase().trim();
-                if (existingTitles.has(titleKey)) {
+                const existingId = existingByTitle.get(titleKey);
+                if (existingId && !replaceExisting) {
                     skipped++;
                     setImportProgress(p => ({ current: p.current + 1, total: p.total }));
                     continue;
                 }
 
                 try {
-                    const created = await createSong({
-                        title: song.title,
-                        artist: song.artist || song.author || 'Unknown',
-                        lyrics: song.lyrics,
-                        verses: song.verses,
-                        author: song.author,
-                    });
-                    if (created) {
-                        allImportedIds.push(created._id || created.id || '');
-                        existingTitles.add(titleKey);
-                        imported++;
+                    if (existingId && replaceExisting) {
+                        const ok = await updateSong(existingId, {
+                            title: song.title,
+                            artist: song.artist || song.author || 'Unknown',
+                            lyrics: song.lyrics,
+                            verses: song.verses,
+                            author: song.author,
+                        });
+                        if (ok) {
+                            allImportedIds.push(existingId);
+                            updated++;
+                        } else {
+                            allErrors.push(`Failed to update "${song.title}"`);
+                        }
                     } else {
-                        allErrors.push(`Failed to import "${song.title}"`);
+                        const created = await createSong({
+                            title: song.title,
+                            artist: song.artist || song.author || 'Unknown',
+                            lyrics: song.lyrics,
+                            verses: song.verses,
+                            author: song.author,
+                        });
+                        if (created) {
+                            const newId = created._id || created.id || '';
+                            allImportedIds.push(newId);
+                            existingByTitle.set(titleKey, newId);
+                            imported++;
+                        } else {
+                            allErrors.push(`Failed to import "${song.title}"`);
+                        }
                     }
                 } catch (error) {
                     allErrors.push(`Failed to import "${song.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -229,6 +265,9 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         if (skipped > 0) {
             allErrors.unshift(`${skipped} song${skipped === 1 ? '' : 's'} skipped (already exist by title).`);
         }
+        if (updated > 0) {
+            allErrors.unshift(`${updated} song${updated === 1 ? '' : 's'} replaced (lyrics/verses updated in place).`);
+        }
         if (isOffline && imported > 0) {
             allErrors.unshift(`Imported ${imported} song${imported === 1 ? '' : 's'} locally — they will sync to the server when you reconnect.`);
         }
@@ -236,7 +275,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         setImportedIds(allImportedIds);
         setImportErrors(allErrors);
         setStep('complete');
-    }, [selectedSongs, parsedSongs, createSong, existingTitles, isOffline]);
+    }, [selectedSongs, parsedSongs, createSong, updateSong, existingByTitle, replaceExisting, isOffline]);
 
     // Toggle song selection
     const toggleSong = useCallback((index: number) => {
@@ -544,7 +583,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                         )}
 
                         {/* Selection controls */}
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-4 flex-wrap">
                             <button
                                 onClick={() => toggleAll(true)}
                                 className="text-sm text-blue-600 hover:text-blue-700"
@@ -557,6 +596,19 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             >
                                 Deselect All
                             </button>
+                            {existingByTitle.size > 0 && (
+                                <label className="flex items-center gap-2 ml-auto cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={replaceExisting}
+                                        onChange={(e) => setReplaceExisting(e.target.checked)}
+                                        className="w-4 h-4 rounded border-gray-300"
+                                    />
+                                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                                        Replace existing ({existingByTitle.size} match{existingByTitle.size === 1 ? '' : 'es'} by title)
+                                    </span>
+                                </label>
+                            )}
                         </div>
 
                         {/* Song list */}

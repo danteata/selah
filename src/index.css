@@ -890,19 +890,32 @@ h6 {
 
 @media (max-width: 768px) {
     .studio-shell {
-        grid-template-rows: 40px 1fr 48px;
+        /* On mobile: top bar (taller for touch), workspace, status bar.
+            The MobileBottomNav component floats over the workspace
+            bottom edge, so workspace gets 14px (h-14) of bottom
+            padding via padding-bottom below. */
+        grid-template-rows: 44px 1fr 32px;
     }
 
     .studio-nav-rail {
         display: none;
     }
 
+    .studio-workspace {
+        padding-bottom: 56px; /* h-14 of MobileBottomNav */
+    }
+
     .studio-slide-queue {
         width: 100%;
+        max-height: 30vh;
     }
 
     .studio-workspace-split {
         flex-direction: column;
+    }
+
+    .studio-status-bar {
+        font-size: 10px;
     }
 }
 

@@ -196,6 +196,12 @@ function NavBar({
 
                     <div className="hidden md:flex items-center gap-3">
                         <Link
+                            to="/download"
+                            className="group flex items-center gap-1.5 text-sm font-medium text-white/70 hover:text-white transition-colors px-3 py-2"
+                        >
+                            Download
+                        </Link>
+                        <Link
                             to="/login"
                             className="text-sm font-medium text-white/60 hover:text-white transition-colors px-3 py-2"
                         >
@@ -237,6 +243,13 @@ function NavBar({
                             </a>
                         ))}
                         <div className="pt-3 mt-3 border-t border-white/5 space-y-2">
+                            <Link
+                                to="/download"
+                                onClick={() => setMobileMenuOpen(false)}
+                                className="block py-2.5 px-3 text-sm text-white/70 hover:text-white rounded-lg"
+                            >
+                                Download
+                            </Link>
                             <Link
                                 to="/login"
                                 className="block py-2.5 px-3 text-sm text-white/70 hover:text-white rounded-lg"

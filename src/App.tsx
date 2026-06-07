@@ -8,6 +8,8 @@ import { ConvexConnectionProvider, useConvexConnection } from './providers/Conve
 import { ConvexErrorBoundary } from './components/offline/ConvexErrorBoundary'
 import { RouteErrorBoundary } from './components/offline/RouteErrorBoundary'
 import { useAppStore } from './store/appStore'
+import { useOAuthCallback } from './hooks/useOAuthCallback'
+import { useDeepLinkOAuth } from './hooks/useDeepLinkOAuth'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
 // Lazy-load all route components so the initial JS chunk stays small.
@@ -22,6 +24,14 @@ const DesktopWelcome = lazy(() => import('./pages/DesktopWelcome'))
 const LoginPage = lazy(() => import('./pages/auth/Login'))
 const SignupPage = lazy(() => import('./pages/auth/Signup'))
 const TestPage = lazy(() => import('./pages/TestPage'))
+const Downloads = lazy(() => import('./pages/Downloads'))
+// Desktop OAuth handoff routes. Both render only on the web build —
+// on Tauri they fall through to the regular dashboard (see the
+// `isDesktop()` guard inside each page). These are mounted at the
+// root level so Vite's SPA fallback serves them even though they
+// aren't in the main nav.
+const DesktopOAuthCallback = lazy(() => import('./pages/auth/DesktopOAuthCallback'))
+const DesktopOAuthDone = lazy(() => import('./pages/auth/DesktopOAuthDone'))
 
 function RouteFallback() {
     return (
@@ -83,6 +93,16 @@ function JoinChurchRoute() {
 function AppRoutes() {
     const { isOffline } = useConvexConnection()
     useDarkModeSync()
+    // The OAuth callback listener uses `useClerk()` (via
+    // useOAuthCallback), so it has to run inside the <ClerkProvider>
+    // tree. On web the hook is a no-op (no listener started) so it
+    // doesn't affect the fly deployment.
+    useOAuthCallback()
+
+    // The deep-link hook listens for `selah://...` URLs the OS hands
+    // to the desktop app after the browser OAuth completes. On web
+    // it's a no-op (no Tauri runtime).
+    useDeepLinkOAuth()
 
     if (isOffline) {
         return (
@@ -95,6 +115,9 @@ function AppRoutes() {
                         <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
                         <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
                         <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
+                        <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
+                        <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
+                        <Route path="/desktop-oauth-done" element={<RouteErrorBoundary name="oauth-done"><DesktopOAuthDone /></RouteErrorBoundary>} />
                         <Route
                             path="/"
                             element={<RouteErrorBoundary name="home"><OfflineApp /></RouteErrorBoundary>}
@@ -115,7 +138,10 @@ function AppRoutes() {
                     <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
                     <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
                     <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
-                    <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
+                        <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
+                        <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
+                        <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
+                    <Route path="/desktop-oauth-done" element={<RouteErrorBoundary name="oauth-done"><DesktopOAuthDone /></RouteErrorBoundary>} />
                     <Route
                         path="/"
                         element={
@@ -143,9 +169,26 @@ function App() {
     const [checking, setChecking] = useState(false)
     const [status, setStatus] = useState('')
 
-    useEffect(() => { getVersion().then(setVersion) }, [])
+    useEffect(() => {
+        // Tauri APIs throw synchronously in the web build because
+        // window.__TAURI_INTERNALS__ is undefined. Only fetch the version
+        // when we're actually running inside Tauri.
+        if (!isDesktop()) return
+        getVersion().then(setVersion).catch(() => {
+            // Silently ignore — version is informational only
+        })
+    }, [])
+
+    // Deep-link listener for Tauri OAuth callbacks is mounted inside
+    // <AppRoutes /> below, which runs inside the <ClerkProvider>
+    // tree. The hook calls `useClerk()` which requires that context,
+    // so it can't run here at the App() root.
 
     async function check() {
+        if (!isDesktop()) {
+            setStatus('updates are only available in the desktop app')
+            return
+        }
         setChecking(true)
         setStatus('checking...')
         try {
