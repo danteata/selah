@@ -38,6 +38,14 @@ export function useAppUpdater(): UseAppUpdaterResult {
         if (state === "checking" || state === "downloading" || state === "restarting") {
             return;
         }
+        // `invoke` from `@tauri-apps/api/core` reads `window.__TAURI_INTERNALS__`
+        // synchronously and throws TypeError if it's missing (the web build).
+        // Skip the call entirely instead of swallowing the throw.
+        if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+            setState("error");
+            setMessage("Updates are only available in the desktop app.");
+            return;
+        }
         setState("checking");
         setMessage(null);
         try {
@@ -61,6 +69,11 @@ export function useAppUpdater(): UseAppUpdaterResult {
     // with the initial React render, and we don't surface errors from this
     // pass — only the on-demand check shows error toasts.
     useEffect(() => {
+        // Web build: no Tauri runtime, skip the silent background check
+        // entirely. The on-demand `runCheck()` shows the same error message.
+        if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+            return;
+        }
         const t = setTimeout(() => {
             invoke<string>("check_update")
                 .then((result) => {
