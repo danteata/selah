@@ -1,16 +1,46 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Embed the macOS Info.plist into the binary so NSMicrophoneUsageDescription
+// and NSSpeechRecognitionUsageDescription are present in the final
+// Contents/Info.plist. Without these, the WebKit speech recognition
+// TCC check SIGABRTs the host app the first time the user clicks the
+// mic, and getUserMedia is silently denied.
+//
+// Tauri 2.x's codegen calls `embed_info_plist!` automatically for
+// `src-tauri/Info.plist` only when feature "custom-protocol" is
+// OFF (see tauri-codegen context.rs:
+// `dev: cfg!(not(feature = "custom-protocol"))`, and the embed is
+// gated on `target == MacOS && dev && !running_tests`).
+//
+// In any build with `custom-protocol` enabled — which is the default
+// in Cargo.toml, and is always enabled by `tauri build` for release
+// bundling — codegen skips the embed, and Tauri's bundler writes a
+// fresh Info.plist from tauri.conf.json that drops our custom keys.
+// We therefore manually call the macro when custom-protocol IS
+// enabled, and rely on the codegen auto-embed when it is OFF (i.e.
+// `tauri dev`). This split avoids the link-time
+// "symbol `_EMBED_INFO_PLIST` already defined" error that would
+// come from double-embedding in `tauri dev`.
+//
+// Verify after every Tauri upgrade:
+//   plutil -p path/to/Selah.app/Contents/Info.plist | grep -E "Microphone|Speech"
+#[cfg(all(target_os = "macos", feature = "custom-protocol"))]
+tauri::embed_plist::embed_info_plist!(concat!(env!("CARGO_MANIFEST_DIR"), "/Info.plist"));
+
 mod audio_capture;
 mod logging;
 mod multi_monitor;
 mod ndi_output;
+mod oauth_listener;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
 use tracing::info;
+
+use crate::oauth_listener::start_oauth_listener;
 
 use audio_capture::{
     AudioCaptureState,
@@ -685,6 +715,23 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Deep-link plugin: registers the `selah://` URL scheme with
+        // the OS. This is the RETURN path for OAuth on desktop — the
+        // user completes OAuth in the system browser, lands on
+        // `https://selah.fly.dev/desktop-oauth-done`, and the
+        // "Open Selah" button on that page deep-links to
+        // `selah://oauth-complete`. The OS routes the scheme back
+        // to the running Selah app, and the handler below emits
+        // `oauth://deep-link` with the full URL for the frontend's
+        // `useDeepLinkOAuth` hook to consume.
+        //
+        // We use `selah://` (not `app.selah.desktop://`) because:
+        //  - Shorter, less typo-prone for the OS-level scheme
+        //  - The OAuth redirect URL is now `https://selah.fly.dev/...`
+        //    (not a custom scheme — Clerk's API rejects those), so
+        //    the custom scheme is only used for the browser→desktop
+        //    handoff, not the OAuth callback itself.
+        .plugin(tauri_plugin_deep_link::init())
         .manage(WhisperServerState {
             child_pid: whisper_child_pid,
             server_pid: whisper_pid,
@@ -747,8 +794,43 @@ pub fn run() {
             get_logs,
             check_previous_crash,
             check_update,
+            start_oauth_listener,
         ])
         .setup(move |app| {
+            // Deep-link plugin: the OS launches the app or focuses
+            // the running instance when a `selah://...` URL is
+            // opened. Forward the URL to the frontend as a Tauri
+            // event so `useDeepLinkOAuth` can react (e.g., dismiss
+            // the "waiting for OAuth" state, prompt the user to
+            // sign in, etc.).
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let app_handle_for_deeplink = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        info!("[deep-link] received url: {}", url);
+                        let _ = app_handle_for_deeplink.emit(
+                            "oauth://deep-link",
+                            url.to_string(),
+                        );
+                    }
+                });
+                // Handle the cold-start case where the user clicks
+                // the deep link in a fresh browser tab while the
+                // app is closed. The plugin buffers the URL and
+                // replays it here when a listener is registered
+                // early enough.
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    let app_handle_for_cold_start = app.handle().clone();
+                    for url in urls {
+                        info!("[deep-link] cold-start url: {}", url);
+                        let _ = app_handle_for_cold_start.emit(
+                            "oauth://deep-link",
+                            url.to_string(),
+                        );
+                    }
+                }
+            }
             // Initialize file logging and crash detection
             let app_config_dir = app.path().app_config_dir()
                 .expect("Failed to get app config dir");
