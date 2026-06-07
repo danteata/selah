@@ -5,7 +5,12 @@
  * plain text from RTF content.
  */
 
-// Destination words that should be skipped entirely (their content is not text)
+// Destination words that should be skipped entirely (their content is not text).
+// Only real RTF destinations go here. EasyWorship emits "SD" prefixes like
+// `\sdewparatemplatestyle101` or `\sdfsreal 60` as bare control words with
+// numeric parameters — they are NOT destinations even though the original
+// parser treated them as such. When they appear in their real destination
+// form (`{\*\sdfsreal 60}`), the `\*` flag below handles skipping the group.
 const DESTINATION_WORDS = new Set([
     'fonttbl', 'colortbl', 'stylesheet', 'listtable', 'listoverridetable',
     'info', 'pict', 'object', 'header', 'footer', 'headerl', 'headerr',
@@ -15,10 +20,6 @@ const DESTINATION_WORDS = new Set([
     'operator', 'company', 'manager', 'doccomm', 'creatim', 'revtim',
     'printim', 'buptim', 'version', 'edmins', 'nofpages', 'nofwords',
     'nofchars', 'nofcharsws', 'id', 'vern', 'pntxtb', 'pntxta',
-    // EasyWorship specific destination markers
-    'sdparawysiwghidden', 'sdlistlevel', 'sdfsreal', 'sdfsdef', 'sdfsauto',
-    'sdslidemarker', 'sdewparatemplatestyle', 'sdastextstyle', 'sdasfactor',
-    'sdasbaseline', 'sdlistlevel', 'deff'
 ]);
 
 /**
@@ -70,9 +71,14 @@ export function parseRTF(rtf: string): string {
             const parsed = parseControlWord(rtf, i);
             i = parsed.newIndex;
 
-            // \* is a special destination marker that means "skip if unrecognized"
+            // \* is a special destination marker that means "skip if
+            // unrecognized". Skip the rest of the current group — this
+            // handles both `{\*\foo}` (body-only) and EasyWorship's
+            // `{\*\foo 60}` (name + parameter inline) forms.
             if (parsed.text === '*') {
-                skipNextGroup = true;
+                if (skipDepth === -1) {
+                    skipDepth = groupDepth;
+                }
             }
             // Check if we should skip this destination
             else if (parsed.isDestination && skipDepth === -1) {

@@ -169,6 +169,37 @@ Tag content\\par
             expect(verses.find(v => v.label === 'Bridge')).toBeDefined();
             expect(verses.find(v => v.label === 'Tag')).toBeDefined();
         });
+
+        // Regression: EasyWorship 6/7 wraps every line in its own group with a
+        // long EasyWorship-specific header (\sdewparatemplatestyle101, etc.)
+        // and inline `{\*\sdfsreal 60}{\*\sdfsdef 93.75}` font/size markers
+        // between the header and the text. Two bugs previously broke this:
+        //   1. The parser treated `\sdewparatemplatestyle101` as a destination
+        //      and skipped the entire group, returning an empty string.
+        //   2. The `\*\sdfsreal 60` form leaked the "60" into the output AND
+        //      the first `\par` ended processing because `skipNextGroup` was
+        //      sticky across group boundaries, eating the rest of the song.
+        it('should parse EasyWorship 6/7 per-line groups without leaking control values', () => {
+            const ewHeader = '{\\rtf1\\ansi\\deff0\\sdeasyworship2\\par';
+            const ewLine1 = '{\\pard\\qc\\qdef\\sdewparatemplatestyle101\\plain\\sdewtemplatestyle101\\fs120{\\*\\sdfsreal 60}{\\*\\sdfsdef 93.75}There is an outpouring of abundance\\par}';
+            const ewLine2 = '{\\pard\\qc\\qdef\\sdewparatemplatestyle101\\plain\\sdewtemplatestyle101\\fs120{\\*\\sdfsreal 60}{\\*\\sdfsdef 93.75}new doors have been opened\\par}';
+            const ewClose = '}';
+            const rtf = ewHeader + ewLine1 + ewLine2 + ewClose;
+
+            const result = parseRTF(rtf);
+
+            // Both lines must be present, neither should be preceded by
+            // the leaked "60" from the font-size property.
+            expect(result).not.toMatch(/^60/);
+            expect(result).not.toContain('60There');
+            expect(result).toContain('There is an outpouring of abundance');
+            expect(result).toContain('new doors have been opened');
+
+            // The control words themselves must not appear in the output.
+            expect(result).not.toContain('sdewparatemplatestyle');
+            expect(result).not.toContain('sdfsreal');
+            expect(result).not.toContain('sdfsdef');
+        });
     });
 });
 
