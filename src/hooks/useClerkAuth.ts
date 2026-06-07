@@ -43,10 +43,19 @@ export function useClerkAuth(mode: AuthMode) {
     const handleGoogleSignIn = async (redirectUrl?: string) => {
         if (!signIn || !isLoaded) return
         try {
+            // Web uses the same-origin path. Tauri desktop uses
+            // the fly.io round-trip via /desktop-oauth-done.
+            const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window
+            const callbackUrl = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-callback'
+                : `${window.location.origin}/sso-callback`
+            const callbackComplete = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-done'
+                : redirectUrl || '/'
             await signIn.authenticateWithRedirect({
                 strategy: 'oauth_google',
-                redirectUrl: '/sso-callback',
-                redirectUrlComplete: redirectUrl || '/',
+                redirectUrl: callbackUrl,
+                redirectUrlComplete: callbackComplete,
             })
         } catch {
             setError('Failed to sign in with Google.')
@@ -78,10 +87,17 @@ export function useClerkAuth(mode: AuthMode) {
     const handleGoogleSignUp = async (redirectUrl?: string) => {
         if (!signUp || !isLoaded) return
         try {
+            const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window
+            const callbackUrl = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-callback'
+                : `${window.location.origin}/sso-callback`
+            const callbackComplete = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-done'
+                : redirectUrl || '/'
             await signUp.authenticateWithRedirect({
                 strategy: 'oauth_google',
-                redirectUrl: '/sso-callback',
-                redirectUrlComplete: redirectUrl || '/',
+                redirectUrl: callbackUrl,
+                redirectUrlComplete: callbackComplete,
             })
         } catch {
             setError('Failed to sign up with Google.')

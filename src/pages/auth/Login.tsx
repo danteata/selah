@@ -61,10 +61,67 @@ export default function LoginPage() {
         if (!isLoaded) return
 
         try {
+            // Clerk refuses custom URL schemes server-side, so the
+            // OAuth redirect must be http(s). On web we use the
+            // browser's same-origin /sso-callback path. On Tauri
+            // desktop we route through the live web build at
+            // selah.fly.dev — that origin is on Clerk's
+            // preconfigured allowlist for this dev instance, and
+            // the `/desktop-oauth-done` page that the flow lands
+            // on contains a "Open Selah Desktop" button with a
+            // `selah://` deep link that hands the user back to the
+            // desktop app. See the long-form comment in
+            // useDeepLinkOAuth.ts for the full flow.
+            const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window
+            const callbackUrl = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-callback'
+                : `${window.location.origin}/sso-callback`
+            const callbackComplete = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-done'
+                : from || '/'
+
+            // Path A: in the Tauri build, the `authenticateWithRedirect`
+            // call navigates the Tauri webview directly. That works
+            // for most flows (Google happens to allow this app's
+            // webview), but if it ever breaks (Google's WebView
+            // detection, regional restrictions, etc.) we fall back
+            // to opening the Clerk OAuth URL in the system browser
+            // via Tauri's shell plugin. The system browser completes
+            // the dance, lands on the fly.io done page, the user
+            // clicks "Open Selah Desktop", and the deep link
+            // `selah://oauth-complete` focuses the desktop app.
+            //
+            // For the typical one-step path, just calling
+            // `authenticateWithRedirect` is enough — the Tauri
+            // webview navigates to Clerk, completes the flow, the
+            // session is set in the webview, and
+            // DesktopOAuthDone's auto-navigate kicks in.
+            if (isDesktop) {
+                try {
+                    const { open } = await import('@tauri-apps/plugin-shell')
+                    // Compute the Clerk hosted sign-in URL from the
+                    // signIn object. authenticateWithRedirect doesn't
+                    // return the URL; instead, use signIn.buildUrl
+                    // to assemble it from the params.
+                    const redirectUrl = encodeURIComponent(callbackUrl)
+                    const strategy = 'oauth_google'
+                    const hostedSignInUrl = `https://${window.location.hostname.includes('selah.fly.dev') ? 'polite-adder-8.clerk.accounts.dev' : 'accounts.dev'}/v1/accounts/signin?strategy=${strategy}&redirect_url=${redirectUrl}`
+                    await open(hostedSignInUrl)
+                    // Don't try to navigate the Tauri webview —
+                    // the system browser is now driving the flow.
+                    // The user will click "Open Selah Desktop" on
+                    // the done page, which deep-links back to us.
+                    return
+                } catch (openErr) {
+                    console.warn('[oauth] shell.open failed, falling back to in-webview flow', openErr)
+                    // Fall through to authenticateWithRedirect.
+                }
+            }
+
             await signIn.authenticateWithRedirect({
                 strategy: 'oauth_google',
-                redirectUrl: '/sso-callback',
-                redirectUrlComplete: from || '/',
+                redirectUrl: callbackUrl,
+                redirectUrlComplete: callbackComplete,
             })
         } catch (err: any) {
             console.error('Google sign in error:', err)

@@ -146,10 +146,20 @@ export default function SignupPage() {
         if (!isLoaded) return
 
         try {
+            // See Login.tsx for the rationale. Web uses the
+            // same-origin path; Tauri desktop uses the fly.io
+            // round-trip via /desktop-oauth-done.
+            const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window
+            const callbackUrl = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-callback'
+                : `${window.location.origin}/sso-callback`
+            const callbackComplete = isDesktop
+                ? 'https://selah.fly.dev/desktop-oauth-done'
+                : from || '/'
             await signUp.authenticateWithRedirect({
                 strategy: 'oauth_google',
-                redirectUrl: '/sso-callback',
-                redirectUrlComplete: from || '/',
+                redirectUrl: callbackUrl,
+                redirectUrlComplete: callbackComplete,
             })
         } catch (err: any) {
             console.error('Google sign up error:', err)
