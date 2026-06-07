@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { Search, Trash2, Plus, FolderOpen, BookOpen, Music, FileText } from 'lucide-react'
 import { useLibrary } from '../../hooks/useLibrary'
+import { useVoiceSearch } from '../../hooks/useVoiceSearch'
+import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 
 interface LibraryContentProps {
@@ -20,6 +22,10 @@ export function LibraryContent({ compact = false }: LibraryContentProps) {
     } = useLibrary()
 
     const { confirm, ConfirmDialog } = useConfirmDialog()
+
+    const voice = useVoiceSearch({
+        onFinal: (text) => setSearchQuery(text),
+    })
 
     const categories = [
         { id: null, label: 'All', icon: FolderOpen, count: libraryCount },
@@ -73,11 +79,19 @@ export function LibraryContent({ compact = false }: LibraryContentProps) {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
                     <input
                         type="text"
-                        value={searchQuery}
+                        value={voice.isListening ? voice.transcript : searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search library..."
-                        className="w-full pl-9 pr-4 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border-default)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-[var(--accent-teal)] outline-none"
+                        placeholder={voice.isListening ? 'Listening…' : 'Search library…'}
+                        className="w-full pl-9 pr-9 py-1.5 text-xs bg-[var(--bg-tertiary)] border border-[var(--border-default)] rounded-lg text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-[var(--accent-teal)] outline-none"
                     />
+                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+                        <VoiceSearchButton
+                            isListening={voice.isListening}
+                            isSupported={voice.isSupported}
+                            error={voice.error}
+                            onClick={voice.isListening ? voice.stop : voice.start}
+                        />
+                    </div>
                 </div>
 
                 <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">

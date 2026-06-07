@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide-react'
 import { useSong, useSongs, useSlideCreation } from '../../hooks'
+import { useVoiceSearch } from '../../hooks/useVoiceSearch'
+import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
 import { AddSongModal } from './AddSongModal'
 import { TemplateSelector } from '../templates/TemplateSelector'
@@ -24,6 +26,10 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
     const { getSong } = useSong()
     const { createSongSlides } = useSlideCreation()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+
+    const voice = useVoiceSearch({
+        onFinal: (text) => setQuery(text),
+    })
 
     // Filter songs
     const filteredSongs = songs.filter((song: Song) =>
@@ -120,11 +126,19 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                         <input
                             type="text"
-                            value={query}
+                            value={voice.isListening ? voice.transcript : query}
                             onChange={(e) => setQuery(e.target.value)}
-                            placeholder="Search songs..."
-                        className="w-full pl-10 pr-4 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                            placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
+                        className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                         />
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                            <VoiceSearchButton
+                                isListening={voice.isListening}
+                                isSupported={voice.isSupported}
+                                error={voice.error}
+                                onClick={voice.isListening ? voice.stop : voice.start}
+                            />
+                        </div>
                     </div>
                 </div>
 
