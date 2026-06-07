@@ -204,10 +204,40 @@ describe('voiceCommandDetection', () => {
             )).toBe(true)
         })
 
-        it('does not match "John 3:16" as a reference command (has verse)', () => {
+        it('matches "John 3:16" as a reference command with verse captured', () => {
             const cmds = detectVoiceCommands('John 3:16')
             const refs = cmds.filter(c => c.type === 'go_to_reference')
-            expect(refs.length).toBe(0)
+            expect(refs.length).toBeGreaterThan(0)
+            const ref = refs.find(c => c.book === 'John' && c.chapter === 3)
+            expect(ref).toBeDefined()
+            expect(ref?.verse).toBe(16)
+        })
+
+        it('matches "John 3.16" (dot separator) with verse 16', () => {
+            const cmds = detectVoiceCommands('John 3.16')
+            const ref = cmds.find(c => c.type === 'go_to_reference' && c.book === 'John' && c.chapter === 3)
+            expect(ref).toBeDefined()
+            expect(ref?.verse).toBe(16)
+        })
+
+        it('matches "John 3 16" (space separator) with verse 16', () => {
+            const cmds = detectVoiceCommands('John 3 16')
+            const ref = cmds.find(c => c.type === 'go_to_reference' && c.book === 'John' && c.chapter === 3)
+            expect(ref).toBeDefined()
+            expect(ref?.verse).toBe(16)
+        })
+
+        it('matches spoken "John chapter three sixteen" with verse 16', () => {
+            const cmds = detectVoiceCommands('John chapter three sixteen')
+            const ref = cmds.find(c => c.type === 'go_to_reference' && c.book === 'John' && c.chapter === 3)
+            expect(ref).toBeDefined()
+            expect(ref?.verse).toBe(16)
+        })
+
+        it('rejects "John 31 6" as out-of-range (chapter 31 does not exist)', () => {
+            const cmds = detectVoiceCommands('John 31 6')
+            const refs = cmds.filter(c => c.type === 'go_to_reference' && c.book === 'John')
+            expect(refs).toHaveLength(0)
         })
 
         it('detects "turn to Romans 8"', () => {
