@@ -32,6 +32,17 @@ RUN node node_modules/esbuild/install.js
 RUN bun run build
 
 # Serve stage
-FROM pierrezemb/gostatic
-COPY --from=build-stage /app/dist /srv/http/
-CMD ["-port","8080","-https-promote", "-enable-logging"]
+# We use nginx:alpine instead of pierrezemb/gostatic because the
+# Vite SPA needs SPA fallback (try_files $uri /index.html) — the
+# OAuth callback lands directly on /desktop-oauth-callback and
+# /desktop-oauth-done as full page loads, and gostatic would 404
+# those since the static files only contain index.html. nginx does
+# the fallback cleanly. See nginx.conf for the full config.
+FROM nginx:alpine
+COPY --from=build-stage /app/dist /usr/share/nginx/html/
+# Strip the default nginx site config so only ours is active.
+RUN rm -f /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+# nginx ships with a master config that includes conf.d/*.conf.
+# Daemon-off + port 8080 match the fly.toml internal_port.
+CMD ["nginx", "-g", "daemon off;"]

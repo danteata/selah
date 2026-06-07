@@ -5,7 +5,12 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="preload" href="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1/dist/transformers.min.js" as="script" />
+  <!--
+    transformers.js is dynamically imported inside the embedding/summarization
+    Web Workers, not from the main thread. A `<link rel="preload">` here
+    triggers a "preloaded but not used" warning because the workers fetch
+    it themselves. The workers' own caching layer handles repeat loads.
+  -->
   <title>Selah</title>
 </head>
 
