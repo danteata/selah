@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { isDesktop } from '../platform'
 import { useScripture } from './useScripture'
 import { useSlideCreation } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
@@ -686,7 +687,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (cancelled) return
 
             // Cross-platform fallback to web-speech if the chosen native provider
-            // isn't available (e.g. running the desktop bundle in dev without the sidecar).
+            // isn't available. Desktop-whisper only exists in the Tauri app, so
+            // the web build always lands here — that's the expected path and we
+            // don't surface a "falling back" banner for it. On desktop, only
+            // flag the fallback if the sidecar genuinely failed (dev without
+            // whisper.cpp running, for example).
             if (!available && targetProvider === 'desktop-whisper') {
                 const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
                 if (cancelled) return
@@ -694,7 +699,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     setProvider('web-speech')
                     setIsSupported(true)
                     setProviderReady(true)
-                    setError('Desktop Whisper unavailable. Falling back to Web Speech API.')
+                    if (isDesktop()) {
+                        setError('Desktop Whisper unavailable. Falling back to Web Speech API.')
+                    }
                     return
                 }
             }

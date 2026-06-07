@@ -48,6 +48,10 @@ interface LoadResult {
 /**
  * Resolve the base URL where the pack files live for a given version.
  * Returns null if neither the desktop bundle nor the web fallback exists.
+ *
+ * On the web build we deliberately return `null` so the caller falls back to
+ * the on-demand IndexedDB path. The pack is desktop-only by design and
+ * probing `/embedding-packs/...` on web just produces console 404s.
  */
 async function resolvePackBaseUrl(version: string): Promise<string | null> {
     if (typeof window === 'undefined') return null
@@ -67,9 +71,10 @@ async function resolvePackBaseUrl(version: string): Promise<string | null> {
         }
     }
 
-    // Web fallback. Operators can drop the same files under `public/` and
-    // they'll be served from the site origin.
-    return `/embedding-packs/${version}/`
+    // Web: no pack deployment expected. Returning null here keeps the
+    // browser console clean (no 404s) and the caller falls back to the
+    // IndexedDB-cached embeddings.
+    return null
 }
 
 async function fetchManifest(baseUrl: string): Promise<PackManifest | null> {

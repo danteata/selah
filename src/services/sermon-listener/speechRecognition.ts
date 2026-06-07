@@ -519,8 +519,19 @@ export class SpeechRecognitionService {
             case 'audio-capture':
                 return 'Microphone was not found or is already in use by another app.'
             case 'not-allowed':
-            case 'service-not-allowed':
-                return 'Microphone permission denied. Enable microphone access in browser settings.'
+            case 'service-not-allowed': {
+                // Tauri desktop doesn't have a "browser settings" page to
+                // point users at — the failure happens at the OS level
+                // (Windows Privacy microphone toggle, macOS Privacy &
+                // Security microphone toggle, or the embedded WebView's
+                // audio capture init). Give the desktop user the right
+                // path; web users get the literal browser language.
+                const isDesktop =
+                    typeof window !== 'undefined' && '__TAURI__' in window
+                return isDesktop
+                    ? "Selah can't access the microphone. On Windows, open Settings → Privacy & security → Microphone and allow Selah. On macOS, open System Settings → Privacy & Security → Microphone. Then click the mic again to retry."
+                    : 'Microphone permission denied. Enable microphone access in your browser.'
+            }
             case 'language-not-supported':
                 return 'Selected recognition language is not supported by this browser.'
             default:

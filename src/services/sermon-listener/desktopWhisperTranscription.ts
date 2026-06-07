@@ -183,10 +183,14 @@ class DesktopWhisperTranscriptionService {
 
     /**
      * Check if running in desktop mode
+     *
+     * The caller already knows the service is desktop-only and reports its
+     * own user-facing status, so we return silently on web. The web build
+     * never reaches these code paths in practice; this is a defensive
+     * guard for any future caller that forgets to gate on isDesktop().
      */
     private checkDesktop(): boolean {
         if (!isDesktop()) {
-            console.warn('Desktop whisper is only available in desktop mode');
             return false;
         }
         return true;
