@@ -44,11 +44,11 @@
         "security": {
             "csp": {
                 "default-src": "'self' asset: https: data:",
-                "script-src": "'self'",
-                "style-src": "'self' 'unsafe-inline'",
+                "script-src": "'self' https://*.clerk.accounts.dev",
+                "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
                 "img-src": "'self' asset: https: data: blob:",
-                "font-src": "'self' asset: https:",
-                "connect-src": "'self' https: wss: http://127.0.0.1:17493",
+                "font-src": "'self' asset: https: data: https://fonts.gstatic.com",
+                "connect-src": "'self' https: wss: ipc: http://ipc.localhost http://asset.localhost asset: tauri: http://127.0.0.1:17493",
                 "media-src": "'self' https: blob:",
                 "worker-src": "'self' blob:"
             },
@@ -88,6 +88,13 @@
         },
         "shell": {
             "open": true
+        },
+        "deep-link": {
+            "desktop": {
+                "schemes": [
+                    "selah"
+                ]
+            }
         }
     }
 }
