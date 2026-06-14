@@ -430,14 +430,53 @@ export class SpeechRecognitionService {
         this.stopWatchdog()
         this.watchdogTimer = window.setInterval(() => {
             if (!this.shouldBeListening) return
-            if (this.isListening) return
-            // If we should be listening but aren't, and no result for 10s, force restart
+
             const silenceMs = Date.now() - this.lastResultTime
-            if (silenceMs > 10000) {
-                console.warn('[SpeechRecognition] Watchdog: stalled, forcing restart')
-                this.scheduleRestart('Watchdog stall detected')
+
+            // Case 1: Not listening at all — restart if silent too long
+            if (!this.isListening) {
+                if (silenceMs > 10000) {
+                    console.warn('[SpeechRecognition] Watchdog: not listening, forcing restart')
+                    this.scheduleRestart('Watchdog: not listening')
+                }
+                return
+            }
+
+            // Case 2: Zombie state — isListening is true but no results for 30s.
+            // Chrome's Web Speech API can enter a "zombie" state where it reports
+            // as active but silently stops producing transcription results.
+            // This is the root cause of the intermittent transcription gap bug.
+            if (silenceMs > 30000) {
+                console.warn('[SpeechRecognition] Watchdog: zombie state detected (listening but no results for 30s), force-restarting')
+                this.forceRestartZombie()
             }
         }, 5000)
+    }
+
+    /**
+     * Force-restart when recognition is in a zombie state
+     * (isListening=true but not producing results).
+     * Aborts the stuck instance, recreates it, and starts fresh.
+     */
+    private forceRestartZombie(): void {
+        this.clearRestartTimer()
+
+        try {
+            this.recognition?.abort()
+        } catch {
+            // ignore — instance may already be dead
+        }
+
+        this.isListening = false
+        this.initialize()
+        this.configure(this.options)
+
+        try {
+            this.recognition?.start()
+        } catch (err) {
+            console.error('[SpeechRecognition] Zombie restart failed:', err)
+            this.scheduleRestart('Zombie restart failed')
+        }
     }
 
     private stopWatchdog(): void {
