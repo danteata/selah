@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, X, ChevronLeft, Music } from 'lucide-react'
-import { useHymn, useSlideCreation } from '../../hooks'
+import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
@@ -23,6 +24,7 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
 
     const { getAllHymns } = useHymn()
     const { createHymnSlides } = useSlideCreation()
+    const { trackEvent } = useAnalytics()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
     const voice = useVoiceSearch({
@@ -60,9 +62,15 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
             slides.forEach(slide => {
                 appendActiveSlide(slide)
             })
+            trackEvent(AnalyticsEventType.HYMN_VIEWED, {
+                hymn_number: selectedHymn.number,
+                title: selectedHymn.title,
+                slide_count: slides.length,
+                has_template: !!selectedTemplate,
+            })
             onClose()
         }
-    }, [selectedHymn, createHymnSlides, appendActiveSlide, onClose])
+    }, [selectedHymn, createHymnSlides, appendActiveSlide, onClose, selectedTemplate, trackEvent])
 
     if (loading) {
         return (

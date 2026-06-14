@@ -5,6 +5,8 @@ import { generateSlideContent, useScripture, useSlideCreation, useSemanticVerseS
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import { useTemplates } from '../../hooks/useTemplates'
 import { TemplateSelector } from '../templates/TemplateSelector'
 import { DetectedVersesBar } from '../sermon-listener/DetectedVersesBar'
@@ -31,6 +33,7 @@ interface BibleListProps {
 type VerseRow = VerseRowType
 
 export function BibleList({ initialQuery = '', onClose, isInline = false }: BibleListProps) {
+    const { trackEvent } = useAnalytics()
     const biblePanelQuery = useAppStore((state) => state.biblePanelQuery)
     const setBiblePanelQuery = useAppStore((state) => state.setBiblePanelQuery)
     const [query, setQuery] = useState(initialQuery || biblePanelQuery || '')
@@ -316,9 +319,8 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         if (!ctx) {
             return true
         }
-        const label = `${ctx.bookIndex}:${ctx.chapter}:${ctx.startVerse}${
-            ctx.endVerse !== ctx.startVerse ? `-${ctx.endVerse}` : ''
-        }`
+        const label = `${ctx.bookIndex}:${ctx.chapter}:${ctx.startVerse}${ctx.endVerse !== ctx.startVerse ? `-${ctx.endVerse}` : ''
+            }`
         const scripture = await fetchScripture(label, resolvedVersionId)
         if (scripture) {
             updateCurrentLiveBibleSlide(scripture)
@@ -402,6 +404,13 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         const label = `${bookIndex}:${chapter}:${verse}`
         const result = await fetchScripture(label, selectedVersion)
         if (result) {
+            trackEvent(AnalyticsEventType.BIBLE_VERSE_SELECTED, {
+                version: selectedVersion,
+                book: bookIndex,
+                chapter,
+                verse,
+                source: 'go_live',
+            })
             const slide = createBibleSlide(result, { template: selectedTemplate })
             if (pushBibleSlideLive(slide)) {
                 addRecentVerse(result.label || '')
@@ -415,13 +424,20 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 version: selectedVersion,
                 content: preText,
             }
+            trackEvent(AnalyticsEventType.BIBLE_VERSE_SELECTED, {
+                version: selectedVersion,
+                book: bookIndex,
+                chapter,
+                verse,
+                source: 'go_live_fallback',
+            })
             const slide = createBibleSlide(fallback, { template: selectedTemplate })
             if (pushBibleSlideLive(slide)) {
                 addRecentVerse(fallback.label)
             }
             setActiveVerseKey(`${bookIndex}:${chapter}:${verse}`)
         }
-    }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, pushBibleSlideLive, addRecentVerse])
+    }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, pushBibleSlideLive, addRecentVerse, trackEvent])
 
     // Mirror the function into the ref so the voice command
     // handler (defined higher up) can call it without a TDZ error.
@@ -566,6 +582,11 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         setHasSearched(true)
         setNeighborVerses({ prev: [], next: [] })
         setFocusedIndex(-1)
+        trackEvent(AnalyticsEventType.BIBLE_SEARCH_PERFORMED, {
+            method: 'text',
+            query_length: query.length,
+            version: selectedVersion,
+        })
         const label = `${parsed.bookIndex}:${parsed.chapter}:${parsed.startVerse}${parsed.endVerse !== parsed.startVerse ? `-${parsed.endVerse}` : ''}`
         const result = await fetchScripture(label, selectedVersion)
         if (result && Array.isArray(result.content)) {
@@ -590,7 +611,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             })
         })
         setShowSuggestions(false)
-    }, [query, parseQuery, fetchScripture, selectedVersion])
+    }, [query, parseQuery, fetchScripture, selectedVersion, trackEvent])
 
     useEffect(() => {
         const trimmed = query.trim()
@@ -662,9 +683,13 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse, fetchScripture, selectedVersion, updateCurrentLiveBibleSlide])
 
     const changeVersion = useCallback((newVersion: string) => {
+        trackEvent(AnalyticsEventType.BIBLE_VERSION_CHANGED, {
+            old_version: selectedVersion,
+            new_version: newVersion,
+        })
         setSelectedVersion(newVersion)
         if (hasSearched) setTimeout(() => handleSearch(), 0)
-    }, [hasSearched, handleSearch])
+    }, [hasSearched, handleSearch, selectedVersion, trackEvent])
 
     const buildVerseRows = useCallback((): VerseRow[] => {
         return buildVerseRowsUtil(
@@ -793,15 +818,15 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                     <X className="w-3.5 h-3.5" />
                                 </button>
                             )}
-                        <VoiceSearchButton
-                            isListening={voice.isListening}
-                            isSupported={voice.isSupported}
-                            error={voice.error}
-                            onClick={() => {
-                                console.warn('[bible-list] mic button clicked, isListening:', voice.isListening, 'isSupported:', voice.isSupported)
-                                if (voice.isListening) voice.stop()
-                                else voice.start()
-                            }}
+                            <VoiceSearchButton
+                                isListening={voice.isListening}
+                                isSupported={voice.isSupported}
+                                error={voice.error}
+                                onClick={() => {
+                                    console.warn('[bible-list] mic button clicked, isListening:', voice.isListening, 'isSupported:', voice.isSupported)
+                                    if (voice.isListening) voice.stop()
+                                    else voice.start()
+                                }}
                             />
                         </div>
                     </div>

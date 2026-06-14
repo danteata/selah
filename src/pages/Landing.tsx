@@ -9,11 +9,6 @@ import {
     Bell,
     Monitor,
     Users,
-    Shield,
-    Moon,
-    Keyboard,
-    RefreshCw,
-    Play,
     Check,
     ArrowRight,
     Menu,
@@ -97,26 +92,10 @@ const dashboardFeatures = [
     { icon: Palette, title: 'Reusable Templates', description: 'Save your favourite slide designs and reuse them week after week with one click.' },
 ]
 
-const technicalHighlights = [
-    { icon: RefreshCw, title: 'Instant Updates', description: 'Every change appears on every screen the moment you make it' },
-    { icon: WifiOff, title: 'Works Offline', description: 'Keep going even if the internet drops. Selah never lets you down.' },
-    { icon: Moon, title: 'Dark Mode', description: 'Easy on the eyes for late-night rehearsals and early-morning setup' },
-    { icon: Keyboard, title: 'Keyboard Shortcuts', description: 'Navigate and control your service without touching the mouse' },
-    { icon: Shield, title: 'Role Management', description: 'Give each volunteer exactly the access they need, nothing more.' },
-    { icon: Users, title: 'Team Collaboration', description: 'Invite your whole media team in seconds with a simple invite code' },
-]
-
 const collabModes = [
     { icon: Lock, label: 'Strict', desc: 'Operator only' },
     { icon: MessageSquare, label: 'Review', desc: 'Suggest → approve' },
     { icon: UserCheck, label: 'Open', desc: 'Anyone pushes' },
-]
-
-const stats = [
-    { value: 'Free', label: 'During Beta' },
-    { value: '< 30min', label: 'Setup Time' },
-    { value: '100%', label: 'Works Offline' },
-    { value: '0', label: 'Credit Card Needed' },
 ]
 
 const transcriptDemo = [
@@ -301,6 +280,12 @@ function HeroSection() {
                 .to('.hero-cta', { opacity: 1, y: 0, duration: 0.5, stagger: 0.08 }, '-=0.3')
                 .to('.hero-stat', { opacity: 1, y: 0, duration: 0.45, stagger: 0.06 }, '-=0.25')
                 .fromTo(
+                    '.hero-mockup',
+                    { y: 60, opacity: 0 },
+                    { opacity: 1, y: 0, duration: 1, ease: 'power3.out' },
+                    '-=0.8'
+                )
+                .fromTo(
                     '.hero-orb',
                     { scale: 0.6 },
                     { opacity: 0.8, scale: 1, duration: 1.4, ease: 'power2.out' },
@@ -313,7 +298,7 @@ function HeroSection() {
     return (
         <section
             ref={heroRef}
-            className="relative pt-36 pb-28 lg:pt-44 lg:pb-36 overflow-hidden"
+            className="relative pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden"
             style={{ background: '#08090c' }}
         >
             <div
@@ -346,23 +331,26 @@ function HeroSection() {
                 style={{ animation: 'blob 11s infinite 2s' }}
             />
             <div
-                className="hero-orb absolute bottom-20 left-1/3 w-56 h-56 bg-pink-500/10 rounded-full blur-3xl pointer-events-none"
+                className="hero-orb absolute bottom-40 left-1/3 w-56 h-56 bg-pink-500/10 rounded-full blur-3xl pointer-events-none"
                 style={{ animation: 'blob 13s infinite 4s' }}
             />
 
             <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="text-center max-w-4xl mx-auto">
                     <div
-                        className="hero-badge inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8"
+                        className="hero-badge inline-flex items-center gap-2 px-4 py-2 rounded-full mb-7"
                         style={{
                             background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.08) 100%)',
                             border: '1px solid rgba(20,184,166,0.35)',
                             boxShadow: '0 8px 24px -8px rgba(20,184,166,0.3), inset 0 1px 0 rgba(255,255,255,0.06)',
                         }}
                     >
-                        <Sparkles className="w-3.5 h-3.5 text-primary-300" />
-                        <span className="text-xs font-semibold text-primary-200">
-                            AI-Powered Worship Studio
+                        <span className="relative flex w-1.5 h-1.5">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-primary-400 opacity-75 animate-ping" />
+                            <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-primary-400" />
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary-200">
+                            Now in open beta · v2 ships this month
                         </span>
                     </div>
 
@@ -370,7 +358,7 @@ function HeroSection() {
                         className="font-bold leading-[1.02] text-white mb-7 font-serif tracking-tight"
                         style={{ fontSize: 'clamp(2.75rem, 6.5vw, 5rem)', textShadow: '0 1px 0 rgba(0,0,0,0.4)' }}
                     >
-                        <span className="hero-line block">Every word.</span>
+                        <span className="hero-line block">Preach the sermon.</span>
                         <span
                             className="hero-line block italic"
                             style={{
@@ -380,20 +368,20 @@ function HeroSection() {
                                 backgroundClip: 'text',
                             }}
                         >
-                            Every verse.
+                            We&rsquo;ll find the verse.
                         </span>
-                        <span className="hero-line block">Every moment.</span>
                     </h1>
 
                     <p
-                        className="hero-subtitle text-lg lg:text-xl max-w-2xl mx-auto mb-10 leading-relaxed"
+                        className="hero-subtitle text-lg lg:text-xl max-w-2xl mx-auto mb-9 leading-relaxed"
                         style={{ color: 'rgba(228,228,231,0.75)' }}
                     >
-                        Selah listens to your sermon, detects scripture in real time, and
-                        puts the right verse on screen — right when you need it.
+                        Selah listens to your sermon, catches every scripture reference, and
+                        puts the right verse on screen &mdash;{' '}
+                        <span className="text-white font-medium">automatically, offline, in real time.</span>
                     </p>
 
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10">
                         <Link
                             to="/signup"
                             className="hero-cta group flex items-center gap-2 px-7 py-3.5 font-semibold rounded-2xl text-white transition-all hover:-translate-y-px"
@@ -402,48 +390,269 @@ function HeroSection() {
                                 boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
                             }}
                         >
-                            Start Free Trial
+                            Get My Church Started
                             <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
                         </Link>
                         <a
                             href="#ai-listener"
-                            className="hero-cta flex items-center gap-2 px-7 py-3.5 font-semibold rounded-2xl text-white/80 transition-all hover:text-white hover:bg-white/5"
+                            className="hero-cta flex items-center gap-2 px-5 py-3.5 font-medium rounded-2xl text-white/80 transition-all hover:text-white"
                             style={{
                                 border: '1px solid rgba(255,255,255,0.1)',
                                 background: 'rgba(255,255,255,0.03)',
                                 backdropFilter: 'blur(10px)',
                             }}
                         >
-                            <Play className="w-4 h-4 text-primary-400" />
-                            See it in action
+                            <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+                            <span>Watch it work</span>
+                            <span className="text-zinc-500 text-sm">90s</span>
                         </a>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-center gap-8 lg:gap-16">
-                        {stats.map((s) => (
-                            <div key={s.label} className="hero-stat text-center">
-                                <div
-                                    style={{
-                                        fontFamily: 'Crimson Pro, serif',
-                                        fontSize: '2.25rem',
-                                        fontWeight: 700,
-                                        background: 'linear-gradient(180deg, #ffffff 0%, #a1a1aa 100%)',
-                                        WebkitBackgroundClip: 'text',
-                                        WebkitTextFillColor: 'transparent',
-                                        backgroundClip: 'text',
-                                        lineHeight: 1,
-                                    }}
+                    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4">
+                        {[
+                            'Free during beta',
+                            'No credit card',
+                            'Works fully offline',
+                            'Under 30-min setup',
+                        ].map((label) => (
+                            <span
+                                key={label}
+                                className="hero-stat inline-flex items-center gap-1.5 text-[13px]"
+                                style={{ color: 'rgba(228,228,231,0.55)' }}
+                            >
+                                <svg
+                                    className="w-3.5 h-3.5 text-primary-400"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="3"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
                                 >
-                                    {s.value}
+                                    <path d="M5 13l4 4L19 7" />
+                                </svg>
+                                {label}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Floating product mockup — the actual app surface */}
+                <div className="hero-mockup relative max-w-5xl mx-auto mt-12">
+                    <div
+                        className="relative rounded-2xl overflow-hidden"
+                        style={{
+                            background: 'linear-gradient(180deg, rgba(15,18,22,0.95) 0%, rgba(8,10,14,0.98) 100%)',
+                            border: '1px solid rgba(255,255,255,0.10)',
+                            boxShadow: '0 60px 120px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)',
+                        }}
+                    >
+                        {/* App chrome */}
+                        <div
+                            className="flex items-center gap-2 px-4 py-2.5 border-b"
+                            style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+                        >
+                            <div className="flex gap-1.5">
+                                <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
+                                <div className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
+                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
+                            </div>
+                            <div
+                                className="ml-3 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.22em]"
+                                style={{ color: 'rgba(255,255,255,0.45)' }}
+                            >
+                                <BookOpen className="w-3 h-3" /> selah.app
+                            </div>
+                            <div className="ml-auto flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.22em] text-emerald-400">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                Live · Sunday 10:42 AM
+                            </div>
+                        </div>
+
+                        {/* App body */}
+                        <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_220px] min-h-[280px]">
+                            {/* Left rail — service order */}
+                            <div
+                                className="p-3 md:border-r hidden md:block"
+                                style={{
+                                    borderColor: 'rgba(255,255,255,0.05)',
+                                    background: 'rgba(0,0,0,0.2)',
+                                }}
+                            >
+                                <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40 mb-2.5 px-1">
+                                    Service order
+                                </div>
+                                {[
+                                    { label: 'Welcome', done: true },
+                                    { label: 'Worship · 3 songs', done: true },
+                                    { label: 'Sermon', active: true },
+                                    { label: 'Offering', done: false },
+                                    { label: 'Communion', done: false },
+                                    { label: 'Closing', done: false },
+                                ].map((item) => (
+                                    <div
+                                        key={item.label}
+                                        className="flex items-center gap-2 px-2 py-1.5 rounded-md mb-0.5 text-[11px]"
+                                        style={
+                                            item.active
+                                                ? {
+                                                      background: 'rgba(20,184,166,0.12)',
+                                                      border: '1px solid rgba(20,184,166,0.3)',
+                                                      color: '#5eead4',
+                                                  }
+                                                : {
+                                                      color: item.done
+                                                          ? 'rgba(255,255,255,0.45)'
+                                                          : 'rgba(255,255,255,0.6)',
+                                                  }
+                                        }
+                                    >
+                                        <div
+                                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                                            style={{
+                                                background: item.active
+                                                    ? '#5eead4'
+                                                    : item.done
+                                                    ? 'rgba(20,184,166,0.4)'
+                                                    : 'rgba(255,255,255,0.2)',
+                                                boxShadow: item.active ? '0 0 8px #5eead4' : 'none',
+                                            }}
+                                        />
+                                        <span className={item.done ? 'line-through decoration-white/20' : ''}>
+                                            {item.label}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Center — projection preview */}
+                            <div className="p-4 flex flex-col">
+                                <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40 mb-2">
+                                    On screen now
                                 </div>
                                 <div
-                                    className="mt-2 uppercase"
-                                    style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em' }}
+                                    className="flex-1 rounded-lg flex flex-col items-center justify-center text-center px-4 relative overflow-hidden"
+                                    style={{ background: 'linear-gradient(135deg, #042f2e 0%, #0c0a09 100%)' }}
                                 >
-                                    {s.label}
+                                    <div
+                                        className="absolute inset-0 opacity-30"
+                                        style={{
+                                            background:
+                                                'radial-gradient(circle at 30% 30%, rgba(20,184,166,0.3), transparent 60%)',
+                                        }}
+                                    />
+                                    <div className="relative">
+                                        <div className="text-[9px] font-mono uppercase tracking-[0.3em] text-teal-300/80 mb-2">
+                                            John 3:16
+                                        </div>
+                                        <div
+                                            className="text-white text-base sm:text-lg leading-snug"
+                                            style={{ fontFamily: 'Crimson Pro, serif' }}
+                                        >
+                                            &ldquo;For God so loved the world
+                                            <br />
+                                            that he gave his one and only Son…&rdquo;
+                                        </div>
+                                        <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/30 mt-3">
+                                            NIV · Pushed 2s ago
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        ))}
+
+                            {/* Right — AI listener status */}
+                            <div
+                                className="p-3 md:border-l hidden md:block"
+                                style={{
+                                    borderColor: 'rgba(255,255,255,0.05)',
+                                    background: 'rgba(0,0,0,0.2)',
+                                }}
+                            >
+                                <div className="flex items-center justify-between mb-2.5 px-1">
+                                    <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40">
+                                        AI Listener
+                                    </div>
+                                    <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-[0.22em] text-emerald-400">
+                                        <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                                        Live
+                                    </div>
+                                </div>
+                                <div className="flex items-end gap-[2px] h-7 mb-3">
+                                    {Array.from({ length: 24 }).map((_, i) => (
+                                        <span
+                                            key={i}
+                                            className="flex-1 rounded-full"
+                                            style={{
+                                                background: 'linear-gradient(180deg, #5eead4 0%, #0d9488 100%)',
+                                                height: `${30 + Math.abs(Math.sin(i * 0.6)) * 70}%`,
+                                                animation: `waveform-bar 1.1s ease-in-out ${i * 0.04}s infinite`,
+                                                opacity: 0.75,
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                                <div
+                                    className="rounded-md p-2 mb-2"
+                                    style={{
+                                        background: 'rgba(20,184,166,0.08)',
+                                        border: '1px solid rgba(20,184,166,0.25)',
+                                    }}
+                                >
+                                    <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-teal-300 mb-0.5">
+                                        Just detected
+                                    </div>
+                                    <div className="text-[11px] text-white font-medium">John 3:16</div>
+                                </div>
+                                <div
+                                    className="rounded-md p-2"
+                                    style={{
+                                        background: 'rgba(255,255,255,0.03)',
+                                        border: '1px solid rgba(255,255,255,0.06)',
+                                    }}
+                                >
+                                    <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/40 mb-0.5">
+                                        Queue
+                                    </div>
+                                    <div className="text-[11px]" style={{ color: 'rgba(255,255,255,0.7)' }}>
+                                        Romans 6:23 · Romans 5:8
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Floating annotation chips */}
+                    <div
+                        className="hidden lg:flex absolute -left-6 top-1/4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
+                        style={{
+                            background: 'rgba(15,18,22,0.95)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)',
+                        }}
+                    >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span style={{ color: 'rgba(255,255,255,0.85)' }}>Caught it the moment you said it</span>
+                    </div>
+                    <div
+                        className="hidden lg:flex absolute -right-6 bottom-12 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
+                        style={{
+                            background: 'rgba(15,18,22,0.95)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)',
+                        }}
+                    >
+                        <svg
+                            className="w-3.5 h-3.5 text-teal-400"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        >
+                            <path d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span style={{ color: 'rgba(255,255,255,0.85)' }}>Pushed to every screen instantly</span>
                     </div>
                 </div>
             </div>
@@ -1431,88 +1640,11 @@ function StandoutFeaturesSection() {
     )
 }
 
-function TechHighlightsSection() {
-    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
-    const gridRef = useScrollReveal<HTMLDivElement>('stagger-fast', { start: 'top 85%', staggerAmount: 0.05 })
-
-    return (
-        <section className="relative py-20 overflow-hidden">
-            <div
-                className="absolute inset-0"
-                style={{
-                    background:
-                        'linear-gradient(135deg, #0d9488 0%, #7c3aed 50%, #db2777 100%)',
-                }}
-            />
-            <div
-                className="absolute inset-0 pointer-events-none opacity-30"
-                style={{
-                    backgroundImage:
-                        'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
-                    backgroundSize: '32px 32px',
-                    maskImage: 'radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 80%)',
-                    WebkitMaskImage: 'radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 80%)',
-                }}
-            />
-
-            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div ref={headingRef} className="text-center mb-12">
-                    <h2
-                        className="mb-3 font-serif tracking-tight text-white"
-                        style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)', fontWeight: 700 }}
-                    >
-                        Built for the realities of live services
-                    </h2>
-                    <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '1rem' }}>
-                        Rock-solid technology under the hood, invisible when everything goes
-                        right.
-                    </p>
-                </div>
-                <div ref={gridRef} className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
-                    {technicalHighlights.map((h) => (
-                        <div
-                            key={h.title}
-                            className="text-center p-4 rounded-2xl transition-all hover:-translate-y-0.5"
-                            style={{
-                                background: 'rgba(255,255,255,0.08)',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                backdropFilter: 'blur(10px)',
-                            }}
-                        >
-                            <div
-                                className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3"
-                                style={{
-                                    background: 'rgba(255,255,255,0.12)',
-                                    border: '1px solid rgba(255,255,255,0.15)',
-                                }}
-                            >
-                                <h.icon className="w-5 h-5 text-white" />
-                            </div>
-                            <div
-                                className="font-semibold text-white mb-1"
-                                style={{ fontSize: '0.82rem' }}
-                            >
-                                {h.title}
-                            </div>
-                            <div
-                                className="leading-snug"
-                                style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.7rem' }}
-                            >
-                                {h.description}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </section>
-    )
-}
-
-const foundingPerks = [
-    { title: 'Free During Beta', description: 'Full access at no cost while we build together.' },
-    { title: 'Shape the Roadmap', description: 'Your feedback directly influences what we build next.' },
-    { title: 'Direct Founder Access', description: 'Personal support from our founding team, not a support bot.' },
-    { title: 'Locked-in Discount', description: '50% off your plan for life when we officially launch.' },
+const betaPerks = [
+    { title: 'Free during beta', description: 'Full access at no cost while we build together.' },
+    { title: 'Direct line to the team', description: 'Your feedback lands in our build queue, not a support ticket.' },
+    { title: 'Locked-in early-bird pricing', description: '50% off your plan for life when we officially launch.' },
+    { title: 'Onboard with us, not a tutorial', description: 'We will personally help your first service go live.' },
 ]
 
 function EarlyAccessSection() {
@@ -1551,24 +1683,23 @@ function EarlyAccessSection() {
                         }}
                     >
                         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                        Limited Early Access
+                        Open beta
                     </div>
                     <h2
                         className="text-4xl md:text-5xl font-bold text-white mb-5 leading-tight font-serif tracking-tight"
                     >
-                        Be a Founding Church
+                        Try Selah on your next service.
                     </h2>
                     <p
                         className="text-lg mb-10 max-w-2xl mx-auto leading-relaxed"
                         style={{ color: 'rgba(228,228,231,0.7)' }}
                     >
-                        Selah is just getting started. We're inviting the first 25 churches to
-                        join us, help shape the platform, and lock in exclusive benefits that
-                        will never be offered again.
+                        Free while we&rsquo;re in beta. Set it up once, run it on Sunday, and tell
+                        us what to build next. No sales call, no commitment.
                     </p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-10 text-left">
-                        {foundingPerks.map((perk) => (
+                        {betaPerks.map((perk) => (
                             <div key={perk.title} className="flex items-start gap-4">
                                 <div
                                     className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
@@ -1600,14 +1731,14 @@ function EarlyAccessSection() {
                             boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
                         }}
                     >
-                        Apply for Early Access
+                        Get Started Free
                         <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                     </Link>
                     <p
                         className="mt-5 text-sm italic"
                         style={{ color: 'rgba(228,228,231,0.4)' }}
                     >
-                        Free to join · No credit card · Spots going fast
+                        No credit card · Cancel anytime
                     </p>
                 </div>
             </div>
@@ -1844,7 +1975,6 @@ export default function Landing() {
             <CoreFeaturesSection />
             <DashboardSection />
             <StandoutFeaturesSection />
-            <TechHighlightsSection />
             <EarlyAccessSection />
             <CtaSection />
             <FooterSection />

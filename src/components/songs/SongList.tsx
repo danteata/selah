@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide-react'
-import { useSong, useSongs, useSlideCreation } from '../../hooks'
+import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
@@ -25,7 +26,9 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
     const { songs, loading: songsLoading, searchSongs, deleteSong, parseSongLyrics } = useSongs()
     const { getSong } = useSong()
     const { createSongSlides } = useSlideCreation()
+    const { trackEvent } = useAnalytics()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const lastSearchTrackRef = useRef<number>(0)
 
     const voice = useVoiceSearch({
         onFinal: (text) => setQuery(text),
@@ -36,6 +39,20 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
         song.title.toLowerCase().includes(query.toLowerCase()) ||
         song.artist.toLowerCase().includes(query.toLowerCase())
     )
+
+    // Throttled song search tracking — fire at most once per 2s
+    useEffect(() => {
+        const trimmed = query.trim()
+        if (trimmed.length < 2) return
+        const now = Date.now()
+        if (now - lastSearchTrackRef.current < 2000) return
+        lastSearchTrackRef.current = now
+        trackEvent(AnalyticsEventType.SONG_SEARCHED, {
+            query_length: trimmed.length,
+            result_count: filteredSongs.length,
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [query])
 
     const handleCreateSlides = useCallback(async () => {
         if (selectedSong) {
@@ -52,10 +69,16 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                 slides.forEach(slide => {
                     appendActiveSlide(slide)
                 })
+                trackEvent(AnalyticsEventType.SONG_SELECTED, {
+                    song_id: songWithVerses._id || songWithVerses.id,
+                    title: songWithVerses.title,
+                    slide_count: slides.length,
+                    has_template: !!selectedTemplate,
+                })
             }
             onClose()
         }
-    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, onClose])
+    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, onClose, selectedTemplate, trackEvent])
 
     const handleDeleteSong = useCallback(async (songId: string) => {
         const success = await deleteSong(songId)

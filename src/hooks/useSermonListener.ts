@@ -10,6 +10,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useAnalytics } from './useAnalytics'
+import { AnalyticsEventType } from '../services/analytics/types'
 import { isDesktop } from '../platform'
 import { useScripture } from './useScripture'
 import { useSlideCreation } from './useSlideCreation'
@@ -196,6 +198,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
+    const { trackEvent } = useAnalytics()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const bibleVersions = useAppStore((state) => state.bibleVersions)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
@@ -280,6 +283,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Track dropped chunk subscription so we can clean it up
     const droppedChunkUnsubRef = useRef<(() => void) | null>(null)
+
+    // Debounce timestamp for SERMON_LISTENER_TRANSCRIPTION — fires at most
+    // once every 5s while the listener is active.
+    const lastTranscriptEventRef = useRef<number>(0)
 
     // Refs for callback stability
     const optionsRef = useRef(options)
@@ -1348,6 +1355,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const latestVerse = versesWithTimestamp[0]
             setCurrentVerse(latestVerse)
 
+            trackEvent(AnalyticsEventType.SERMON_LISTENER_VERSE_DETECTED, {
+                reference: latestVerse.reference,
+                confidence: latestVerse.confidence,
+                detection_type: 'regex',
+                verse_count: versesWithTimestamp.length,
+            })
+
             // Refresh active reference context so later bare references resolve correctly
             activeReferenceContextRef.current = updateContextFromVerse(latestVerse)
 
@@ -1588,6 +1602,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         const bestSemanticVerse = versesWithTimestamp[0]
                         setCurrentVerse(bestSemanticVerse)
 
+                        trackEvent(AnalyticsEventType.SERMON_LISTENER_VERSE_DETECTED, {
+                            reference: bestSemanticVerse.reference,
+                            confidence: bestSemanticVerse.confidence,
+                            detection_type: 'semantic',
+                            verse_count: versesWithTimestamp.length,
+                        })
+
                         if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                             lookupVerse(bestSemanticVerse).then(scripture => {
                                 optionsRef.current.onVerseDetected?.(bestSemanticVerse, scripture)
@@ -1711,6 +1732,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const errorMsg = 'Speech recognition is not supported'
             setError(errorMsg)
             onError?.(errorMsg)
+            trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, { reason: 'unsupported' })
             return false
         }
 
@@ -1802,6 +1824,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setError(null)
                 sessionStartTimeRef.current = Date.now()
                 chunkStartTimeRef.current = 0
+                trackEvent(AnalyticsEventType.SERMON_LISTENER_STARTED, {
+                    provider,
+                    language,
+                    capture_source: sermonSettings?.captureSource,
+                })
             },
             onEnd: () => {
                 setIsListening(false)
@@ -1893,6 +1920,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     const newFullTranscript = `${transcriptBufferRef.current}`.trim()
                     processTranscript(newFullTranscript, cleanedText)
                     chunkStartTimeRef.current = 0
+                    // Debounced transcript event — fire only on final results so
+                    // we don't flood Amplitude with interim chunks.
+                    if (lastTranscriptEventRef.current && Date.now() - lastTranscriptEventRef.current > 5000) {
+                        trackEvent(AnalyticsEventType.SERMON_LISTENER_TRANSCRIPTION, {
+                            length: newFullTranscript.length,
+                            provider,
+                        })
+                        lastTranscriptEventRef.current = Date.now()
+                    } else if (!lastTranscriptEventRef.current) {
+                        lastTranscriptEventRef.current = Date.now()
+                    }
                 } else {
                     setInterimTranscript(cleanedText)
                     if (chunkStartTimeRef.current === 0) {
@@ -1915,6 +1953,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setError(resolvedError)
                 setIsListening(false)
                 onError?.(resolvedError)
+                trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, {
+                    provider,
+                    message: typeof resolvedError === 'string' ? resolvedError : 'unknown',
+                })
             },
             onStatusChange: (status: TranscriptionStatus) => {
                 setIsListening(status.isListening)
@@ -1962,15 +2004,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             droppedChunkUnsubRef.current()
             droppedChunkUnsubRef.current = null
         }
+        const wasListening = isListening
+        const durationMs = sessionStartTimeRef.current
+            ? Date.now() - sessionStartTimeRef.current
+            : 0
         unifiedTranscriptionService.stop()
         setIsListening(false)
         setInterimTranscript('')
         setIsSpeechDetected(false)
         setDroppedChunkInfo({ dropped: 0, total: 0 })
-        stopKeepAwake().catch(err => {
+        stopKeepAwake().catch((err: unknown) => {
             console.warn('[useSermonListener] Keep-awake release failed (non-fatal):', err)
         })
-    }, [])
+        if (wasListening) {
+            trackEvent(AnalyticsEventType.SERMON_LISTENER_STOPPED, {
+                duration_seconds: Math.round(durationMs / 1000),
+                verses_detected: detectedVersesRef.current.length,
+                provider,
+            })
+        }
+    }, [provider, trackEvent])
 
     /**
      * Reset state

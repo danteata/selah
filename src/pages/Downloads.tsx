@@ -25,6 +25,8 @@ import { gsap } from '../lib/gsap'
 import { useScrollReveal } from '../hooks/useScrollReveal'
 import { useLatestRelease, SELAH_REPO, type PlatformBucket } from '../hooks/useLatestRelease'
 import { detectPlatform, type UserOS, type UserPlatform } from '../lib/userPlatform'
+import { useAnalytics } from '../hooks'
+import { AnalyticsEventType } from '../services/analytics/types'
 
 const RELEASES_PAGE = `https://github.com/${SELAH_REPO.owner}/${SELAH_REPO.repo}/releases`
 
@@ -246,6 +248,7 @@ function HeroCTA({
     platform: UserPlatform
     release: ReturnType<typeof useLatestRelease>['release']
 }) {
+    const { trackEvent } = useAnalytics()
     if (!release) return null
     const bucket = release.buckets.find((b) => b.os === platform.os)
     const variant =
@@ -273,6 +276,7 @@ function HeroCTA({
     return (
         <a
             href={variant.url}
+            onClick={() => trackEvent(AnalyticsEventType.DOWNLOAD_INITIATED, { platform: platform.os, arch: platform.arch, version: release.version, size: variant.size })}
             className="group flex items-center gap-3 px-7 py-4 font-semibold rounded-2xl text-white transition-all hover:-translate-y-px"
             style={{
                 background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
@@ -333,6 +337,7 @@ function VariantRow({
     variant: { label: string; url: string; fileName: string; size: number; format: string }
     recommended: boolean
 }) {
+    const { trackEvent } = useAnalytics()
     return (
         <div
             className="rounded-xl p-4 transition-all"
@@ -372,6 +377,7 @@ function VariantRow({
             <div className="flex items-center gap-2">
                 <a
                     href={variant.url}
+                    onClick={() => trackEvent(AnalyticsEventType.DOWNLOAD_INITIATED, { platform: variant.fileName.split('.').pop(), variant: variant.label, size: variant.size })}
                     className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110"
                     style={{
                         background: recommended
@@ -1212,6 +1218,12 @@ export default function Downloads() {
     const { status, release, error } = useLatestRelease()
     const userPlatform = useMemo(() => detectPlatform(), [])
     const [retryNonce, setRetryNonce] = useState(0)
+    const { trackPage, trackEvent } = useAnalytics()
+
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/download')
+    }, [trackPage])
 
     useEffect(() => {
         const onScroll = () => setScrolled(window.scrollY > 16)

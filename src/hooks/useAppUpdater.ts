@@ -14,6 +14,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useAnalytics } from "./useAnalytics";
+import { AnalyticsEventType } from "../services/analytics/types";
 
 export type UpdateState =
     | "idle"
@@ -33,6 +35,7 @@ export interface UseAppUpdaterResult {
 export function useAppUpdater(): UseAppUpdaterResult {
     const [state, setState] = useState<UpdateState>("idle");
     const [message, setMessage] = useState<string | null>(null);
+    const { trackEvent } = useAnalytics();
 
     const runCheck = useCallback(async () => {
         if (state === "checking" || state === "downloading" || state === "restarting") {
@@ -48,6 +51,7 @@ export function useAppUpdater(): UseAppUpdaterResult {
         }
         setState("checking");
         setMessage(null);
+        trackEvent(AnalyticsEventType.DESKTOP_UPDATE_CHECKED);
         try {
             const result = await invoke<string>("check_update");
             // `check_update` only returns Ok() on two paths: "up to date" (no
@@ -58,12 +62,13 @@ export function useAppUpdater(): UseAppUpdaterResult {
                 setMessage("You're on the latest version.");
             } else {
                 setState("restarting");
+                trackEvent(AnalyticsEventType.DESKTOP_UPDATE_INSTALLED, { result });
             }
         } catch (e) {
             setState("error");
             setMessage(typeof e === "string" ? e : (e as Error).message ?? String(e));
         }
-    }, [state]);
+    }, [state, trackEvent]);
 
     // Silent background check 5 s after mount.  We delay so we don't compete
     // with the initial React render, and we don't surface errors from this

@@ -1,14 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSignIn, useClerk, useUser } from '@clerk/clerk-react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Cloud } from 'lucide-react'
 import { useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
+import { useAnalytics } from '../../hooks'
+import { AnalyticsEventType, sanitizeAuthError } from '../../services/analytics/types'
 
 export default function LoginPage() {
     const { signIn, isLoaded, setActive } = useSignIn()
     const navigate = useNavigate()
     const location = useLocation()
+    const { trackEvent, trackPage } = useAnalytics()
 
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -22,12 +25,18 @@ export default function LoginPage() {
     // Get redirect path from location state (for invite links)
     const from = (location.state as { from?: string })?.from
 
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/login')
+    }, [trackPage])
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!isLoaded) return
 
         setIsLoading(true)
         setError('')
+        trackEvent(AnalyticsEventType.AUTH_ATTEMPTED, { method: 'email', page: 'login' })
 
         try {
             const result = await signIn.create({
@@ -37,6 +46,7 @@ export default function LoginPage() {
 
             if (result.status === 'complete' && result.createdSessionId) {
                 await setActive({ session: result.createdSessionId })
+                trackEvent(AnalyticsEventType.USER_SIGNED_IN, { method: 'email' })
                 // Create user record in Convex if it doesn't exist
                 // We'll try to extract user info from Clerk or use the provided email
                 await upsertUser({
@@ -51,7 +61,9 @@ export default function LoginPage() {
             }
         } catch (err: any) {
             console.error('Sign in error:', err)
-            setError(err.errors?.[0]?.message || 'Failed to sign in. Please check your credentials.')
+            const errorMessage = err.errors?.[0]?.message || 'Failed to sign in. Please check your credentials.'
+            setError(errorMessage)
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', error_category: sanitizeAuthError(errorMessage) })
         } finally {
             setIsLoading(false)
         }
@@ -59,6 +71,7 @@ export default function LoginPage() {
 
     const handleGoogleSignIn = async () => {
         if (!isLoaded) return
+        trackEvent(AnalyticsEventType.AUTH_GOOGLE_CLICKED, { page: 'login' })
 
         try {
             // Clerk refuses custom URL schemes server-side, so the
@@ -126,6 +139,7 @@ export default function LoginPage() {
         } catch (err: any) {
             console.error('Google sign in error:', err)
             setError('Failed to sign in with Google.')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'google', error_category: 'oauth_redirect_failed' })
         }
     }
 

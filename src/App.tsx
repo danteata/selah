@@ -7,6 +7,9 @@ import { isDesktop } from './platform'
 import { ConvexConnectionProvider, useConvexConnection } from './providers/ConvexConnectionProvider'
 import { ConvexErrorBoundary } from './components/offline/ConvexErrorBoundary'
 import { RouteErrorBoundary } from './components/offline/RouteErrorBoundary'
+import { AnalyticsProvider, useAnalyticsContext } from './providers/AnalyticsProvider'
+import type { AnalyticsProviderType as AnalyticsType } from './services/analytics/types'
+import { AnalyticsEventType } from './services/analytics/types'
 import { useAppStore } from './store/appStore'
 import { useOAuthCallback } from './hooks/useOAuthCallback'
 import { useDeepLinkOAuth } from './hooks/useDeepLinkOAuth'
@@ -55,6 +58,18 @@ function useDarkModeSync() {
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL!
 const queryClient = new QueryClient()
 
+// Analytics configuration from environment variables.
+// Set VITE_ANALYTICS_PROVIDER to "posthog", "amplitude", "console", or "none".
+// In development, defaults to "console" so events are visible in the browser dev tools.
+const ANALYTICS_PROVIDER: AnalyticsType =
+    (import.meta.env.VITE_ANALYTICS_PROVIDER as AnalyticsType) || (import.meta.env.DEV ? 'console' : 'none')
+const ANALYTICS_KEY =
+    ANALYTICS_PROVIDER === 'posthog'
+        ? import.meta.env.VITE_POSTHOG_KEY ?? ''
+        : ANALYTICS_PROVIDER === 'amplitude'
+            ? import.meta.env.VITE_AMPLITUDE_KEY ?? ''
+            : '' // console / none don't need a real key
+
 function OfflineApp() {
     const { isSignedIn, isLoaded } = useAuth()
 
@@ -92,6 +107,8 @@ function JoinChurchRoute() {
 
 function AppRoutes() {
     const { isOffline } = useConvexConnection()
+    const { analytics } = useAnalyticsContext()
+    const location = useLocation()
     useDarkModeSync()
     // The OAuth callback listener uses `useClerk()` (via
     // useOAuthCallback), so it has to run inside the <ClerkProvider>
@@ -103,6 +120,30 @@ function AppRoutes() {
     // to the desktop app after the browser OAuth completes. On web
     // it's a no-op (no Tauri runtime).
     useDeepLinkOAuth()
+
+    // App lifecycle: fire APP_INITIALIZED once + PAGE_VIEWED on every route change
+    useEffect(() => {
+        const start = Date.now()
+        analytics.trackEvent(AnalyticsEventType.APP_INITIALIZED, {
+            is_desktop: isDesktop(),
+            app_version: '0.1.0',
+        })
+        analytics.trackEvent(AnalyticsEventType.APP_LOADED, {
+            load_ms: Date.now() - start,
+            is_desktop: isDesktop(),
+        })
+        // SESSION_START fires on first route mount — covers both web and
+        // desktop cold starts without needing auth state.
+        analytics.trackEvent(AnalyticsEventType.SESSION_START, {
+            is_desktop: isDesktop(),
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    useEffect(() => {
+        analytics.page(location.pathname)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.pathname])
 
     if (isOffline) {
         return (
@@ -138,9 +179,9 @@ function AppRoutes() {
                     <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
                     <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
                     <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
-                        <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
-                        <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
-                        <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
+                    <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
+                    <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
+                    <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
                     <Route path="/desktop-oauth-done" element={<RouteErrorBoundary name="oauth-done"><DesktopOAuthDone /></RouteErrorBoundary>} />
                     <Route
                         path="/"
@@ -168,6 +209,7 @@ function App() {
     const [version, setVersion] = useState('')
     const [checking, setChecking] = useState(false)
     const [status, setStatus] = useState('')
+    const { analytics } = useAnalyticsContext()
 
     useEffect(() => {
         // Tauri APIs throw synchronously in the web build because
@@ -191,9 +233,16 @@ function App() {
         }
         setChecking(true)
         setStatus('checking...')
+        const start = Date.now()
+        analytics.trackEvent(AnalyticsEventType.DESKTOP_UPDATE_CHECKED)
         try {
             const r = await invoke<string>('check_update')
             setStatus(r)
+            if (r && !r.toLowerCase().includes('up to date') && !r.toLowerCase().includes('no update')) {
+                analytics.trackEvent(AnalyticsEventType.DESKTOP_UPDATE_INSTALLED, {
+                    elapsed_ms: Date.now() - start,
+                })
+            }
         } catch (e) {
             setStatus(`error: ${e}`)
         } finally {
@@ -203,17 +252,19 @@ function App() {
 
     return (
         <RouteErrorBoundary name="app-root">
-            <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY!}>
-                <ConvexConnectionProvider convexUrl={CONVEX_URL}>
-                    <ConvexErrorBoundary>
-                        <QueryClientProvider client={queryClient}>
-                            <BrowserRouter>
-                                <AppRoutes />
-                            </BrowserRouter>
-                        </QueryClientProvider>
-                    </ConvexErrorBoundary>
-                </ConvexConnectionProvider>
-            </ClerkProvider>
+            <AnalyticsProvider providerType={ANALYTICS_PROVIDER} apiKey={ANALYTICS_KEY}>
+                <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY!}>
+                    <ConvexConnectionProvider convexUrl={CONVEX_URL}>
+                        <ConvexErrorBoundary>
+                            <QueryClientProvider client={queryClient}>
+                                <BrowserRouter>
+                                    <AppRoutes />
+                                </BrowserRouter>
+                            </QueryClientProvider>
+                        </ConvexErrorBoundary>
+                    </ConvexConnectionProvider>
+                </ClerkProvider>
+            </AnalyticsProvider>
         </RouteErrorBoundary>
     )
 }

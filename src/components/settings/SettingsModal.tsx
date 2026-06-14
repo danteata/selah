@@ -11,6 +11,8 @@ import { SongMigrationWizard } from '../admin/SongMigrationWizard'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
+import { useAnalytics } from '../../hooks'
+import { AnalyticsEventType } from '../../services/analytics/types'
 
 type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
@@ -23,6 +25,7 @@ interface SettingsModalProps {
 export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: SettingsModalProps) {
     const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
     const { isAdmin, isSuperadmin, currentUser } = useUserRole()
+    const { trackEvent } = useAnalytics()
 
     const settings = useAppStore((state) => state.settings)
     const setAppSettings = useAppStore((state) => state.setAppSettings)
@@ -40,6 +43,19 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
             setActiveTab(initialTab)
         }
     }, [initialTab])
+
+    // Track settings opened
+    useEffect(() => {
+        if (isOpen) {
+            trackEvent(AnalyticsEventType.SETTINGS_OPENED, { initial_tab: initialTab })
+        }
+    }, [isOpen, initialTab, trackEvent])
+
+    // Track tab changes
+    const handleTabChange = useCallback((tab: SettingsTab) => {
+        setActiveTab(tab)
+        trackEvent(AnalyticsEventType.SETTINGS_TAB_CHANGED, { tab })
+    }, [trackEvent])
 
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
@@ -99,7 +115,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                         {tabs.map((tab) => (
                             <button
                                 key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
+                                onClick={() => handleTabChange(tab.id)}
                                 className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
                                     ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -120,7 +136,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 {adminTabs.map((tab) => (
                                     <button
                                         key={tab.id}
-                                        onClick={() => setActiveTab(tab.id)}
+                                        onClick={() => handleTabChange(tab.id)}
                                         className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
                                             ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'
                                             : 'text-gray-600 dark:text-gray-400 hover:bg-amber-50 dark:hover:bg-amber-900/10'

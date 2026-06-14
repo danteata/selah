@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react'
 import { Upload, X, Image, Film, Music, FileText, Check, AlertCircle, Loader2 } from 'lucide-react'
 import { openFileDialog } from '../../utils/fileDialog'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 
 export interface UploadedFile {
     id: string
@@ -36,6 +38,7 @@ export function MediaUpload({
     const [files, setFiles] = useState<UploadedFile[]>([])
     const [isDragging, setIsDragging] = useState(false)
     const [isUploading, setIsUploading] = useState(false)
+    const { trackEvent } = useAnalytics()
 
     const getFileType = (file: File): UploadedFile['type'] => {
         if (file.type.startsWith('image/')) return 'image'
@@ -128,11 +131,18 @@ export function MediaUpload({
     }
 
     const removeFile = (id: string) => {
+        const removed = files.find((f) => f.id === id)
         setFiles((prev) => {
             const file = prev.find((f) => f.id === id)
             if (file?.url) URL.revokeObjectURL(file.url)
             return prev.filter((f) => f.id !== id)
         })
+        if (removed) {
+            trackEvent(AnalyticsEventType.MEDIA_REMOVED, {
+                file_type: removed.type,
+                size: removed.size,
+            })
+        }
     }
 
     const handleUpload = async () => {
@@ -159,7 +169,15 @@ export function MediaUpload({
 
         setFiles(updatedFiles)
         setIsUploading(false)
-        onUpload(updatedFiles.filter((f) => f.status === 'complete'))
+        const completed = updatedFiles.filter((f) => f.status === 'complete')
+        if (completed.length > 0) {
+            trackEvent(AnalyticsEventType.MEDIA_UPLOADED, {
+                count: completed.length,
+                types: [...new Set(completed.map((f) => f.type))],
+                total_size: completed.reduce((sum, f) => sum + f.size, 0),
+            })
+        }
+        onUpload(completed)
     }
 
     const validFiles = files.filter((f) => f.status !== 'error')

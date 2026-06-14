@@ -7,6 +7,8 @@ import { useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import { generateSlideContent } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import type { Slide, Scripture, Countdown } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
@@ -35,6 +37,7 @@ function formatSecondsToTime(totalSeconds: number): string {
 
 export function LiveOutput() {
     const sermonListener = useSermonListenerContext()
+    const { trackEvent } = useAnalytics()
     const activeNavSection = useAppStore((s) => s.activeNavSection)
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
 
@@ -210,13 +213,24 @@ export function LiveOutput() {
         // Send to live window via native API
         const slide = activeSlides.find(s => s.id === slideId)
         if (slide) {
+            trackEvent(AnalyticsEventType.SLIDE_DISPLAYED, {
+                slide_type: slide.type || 'unknown',
+                source: isConnected ? 'collaboration' : 'local',
+                layout: slide.layout || 'full_text',
+            })
+            if (slide.layout === 'lower_third' || slide.layout === 'lower-third') {
+                trackEvent(AnalyticsEventType.LOWER_THIRD_DISPLAYED, {
+                    slide_id: slide.id,
+                    title: slide.title,
+                })
+            }
             if (isDesktop) {
                 sendSlideToLive(slideId, slide as unknown as Record<string, unknown>)
             }
             // Broadcast to other windows (for web mode)
             window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: slide }))
         }
-    }, [setLiveSlide, activeSlides, isDesktop, sendSlideToLive, isConnected, isOperator, isOpen, setLiveSlideShared])
+    }, [setLiveSlide, activeSlides, isDesktop, sendSlideToLive, isConnected, isOperator, isOpen, setLiveSlideShared, trackEvent])
 
     const handleSuggestNext = useCallback(async (slideId: string) => {
         if (!isConnected || isOperator) return
@@ -297,8 +311,11 @@ export function LiveOutput() {
     }, [liveOutputSlides, handleSetLiveSlide])
 
     const handleDeleteSlide = useCallback((slide: Slide) => {
+        trackEvent(AnalyticsEventType.SLIDE_DELETED, {
+            slide_type: slide.type || 'unknown',
+        })
         removeActiveSlide(slide)
-    }, [removeActiveSlide])
+    }, [removeActiveSlide, trackEvent])
 
     const handleEditSlide = useCallback((slide: Slide) => {
         setEditingSlide(slide)
@@ -378,6 +395,10 @@ export function LiveOutput() {
         const timeStr = countdownData?.time || liveSlide.contents[1] || '00:05:00'
         const initialSeconds = parseTimeStringToSeconds(timeStr)
         setPreviewCountdownSeconds(initialSeconds)
+        trackEvent(AnalyticsEventType.COUNTDOWN_STARTED, {
+            slide_id: liveSlide.id,
+            duration_seconds: initialSeconds,
+        })
 
         // Start ticking
         previewIntervalRef.current = setInterval(() => {
@@ -385,6 +406,10 @@ export function LiveOutput() {
                 if (prev <= 1) {
                     clearInterval(previewIntervalRef.current!)
                     previewIntervalRef.current = null
+                    trackEvent(AnalyticsEventType.COUNTDOWN_COMPLETED, {
+                        slide_id: liveSlide.id,
+                        duration_seconds: initialSeconds,
+                    })
                     return 0
                 }
                 return prev - 1
@@ -397,6 +422,7 @@ export function LiveOutput() {
                 previewIntervalRef.current = null
             }
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [liveSlide?.id, liveSlide?.type])
 
     // Handle stop presenting
@@ -757,7 +783,7 @@ export function LiveOutput() {
                                                 const captionNodeLT = (captionLT || subtitleLT) && (
                                                     <div
                                                         className="shrink-0 text-white/85 drop-shadow-lg"
-                                                         style={{
+                                                        style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(14px, 3cqw, 36px)',
                                                             lineHeight: 1.25,
@@ -808,7 +834,7 @@ export function LiveOutput() {
                                                 {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
                                                     <div
                                                         className="shrink-0 text-center text-white/85 pb-2 drop-shadow-lg"
-                                                         style={{
+                                                        style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.3,
@@ -833,7 +859,7 @@ export function LiveOutput() {
                                                 {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
                                                     <div
                                                         className="shrink-0 text-center text-white/85 pt-2 drop-shadow-lg"
-                                                         style={{
+                                                        style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.3,

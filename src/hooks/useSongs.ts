@@ -167,6 +167,8 @@ export function useSongs(): UseSongsReturn {
                 updatedAt: new Date().toISOString(),
             })
 
+            let result = localSong
+
             if (!isOffline) {
                 try {
                     const serverId = await createSongMutation({
@@ -181,14 +183,16 @@ export function useSongs(): UseSongsReturn {
                         churchId,
                     })
 
+                    const serverSong: Song = { ...localSong, _id: serverId, id: serverId }
                     await db.library.delete(localId)
                     await db.library.put({
                         id: serverId,
                         type: 'song',
-                        content: { ...localSong, _id: serverId, id: serverId },
+                        content: serverSong,
                         createdAt: new Date().toISOString(),
                         updatedAt: new Date().toISOString(),
                     })
+                    result = serverSong
                 } catch (err) {
                     console.warn('[useSongs] Server create failed, keeping local:', err)
                 }
@@ -198,7 +202,7 @@ export function useSongs(): UseSongsReturn {
             await loadLocalSongs()
             notifySongsChanged()
 
-            return localSong
+            return result
         } catch (error) {
             console.error('Error creating song:', error)
             return null
@@ -232,7 +236,9 @@ export function useSongs(): UseSongsReturn {
                 updatedAt: new Date().toISOString(),
             })
 
-            if (!isOffline) {
+            const isLocal = songId.startsWith('local_')
+
+            if (!isOffline && !isLocal) {
                 try {
                     await updateSongMutation({
                         songId,
@@ -250,6 +256,10 @@ export function useSongs(): UseSongsReturn {
                 } catch (err) {
                     console.warn('[useSongs] Server update failed, local update kept:', err)
                 }
+            } else if (isLocal) {
+                // Song hasn't been synced to server yet — local-only update is sufficient.
+                // It will be synced when createSong eventually succeeds.
+                console.debug('[useSongs] Skipping server update for local-only song:', songId)
             }
 
             await loadLocalSongs()
@@ -270,7 +280,9 @@ export function useSongs(): UseSongsReturn {
             const db = getIndexedDB()
             await db.library.delete(songId)
 
-            if (!isOffline) {
+            const isLocal = songId.startsWith('local_')
+
+            if (!isOffline && !isLocal) {
                 try {
                     await deleteSongMutation({ songId })
                 } catch (err) {

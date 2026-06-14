@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Calendar, Plus, ChevronDown, Trash2, Edit, Check, Loader2 } from 'lucide-react'
 import { useSchedules } from '../../hooks/useSchedules'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 import type { Schedule } from '../../types'
 
@@ -20,7 +22,7 @@ export function ScheduleSelector() {
         updateSchedule,
         isLoading,
     } = useSchedules()
-
+    const { trackEvent } = useAnalytics()
     const { confirm, ConfirmDialog } = useConfirmDialog()
 
     // Close dropdown when clicking outside
@@ -39,6 +41,9 @@ export function ScheduleSelector() {
     const handleCreateSchedule = () => {
         if (newScheduleName.trim()) {
             createSchedule(newScheduleName.trim())
+            trackEvent(AnalyticsEventType.SCHEDULE_CREATED, {
+                name: newScheduleName.trim(),
+            })
             setNewScheduleName('')
             setShowCreateForm(false)
             setIsOpen(false)
@@ -47,6 +52,10 @@ export function ScheduleSelector() {
 
     const handleSelectSchedule = (schedule: Schedule) => {
         setActiveSchedule(schedule)
+        trackEvent(AnalyticsEventType.SCHEDULE_VIEWED, {
+            schedule_id: schedule._id,
+            name: schedule.name,
+        })
         setIsOpen(false)
     }
 
@@ -74,6 +83,10 @@ export function ScheduleSelector() {
     const handleSaveEdit = (scheduleId: string) => {
         if (editName.trim()) {
             updateSchedule(scheduleId, { name: editName.trim() })
+            trackEvent(AnalyticsEventType.SCHEDULE_EDITED, {
+                schedule_id: scheduleId,
+                new_name: editName.trim(),
+            })
         }
         setIsEditing(null)
     }
