@@ -184,10 +184,7 @@ export const updateSong = mutation({
             throw new Error("Not authenticated");
         }
 
-        const song = await ctx.db
-            .query("songs")
-            .filter((q) => q.eq(q.field("_id"), args.songId))
-            .unique();
+        const song = await ctx.db.get(args.songId as Id<"songs">);
 
         if (!song) {
             throw new Error("Song not found");
@@ -202,7 +199,7 @@ export const updateSong = mutation({
             throw new Error("Unauthorized");
         }
 
-        await ctx.db.patch(args.songId as Id<"songs">, {
+        await ctx.db.patch(song._id, {
             ...args.updates,
             updatedAt: new Date().toISOString(),
         });
@@ -222,10 +219,7 @@ export const deleteSong = mutation({
             throw new Error("Not authenticated");
         }
 
-        const song = await ctx.db
-            .query("songs")
-            .filter((q) => q.eq(q.field("_id"), args.songId))
-            .unique();
+        const song = await ctx.db.get(args.songId as Id<"songs">);
 
         if (!song) {
             throw new Error("Song not found");
@@ -236,11 +230,11 @@ export const deleteSong = mutation({
             .withIndex("by_email", (q) => q.eq("email", identity.email!))
             .unique();
 
-        if (!user || (song.createdBy !== user._id && user.churchId !== song.churchId)) {
+        if (!user || (song.createdBy !== user._id && song.churchId !== user.churchId)) {
             throw new Error("Unauthorized");
         }
 
-        await ctx.db.delete(args.songId as Id<"songs">);
+        await ctx.db.delete(song._id);
         return true;
     },
 });

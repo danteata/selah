@@ -17,6 +17,17 @@ import type { EWSongSQLite, EWSongWords, ParsedSong, EasyWorshipFileType } from 
 import { parseVersesRaw, cleanLyrics, isEasyWorshipFormat } from './verseParser';
 import { parseRTF, extractVerseStructureFromRTF } from './rtfParser';
 
+// Strip the ---SLIDE--- structural markers that parseRTF preserves for
+// extractVerseStructureFromRTF, plus the "Slide N" / "Repeat" presentation
+// labels that EasyWorship emits as visible text. None of these belong in
+// the `lyrics` field that goes to Convex or the UI.
+function parseRTFForLyrics(rtf: string): string {
+    return parseRTF(rtf)
+        .replace(/\n?---SLIDE---\n?/g, '\n')
+        .replace(/^Slide\s+\d+\s*$/gim, '')
+        .replace(/^Repeat\s*$/gim, '')
+}
+
 // Import sql.js for SQLite parsing (browser-based)
 // This is a WebAssembly version of SQLite that works in the browser
 let SQL: any = null;
@@ -194,7 +205,7 @@ async function parseSongWordsDB(db: any, tableNames: string[]): Promise<ParsedSo
         const rtfLyrics = row[colIndex['words']] ?? '';
 
         // Parse RTF to plain text
-        const plainLyrics = parseRTF(rtfLyrics);
+        const plainLyrics = parseRTFForLyrics(rtfLyrics);
 
         // Extract verse structure
         const verseStructure = extractVerseStructureFromRTF(rtfLyrics);
@@ -296,7 +307,7 @@ export async function parseEasyWorshipDatabases(files: {
                 const metadata = songsMetadata.get(songId);
 
                 // Parse RTF to plain text
-                const plainLyrics = parseRTF(rtfLyrics);
+                const plainLyrics = parseRTFForLyrics(rtfLyrics);
 
                 // Extract verse structure
                 const verseStructure = extractVerseStructureFromRTF(rtfLyrics);
@@ -418,7 +429,7 @@ export async function parseXML(file: File): Promise<ParsedSong[]> {
 
             if (lyricsRaw.startsWith('{\\rtf')) {
                 // Parse RTF
-                lyrics = parseRTF(lyricsRaw);
+                lyrics = parseRTFForLyrics(lyricsRaw);
                 const verseStructure = extractVerseStructureFromRTF(lyricsRaw);
                 verses = verseStructure
                     .filter(v => v.content.trim())
@@ -502,7 +513,7 @@ export async function parseCSV(file: File): Promise<ParsedSong[]> {
             let verses: string[] = [];
 
             if (lyricsRaw.startsWith('{\\rtf')) {
-                lyrics = parseRTF(lyricsRaw);
+                lyrics = parseRTFForLyrics(lyricsRaw);
                 const verseStructure = extractVerseStructureFromRTF(lyricsRaw);
                 verses = verseStructure
                     .filter(v => v.content.trim())

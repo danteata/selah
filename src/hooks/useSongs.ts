@@ -6,6 +6,24 @@ import type { Song } from '../types'
 import { getIndexedDB } from './useIndexedDB'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 
+// Per-call timeout for Convex mutations. If the websocket dies, useMutation
+// promises can hang indefinitely — bounded timeout lets the wizard move on
+// instead of freezing the whole batch on a single bad song.
+const MUTATION_TIMEOUT_MS = 15_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error(`${label} timed out after ${ms}ms`)),
+            ms,
+        )
+        promise.then(
+            (v) => { clearTimeout(timer); resolve(v) },
+            (e) => { clearTimeout(timer); reject(e) },
+        )
+    })
+}
+
 // Cross-instance refresh signal — fired whenever any useSongs() instance mutates
 // IndexedDB so every other instance (Songs panel, MusicBrowser, etc.) reloads.
 const songsChangeTarget = new EventTarget()
@@ -171,17 +189,21 @@ export function useSongs(): UseSongsReturn {
 
             if (!isOffline) {
                 try {
-                    const serverId = await createSongMutation({
-                        title: songData.title,
-                        artist: songData.artist,
-                        lyrics: songData.lyrics,
-                        album: songData.album,
-                        cover: songData.cover,
-                        author: songData.author,
-                        verses: songData.verses,
-                        isPublic,
-                        churchId,
-                    })
+                    const serverId = await withTimeout(
+                        createSongMutation({
+                            title: songData.title,
+                            artist: songData.artist,
+                            lyrics: songData.lyrics,
+                            album: songData.album,
+                            cover: songData.cover,
+                            author: songData.author,
+                            verses: songData.verses,
+                            isPublic,
+                            churchId,
+                        }),
+                        MUTATION_TIMEOUT_MS,
+                        'createSong',
+                    )
 
                     const serverSong: Song = { ...localSong, _id: serverId, id: serverId }
                     await db.library.delete(localId)
@@ -240,19 +262,23 @@ export function useSongs(): UseSongsReturn {
 
             if (!isOffline && !isLocal) {
                 try {
-                    await updateSongMutation({
-                        songId,
-                        updates: {
-                            title: updateData.title,
-                            artist: updateData.artist,
-                            lyrics: updateData.lyrics,
-                            album: updateData.album,
-                            cover: updateData.cover,
-                            author: updateData.author,
-                            verses: updateData.verses,
-                            isPublic: updateData.isPublic,
-                        },
-                    })
+                    await withTimeout(
+                        updateSongMutation({
+                            songId,
+                            updates: {
+                                title: updateData.title,
+                                artist: updateData.artist,
+                                lyrics: updateData.lyrics,
+                                album: updateData.album,
+                                cover: updateData.cover,
+                                author: updateData.author,
+                                verses: updateData.verses,
+                                isPublic: updateData.isPublic,
+                            },
+                        }),
+                        MUTATION_TIMEOUT_MS,
+                        'updateSong',
+                    )
                 } catch (err) {
                     console.warn('[useSongs] Server update failed, local update kept:', err)
                 }
@@ -284,7 +310,11 @@ export function useSongs(): UseSongsReturn {
 
             if (!isOffline && !isLocal) {
                 try {
-                    await deleteSongMutation({ songId })
+                    await withTimeout(
+                        deleteSongMutation({ songId }),
+                        MUTATION_TIMEOUT_MS,
+                        'deleteSong',
+                    )
                 } catch (err) {
                     console.warn('[useSongs] Server delete failed, local delete kept:', err)
                 }

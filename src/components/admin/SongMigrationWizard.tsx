@@ -204,7 +204,24 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         // Process with bounded concurrency (8 parallel) so import feels fast on
         // large libraries while not overwhelming IndexedDB / Convex.
         const CONCURRENCY = 8;
+        // Per-song timeout. A dead Convex websocket can leave useMutation
+        // promises unresolved forever; without this, a single bad song would
+        // freeze the import. Picked to be larger than the 15s mutation
+        // timeout in useSongs.ts so genuine slow paths can still complete.
+        const SONG_TIMEOUT_MS = 45_000;
         let cursor = 0;
+
+        const withSongTimeout = <T,>(p: Promise<T>, title: string): Promise<T> =>
+            new Promise<T>((resolve, reject) => {
+                const timer = setTimeout(
+                    () => reject(new Error(`Timed out after ${SONG_TIMEOUT_MS}ms`)),
+                    SONG_TIMEOUT_MS,
+                );
+                p.then(
+                    (v) => { clearTimeout(timer); resolve(v); },
+                    (e) => { clearTimeout(timer); reject(e); },
+                );
+            });
 
         const worker = async () => {
             while (cursor < songsToImport.length) {
@@ -223,13 +240,16 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
 
                 try {
                     if (existingId && replaceExisting) {
-                        const ok = await updateSong(existingId, {
-                            title: song.title,
-                            artist: song.artist || song.author || 'Unknown',
-                            lyrics: song.lyrics,
-                            verses: song.verses,
-                            author: song.author,
-                        });
+                        const ok = await withSongTimeout(
+                            updateSong(existingId, {
+                                title: song.title,
+                                artist: song.artist || song.author || 'Unknown',
+                                lyrics: song.lyrics,
+                                verses: song.verses,
+                                author: song.author,
+                            }),
+                            song.title,
+                        );
                         if (ok) {
                             allImportedIds.push(existingId);
                             updated++;
@@ -237,15 +257,18 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             allErrors.push(`Failed to update "${song.title}"`);
                         }
                     } else {
-                        const created = await createSong({
-                            title: song.title,
-                            artist: song.artist || song.author || 'Unknown',
-                            lyrics: song.lyrics,
-                            verses: song.verses,
-                            author: song.author,
-                        });
+                        const created = await withSongTimeout(
+                            createSong({
+                                title: song.title,
+                                artist: song.artist || song.author || 'Unknown',
+                                lyrics: song.lyrics,
+                                verses: song.verses,
+                                author: song.author,
+                            }),
+                            song.title,
+                        );
                         if (created) {
-                            const newId = created._id || created.id || '';
+                            const newId = (created as any)._id || (created as any).id || '';
                             allImportedIds.push(newId);
                             existingByTitle.set(titleKey, newId);
                             imported++;
@@ -254,7 +277,18 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                         }
                     }
                 } catch (error) {
-                    allErrors.push(`Failed to import "${song.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    const msg = error instanceof Error ? error.message : 'Unknown error';
+                    allErrors.push(`Failed to import "${song.title}": ${msg}`);
+                    // If Convex is dead, abort the rest of the import to avoid
+                    // hammering a broken connection. Local IndexedDB writes
+                    // already succeeded, so data isn't lost.
+                    if (msg.toLowerCase().includes('timed out') || msg.toLowerCase().includes('websocket')) {
+                        allErrors.unshift(
+                            'Import aborted: Convex connection lost. ' +
+                            `${imported + updated} song${imported + updated === 1 ? '' : 's'} saved locally and will sync when you reconnect.`,
+                        );
+                        cursor = songsToImport.length;
+                    }
                 }
                 setImportProgress(p => ({ current: p.current + 1, total: p.total }));
             }
@@ -383,9 +417,12 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             <div
                                 className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 transition-colors"
                                 onClick={handleSingleFileClick}
-                                onDragOver={(e) => e.preventDefault()}
+                                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                onDragLeave={(e) => { e.stopPropagation(); }}
                                 onDrop={(e) => {
                                     e.preventDefault();
+                                    e.stopPropagation();
                                     const file = e.dataTransfer.files?.[0];
                                     if (file) {
                                         handleSingleFileUpload(file);
