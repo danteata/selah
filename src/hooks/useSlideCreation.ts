@@ -287,11 +287,19 @@ export function useSlideCreation() {
         tempSlide.data = scripture
         tempSlide.contents = generateSlideContent(tempSlide, scripture)
 
+        // Scripture has no top-level `book` field — derive from the first
+        // BibleVerse in `content` (when array) or parse the leading word off
+        // `label` (e.g. "John 3:16" -> "John"). Fall back to undefined.
+        const bookFromContent = Array.isArray(scripture.content)
+            ? scripture.content[0]?.book
+            : undefined
+        const bookFromLabel = scripture.label?.split(/\s+\d/)[0]?.trim() || undefined
+
         trackEvent(AnalyticsEventType.SLIDE_CREATED, {
             slide_type: 'bible',
             source: options?.fromWholeBibleSearch ? 'bible_search' : 'quick_action',
             version: scripture.version,
-            book: scripture.book,
+            book: bookFromContent ?? bookFromLabel,
             has_template: !!templateToUse,
         })
 
