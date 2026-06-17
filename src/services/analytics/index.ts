@@ -1,229 +1,100 @@
 /**
- * Analytics Service Adapter
- * 
- * Provides a unified interface for analytics tracking that can be swapped
- * between different providers (Posthog, Amplitude, etc.) via configuration.
- * 
- * Usage:
- *   import { analytics } from '@/services/analytics'
- *   analytics.track('slide_created', { type: 'bible' })
+ * Analytics service entry point.
+ *
+ * Canonical exports (new API):
+ *   - `analytics`             — singleton instance
+ *   - `AnalyticsService`      — class
+ *   - `AnalyticsEventType`    — typed event names
+ *   - `AnalyticsProvider`     — provider interface
+ *   - `AnalyticsProviderConfig` — provider config shape
+ *
+ * Compatibility shims (old API, used by `src/services/index.ts`):
+ *   - `initAnalytics()`        — read env vars, call `analytics.initialize(...)`
+ *   - `getAnalytics()`         — return the singleton
+ *   - `createAnalyticsAdapter()` — factory that returns a fresh `AnalyticsProvider`
+ *   - `AnalyticsAdapter`       — alias for `AnalyticsProvider`
+ *   - `AnalyticsConfig`        — alias for `AnalyticsProviderConfig`
  */
 
-// Core analytics interface - implement this for each provider
-export interface AnalyticsAdapter {
-    /** Initialize the analytics provider */
-    init(config: AnalyticsConfig): Promise<void>
+import { AnalyticsService, analytics } from './service'
+import type {
+    AnalyticsEvent,
+    AnalyticsProvider,
+    AnalyticsProviderConfig,
+    AnalyticsProviderType,
+    AnalyticsUserProperties,
+} from './types'
+import { PostHogAnalyticsProvider } from './providers/posthog'
+import { AmplitudeAnalyticsProvider } from './providers/amplitude'
+import { ConsoleAnalyticsProvider } from './providers/console'
+import { NoOpAnalyticsProvider } from './providers/noop'
 
-    /** Track a custom event */
-    track(event: string, properties?: Record<string, unknown>): void
+export { AnalyticsService, analytics } from './service'
+export type {
+    AnalyticsEvent,
+    AnalyticsProvider,
+    AnalyticsProviderConfig,
+    AnalyticsProviderType,
+    AnalyticsUserProperties,
+} from './types'
+export { AnalyticsEventType, AnalyticsProviderType as ProviderType } from './types'
 
-    /** Identify a user */
-    identify(userId: string, traits?: Record<string, unknown>): void
+// ---------------------------------------------------------------------------
+// Compatibility shims (old API)
+// ---------------------------------------------------------------------------
 
-    /** Track a page view */
-    page(name: string, properties?: Record<string, unknown>): void
+/** @deprecated Use {@link AnalyticsProvider}. */
+export type AnalyticsAdapter = AnalyticsProvider
+/** @deprecated Use {@link AnalyticsProviderConfig}. */
+export type AnalyticsConfig = AnalyticsProviderConfig
 
-    /** Reset/logout the current user */
-    reset(): void
-
-    /** Get the current distinct/user ID */
-    getDistinctId(): string | null
-}
-
-export interface AnalyticsConfig {
-    apiKey: string
-    apiHost?: string
-    debug?: boolean
-    autocapture?: boolean
-}
-
-// ============================================================================
-// Posthog Implementation
-// ============================================================================
-class PosthogAdapter implements AnalyticsAdapter {
-    private posthog: typeof import('posthog-js').default | null = null
-
-    async init(config: AnalyticsConfig): Promise<void> {
-        try {
-            const posthogModule = await import('posthog-js')
-            this.posthog = posthogModule.default
-
-            this.posthog.init(config.apiKey, {
-                api_host: config.apiHost || 'https://app.posthog.com',
-                autocapture: config.autocapture ?? true,
-                capture_pageview: false, // We'll handle this manually
-                debug: config.debug,
-            })
-        } catch (error) {
-            console.warn('Posthog not available:', error)
-        }
-    }
-
-    track(event: string, properties?: Record<string, unknown>): void {
-        this.posthog?.capture(event, properties)
-    }
-
-    identify(userId: string, traits?: Record<string, unknown>): void {
-        this.posthog?.identify(userId, traits)
-    }
-
-    page(name: string, properties?: Record<string, unknown>): void {
-        this.posthog?.capture('$pageview', { page_name: name, ...properties })
-    }
-
-    reset(): void {
-        this.posthog?.reset()
-    }
-
-    getDistinctId(): string | null {
-        return this.posthog?.get_distinct_id() || null
-    }
-}
-
-// ============================================================================
-// Amplitude Implementation
-// ============================================================================
-class AmplitudeAdapter implements AnalyticsAdapter {
-    private amplitude: typeof import('@amplitude/analytics-browser') | null = null
-
-    async init(config: AnalyticsConfig): Promise<void> {
-        try {
-            this.amplitude = await import('@amplitude/analytics-browser')
-
-            this.amplitude.init(config.apiKey, undefined, {
-                serverUrl: config.apiHost,
-                logLevel: config.debug ? 1 : 0, // 1 = verbose
-                autocapture: config.autocapture ? {
-                    elementInteractions: true,
-                    pageViews: false
-                } : false,
-            })
-        } catch (error) {
-            console.warn('Amplitude not available:', error)
-        }
-    }
-
-    track(event: string, properties?: Record<string, unknown>): void {
-        this.amplitude?.track(event, properties)
-    }
-
-    identify(userId: string, traits?: Record<string, unknown>): void {
-        this.amplitude?.setUserId(userId)
-        if (traits) {
-            const identifyEvent = new this.amplitude!.Identify()
-            Object.entries(traits).forEach(([key, value]) => {
-                identifyEvent.set(key, value as string | number | boolean)
-            })
-            this.amplitude?.identify(identifyEvent)
-        }
-    }
-
-    page(name: string, properties?: Record<string, unknown>): void {
-        this.amplitude?.track('Page View', { page_name: name, ...properties })
-    }
-
-    reset(): void {
-        this.amplitude?.reset()
-    }
-
-    getDistinctId(): string | null {
-        return this.amplitude?.getUserId() || null
-    }
-}
-
-// ============================================================================
-// Noop Implementation (for development/testing)
-// ============================================================================
-class NoopAdapter implements AnalyticsAdapter {
-    private debug = false
-
-    async init(config: AnalyticsConfig): Promise<void> {
-        this.debug = config.debug ?? false
-        if (this.debug) {
-            console.log('[Analytics:Noop] Initialized')
-        }
-    }
-
-    track(event: string, properties?: Record<string, unknown>): void {
-        if (this.debug) {
-            console.log('[Analytics:Noop] Track:', event, properties)
-        }
-    }
-
-    identify(userId: string, traits?: Record<string, unknown>): void {
-        if (this.debug) {
-            console.log('[Analytics:Noop] Identify:', userId, traits)
-        }
-    }
-
-    page(name: string, properties?: Record<string, unknown>): void {
-        if (this.debug) {
-            console.log('[Analytics:Noop] Page:', name, properties)
-        }
-    }
-
-    reset(): void {
-        if (this.debug) {
-            console.log('[Analytics:Noop] Reset')
-        }
-    }
-
-    getDistinctId(): string | null {
-        return null
-    }
-}
-
-// ============================================================================
-// Factory & Singleton
-// ============================================================================
-export type AnalyticsProvider = 'posthog' | 'amplitude' | 'noop'
-
-export function createAnalyticsAdapter(provider: AnalyticsProvider): AnalyticsAdapter {
-    switch (provider) {
+/**
+ * Build a fresh provider instance for the given type. Mirrors the old
+ * `createAnalyticsAdapter` factory. The factory used to live in
+ * `src/services/analytics/index.ts` and was lost when the module was
+ * slimmed down; this is the equivalent.
+ */
+export function createAnalyticsAdapter(type: AnalyticsProviderType): AnalyticsProvider {
+    switch (type) {
         case 'posthog':
-            return new PosthogAdapter()
+            return new PostHogAnalyticsProvider()
         case 'amplitude':
-            return new AmplitudeAdapter()
-        case 'noop':
+            return new AmplitudeAnalyticsProvider()
+        case 'console':
+            return new ConsoleAnalyticsProvider()
+        case 'none':
         default:
-            return new NoopAdapter()
+            return new NoOpAnalyticsProvider()
     }
 }
 
-// Singleton instance - configured via environment
-let analyticsInstance: AnalyticsAdapter | null = null
-
-export function getAnalytics(): AnalyticsAdapter {
-    if (!analyticsInstance) {
-        const provider = (import.meta.env.VITE_ANALYTICS_PROVIDER || 'noop') as AnalyticsProvider
-        analyticsInstance = createAnalyticsAdapter(provider)
-    }
-    return analyticsInstance
-}
-
-export async function initAnalytics(): Promise<void> {
-    const analytics = getAnalytics()
-    const apiKey = import.meta.env.VITE_ANALYTICS_API_KEY || ''
-    const apiHost = import.meta.env.VITE_ANALYTICS_API_HOST
-
-    await analytics.init({
-        apiKey,
-        apiHost,
-        debug: import.meta.env.DEV,
-        autocapture: true,
+/**
+ * @deprecated Call `analytics.initialize(type, config)` instead. This shim
+ * reads the legacy `VITE_ANALYTICS_*` env vars for backward compatibility
+ * with `initServices()`.
+ */
+export async function initAnalytics(
+    overrides: Partial<AnalyticsProviderConfig> = {},
+): Promise<void> {
+    const providerType = (import.meta.env.VITE_ANALYTICS_PROVIDER ||
+        'console') as AnalyticsProviderType
+    const apiKey =
+        providerType === 'amplitude'
+            ? import.meta.env.VITE_AMPLITUDE_KEY
+            : providerType === 'posthog'
+                ? import.meta.env.VITE_POSTHOG_KEY
+                : ''
+    await analytics.initialize(providerType, {
+        apiKey: apiKey ?? '',
+        enabled: import.meta.env.VITE_ANALYTICS_ENABLED !== 'false',
+        environment: import.meta.env.DEV ? 'development' : 'production',
+        appVersion: overrides.appVersion,
+        isDesktop: overrides.isDesktop,
+        options: overrides.options,
     })
 }
 
-// Export singleton for easy access
-export const analytics = {
-    get instance() {
-        return getAnalytics()
-    },
-    track: (event: string, properties?: Record<string, unknown>) =>
-        getAnalytics().track(event, properties),
-    identify: (userId: string, traits?: Record<string, unknown>) =>
-        getAnalytics().identify(userId, traits),
-    page: (name: string, properties?: Record<string, unknown>) =>
-        getAnalytics().page(name, properties),
-    reset: () => getAnalytics().reset(),
+/** @deprecated Use the `analytics` singleton directly. */
+export function getAnalytics(): AnalyticsService {
+    return AnalyticsService.getInstance()
 }
