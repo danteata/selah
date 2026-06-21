@@ -1,87 +1,45 @@
 import { Link } from 'react-router-dom'
-import { useState, useEffect, useRef } from 'react'
-import { gsap } from '../lib/gsap'
-import { useScrollReveal } from '../hooks/useScrollReveal'
+import { useState, useEffect } from 'react'
 import {
     BookOpen,
-    Video,
-    Clock,
-    Bell,
-    Monitor,
-    Users,
-    Check,
     ArrowRight,
     Menu,
     X,
     Mic,
     Brain,
-    Layers,
-    Sparkles,
+    FileText,
     WifiOff,
     LayoutDashboard,
-    FileText,
-    Music,
-    Book,
+    Layers,
     Type,
     Palette,
-    Cast,
     Lock,
     MessageSquare,
     UserCheck,
+    Users,
+    Check,
     Radio,
     Sliders,
     Volume2,
+    Monitor,
+    Cast,
+    Sparkles,
 } from 'lucide-react'
+import { useScrollReveal } from '@/hooks/useScrollReveal'
+import { Preloader } from '@/components/landing/Preloader'
+import { Cursor } from '@/components/landing/Cursor'
+import { Hero } from '@/components/landing/Hero'
+import { SermonListener } from '@/components/landing/SermonListener'
+import { FeaturesRail } from '@/components/landing/FeaturesRail'
 
-const coreFeatures = [
-    {
-        icon: Music,
-        title: 'Song & Hymn Library',
-        description: "Every song your church loves, organised and ready. Find anything in seconds during a live service.",
-        accent: '#0d9488',
-        tag: 'Core',
-    },
-    {
-        icon: Book,
-        title: 'Bible on Screen',
-        description: 'Search any translation and display verses beautifully. Add your own Bible version and it works the same way.',
-        accent: '#d97706',
-        tag: 'Core',
-    },
-    {
-        icon: Video,
-        title: 'Media & Video',
-        description: 'Play YouTube clips, show announcement videos, or display images, all from the same screen.',
-        accent: '#be123c',
-        tag: 'Core',
-    },
-    {
-        icon: Clock,
-        title: 'Countdown Timers',
-        description: 'Keep people engaged before the service begins. Beautiful countdowns you can set up in seconds.',
-        accent: '#059669',
-        tag: 'Core',
-    },
-    {
-        icon: Bell,
-        title: 'Live Announcements',
-        description: 'Need to share something mid-service? Push a message to the screen instantly, with no interruption.',
-        accent: '#4338ca',
-        tag: 'Core',
-    },
-    {
-        icon: Monitor,
-        title: 'Projection Output',
-        description: 'Project to any connected screen with one click. Your congregation always sees the right content.',
-        accent: '#0d9488',
-        tag: 'Live',
-    },
-]
+// ─────────────────────────────────────────────────────────────────────────────
+// Content
+// ─────────────────────────────────────────────────────────────────────────────
 
 const aiFeatures = [
     { icon: Mic, title: 'Listens as You Preach', description: 'Selah quietly listens through your microphone and follows your sermon in real time, with no manual input required.' },
     { icon: Brain, title: 'Understands Context', description: "Even when no verse is named, Selah reads between the lines and suggests scriptures that match what's being preached." },
-    { icon: FileText, title: 'Catches Every Reference', description: 'Say "John chapter 3 verse 16" naturally and Selah finds it instantly, ready to display on screen.' },
+    { icon: FileText, title: 'Catches Every Reference', description: 'Say “John chapter 3 verse 16” naturally and Selah finds it instantly, ready to display on screen.' },
     { icon: WifiOff, title: 'Works Without the Internet', description: 'Patchy church wifi? Selah keeps running so your service never misses a beat.' },
 ]
 
@@ -98,17 +56,49 @@ const collabModes = [
     { icon: UserCheck, label: 'Open', desc: 'Anyone pushes' },
 ]
 
-const transcriptDemo = [
-    { text: '…and as we reflect on the love of God, we turn to', delay: 0 },
-    { text: 'John chapter three, verse sixteen —', delay: 2200, isVerse: true },
-    { text: 'where we read that God so loved the world', delay: 4400 },
-    { text: 'that he gave his one and only Son…', delay: 6400 },
+const betaPerks = [
+    { title: 'Free during beta', description: 'Full access at no cost while we build together.' },
+    { title: 'Direct line to the team', description: 'Your feedback lands in our build queue, not a support ticket.' },
+    { title: 'Locked-in early-bird pricing', description: '50% off your plan for life when we officially launch.' },
+    { title: 'Onboard with us, not a tutorial', description: 'We will personally help your first service go live.' },
 ]
 
-const waveBars = Array.from({ length: 32 }, (_, i) => {
-    const base = 20 + Math.abs(Math.sin(i * 0.55)) * 75
-    return Math.round(base)
+// Mock dashboard panels
+const dashboardPanels = [
+    { label: 'Quick Actions', col: 'col-span-1', row: 'row-span-2', accent: '#0d9488' },
+    { label: 'Live Preview', col: 'col-span-2', row: '', accent: '#be123c' },
+    { label: 'Service Order', col: 'col-span-2', row: '', accent: '#4338ca' },
+    { label: 'AI Listener', col: 'col-span-2', row: '', accent: '#0d9488' },
+    { label: 'Library', col: 'col-span-1', row: 'row-span-2', accent: '#d97706' },
+]
+
+// Standout section demo data
+const avatarColors = [
+    'from-teal-400 to-emerald-500',
+    'from-amber-400 to-orange-500',
+    'from-rose-400 to-pink-500',
+    'from-violet-400 to-purple-500',
+]
+
+const pipelineBars = Array.from({ length: 40 }, (_, i) => {
+    return Math.round(25 + Math.abs(Math.sin(i * 0.4)) * 60)
 })
+
+const suggestedSlides = [
+    { label: 'Amazing Grace (V2)', color: '#f59e0b' },
+    { label: 'John 3:16', color: '#0d9488' },
+    { label: 'Offering slide', color: '#be123c' },
+]
+
+const SmallArrow = () => (
+    <svg className="w-3 h-3 text-white/20 flex-shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M5 12h14M13 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NavBar — translucent, condenses on scroll
+// ─────────────────────────────────────────────────────────────────────────────
 
 function NavBar({
     scrolled,
@@ -120,18 +110,19 @@ function NavBar({
     setMobileMenuOpen: (v: boolean) => void
 }) {
     const navLinks = [
+        { href: '#sermon-listener', label: 'Sermon Listener' },
         { href: '#features', label: 'Features' },
-        { href: '#ai-listener', label: 'AI Listener' },
         { href: '#dashboard', label: 'Dashboard' },
-        { href: '#early-access', label: 'Early Access' },
+        { href: '#early-access', label: 'Beta' },
     ]
 
     return (
         <nav
-            className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 border-b ${scrolled
-                    ? 'bg-[#08090c]/80 backdrop-blur-xl border-white/5 shadow-2xl shadow-black/20'
+            className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 border-b ${
+                scrolled
+                    ? 'bg-[#08090c]/80 backdrop-blur-xl border-white/5'
                     : 'bg-transparent border-transparent'
-                }`}
+            }`}
         >
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between h-16">
@@ -145,20 +136,12 @@ function NavBar({
                         >
                             <BookOpen className="w-4.5 h-4.5 text-white" strokeWidth={2.25} />
                         </div>
-                        <div className="leading-none">
-                            <div
-                                style={{ fontFamily: 'Crimson Pro, serif', fontSize: '1.25rem', fontWeight: 600 }}
-                                className="text-white"
-                            >
-                                Selah
-                            </div>
-                            <div
-                                className="text-[9px] font-mono uppercase tracking-[0.22em] mt-0.5"
-                                style={{ color: 'rgba(255,255,255,0.35)' }}
-                            >
-                                Worship Studio
-                            </div>
-                        </div>
+                        <span
+                            className="text-white"
+                            style={{ fontFamily: 'Crimson Pro, serif', fontSize: '1.3rem', fontWeight: 600 }}
+                        >
+                            Selah
+                        </span>
                     </Link>
 
                     <div className="hidden md:flex items-center gap-1">
@@ -176,7 +159,7 @@ function NavBar({
                     <div className="hidden md:flex items-center gap-3">
                         <Link
                             to="/download"
-                            className="group flex items-center gap-1.5 text-sm font-medium text-white/70 hover:text-white transition-colors px-3 py-2"
+                            className="text-sm font-medium text-white/70 hover:text-white transition-colors px-3 py-2"
                         >
                             Download
                         </Link>
@@ -188,10 +171,11 @@ function NavBar({
                         </Link>
                         <Link
                             to="/signup"
-                            className="group flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl text-white transition-all hover:-translate-y-px"
+                            data-cursor="Go"
+                            className="group flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-full text-[#08090c] transition-all hover:-translate-y-px"
                             style={{
                                 background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
-                                boxShadow: '0 4px 16px -4px rgba(20,184,166,0.5), inset 0 1px 0 rgba(255,255,255,0.15)',
+                                boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.2)',
                             }}
                         >
                             Get Started Free
@@ -202,6 +186,7 @@ function NavBar({
                     <button
                         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                         className="md:hidden p-2 text-white/60 hover:text-white"
+                        aria-label="Toggle menu"
                     >
                         {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
                     </button>
@@ -237,7 +222,7 @@ function NavBar({
                             </Link>
                             <Link
                                 to="/signup"
-                                className="block w-full py-3 text-center text-sm font-semibold rounded-xl text-white"
+                                className="block w-full py-3 text-center text-sm font-semibold rounded-full text-[#08090c]"
                                 style={{ background: 'linear-gradient(135deg, #14b8a6, #0d9488)' }}
                             >
                                 Get Started Free
@@ -250,653 +235,16 @@ function NavBar({
     )
 }
 
-function HeroSection() {
-    const heroRef = useRef<HTMLElement>(null)
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Features — "How it listens"
+// ─────────────────────────────────────────────────────────────────────────────
 
-    useEffect(() => {
-        const el = heroRef.current
-        if (!el) return
-        const ctx = gsap.context(() => {
-            gsap.set(
-                [
-                    '.hero-badge',
-                    '.hero-line',
-                    '.hero-subtitle',
-                    '.hero-cta',
-                    '.hero-stat',
-                    '.hero-orb',
-                ],
-                { opacity: 0 }
-            )
-            const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
-            tl.to('.hero-badge', { opacity: 1, y: 0, duration: 0.6, delay: 0.15 })
-                .fromTo(
-                    '.hero-line',
-                    { opacity: 0, y: 44 },
-                    { opacity: 1, y: 0, duration: 0.8, stagger: 0.14 },
-                    '-=0.3'
-                )
-                .to('.hero-subtitle', { opacity: 1, y: 0, duration: 0.6 }, '-=0.3')
-                .to('.hero-cta', { opacity: 1, y: 0, duration: 0.5, stagger: 0.08 }, '-=0.3')
-                .to('.hero-stat', { opacity: 1, y: 0, duration: 0.45, stagger: 0.06 }, '-=0.25')
-                .fromTo(
-                    '.hero-mockup',
-                    { y: 60, opacity: 0 },
-                    { opacity: 1, y: 0, duration: 1, ease: 'power3.out' },
-                    '-=0.8'
-                )
-                .fromTo(
-                    '.hero-orb',
-                    { scale: 0.6 },
-                    { opacity: 0.8, scale: 1, duration: 1.4, ease: 'power2.out' },
-                    '-=1.2'
-                )
-        }, el)
-        return () => ctx.revert()
-    }, [])
+function AiFeaturesSection() {
+    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 85%' })
+    const gridRef = useScrollReveal<HTMLDivElement>('stagger', { start: 'top 82%', staggerAmount: 0.1 })
 
     return (
-        <section
-            ref={heroRef}
-            className="relative pt-32 pb-20 lg:pt-40 lg:pb-28 overflow-hidden"
-            style={{ background: '#08090c' }}
-        >
-            <div
-                className="absolute inset-0 pointer-events-none animate-lp-gradient-drift"
-                style={{
-                    background:
-                        'radial-gradient(ellipse 60% 50% at 25% 10%, rgba(20,184,166,0.18), transparent 60%),' +
-                        'radial-gradient(ellipse 50% 50% at 80% 70%, rgba(217,119,6,0.10), transparent 65%),' +
-                        'radial-gradient(ellipse 40% 40% at 50% 50%, rgba(45,212,191,0.05), transparent 60%)',
-                }}
-            />
-
-            <div
-                className="absolute inset-0 pointer-events-none opacity-[0.04]"
-                style={{
-                    backgroundImage:
-                        'linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)',
-                    backgroundSize: '64px 64px',
-                    maskImage: 'radial-gradient(ellipse 60% 60% at 50% 40%, black 30%, transparent 80%)',
-                    WebkitMaskImage: 'radial-gradient(ellipse 60% 60% at 50% 40%, black 30%, transparent 80%)',
-                }}
-            />
-
-            <div
-                className="hero-orb absolute top-32 left-[12%] w-72 h-72 bg-primary-500/20 rounded-full blur-3xl pointer-events-none"
-                style={{ animation: 'blob 9s infinite' }}
-            />
-            <div
-                className="hero-orb absolute top-48 right-[10%] w-64 h-64 bg-amber-500/12 rounded-full blur-3xl pointer-events-none"
-                style={{ animation: 'blob 11s infinite 2s' }}
-            />
-            <div
-                className="hero-orb absolute bottom-40 left-1/3 w-56 h-56 bg-pink-500/10 rounded-full blur-3xl pointer-events-none"
-                style={{ animation: 'blob 13s infinite 4s' }}
-            />
-
-            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="text-center max-w-4xl mx-auto">
-                    <div
-                        className="hero-badge inline-flex items-center gap-2 px-4 py-2 rounded-full mb-7"
-                        style={{
-                            background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.08) 100%)',
-                            border: '1px solid rgba(20,184,166,0.35)',
-                            boxShadow: '0 8px 24px -8px rgba(20,184,166,0.3), inset 0 1px 0 rgba(255,255,255,0.06)',
-                        }}
-                    >
-                        <span className="relative flex w-1.5 h-1.5">
-                            <span className="absolute inline-flex h-full w-full rounded-full bg-primary-400 opacity-75 animate-ping" />
-                            <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-primary-400" />
-                        </span>
-                        <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary-200">
-                            Now in open beta · v2 ships this month
-                        </span>
-                    </div>
-
-                    <h1
-                        className="font-bold leading-[1.02] text-white mb-7 font-serif tracking-tight"
-                        style={{ fontSize: 'clamp(2.75rem, 6.5vw, 5rem)', textShadow: '0 1px 0 rgba(0,0,0,0.4)' }}
-                    >
-                        <span className="hero-line block">Preach the sermon.</span>
-                        <span
-                            className="hero-line block italic"
-                            style={{
-                                background: 'linear-gradient(135deg, #5eead4 0%, #2dd4bf 45%, #fcd34d 100%)',
-                                WebkitBackgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent',
-                                backgroundClip: 'text',
-                            }}
-                        >
-                            We&rsquo;ll find the verse.
-                        </span>
-                    </h1>
-
-                    <p
-                        className="hero-subtitle text-lg lg:text-xl max-w-2xl mx-auto mb-9 leading-relaxed"
-                        style={{ color: 'rgba(228,228,231,0.75)' }}
-                    >
-                        Selah listens to your sermon, catches every scripture reference, and
-                        puts the right verse on screen &mdash;{' '}
-                        <span className="text-white font-medium">automatically, offline, in real time.</span>
-                    </p>
-
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10">
-                        <Link
-                            to="/signup"
-                            className="hero-cta group flex items-center gap-2 px-7 py-3.5 font-semibold rounded-2xl text-white transition-all hover:-translate-y-px"
-                            style={{
-                                background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
-                                boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
-                            }}
-                        >
-                            Get My Church Started
-                            <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-                        </Link>
-                        <a
-                            href="#ai-listener"
-                            className="hero-cta flex items-center gap-2 px-5 py-3.5 font-medium rounded-2xl text-white/80 transition-all hover:text-white"
-                            style={{
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                background: 'rgba(255,255,255,0.03)',
-                                backdropFilter: 'blur(10px)',
-                            }}
-                        >
-                            <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
-                            <span>Watch it work</span>
-                            <span className="text-zinc-500 text-sm">90s</span>
-                        </a>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4">
-                        {[
-                            'Free during beta',
-                            'No credit card',
-                            'Works fully offline',
-                            'Under 30-min setup',
-                        ].map((label) => (
-                            <span
-                                key={label}
-                                className="hero-stat inline-flex items-center gap-1.5 text-[13px]"
-                                style={{ color: 'rgba(228,228,231,0.55)' }}
-                            >
-                                <svg
-                                    className="w-3.5 h-3.5 text-primary-400"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="3"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                >
-                                    <path d="M5 13l4 4L19 7" />
-                                </svg>
-                                {label}
-                            </span>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Floating product mockup — the actual app surface */}
-                <div className="hero-mockup relative max-w-5xl mx-auto mt-12">
-                    <div
-                        className="relative rounded-2xl overflow-hidden"
-                        style={{
-                            background: 'linear-gradient(180deg, rgba(15,18,22,0.95) 0%, rgba(8,10,14,0.98) 100%)',
-                            border: '1px solid rgba(255,255,255,0.10)',
-                            boxShadow: '0 60px 120px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)',
-                        }}
-                    >
-                        {/* App chrome */}
-                        <div
-                            className="flex items-center gap-2 px-4 py-2.5 border-b"
-                            style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-                        >
-                            <div className="flex gap-1.5">
-                                <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
-                                <div className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
-                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
-                            </div>
-                            <div
-                                className="ml-3 flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.22em]"
-                                style={{ color: 'rgba(255,255,255,0.45)' }}
-                            >
-                                <BookOpen className="w-3 h-3" /> selah.app
-                            </div>
-                            <div className="ml-auto flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.22em] text-emerald-400">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                Live · Sunday 10:42 AM
-                            </div>
-                        </div>
-
-                        {/* App body */}
-                        <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_220px] min-h-[280px]">
-                            {/* Left rail — service order */}
-                            <div
-                                className="p-3 md:border-r hidden md:block"
-                                style={{
-                                    borderColor: 'rgba(255,255,255,0.05)',
-                                    background: 'rgba(0,0,0,0.2)',
-                                }}
-                            >
-                                <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40 mb-2.5 px-1">
-                                    Service order
-                                </div>
-                                {[
-                                    { label: 'Welcome', done: true },
-                                    { label: 'Worship · 3 songs', done: true },
-                                    { label: 'Sermon', active: true },
-                                    { label: 'Offering', done: false },
-                                    { label: 'Communion', done: false },
-                                    { label: 'Closing', done: false },
-                                ].map((item) => (
-                                    <div
-                                        key={item.label}
-                                        className="flex items-center gap-2 px-2 py-1.5 rounded-md mb-0.5 text-[11px]"
-                                        style={
-                                            item.active
-                                                ? {
-                                                      background: 'rgba(20,184,166,0.12)',
-                                                      border: '1px solid rgba(20,184,166,0.3)',
-                                                      color: '#5eead4',
-                                                  }
-                                                : {
-                                                      color: item.done
-                                                          ? 'rgba(255,255,255,0.45)'
-                                                          : 'rgba(255,255,255,0.6)',
-                                                  }
-                                        }
-                                    >
-                                        <div
-                                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                                            style={{
-                                                background: item.active
-                                                    ? '#5eead4'
-                                                    : item.done
-                                                    ? 'rgba(20,184,166,0.4)'
-                                                    : 'rgba(255,255,255,0.2)',
-                                                boxShadow: item.active ? '0 0 8px #5eead4' : 'none',
-                                            }}
-                                        />
-                                        <span className={item.done ? 'line-through decoration-white/20' : ''}>
-                                            {item.label}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* Center — projection preview */}
-                            <div className="p-4 flex flex-col">
-                                <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40 mb-2">
-                                    On screen now
-                                </div>
-                                <div
-                                    className="flex-1 rounded-lg flex flex-col items-center justify-center text-center px-4 relative overflow-hidden"
-                                    style={{ background: 'linear-gradient(135deg, #042f2e 0%, #0c0a09 100%)' }}
-                                >
-                                    <div
-                                        className="absolute inset-0 opacity-30"
-                                        style={{
-                                            background:
-                                                'radial-gradient(circle at 30% 30%, rgba(20,184,166,0.3), transparent 60%)',
-                                        }}
-                                    />
-                                    <div className="relative">
-                                        <div className="text-[9px] font-mono uppercase tracking-[0.3em] text-teal-300/80 mb-2">
-                                            John 3:16
-                                        </div>
-                                        <div
-                                            className="text-white text-base sm:text-lg leading-snug"
-                                            style={{ fontFamily: 'Crimson Pro, serif' }}
-                                        >
-                                            &ldquo;For God so loved the world
-                                            <br />
-                                            that he gave his one and only Son…&rdquo;
-                                        </div>
-                                        <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/30 mt-3">
-                                            NIV · Pushed 2s ago
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Right — AI listener status */}
-                            <div
-                                className="p-3 md:border-l hidden md:block"
-                                style={{
-                                    borderColor: 'rgba(255,255,255,0.05)',
-                                    background: 'rgba(0,0,0,0.2)',
-                                }}
-                            >
-                                <div className="flex items-center justify-between mb-2.5 px-1">
-                                    <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40">
-                                        AI Listener
-                                    </div>
-                                    <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-[0.22em] text-emerald-400">
-                                        <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-                                        Live
-                                    </div>
-                                </div>
-                                <div className="flex items-end gap-[2px] h-7 mb-3">
-                                    {Array.from({ length: 24 }).map((_, i) => (
-                                        <span
-                                            key={i}
-                                            className="flex-1 rounded-full"
-                                            style={{
-                                                background: 'linear-gradient(180deg, #5eead4 0%, #0d9488 100%)',
-                                                height: `${30 + Math.abs(Math.sin(i * 0.6)) * 70}%`,
-                                                animation: `waveform-bar 1.1s ease-in-out ${i * 0.04}s infinite`,
-                                                opacity: 0.75,
-                                            }}
-                                        />
-                                    ))}
-                                </div>
-                                <div
-                                    className="rounded-md p-2 mb-2"
-                                    style={{
-                                        background: 'rgba(20,184,166,0.08)',
-                                        border: '1px solid rgba(20,184,166,0.25)',
-                                    }}
-                                >
-                                    <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-teal-300 mb-0.5">
-                                        Just detected
-                                    </div>
-                                    <div className="text-[11px] text-white font-medium">John 3:16</div>
-                                </div>
-                                <div
-                                    className="rounded-md p-2"
-                                    style={{
-                                        background: 'rgba(255,255,255,0.03)',
-                                        border: '1px solid rgba(255,255,255,0.06)',
-                                    }}
-                                >
-                                    <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/40 mb-0.5">
-                                        Queue
-                                    </div>
-                                    <div className="text-[11px]" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                                        Romans 6:23 · Romans 5:8
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Floating annotation chips */}
-                    <div
-                        className="hidden lg:flex absolute -left-6 top-1/4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
-                        style={{
-                            background: 'rgba(15,18,22,0.95)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)',
-                        }}
-                    >
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        <span style={{ color: 'rgba(255,255,255,0.85)' }}>Caught it the moment you said it</span>
-                    </div>
-                    <div
-                        className="hidden lg:flex absolute -right-6 bottom-12 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
-                        style={{
-                            background: 'rgba(15,18,22,0.95)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)',
-                        }}
-                    >
-                        <svg
-                            className="w-3.5 h-3.5 text-teal-400"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        >
-                            <path d="M5 13l4 4L19 7" />
-                        </svg>
-                        <span style={{ color: 'rgba(255,255,255,0.85)' }}>Pushed to every screen instantly</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-    )
-}
-
-function LiveDemoMock({
-    activeLine,
-    showDetected,
-}: {
-    activeLine: number
-    showDetected: boolean
-}) {
-    return (
-        <div
-            className="rounded-2xl overflow-hidden flex flex-col animate-lp-mock-float"
-            style={{
-                height: '420px',
-                background: 'linear-gradient(180deg, rgba(15,18,22,0.9) 0%, rgba(8,10,14,0.96) 100%)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                boxShadow:
-                    '0 40px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06), 0 0 80px -20px rgba(20,184,166,0.2)',
-                backdropFilter: 'blur(20px)',
-            }}
-        >
-            <div
-                className="flex items-center gap-2 px-4 py-3 border-b flex-shrink-0"
-                style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-            >
-                <div className="flex gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
-                </div>
-                <div className="ml-2 flex items-center gap-2">
-                    <Mic className="w-3.5 h-3.5 text-primary-400" />
-                    <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-white/50">
-                        Sermon Listener
-                    </span>
-                </div>
-                <span className="ml-auto flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.22em] text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-live-dot" />
-                    Live
-                </span>
-            </div>
-
-            <div className="flex-1 p-6 pb-5 flex flex-col gap-5 overflow-hidden min-h-0">
-                <div className="flex items-center gap-1 h-10 flex-shrink-0">
-                    {waveBars.map((h, i) => (
-                        <div
-                            key={i}
-                            className="flex-1 rounded-full"
-                            style={{
-                                background: 'linear-gradient(180deg, #2dd4bf 0%, #0d9488 100%)',
-                                animation: `waveform-bar 1.2s ease-in-out ${i * 0.04}s infinite`,
-                                opacity: 0.75,
-                                minHeight: '4px',
-                                maxHeight: `${h}%`,
-                            }}
-                        />
-                    ))}
-                </div>
-
-                <div className="flex-1 overflow-hidden flex flex-col justify-end gap-2.5 min-h-0">
-                    {transcriptDemo.map((line, i) => (
-                        <p
-                            key={i}
-                            className="text-[15px] leading-relaxed transition-all duration-500"
-                            style={{
-                                opacity: i <= activeLine ? 1 : 0,
-                                color:
-                                    line.isVerse && i === activeLine
-                                        ? '#5eead4'
-                                        : 'rgb(228,228,231)',
-                                fontWeight: line.isVerse && i === activeLine ? 600 : 400,
-                            }}
-                        >
-                            {line.text}
-                            {line.isVerse && i <= activeLine && (
-                                <span
-                                    className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-widest"
-                                    style={{
-                                        background: 'rgba(20,184,166,0.18)',
-                                        color: '#5eead4',
-                                    }}
-                                >
-                                    detected
-                                </span>
-                            )}
-                        </p>
-                    ))}
-                </div>
-            </div>
-
-            <div className="h-[104px] flex-shrink-0 px-6 pb-6">
-                <div
-                    className="h-full p-4 rounded-xl"
-                    style={{
-                        background: 'linear-gradient(135deg, rgba(20,184,166,0.20) 0%, rgba(20,184,166,0.04) 100%)',
-                        border: '1px solid rgba(20,184,166,0.32)',
-                        boxShadow: '0 8px 24px -8px rgba(20,184,166,0.25)',
-                        opacity: showDetected ? 1 : 0,
-                        transform: showDetected ? 'translateX(0)' : 'translateX(-10px)',
-                        transition: 'opacity 0.5s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
-                    }}
-                >
-                    <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-primary-300 mb-1.5">
-                        <span
-                            className="w-1.5 h-1.5 rounded-full bg-primary-400"
-                            style={{
-                                animation: showDetected
-                                    ? 'live-dot 1.6s ease-in-out infinite'
-                                    : 'none',
-                            }}
-                        />
-                        Queued for display
-                    </div>
-                    <div className="text-white font-serif font-semibold text-lg leading-tight">
-                        John 3:16
-                    </div>
-                    <div className="text-xs text-zinc-400 mt-0.5 italic font-serif truncate">
-                        &ldquo;For God so loved the world that he gave his one and only
-                        Son…&rdquo;
-                    </div>
-                </div>
-            </div>
-        </div>
-    )
-}
-
-function SermonListenerSection({
-    activeLine,
-    showDetected,
-}: {
-    activeLine: number
-    showDetected: boolean
-}) {
-    const colLeftRef = useScrollReveal<HTMLDivElement>('fade-right', { start: 'top 82%' })
-    const colRightRef = useScrollReveal<HTMLDivElement>('scale', { start: 'top 82%', delay: 0.15 })
-
-    return (
-        <section id="ai-listener" className="relative py-24 lg:py-36 overflow-hidden" style={{ background: '#08090c' }}>
-            <div
-                className="absolute inset-0 pointer-events-none opacity-40"
-                style={{
-                    background:
-                        'radial-gradient(ellipse 50% 50% at 20% 30%, rgba(20,184,166,0.10), transparent 60%),' +
-                        'radial-gradient(ellipse 40% 40% at 85% 70%, rgba(217,119,6,0.06), transparent 60%)',
-                }}
-            />
-
-            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="grid lg:grid-cols-2 gap-16 items-center">
-                    <div ref={colLeftRef}>
-                        <div
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 text-[10px] font-bold uppercase tracking-[0.22em]"
-                            style={{
-                                background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.08) 100%)',
-                                border: '1px solid rgba(20,184,166,0.35)',
-                                color: '#5eead4',
-                            }}
-                        >
-                            <Mic className="w-3 h-3" /> AI Sermon Listener
-                        </div>
-                        <h2
-                            className="mb-5 font-serif tracking-tight"
-                            style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', fontWeight: 700, lineHeight: 1.1, color: '#fff' }}
-                        >
-                            Scripture surfaces itself.
-                            <br />
-                            <span
-                                style={{
-                                    background: 'linear-gradient(135deg, #5eead4 0%, #2dd4bf 45%, #fcd34d 100%)',
-                                    WebkitBackgroundClip: 'text',
-                                    WebkitTextFillColor: 'transparent',
-                                    backgroundClip: 'text',
-                                }}
-                                className="italic"
-                            >
-                                You just preach.
-                            </span>
-                        </h2>
-                        <p
-                            className="mb-8 leading-relaxed text-lg"
-                            style={{ color: 'rgba(228,228,231,0.7)' }}
-                        >
-                            Selah listens quietly in the background as your pastor preaches. The
-                            moment a scripture is mentioned, or even just implied, the right
-                            verse is ready to appear on screen. No scrambling, no missed
-                            moments.
-                        </p>
-                        <div className="space-y-3.5">
-                            {aiFeatures.map((f) => (
-                                <div
-                                    key={f.title}
-                                    className="flex gap-4 p-4 rounded-2xl transition-all hover:bg-white/[0.02]"
-                                    style={{
-                                        background: 'rgba(255,255,255,0.02)',
-                                        border: '1px solid rgba(255,255,255,0.06)',
-                                    }}
-                                >
-                                    <div
-                                        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                                        style={{
-                                            background: 'rgba(20,184,166,0.12)',
-                                            border: '1px solid rgba(20,184,166,0.2)',
-                                        }}
-                                    >
-                                        <f.icon className="w-4 h-4 text-primary-300" />
-                                    </div>
-                                    <div>
-                                        <div className="font-semibold text-white text-[0.95rem]">{f.title}</div>
-                                        <div
-                                            className="mt-1 leading-relaxed"
-                                            style={{ color: 'rgba(228,228,231,0.6)', fontSize: '0.85rem' }}
-                                        >
-                                            {f.description}
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div ref={colRightRef}>
-                        <LiveDemoMock activeLine={activeLine} showDetected={showDetected} />
-                    </div>
-                </div>
-            </div>
-        </section>
-    )
-}
-
-function CoreFeaturesSection() {
-    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
-    const gridRef = useScrollReveal<HTMLDivElement>('stagger', { start: 'top 85%', staggerAmount: 0.08 })
-
-    return (
-        <section
-            id="features"
-            className="relative py-24 lg:py-36 overflow-hidden"
-            style={{ background: '#0a0b10' }}
-        >
+        <section className="relative py-24 lg:py-32 overflow-hidden" style={{ background: '#08090c' }}>
             <div
                 className="absolute inset-0 pointer-events-none opacity-30"
                 style={{
@@ -905,72 +253,54 @@ function CoreFeaturesSection() {
                 }}
             />
 
-            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div ref={headingRef} className="text-center mb-16">
-                    <div
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-5 text-[10px] font-bold uppercase tracking-[0.22em]"
-                        style={{
-                            background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.08) 100%)',
-                            border: '1px solid rgba(20,184,166,0.35)',
-                            color: '#5eead4',
-                        }}
-                    >
-                        <Sparkles className="w-3 h-3" /> Everything you need
-                    </div>
-                    <h2
-                        className="text-4xl sm:text-5xl font-bold text-white mb-4 font-serif tracking-tight"
-                    >
-                        Built for the whole service
-                    </h2>
-                    <p className="text-lg max-w-2xl mx-auto" style={{ color: 'rgba(228,228,231,0.6)' }}>
-                        Songs, scripture, media, countdowns, announcements. All in one unified
-                        platform built for live services.
+            <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div ref={headingRef} className="max-w-2xl mb-14">
+                    <p className="text-xs font-mono uppercase tracking-[0.3em] text-teal-400 mb-4">
+                        How it listens
                     </p>
-                </div>
-
-                <div ref={gridRef} className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {coreFeatures.map((f) => (
-                        <div
-                            key={f.title}
-                            className="group relative rounded-2xl p-6 transition-all duration-300 hover:-translate-y-1"
+                    <h2
+                        className="text-4xl sm:text-5xl text-white"
+                        style={{ fontFamily: 'Crimson Pro, serif', fontWeight: 600, lineHeight: 1.05 }}
+                    >
+                        It doesn&rsquo;t transcribe.
+                        <br />
+                        <span
+                            className="italic"
                             style={{
-                                background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
-                                border: '1px solid rgba(255,255,255,0.06)',
-                                backdropFilter: 'blur(10px)',
+                                background: 'linear-gradient(135deg, #5eead4 0%, #fcd34d 100%)',
+                                WebkitBackgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent',
+                                backgroundClip: 'text',
                             }}
                         >
-                            <div
-                                className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-                                style={{
-                                    background: `radial-gradient(circle at 50% 0%, ${f.accent}15, transparent 60%)`,
-                                }}
-                            />
-                            <div className="relative">
-                                <div className="flex items-start justify-between mb-4">
-                                    <div
-                                        className="w-11 h-11 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300"
-                                        style={{
-                                            background: `${f.accent}15`,
-                                            border: `1px solid ${f.accent}25`,
-                                        }}
-                                    >
-                                        <f.icon className="w-5 h-5" style={{ color: f.accent }} />
-                                    </div>
-                                    <span
-                                        className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest"
-                                        style={{ background: `${f.accent}15`, color: f.accent }}
-                                    >
-                                        {f.tag}
-                                    </span>
-                                </div>
-                                <h3 className="text-lg font-semibold text-white mb-2">{f.title}</h3>
-                                <p
-                                    className="text-sm leading-relaxed"
-                                    style={{ color: 'rgba(228,228,231,0.6)' }}
+                            It understands.
+                        </span>
+                    </h2>
+                </div>
+
+                <div
+                    ref={gridRef}
+                    className="grid sm:grid-cols-2 gap-px bg-white/[0.06] rounded-2xl overflow-hidden border border-white/[0.06]"
+                >
+                    {aiFeatures.map((f) => (
+                        <div
+                            key={f.title}
+                            className="group p-8 transition-colors hover:bg-white/[0.02]"
+                            style={{ background: '#08090c' }}
+                        >
+                            <div className="flex items-center gap-3 mb-4">
+                                <div
+                                    className="w-10 h-10 rounded-xl flex items-center justify-center"
+                                    style={{
+                                        background: 'rgba(20,184,166,0.12)',
+                                        border: '1px solid rgba(20,184,166,0.2)',
+                                    }}
                                 >
-                                    {f.description}
-                                </p>
+                                    <f.icon className="w-4 h-4 text-teal-300" />
+                                </div>
+                                <h3 className="text-lg font-semibold text-white font-serif">{f.title}</h3>
                             </div>
+                            <p className="text-sm leading-relaxed text-zinc-400">{f.description}</p>
                         </div>
                     ))}
                 </div>
@@ -979,22 +309,18 @@ function CoreFeaturesSection() {
     )
 }
 
-function DashboardSection() {
-    const colLeftRef = useScrollReveal<HTMLDivElement>('fade-right', { start: 'top 82%' })
-    const colRightRef = useScrollReveal<HTMLDivElement>('scale', { start: 'top 82%', delay: 0.15 })
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard — adaptive layout editorial split
+// ─────────────────────────────────────────────────────────────────────────────
 
-    const panels = [
-        { label: 'Quick Actions', col: 'col-span-1', h: 'row-span-2', accent: '#0d9488' },
-        { label: 'Live Preview', col: 'col-span-2', h: '', accent: '#be123c' },
-        { label: 'Service Order', col: 'col-span-2', h: '', accent: '#4338ca' },
-        { label: 'AI Listener', col: 'col-span-2', h: '', accent: '#0d9488' },
-        { label: 'Library', col: 'col-span-1', h: 'row-span-2', accent: '#d97706' },
-    ]
+function DashboardSection() {
+    const colLeftRef = useScrollReveal<HTMLDivElement>('fade-right', { start: 'top 80%' })
+    const colRightRef = useScrollReveal<HTMLDivElement>('scale', { start: 'top 80%', delay: 0.12 })
 
     return (
         <section
             id="dashboard"
-            className="relative py-24 lg:py-36 overflow-hidden"
+            className="relative py-24 lg:py-32 overflow-hidden"
             style={{ background: '#08090c' }}
         >
             <div
@@ -1004,45 +330,33 @@ function DashboardSection() {
                         'radial-gradient(ellipse 55% 55% at 80% 50%, rgba(217,119,6,0.08), transparent 65%)',
                 }}
             />
-
-            <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="grid lg:grid-cols-2 gap-16 items-center">
                     <div ref={colLeftRef}>
-                        <div
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 text-[10px] font-bold uppercase tracking-[0.22em]"
-                            style={{
-                                background: 'linear-gradient(135deg, rgba(217,119,6,0.15) 0%, rgba(180,83,9,0.08) 100%)',
-                                border: '1px solid rgba(217,119,6,0.35)',
-                                color: '#fcd34d',
-                            }}
-                        >
-                            <LayoutDashboard className="w-3 h-3" /> Adaptive Dashboard
-                        </div>
+                        <p className="text-xs font-mono uppercase tracking-[0.3em] text-amber-400 mb-4">
+                            Adaptive Dashboard
+                        </p>
                         <h2
-                            className="mb-5 font-serif tracking-tight"
-                            style={{ fontSize: 'clamp(2rem, 4vw, 3rem)', fontWeight: 700, lineHeight: 1.1, color: '#fff' }}
+                            className="mb-6 text-4xl sm:text-5xl text-white"
+                            style={{ fontFamily: 'Crimson Pro, serif', fontWeight: 600, lineHeight: 1.05 }}
                         >
                             Your layout,
                             <br />
                             <span
+                                className="italic"
                                 style={{
                                     background: 'linear-gradient(135deg, #fcd34d 0%, #f59e0b 100%)',
                                     WebkitBackgroundClip: 'text',
                                     WebkitTextFillColor: 'transparent',
                                     backgroundClip: 'text',
                                 }}
-                                className="italic"
                             >
                                 your way.
                             </span>
                         </h2>
-                        <p
-                            className="mb-8 leading-relaxed text-lg"
-                            style={{ color: 'rgba(228,228,231,0.7)' }}
-                        >
-                            Selah's drag-and-drop dashboard adapts to every volunteer's
-                            workflow. Resize and reposition every panel. Your layout is saved
-                            per user, per church.
+                        <p className="mb-8 leading-relaxed text-lg text-zinc-400 max-w-md">
+                            Selah&rsquo;s drag-and-drop dashboard adapts to every volunteer&rsquo;s workflow.
+                            Resize and reposition every panel. Your layout is saved per user, per church.
                         </p>
                         <div className="grid grid-cols-2 gap-4">
                             {dashboardFeatures.map((f) => (
@@ -1063,13 +377,8 @@ function DashboardSection() {
                                     >
                                         <f.icon className="w-4 h-4 text-amber-400" />
                                     </div>
-                                    <div className="font-semibold text-white text-[0.88rem]">
-                                        {f.title}
-                                    </div>
-                                    <div
-                                        className="mt-1 leading-relaxed"
-                                        style={{ color: 'rgba(228,228,231,0.55)', fontSize: '0.78rem' }}
-                                    >
+                                    <div className="font-semibold text-white text-[0.88rem]">{f.title}</div>
+                                    <div className="mt-1 leading-relaxed text-zinc-500 text-[0.78rem]">
                                         {f.description}
                                     </div>
                                 </div>
@@ -1105,13 +414,13 @@ function DashboardSection() {
                             </span>
                         </div>
                         <div
-                            className="p-4 grid grid-cols-3 gap-2 text-xs"
+                            className="p-4 grid grid-cols-3 gap-2 grid-rows-2 text-xs"
                             style={{ minHeight: '360px' }}
                         >
-                            {panels.map((p) => (
+                            {dashboardPanels.map((p) => (
                                 <div
                                     key={p.label}
-                                    className={`${p.col} ${p.h} flex items-center justify-center rounded-xl p-3 font-semibold relative overflow-hidden`}
+                                    className={`${p.col} ${p.row} flex items-center justify-center rounded-xl p-3 font-semibold relative overflow-hidden`}
                                     style={{
                                         background: `linear-gradient(135deg, ${p.accent}18 0%, ${p.accent}08 100%)`,
                                         border: `1px solid ${p.accent}30`,
@@ -1122,7 +431,7 @@ function DashboardSection() {
                                     <span className="relative z-10">{p.label}</span>
                                     {p.label === 'AI Listener' && (
                                         <div
-                                            className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-primary-400/60 to-transparent"
+                                            className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-teal-400/60 to-transparent"
                                             style={{ animation: 'lp-shimmer 3s linear infinite' }}
                                         />
                                     )}
@@ -1136,31 +445,17 @@ function DashboardSection() {
     )
 }
 
-function StandoutFeaturesSection() {
+// ─────────────────────────────────────────────────────────────────────────────
+// Standout — three flagship features
+// ─────────────────────────────────────────────────────────────────────────────
+
+function StandoutSection() {
     const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
-    const gridRef = useScrollReveal<HTMLDivElement>('stagger', { start: 'top 85%', staggerAmount: 0.1 })
-
-    const avatarColors = [
-        'from-teal-400 to-emerald-500',
-        'from-amber-400 to-orange-500',
-        'from-rose-400 to-pink-500',
-        'from-violet-400 to-purple-500',
-    ]
-
-    const pipelineBars = Array.from({ length: 40 }, (_, i) => {
-        const base = 25 + Math.abs(Math.sin(i * 0.4)) * 60
-        return Math.round(base)
-    })
-
-    const suggestedSlides = [
-        { label: 'Amazing Grace (V2)', color: '#f59e0b' },
-        { label: 'John 3:16', color: '#0d9488' },
-        { label: 'Offering slide', color: '#be123c' },
-    ]
+    const gridRef = useScrollReveal<HTMLDivElement>('stagger', { start: 'top 82%', staggerAmount: 0.12 })
 
     return (
         <section
-            className="relative py-24 lg:py-36 overflow-hidden"
+            className="relative py-24 lg:py-32 overflow-hidden"
             style={{ background: '#0a0b10' }}
         >
             <div
@@ -1199,7 +494,9 @@ function StandoutFeaturesSection() {
                 </div>
 
                 <div ref={gridRef} className="grid lg:grid-cols-3 gap-5">
-                    <div
+                    {/* Card 1 — Collaboration */}
+                    <article
+                        data-cursor="Team"
                         className="group relative rounded-2xl p-6 overflow-hidden transition-all duration-300 hover:-translate-y-1"
                         style={{
                             background:
@@ -1277,10 +574,7 @@ function StandoutFeaturesSection() {
 
                             <div
                                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest mb-3"
-                                style={{
-                                    background: 'rgba(20,184,166,0.12)',
-                                    color: '#5eead4',
-                                }}
+                                style={{ background: 'rgba(20,184,166,0.12)', color: '#5eead4' }}
                             >
                                 <Users className="w-2.5 h-2.5" /> Real-time
                             </div>
@@ -1291,7 +585,7 @@ function StandoutFeaturesSection() {
                                 className="text-sm leading-relaxed mb-4"
                                 style={{ color: 'rgba(228,228,231,0.6)' }}
                             >
-                                Your whole team works the service together. See who's
+                                Your whole team works the service together. See who&rsquo;s
                                 online, suggest slides from anywhere, and hand off
                                 operator control with one click.
                             </p>
@@ -1306,18 +600,18 @@ function StandoutFeaturesSection() {
                                             color: 'rgba(228,228,231,0.7)',
                                         }}
                                     >
-                                        <mode.icon className="w-2.5 h-2.5 text-primary-400" />
+                                        <mode.icon className="w-2.5 h-2.5 text-teal-400" />
                                         <span className="font-medium">{mode.label}</span>
-                                        <span style={{ color: 'rgba(255,255,255,0.35)' }}>
-                                            · {mode.desc}
-                                        </span>
+                                        <span style={{ color: 'rgba(255,255,255,0.35)' }}>· {mode.desc}</span>
                                     </div>
                                 ))}
                             </div>
                         </div>
-                    </div>
+                    </article>
 
-                    <div
+                    {/* Card 2 — Audio Pipeline */}
+                    <article
+                        data-cursor="Audio"
                         className="group relative rounded-2xl p-6 overflow-hidden transition-all duration-300 hover:-translate-y-1"
                         style={{
                             background:
@@ -1361,11 +655,8 @@ function StandoutFeaturesSection() {
                                             key={i}
                                             className="flex-1 rounded-full"
                                             style={{
-                                                background:
-                                                    'linear-gradient(180deg, #22d3ee 0%, #0e7490 100%)',
-                                                animation: `waveform-bar 1.1s ease-in-out ${
-                                                    i * 0.035
-                                                }s infinite`,
+                                                background: 'linear-gradient(180deg, #22d3ee 0%, #0e7490 100%)',
+                                                animation: `waveform-bar 1.1s ease-in-out ${i * 0.035}s infinite`,
                                                 opacity: 0.8,
                                                 minHeight: '3px',
                                                 maxHeight: `${h}%`,
@@ -1374,42 +665,25 @@ function StandoutFeaturesSection() {
                                     ))}
                                 </div>
                                 <div className="flex items-center justify-center gap-2 mb-3">
-                                    <div
-                                        className="flex items-center gap-1 px-2 py-1 rounded-md"
-                                        style={{
-                                            background: 'rgba(34,211,238,0.08)',
-                                            border: '1px solid rgba(34,211,238,0.18)',
-                                        }}
-                                    >
-                                        <Mic className="w-2.5 h-2.5 text-cyan-400" />
-                                        <span className="text-[8px] font-mono uppercase tracking-widest text-cyan-300">
-                                            Mic
-                                        </span>
-                                    </div>
-                                    <div
-                                        className="flex items-center gap-1 px-2 py-1 rounded-md"
-                                        style={{
-                                            background: 'rgba(34,211,238,0.08)',
-                                            border: '1px solid rgba(34,211,238,0.18)',
-                                        }}
-                                    >
-                                        <Sliders className="w-2.5 h-2.5 text-cyan-400" />
-                                        <span className="text-[8px] font-mono uppercase tracking-widest text-cyan-300">
-                                            Mixer
-                                        </span>
-                                    </div>
-                                    <div
-                                        className="flex items-center gap-1 px-2 py-1 rounded-md"
-                                        style={{
-                                            background: 'rgba(34,211,238,0.08)',
-                                            border: '1px solid rgba(34,211,238,0.18)',
-                                        }}
-                                    >
-                                        <Volume2 className="w-2.5 h-2.5 text-cyan-400" />
-                                        <span className="text-[8px] font-mono uppercase tracking-widest text-cyan-300">
-                                            Any app
-                                        </span>
-                                    </div>
+                                    {[
+                                        { Ic: Mic, l: 'Mic' },
+                                        { Ic: Sliders, l: 'Mixer' },
+                                        { Ic: Volume2, l: 'Any app' },
+                                    ].map(({ Ic, l }) => (
+                                        <div
+                                            key={l}
+                                            className="flex items-center gap-1 px-2 py-1 rounded-md"
+                                            style={{
+                                                background: 'rgba(34,211,238,0.08)',
+                                                border: '1px solid rgba(34,211,238,0.18)',
+                                            }}
+                                        >
+                                            <Ic className="w-2.5 h-2.5 text-cyan-400" />
+                                            <span className="text-[8px] font-mono uppercase tracking-widest text-cyan-300">
+                                                {l}
+                                            </span>
+                                        </div>
+                                    ))}
                                 </div>
                                 <div className="flex items-center justify-between gap-2">
                                     <div
@@ -1424,19 +698,7 @@ function StandoutFeaturesSection() {
                                             Any audio
                                         </span>
                                     </div>
-                                    <svg
-                                        className="w-3 h-3 text-white/20 flex-shrink-0"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                    >
-                                        <path
-                                            d="M5 12h14M13 5l7 7-7 7"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                    </svg>
+                                    <SmallArrow />
                                     <div
                                         className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-md"
                                         style={{
@@ -1449,19 +711,7 @@ function StandoutFeaturesSection() {
                                             Just speech
                                         </span>
                                     </div>
-                                    <svg
-                                        className="w-3 h-3 text-white/20 flex-shrink-0"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                    >
-                                        <path
-                                            d="M5 12h14M13 5l7 7-7 7"
-                                            stroke="currentColor"
-                                            strokeWidth="2"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-                                    </svg>
+                                    <SmallArrow />
                                     <div
                                         className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-md"
                                         style={{
@@ -1469,8 +719,8 @@ function StandoutFeaturesSection() {
                                             border: '1px solid rgba(20,184,166,0.25)',
                                         }}
                                     >
-                                        <Type className="w-3 h-3 text-primary-400" />
-                                        <span className="text-[9px] font-mono uppercase tracking-widest text-primary-300">
+                                        <Type className="w-3 h-3 text-teal-400" />
+                                        <span className="text-[9px] font-mono uppercase tracking-widest text-teal-300">
                                             Perfect text
                                         </span>
                                     </div>
@@ -1479,10 +729,7 @@ function StandoutFeaturesSection() {
 
                             <div
                                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest mb-3"
-                                style={{
-                                    background: 'rgba(168,85,247,0.12)',
-                                    color: '#c4b5fd',
-                                }}
+                                style={{ background: 'rgba(168,85,247,0.12)', color: '#c4b5fd' }}
                             >
                                 <Volume2 className="w-2.5 h-2.5" /> Desktop-only
                             </div>
@@ -1499,9 +746,11 @@ function StandoutFeaturesSection() {
                                 turns it into perfectly accurate text.
                             </p>
                         </div>
-                    </div>
+                    </article>
 
-                    <div
+                    {/* Card 3 — NDI */}
+                    <article
+                        data-cursor="Output"
                         className="group relative rounded-2xl p-6 overflow-hidden transition-all duration-300 hover:-translate-y-1"
                         style={{
                             background:
@@ -1614,10 +863,7 @@ function StandoutFeaturesSection() {
 
                             <div
                                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest mb-3"
-                                style={{
-                                    background: 'rgba(59,130,246,0.12)',
-                                    color: '#93c5fd',
-                                }}
+                                style={{ background: 'rgba(59,130,246,0.12)', color: '#93c5fd' }}
                             >
                                 <Cast className="w-2.5 h-2.5" /> Pro output
                             </div>
@@ -1633,29 +879,26 @@ function StandoutFeaturesSection() {
                                 sanctuaries of any size — no extra hardware required.
                             </p>
                         </div>
-                    </div>
+                    </article>
                 </div>
             </div>
         </section>
     )
 }
 
-const betaPerks = [
-    { title: 'Free during beta', description: 'Full access at no cost while we build together.' },
-    { title: 'Direct line to the team', description: 'Your feedback lands in our build queue, not a support ticket.' },
-    { title: 'Locked-in early-bird pricing', description: '50% off your plan for life when we officially launch.' },
-    { title: 'Onboard with us, not a tutorial', description: 'We will personally help your first service go live.' },
-]
+// ─────────────────────────────────────────────────────────────────────────────
+// Early Access — the closing CTA. Calm, confident, no hard sell.
+// ─────────────────────────────────────────────────────────────────────────────
 
 function EarlyAccessSection() {
-    const sectionRef = useScrollReveal<HTMLElement>('fade-up', { start: 'top 88%' })
+    const sectionRef = useScrollReveal<HTMLElement>('fade-up', { start: 'top 86%' })
 
     return (
         <section
             ref={sectionRef}
             id="early-access"
             className="relative py-24 lg:py-36 overflow-hidden"
-            style={{ background: '#0a0b10' }}
+            style={{ background: '#08090c' }}
         >
             <div
                 className="absolute inset-0 pointer-events-none opacity-40"
@@ -1664,14 +907,15 @@ function EarlyAccessSection() {
                         'radial-gradient(ellipse 50% 50% at 50% 50%, rgba(20,184,166,0.10), transparent 60%)',
                 }}
             />
-
             <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div
                     className="rounded-3xl p-10 md:p-16 text-center"
                     style={{
-                        background: 'linear-gradient(180deg, rgba(20,184,166,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+                        background:
+                            'linear-gradient(180deg, rgba(20,184,166,0.06) 0%, rgba(255,255,255,0.02) 100%)',
                         border: '1px solid rgba(20,184,166,0.25)',
-                        boxShadow: '0 40px 80px -20px rgba(0,0,0,0.5), 0 0 80px -20px rgba(20,184,166,0.2)',
+                        boxShadow:
+                            '0 40px 80px -20px rgba(0,0,0,0.5), 0 0 80px -20px rgba(20,184,166,0.2)',
                     }}
                 >
                     <div
@@ -1685,15 +929,10 @@ function EarlyAccessSection() {
                         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                         Open beta
                     </div>
-                    <h2
-                        className="text-4xl md:text-5xl font-bold text-white mb-5 leading-tight font-serif tracking-tight"
-                    >
+                    <h2 className="text-4xl md:text-5xl font-bold text-white mb-5 leading-tight font-serif tracking-tight">
                         Try Selah on your next service.
                     </h2>
-                    <p
-                        className="text-lg mb-10 max-w-2xl mx-auto leading-relaxed"
-                        style={{ color: 'rgba(228,228,231,0.7)' }}
-                    >
+                    <p className="text-lg mb-10 max-w-2xl mx-auto leading-relaxed text-zinc-400">
                         Free while we&rsquo;re in beta. Set it up once, run it on Sunday, and tell
                         us what to build next. No sales call, no commitment.
                     </p>
@@ -1708,16 +947,11 @@ function EarlyAccessSection() {
                                         border: '1px solid rgba(20,184,166,0.25)',
                                     }}
                                 >
-                                    <Check className="w-4 h-4 text-primary-400" />
+                                    <Check className="w-4 h-4 text-teal-400" />
                                 </div>
                                 <div>
                                     <div className="font-semibold text-white mb-0.5">{perk.title}</div>
-                                    <div
-                                        className="text-sm"
-                                        style={{ color: 'rgba(228,228,231,0.6)' }}
-                                    >
-                                        {perk.description}
-                                    </div>
+                                    <div className="text-sm text-zinc-500">{perk.description}</div>
                                 </div>
                             </div>
                         ))}
@@ -1725,86 +959,35 @@ function EarlyAccessSection() {
 
                     <Link
                         to="/signup"
-                        className="group inline-flex items-center gap-2 px-8 py-4 font-semibold rounded-2xl text-white text-lg transition-all hover:-translate-y-px"
+                        data-cursor="Go"
+                        className="group inline-flex items-center gap-2 px-8 py-4 font-semibold rounded-full text-[#08090c] text-lg transition-all hover:-translate-y-px"
                         style={{
                             background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
-                            boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
+                            boxShadow:
+                                '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
                         }}
                     >
                         Get Started Free
                         <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                     </Link>
-                    <p
-                        className="mt-5 text-sm italic"
-                        style={{ color: 'rgba(228,228,231,0.4)' }}
-                    >
-                        No credit card · Cancel anytime
-                    </p>
+                    <p className="mt-5 text-sm italic text-zinc-500">No credit card · Cancel anytime</p>
                 </div>
             </div>
         </section>
     )
 }
 
-function CtaSection() {
-    const contentRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
-
-    return (
-        <section
-            className="relative py-24 lg:py-36 overflow-hidden"
-            style={{ background: '#08090c' }}
-        >
-            <div
-                className="absolute inset-0"
-                style={{
-                    background:
-                        'linear-gradient(135deg, #0d9488 0%, #7c3aed 50%, #db2777 100%)',
-                }}
-            />
-            <div
-                className="absolute inset-0 pointer-events-none opacity-30"
-                style={{
-                    backgroundImage:
-                        'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
-                    backgroundSize: '32px 32px',
-                }}
-            />
-
-            <div
-                ref={contentRef}
-                className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center"
-            >
-                <h2
-                    className="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight font-serif tracking-tight"
-                >
-                    Ready to give your media team
-                    <br />a head start?
-                </h2>
-                <p className="text-xl text-white/80 mb-10 max-w-2xl mx-auto">
-                    Be part of the first wave. Join free during our beta. No credit card, no
-                    commitment. Just better services, starting Sunday.
-                </p>
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                    <Link
-                        to="/signup"
-                        className="group flex items-center gap-2 px-8 py-4 bg-white text-primary-600 font-semibold rounded-2xl hover:bg-gray-50 transition-all shadow-xl text-lg hover:-translate-y-px"
-                    >
-                        Get Started Free
-                        <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
-                    </Link>
-                    <Link
-                        to="/login"
-                        className="px-8 py-4 text-white font-semibold rounded-2xl border-2 border-white/30 hover:bg-white/10 transition-all text-lg"
-                    >
-                        Sign In
-                    </Link>
-                </div>
-            </div>
-        </section>
-    )
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Footer
+// ─────────────────────────────────────────────────────────────────────────────
 
 function FooterSection() {
+    const linkGroups = [
+        { title: 'Product', links: ['Features', 'AI Listener', 'Pricing', 'Templates'] },
+        { title: 'Resources', links: ['Documentation', 'Whisper Setup', 'Blog', 'Community'] },
+        { title: 'Company', links: ['About', 'Contact', 'Privacy', 'Terms'] },
+    ]
+
     return (
         <footer className="py-16 border-t border-white/5" style={{ background: '#08090c' }}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1819,100 +1002,44 @@ function FooterSection() {
                             </div>
                             <div>
                                 <div
-                                    style={{ fontFamily: 'Crimson Pro, serif', fontSize: '1.25rem', fontWeight: 600 }}
                                     className="text-white leading-none"
+                                    style={{ fontFamily: 'Crimson Pro, serif', fontSize: '1.25rem', fontWeight: 600 }}
                                 >
                                     Selah
                                 </div>
-                                <div
-                                    className="text-[9px] font-mono uppercase tracking-[0.22em] mt-1"
-                                    style={{ color: 'rgba(255,255,255,0.35)' }}
-                                >
+                                <div className="text-[9px] font-mono uppercase tracking-[0.22em] mt-1 text-white/35">
                                     Worship Studio
                                 </div>
                             </div>
                         </Link>
-                        <p
-                            className="text-sm leading-relaxed"
-                            style={{ color: 'rgba(228,228,231,0.5)' }}
-                        >
-                            A modern, AI-powered worship presentation platform built for
-                            churches.
+                        <p className="text-sm leading-relaxed text-zinc-500">
+                            A modern, AI-powered worship presentation platform built for churches.
                         </p>
                     </div>
 
-                    <div>
-                        <h4 className="font-semibold text-white mb-4 text-sm">Product</h4>
-                        <ul className="space-y-2.5">
-                            {['Features', 'AI Listener', 'Pricing', 'Templates'].map((link) => (
-                                <li key={link}>
-                                    <a
-                                        href="#"
-                                        className="text-sm transition-colors"
-                                        style={{ color: 'rgba(228,228,231,0.5)' }}
-                                    >
-                                        {link}
-                                    </a>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-
-                    <div>
-                        <h4 className="font-semibold text-white mb-4 text-sm">Resources</h4>
-                        <ul className="space-y-2.5">
-                            {['Documentation', 'Whisper Setup', 'Blog', 'Community'].map((link) => (
-                                <li key={link}>
-                                    <a
-                                        href="#"
-                                        className="text-sm transition-colors"
-                                        style={{ color: 'rgba(228,228,231,0.5)' }}
-                                    >
-                                        {link}
-                                    </a>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-
-                    <div>
-                        <h4 className="font-semibold text-white mb-4 text-sm">Company</h4>
-                        <ul className="space-y-2.5">
-                            {['About', 'Contact', 'Privacy', 'Terms'].map((link) => (
-                                <li key={link}>
-                                    <a
-                                        href="#"
-                                        className="text-sm transition-colors"
-                                        style={{ color: 'rgba(228,228,231,0.5)' }}
-                                    >
-                                        {link}
-                                    </a>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
+                    {linkGroups.map((group) => (
+                        <div key={group.title}>
+                            <h4 className="font-semibold text-white mb-4 text-sm">{group.title}</h4>
+                            <ul className="space-y-2.5">
+                                {group.links.map((link) => (
+                                    <li key={link}>
+                                        <a href="#" className="text-sm text-zinc-500 hover:text-white transition-colors">
+                                            {link}
+                                        </a>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    ))}
                 </div>
 
                 <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
-                    <p
-                        className="text-xs"
-                        style={{ color: 'rgba(228,228,231,0.4)' }}
-                    >
-                        © {new Date().getFullYear()} Selah · Built for the Church
-                    </p>
+                    <p className="text-xs text-zinc-600">© {new Date().getFullYear()} Selah · Built for the Church</p>
                     <div className="flex items-center gap-6">
-                        <a
-                            href="#"
-                            className="text-xs transition-colors"
-                            style={{ color: 'rgba(228,228,231,0.4)' }}
-                        >
+                        <a href="#" className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">
                             Privacy Policy
                         </a>
-                        <a
-                            href="#"
-                            className="text-xs transition-colors"
-                            style={{ color: 'rgba(228,228,231,0.4)' }}
-                        >
+                        <a href="#" className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">
                             Terms of Service
                         </a>
                     </div>
@@ -1922,11 +1049,14 @@ function FooterSection() {
     )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Landing() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-    const [activeLine, setActiveLine] = useState(-1)
-    const [showDetected, setShowDetected] = useState(false)
     const [scrolled, setScrolled] = useState(false)
+    const [started, setStarted] = useState(false)
 
     useEffect(() => {
         const onScroll = () => setScrolled(window.scrollY > 20)
@@ -1934,49 +1064,34 @@ export default function Landing() {
         return () => window.removeEventListener('scroll', onScroll)
     }, [])
 
+    // Lock body scroll while the preloader is on screen so the opening
+    // animation doesn't fight the scrollbar.
     useEffect(() => {
-        let mounted = true
-        const run = () => {
-            if (!mounted) return
-            setActiveLine(-1)
-            setShowDetected(false)
-            transcriptDemo.forEach((line, i) => {
-                setTimeout(() => {
-                    if (!mounted) return
-                    setActiveLine(i)
-                    if (line.isVerse) {
-                        setTimeout(() => {
-                            if (mounted) setShowDetected(true)
-                        }, 700)
-                    }
-                }, line.delay + 500)
-            })
-        }
-        run()
-        const loop = setInterval(run, 12000)
+        document.body.style.overflow = started ? '' : 'hidden'
         return () => {
-            mounted = false
-            clearInterval(loop)
+            document.body.style.overflow = ''
         }
-    }, [])
+    }, [started])
 
     return (
         <div
-            className="dark min-h-screen overflow-hidden"
+            className="dark min-h-screen overflow-x-hidden"
             style={{ background: '#08090c', color: '#fff' }}
         >
+            <Preloader onDone={() => setStarted(true)} />
+            <Cursor />
             <NavBar
                 scrolled={scrolled}
                 mobileMenuOpen={mobileMenuOpen}
                 setMobileMenuOpen={setMobileMenuOpen}
             />
-            <HeroSection />
-            <SermonListenerSection activeLine={activeLine} showDetected={showDetected} />
-            <CoreFeaturesSection />
+            <Hero started={started} />
+            <SermonListener />
+            <AiFeaturesSection />
+            <FeaturesRail />
             <DashboardSection />
-            <StandoutFeaturesSection />
+            <StandoutSection />
             <EarlyAccessSection />
-            <CtaSection />
             <FooterSection />
         </div>
     )

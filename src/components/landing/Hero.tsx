@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { BookOpen } from "lucide-react";
 import { gsap } from "@/lib/gsap";
-import { HeroScene } from "@/components/landing/HeroScene";
+import { WelcomeScene } from "@/components/landing/WelcomeScene";
 import { Magnetic } from "@/components/landing/Magnetic";
 
 function splitChars(el: HTMLElement) {
@@ -63,7 +64,7 @@ export function Hero({ started }: { started: boolean }) {
 
   return (
     <section className="relative min-h-screen flex flex-col justify-center overflow-hidden px-6 pt-24 pb-12">
-      <HeroScene flattenTriggerId="sermon-listener" />
+      <WelcomeScene />
 
       <div className="relative z-10 max-w-6xl mx-auto text-center" style={{ perspective: "800px" }}>
         <div className="hero-eyebrow inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-7 text-[10px] font-bold uppercase tracking-[0.22em]" style={{ background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.05) 100%)', border: '1px solid rgba(20,184,166,0.35)', color: '#5eead4' }}>
