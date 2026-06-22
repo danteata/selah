@@ -307,24 +307,52 @@ function Divider() {
 }
 
 function SignInForm({
+    auth,
     email, setEmail,
     password, setPassword,
     showPassword, setShowPassword,
     isLoading,
 }: {
+    auth: ReturnType<typeof useClerkAuth>
     email: string; setEmail: (v: string) => void
     password: string; setPassword: (v: string) => void
     showPassword: boolean; setShowPassword: (v: boolean) => void
     isLoading: boolean
 }) {
-    const auth = useClerkAuth('signin')
+    // `password` — the default. `code-request` — collecting the email to
+    // send a one-time code to. `code-entry` — the code has been sent and
+    // we're collecting it. The code path is the supported way in for
+    // accounts created via Google (which have no password).
+    const [signInMethod, setSignInMethod] = useState<
+        'password' | 'code-request' | 'code-entry'
+    >('password')
+    const [code, setCode] = useState('')
+
+    const useCodeInstead = () => {
+        auth.clearError()
+        setSignInMethod('code-request')
+    }
+    const backToPassword = () => {
+        auth.clearError()
+        setCode('')
+        setSignInMethod('password')
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        const success = await auth.handleEmailSignIn(email, password)
-        if (success) {
-            // navigation handled by Clerk + Convex
+        if (signInMethod === 'password') {
+            await auth.handleEmailSignIn(email, password)
+            // On success, navigation is handled by Clerk + the
+            // <SignedIn> guard in App.tsx.
+            return
         }
+        if (signInMethod === 'code-request') {
+            const sent = await auth.startEmailCodeSignIn(email)
+            if (sent) setSignInMethod('code-entry')
+            return
+        }
+        // code-entry
+        await auth.attemptEmailCodeSignIn(code)
     }
 
     return (
@@ -343,53 +371,94 @@ function SignInForm({
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="pastor@church.com"
                         required
-                        className="w-full pl-11 pr-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 bg-zinc-900/50 border border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                        disabled={signInMethod === 'code-entry'}
+                        className="w-full pl-11 pr-4 py-3 rounded-xl text-sm transition-all focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 bg-zinc-900/50 border border-zinc-800 text-zinc-100 placeholder:text-zinc-500 disabled:opacity-60"
                     />
                 </div>
             </div>
 
-            <div>
-                <label className="block text-sm font-semibold mb-2 text-zinc-300">
-                    Password
-                </label>
-                <div className="relative group">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 transition-colors group-focus-within:text-teal-400" />
-                    <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                        className="w-full pl-11 pr-12 py-3 rounded-xl text-sm transition-all focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 bg-zinc-900/50 border border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
-                    />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-teal-400 transition-colors">
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+            {signInMethod === 'password' && (
+                <div>
+                    <label className="block text-sm font-semibold mb-2 text-zinc-300">
+                        Password
+                    </label>
+                    <div className="relative group">
+                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 transition-colors group-focus-within:text-teal-400" />
+                        <input
+                            type={showPassword ? 'text' : 'password'}
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="••••••••"
+                            required
+                            className="w-full pl-11 pr-12 py-3 rounded-xl text-sm transition-all focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 bg-zinc-900/50 border border-zinc-800 text-zinc-100 placeholder:text-zinc-500"
+                        />
+                        <button type="button" onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-teal-400 transition-colors">
+                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                    </div>
                 </div>
-            </div>
+            )}
+
+            {signInMethod === 'code-entry' && (
+                <div>
+                    <label className="block text-sm font-semibold mb-2 text-zinc-300">
+                        Sign-in code
+                    </label>
+                    <input
+                        type="text"
+                        inputMode="numeric"
+                        value={code}
+                        onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="000000"
+                        required
+                        autoFocus
+                        className="w-full px-4 py-3 text-center text-2xl tracking-[0.4em] font-bold rounded-xl transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-zinc-900/60 border border-zinc-800 text-teal-300 placeholder:opacity-20"
+                    />
+                    <p className="mt-2 text-xs text-zinc-500">
+                        We emailed a 6-digit code to <strong className="text-zinc-300">{email}</strong>.
+                    </p>
+                </div>
+            )}
 
             <Magnetic strength={0.2}>
                 <button
                     type="submit"
-                    disabled={isLoading}
+                    disabled={isLoading || (signInMethod === 'code-entry' && code.length < 6)}
                     className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl font-bold text-white text-sm transition-all hover:shadow-lg active:scale-[0.98] disabled:opacity-50"
                     style={{ background: 'linear-gradient(135deg, #14b8a6, #0d9488)', boxShadow: '0 8px 24px -4px rgba(20,184,166,0.4), inset 0 1px 0 rgba(255,255,255,0.15)' }}>
                     {isLoading ? (
                         <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
                         <>
-                            Continue
+                            {signInMethod === 'password' && 'Continue'}
+                            {signInMethod === 'code-request' && 'Email me a code'}
+                            {signInMethod === 'code-entry' && 'Verify & sign in'}
                             <ArrowRight className="w-4 h-4 ml-1" />
                         </>
                     )}
                 </button>
             </Magnetic>
+
+            <p className="text-center text-sm text-zinc-500">
+                {signInMethod === 'password' ? (
+                    <button type="button" onClick={useCodeInstead}
+                        className="font-semibold text-teal-400 hover:underline">
+                        Email me a code instead
+                    </button>
+                ) : (
+                    <button type="button" onClick={backToPassword}
+                        className="font-semibold text-teal-400 hover:underline">
+                        Use password instead
+                    </button>
+                )}
+            </p>
         </form>
     )
 }
 
 function SignUpAccountForm({
+    auth,
     fullName, setFullName,
     email, setEmail,
     password, setPassword,
@@ -397,6 +466,7 @@ function SignUpAccountForm({
     isLoading,
     onSignUpSuccess,
 }: {
+    auth: ReturnType<typeof useClerkAuth>
     fullName: string; setFullName: (v: string) => void
     email: string; setEmail: (v: string) => void
     password: string; setPassword: (v: string) => void
@@ -404,8 +474,6 @@ function SignUpAccountForm({
     isLoading: boolean
     onSignUpSuccess: () => void
 }) {
-    const auth = useClerkAuth('signup')
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         const result = await auth.handleEmailSignUp(fullName, email, password)
@@ -496,22 +564,22 @@ function SignUpAccountForm({
 }
 
 function VerifyForm({
+    auth,
     verificationCode,
     setVerificationCode,
     isLoading,
     onVerifySuccess,
 }: {
+    auth: ReturnType<typeof useClerkAuth>
     verificationCode: string; setVerificationCode: (v: string) => void
     isLoading: boolean
     onVerifySuccess: (clerkId: string) => void
 }) {
-    const auth = useClerkAuth('signup')
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        const sessionId = await auth.handleVerification(verificationCode)
-        if (sessionId) {
-            onVerifySuccess(sessionId)
+        const clerkUserId = await auth.handleVerification(verificationCode)
+        if (clerkUserId) {
+            onVerifySuccess(clerkUserId)
         }
     }
 
@@ -556,20 +624,20 @@ function VerifyForm({
 }
 
 function ChurchForm({
+    auth,
     churchOption, setChurchOption,
     churchName, setChurchName,
     churchCode, setChurchCode,
     isLoading,
     onChurchSuccess,
 }: {
+    auth: ReturnType<typeof useClerkAuth>
     churchOption: 'create' | 'join'; setChurchOption: (v: 'create' | 'join') => void
     churchName: string; setChurchName: (v: string) => void
     churchCode: string; setChurchCode: (v: string) => void
     isLoading: boolean
     onChurchSuccess: () => void
 }) {
-    const auth = useClerkAuth('signup')
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         try {
@@ -687,8 +755,8 @@ function RightPanel() {
         clearError()
     }
 
-    const handleVerifySuccess = async (sessionId: string) => {
-        await auth.handleCreateUser(sessionId, fullName, email)
+    const handleVerifySuccess = async (clerkUserId: string) => {
+        await auth.handleCreateUser(clerkUserId, fullName, email)
         setSignupStep('church')
     }
 
@@ -798,6 +866,7 @@ function RightPanel() {
             {/* Sign In Form */}
             {authMode === 'signin' && signupStep === 'account' && (
                 <SignInForm
+                    auth={auth}
                     email={email} setEmail={setEmail}
                     password={password} setPassword={setPassword}
                     showPassword={showPassword} setShowPassword={setShowPassword}
@@ -808,6 +877,7 @@ function RightPanel() {
             {/* Sign Up Account Form */}
             {authMode === 'signup' && signupStep === 'account' && (
                 <SignUpAccountForm
+                    auth={auth}
                     fullName={fullName} setFullName={setFullName}
                     email={email} setEmail={setEmail}
                     password={password} setPassword={setPassword}
@@ -820,6 +890,7 @@ function RightPanel() {
             {/* Verify Step */}
             {signupStep === 'verify' && (
                 <VerifyForm
+                    auth={auth}
                     verificationCode={verificationCode}
                     setVerificationCode={setVerificationCode}
                     isLoading={isLoading}
@@ -830,6 +901,7 @@ function RightPanel() {
             {/* Church Step */}
             {signupStep === 'church' && (
                 <ChurchForm
+                    auth={auth}
                     churchOption={churchOption} setChurchOption={setChurchOption}
                     churchName={churchName} setChurchName={setChurchName}
                     churchCode={churchCode} setChurchCode={setChurchCode}

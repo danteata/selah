@@ -10,6 +10,7 @@ import { isDesktop } from '../../platform'
 import {
     TAURI_OAUTH_REDIRECT_URL,
     getExternalVerificationRedirectURL,
+    friendlyAuthError,
 } from '../../hooks/useClerkAuth'
 
 type SignupStep = 'account' | 'church' | 'verify'
@@ -88,7 +89,7 @@ export default function SignupPage() {
             setStep('verify')
         } catch (err: any) {
             console.error('Sign up error:', err)
-            const errorMessage = err.errors?.[0]?.message || 'Failed to create account.'
+            const errorMessage = friendlyAuthError(err, 'Failed to create account.')
             setError(errorMessage)
             trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', page: 'signup', error_category: sanitizeAuthError(errorMessage) })
         } finally {
@@ -112,12 +113,18 @@ export default function SignupPage() {
             if (result.status === 'complete' && result.createdSessionId) {
                 await setActive({ session: result.createdSessionId })
                 trackEvent(AnalyticsEventType.USER_SIGNED_UP, { method: 'email' })
-                // Create user record in Convex
-                await upsertUser({
-                    clerkId: result.createdSessionId,
-                    fullname: fullName,
-                    email,
-                })
+                // Create user record in Convex keyed by the Clerk USER id
+                // (`user_...`) — that's what the backend matches via
+                // `getUserIdentity().subject`. `createdSessionId` is a
+                // session id and would create an orphan row.
+                const clerkUserId = result.createdUserId
+                if (clerkUserId) {
+                    await upsertUser({
+                        clerkId: clerkUserId,
+                        fullname: fullName,
+                        email,
+                    })
+                }
                 trackEvent(AnalyticsEventType.SIGNUP_STEP_COMPLETED, { step: 'verify' })
                 // If in invite flow, go directly to the join page to accept
                 // Otherwise continue to church setup
@@ -129,7 +136,7 @@ export default function SignupPage() {
             }
         } catch (err: any) {
             console.error('Verification error:', err)
-            const errorMessage = err.errors?.[0]?.message || 'Invalid verification code.'
+            const errorMessage = friendlyAuthError(err, 'Invalid verification code.')
             setError(errorMessage)
             trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', page: 'signup-verify', error_category: sanitizeAuthError(errorMessage) })
         } finally {

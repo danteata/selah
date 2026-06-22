@@ -21,6 +21,31 @@ function isTauri(): boolean {
     return typeof window !== 'undefined' && '__TAURI__' in window
 }
 
+// Turn a Clerk API error into a message that tells the user what to do
+// next, rather than surfacing Clerk's raw text. Clerk errors carry a
+// machine-readable `code` on each entry in `errors[]`; we key off that
+// and fall back to the provided default.
+export function friendlyAuthError(err: unknown, fallback: string): string {
+    const entry = (err as { errors?: Array<{ code?: string; message?: string }> })
+        .errors?.[0]
+    switch (entry?.code) {
+        case 'strategy_for_user_invalid':
+            // The account has no password (e.g. it was created via
+            // Google), so the password strategy isn't valid for it.
+            return 'This account doesn’t use a password — sign in with “Continue with Google” instead.'
+        case 'form_password_incorrect':
+        case 'form_identifier_not_found':
+            return 'Incorrect email or password.'
+        case 'form_identifier_exists':
+            return 'An account with this email already exists. Try signing in instead.'
+        case 'form_code_incorrect':
+        case 'verification_failed':
+            return 'That verification code is incorrect or has expired.'
+        default:
+            return entry?.message || (err instanceof Error ? err.message : fallback)
+    }
+}
+
 function getOAuthRedirectUrl(): string {
     if (isTauri()) {
         return TAURI_OAUTH_REDIRECT_URL
@@ -131,7 +156,7 @@ async function startTauriOAuth(
 export function useClerkAuth(mode: AuthMode) {
     const { signIn, isLoaded: signInLoaded } = useSignIn()
     const { signUp, isLoaded: signUpLoaded } = useSignUp()
-    const { setActive } = useClerk()
+    const clerk = useClerk()
 
     const upsertUser = useMutation(api.users.upsertUser)
     const createChurch = useMutation(api.churches.createChurch)
@@ -149,14 +174,97 @@ export function useClerkAuth(mode: AuthMode) {
         try {
             const result = await signIn.create({ identifier: email, password })
             if (result.status === 'complete' && result.createdSessionId) {
-                await setActive({ session: result.createdSessionId })
-                await upsertUser({ clerkId: result.createdSessionId, fullname: email.split('@')[0], email })
+                await clerk.setActive({ session: result.createdSessionId })
+                // Persist against the Clerk USER id (`user_...`), which is
+                // what the Convex backend matches everywhere via
+                // `getUserIdentity().subject`. `createdSessionId` is a
+                // SESSION id (`sess_...`) and would create an orphan row
+                // the rest of the app never reads. `clerk.user` is
+                // populated once `setActive` resolves.
+                const clerkUserId = clerk.user?.id
+                if (clerkUserId) {
+                    await upsertUser({ clerkId: clerkUserId, fullname: email.split('@')[0], email })
+                }
                 return true
             }
+            // The attempt was created but isn't complete — the account
+            // needs a factor other than the password we supplied (most
+            // commonly: it was created via Google and has no password).
+            setError(
+                "We couldn't sign you in with that password. If you created this account with Google, use “Continue with Google” below.",
+            )
             return false
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to sign in. Please check your credentials.'
-            setError((err as { errors?: Array<{ message?: string }> }).errors?.[0]?.message || message)
+            setError(friendlyAuthError(err, 'Failed to sign in. Please check your credentials.'))
+            return false
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    // Passwordless sign-in: email the user a one-time code. This is the
+    // path for accounts created via Google (which have no password) but
+    // who want to sign in by email. Returns true once the code has been
+    // sent so the UI can switch to the code-entry step.
+    const startEmailCodeSignIn = async (email: string): Promise<boolean> => {
+        if (!signIn || !isLoaded) return false
+        setIsLoading(true)
+        setError('')
+        try {
+            const attempt = await signIn.create({ identifier: email })
+            const emailFactor = attempt.supportedFirstFactors?.find(
+                (f) => f.strategy === 'email_code',
+            )
+            if (!emailFactor || !('emailAddressId' in emailFactor)) {
+                setError(
+                    'Email-code sign-in isn’t available for this account. Try “Continue with Google”.',
+                )
+                return false
+            }
+            await signIn.prepareFirstFactor({
+                strategy: 'email_code',
+                emailAddressId: emailFactor.emailAddressId,
+            })
+            return true
+        } catch (err: unknown) {
+            setError(friendlyAuthError(err, 'Could not send a sign-in code.'))
+            return false
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    // Complete a passwordless sign-in with the emailed code.
+    const attemptEmailCodeSignIn = async (code: string): Promise<boolean> => {
+        if (!signIn || !isLoaded) return false
+        setIsLoading(true)
+        setError('')
+        try {
+            const result = await signIn.attemptFirstFactor({
+                strategy: 'email_code',
+                code,
+            })
+            if (result.status === 'complete' && result.createdSessionId) {
+                await clerk.setActive({ session: result.createdSessionId })
+                const clerkUserId = clerk.user?.id
+                if (clerkUserId) {
+                    const primaryEmail =
+                        clerk.user?.primaryEmailAddress?.emailAddress ?? ''
+                    await upsertUser({
+                        clerkId: clerkUserId,
+                        fullname:
+                            clerk.user?.fullName ||
+                            primaryEmail.split('@')[0] ||
+                            'User',
+                        email: primaryEmail,
+                    })
+                }
+                return true
+            }
+            setError("That code didn't complete sign-in. Please try again.")
+            return false
+        } catch (err: unknown) {
+            setError(friendlyAuthError(err, 'Invalid or expired code.'))
             return false
         } finally {
             setIsLoading(false)
@@ -184,11 +292,7 @@ export function useClerkAuth(mode: AuthMode) {
                 })
             }
         } catch (err: unknown) {
-            const message =
-                err instanceof Error ? err.message : 'Failed to sign in with Google.'
-            setError(
-                (err as { errors?: Array<{ message?: string }> }).errors?.[0]?.message || message,
-            )
+            setError(friendlyAuthError(err, 'Failed to sign in with Google.'))
         } finally {
             setIsLoading(false)
         }
@@ -208,8 +312,7 @@ export function useClerkAuth(mode: AuthMode) {
             await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
             return 'verify'
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to create account.'
-            setError((err as { errors?: Array<{ message?: string }> }).errors?.[0]?.message || message)
+            setError(friendlyAuthError(err, 'Failed to create account.'))
             return null
         } finally {
             setIsLoading(false)
@@ -233,11 +336,7 @@ export function useClerkAuth(mode: AuthMode) {
                 })
             }
         } catch (err: unknown) {
-            const message =
-                err instanceof Error ? err.message : 'Failed to sign up with Google.'
-            setError(
-                (err as { errors?: Array<{ message?: string }> }).errors?.[0]?.message || message,
-            )
+            setError(friendlyAuthError(err, 'Failed to sign up with Google.'))
         } finally {
             setIsLoading(false)
         }
@@ -250,13 +349,17 @@ export function useClerkAuth(mode: AuthMode) {
         try {
             const result = await signUp.attemptEmailAddressVerification({ code })
             if (result.status === 'complete' && result.createdSessionId) {
-                await setActive({ session: result.createdSessionId })
-                return result.createdSessionId
+                await clerk.setActive({ session: result.createdSessionId })
+                // Return the Clerk USER id (not the session id) — the
+                // caller passes this to `upsertUser` as `clerkId`, which
+                // must match `getUserIdentity().subject` on the backend.
+                // `createdUserId` is set on a completed sign-up; fall back
+                // to the now-active `clerk.user` just in case.
+                return result.createdUserId ?? clerk.user?.id ?? null
             }
             return null
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Invalid verification code.'
-            setError((err as { errors?: Array<{ message?: string }> }).errors?.[0]?.message || message)
+            setError(friendlyAuthError(err, 'Invalid verification code.'))
             return null
         } finally {
             setIsLoading(false)
@@ -283,6 +386,8 @@ export function useClerkAuth(mode: AuthMode) {
         error,
         clearError,
         handleEmailSignIn,
+        startEmailCodeSignIn,
+        attemptEmailCodeSignIn,
         handleGoogleSignIn,
         handleEmailSignUp,
         handleGoogleSignUp,

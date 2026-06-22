@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useSignIn, useUser } from '@clerk/clerk-react'
+import { useSignIn, useClerk } from '@clerk/clerk-react'
+import { friendlyAuthError } from '../../hooks/useClerkAuth'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Cloud } from 'lucide-react'
 import { useMutation } from 'convex/react'
@@ -10,6 +11,7 @@ import { isDesktop } from '../../platform'
 
 export default function LoginPage() {
     const { signIn, isLoaded, setActive } = useSignIn()
+    const clerk = useClerk()
     const navigate = useNavigate()
     const location = useLocation()
     const { trackEvent, trackPage } = useAnalytics()
@@ -48,13 +50,19 @@ export default function LoginPage() {
             if (result.status === 'complete' && result.createdSessionId) {
                 await setActive({ session: result.createdSessionId })
                 trackEvent(AnalyticsEventType.USER_SIGNED_IN, { method: 'email' })
-                // Create user record in Convex if it doesn't exist
-                // We'll try to extract user info from Clerk or use the provided email
-                await upsertUser({
-                    clerkId: result.createdSessionId,
-                    fullname: email.split('@')[0], // Use email username as fallback
-                    email,
-                })
+                // Create/refresh the Convex user record, keyed by the Clerk
+                // USER id (`user_...`) — that's what the backend matches via
+                // `getUserIdentity().subject`. `createdSessionId` is a
+                // session id and would create an orphan row. `clerk.user`
+                // is populated once `setActive` resolves.
+                const clerkUserId = clerk.user?.id
+                if (clerkUserId) {
+                    await upsertUser({
+                        clerkId: clerkUserId,
+                        fullname: email.split('@')[0], // Use email username as fallback
+                        email,
+                    })
+                }
                 // Redirect to the original destination (invite link) or dashboard
                 navigate(from || '/dashboard')
             } else {
@@ -62,7 +70,7 @@ export default function LoginPage() {
             }
         } catch (err: any) {
             console.error('Sign in error:', err)
-            const errorMessage = err.errors?.[0]?.message || 'Failed to sign in. Please check your credentials.'
+            const errorMessage = friendlyAuthError(err, 'Failed to sign in. Please check your credentials.')
             setError(errorMessage)
             trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', error_category: sanitizeAuthError(errorMessage) })
         } finally {
