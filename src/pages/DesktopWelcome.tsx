@@ -277,6 +277,7 @@ function LeftPanel() {
 function GoogleButton({ onClick, isLoading }: { onClick: () => void; isLoading: boolean }) {
     return (
         <button
+            type="button"
             onClick={onClick}
             disabled={isLoading}
             className="w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-xl font-semibold transition-all hover:bg-zinc-800 active:scale-[0.98] border border-zinc-800 shadow-sm text-white bg-zinc-900"

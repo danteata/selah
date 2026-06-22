@@ -6,6 +6,11 @@ import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType, sanitizeAuthError } from '../../services/analytics/types'
+import { isDesktop } from '../../platform'
+import {
+    TAURI_OAUTH_REDIRECT_URL,
+    getExternalVerificationRedirectURL,
+} from '../../hooks/useClerkAuth'
 
 type SignupStep = 'account' | 'church' | 'verify'
 
@@ -170,23 +175,49 @@ export default function SignupPage() {
         trackEvent(AnalyticsEventType.AUTH_GOOGLE_CLICKED, { page: 'signup' })
 
         try {
-            // See Login.tsx for the rationale. Web uses the
-            // same-origin path; Tauri desktop uses the fly.io
-            // round-trip via /desktop-oauth-done.
-            const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window
-            const callbackUrl = isDesktop
-                ? 'https://selah.fly.dev/desktop-oauth-callback'
-                : `${window.location.origin}/sso-callback`
-            const callbackComplete = isDesktop
-                ? 'https://selah.fly.dev/desktop-oauth-done'
-                : from || '/'
-            await signUp.authenticateWithRedirect({
-                strategy: 'oauth_google',
-                redirectUrl: callbackUrl,
-                redirectUrlComplete: callbackComplete,
-            })
+            if (isDesktop()) {
+                // System-browser flow — see `useClerkAuth` for the
+                // full rationale. The Tauri webview can't host the
+                // Clerk Account Portal (its `window.opener` postMessage
+                // handshake has no listener), so we hand the OAuth URL
+                // to the OS default browser. The system browser
+                // completes the OAuth against the Rust one-shot
+                // listener at `localhost:19888`, which then navigates
+                // the Tauri webview back to the React app with the
+                // handshake in the query string. `App.tsx` picks up
+                // the handshake and renders `<DesktopOAuthCallback />`.
+                const { invoke } = await import('@tauri-apps/api/core')
+                const { open } = await import('@tauri-apps/plugin-shell')
+                await invoke('start_oauth_listener') // idempotent
+                const result = await signUp.create({
+                    strategy: 'oauth_google',
+                    redirectUrl: TAURI_OAUTH_REDIRECT_URL,
+                })
+                const oauthUrl = getExternalVerificationRedirectURL(result)
+                if (!oauthUrl) {
+                    throw new Error(
+                        'Clerk did not return an OAuth redirect URL. ' +
+                            'Check that oauth_google is enabled on your Clerk ' +
+                            'instance and that http://localhost:19888 is on the ' +
+                            'allowed redirect list.',
+                    )
+                }
+                await open(oauthUrl)
+            } else {
+                // Web flow — Clerk's hosted sign-in loads in this same
+                // tab and the OAuth callback lands on the same-origin
+                // `/sso-callback` route, which the App's
+                // <ClerkProvider> handles natively.
+                const callbackUrl = `${window.location.origin}/sso-callback`
+                const callbackComplete = from || '/'
+                await signUp.authenticateWithRedirect({
+                    strategy: 'oauth_google',
+                    redirectUrl: callbackUrl,
+                    redirectUrlComplete: callbackComplete,
+                })
+            }
         } catch (err: any) {
-            console.error('Google sign up error:', err)
+            console.error('[auth] Google sign up error:', err)
             setError('Failed to sign up with Google.')
             trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'google', page: 'signup', error_category: 'oauth_redirect_failed' })
         }

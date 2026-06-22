@@ -27,7 +27,7 @@ use std::net::SocketAddr;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tiny_http::{Response, Server};
 use tracing::info;
 
@@ -99,19 +99,99 @@ pub fn start_oauth_listener(app: AppHandle) -> Result<String, String> {
         let callback_url = match server.recv_timeout(Duration::from_secs(300)) {
             Ok(Some(req)) => {
                 let url = req.url().to_string();
-                // Send a minimal success page. The webview is going
-                // to navigate away or the event handler will close
-                // it; either way a tiny HTML payload is enough.
+                // The system browser did the OAuth and landed on
+                // `http://localhost:19888/oauth-callback?<query>`.
+                // The Tauri webview's React app is currently on
+                // a Tauri origin (e.g. `tauri://localhost/login`)
+                // and needs to load `<DesktopOAuthCallback />` to
+                // process the handshake.
+                //
+                // We navigate the Tauri webview via `webview.eval`
+                // because every JS-side path (event delivery,
+                // React Router history updates, postMessage)
+                // proved unreliable in the Tauri 2 webview. The
+                // Rust side is the only place with a reliable hook
+                // into the webview's URL.
+                //
+                // The Tauri 2 asset server has no SPA fallback — it
+                // returns 500 for any path that doesn't match a
+                // real file in `dist/`. The only path it serves
+                // reliably is the root path `/` (which maps to
+                // `index.html`, the Vite entry point). So we
+                // navigate to a root-relative `/?<query>` — the
+                // browser resolves it against the webview's current
+                // origin (`http://localhost:3000` in dev, served by
+                // Vite; `tauri://localhost` in production, served by
+                // the asset server). Hard-coding `tauri://localhost/`
+                // here would break dev mode, where the Vite dev
+                // server is the origin and `tauri://` resolves to
+                // the empty `dist/` (no `bun run build` yet). The
+                // React app re-mounts at the root, `App.tsx`'s
+                // useEffect reads the query string, sees
+                // `__clerk_handshake`, and renders
+                // `<DesktopOAuthCallback />` directly. After
+                // processing, the component navigates to `/` (the
+                // same root path, also served by the asset
+                // server) and the `<SignedIn>` guard renders the
+                // dashboard.
+                let query_only = if let Some(idx) = url.find('?') {
+                    url[idx + 1..].to_string()
+                } else {
+                    String::new()
+                };
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    // The Tauri webview NEVER navigated to the listener —
+                    // only the system browser did the OAuth. So the
+                    // webview is still on the app origin
+                    // (`http://localhost:3000` in dev, `tauri://localhost`
+                    // in production). A ROOT-RELATIVE navigation therefore
+                    // resolves against the correct origin automatically,
+                    // with no origin detection needed.
+                    //
+                    // We deliberately do NOT read `config().build.dev_url`:
+                    // that field stays `http://localhost:3000` even in a
+                    // production build, so the old code navigated the
+                    // packaged app to a dead Vite URL.
+                    //
+                    // We carry Clerk's callback query string (e.g.
+                    // `?__clerk_handshake=...`) across to the React app.
+                    // `App.tsx` detects it and renders
+                    // `<DesktopOAuthCallback />`, letting the Clerk SDK
+                    // exchange the handshake for a session in the webview's
+                    // own client. `replace()` (not `href =`) avoids leaving
+                    // the listener URL in the webview history.
+                    //
+                    // The `{:?}` (Debug) formatting produces a properly
+                    // quoted, escaped JS string literal, which prevents the
+                    // query string from breaking out of the `eval` (the
+                    // Clerk params are URL-encoded ASCII, so no `\u{..}`
+                    // escapes that would be invalid JS are emitted).
+                    let target = format!("/?{}", query_only);
+                    let nav_script =
+                        format!("window.location.replace({:?});", target);
+                    if let Err(e) = window.eval(&nav_script) {
+                        eprintln!("[oauth] failed to navigate webview: {}", e);
+                    }
+                    // Bring the desktop app back to the foreground — the
+                    // system browser stole focus during the OAuth.
+                    let _ = window.set_focus();
+                } else {
+                    eprintln!("[oauth] no main webview window to navigate");
+                }
+                // Tiny success page for the system browser. The
+                // Tauri webview is being navigated independently
+                // above; this is just to give the user something
+                // to look at in the system browser tab while the
+                // desktop app focuses.
                 let body = b"<html><body style=\"font-family:sans-serif;padding:32px;\">\
                     <h2>Sign-in complete</h2>\
                     <p>You can close this tab and return to Selah.</p>\
                     </body></html>";
-                let resp = Response::from_data(body)
-                    .with_header(
-                        "Content-Type: text/html; charset=utf-8"
-                            .parse::<tiny_http::Header>()
-                            .expect("static header is valid"),
-                    );
+                let resp = Response::from_data(body).with_header(
+                    "Content-Type: text/html; charset=utf-8"
+                        .parse::<tiny_http::Header>()
+                        .expect("static header is valid"),
+                );
                 if let Err(e) = req.respond(resp) {
                     eprintln!("[oauth] failed to send callback response: {}", e);
                 }

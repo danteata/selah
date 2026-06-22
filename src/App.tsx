@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ClerkProvider, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { isDesktop } from './platform'
 import { ConvexConnectionProvider, useConvexConnection } from './providers/ConvexConnectionProvider'
@@ -12,7 +12,6 @@ import type { AnalyticsProviderType as AnalyticsType } from './services/analytic
 import { AnalyticsEventType } from './services/analytics/types'
 import { useAppStore } from './store/appStore'
 import { useOAuthCallback } from './hooks/useOAuthCallback'
-import { useDeepLinkOAuth } from './hooks/useDeepLinkOAuth'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
 // Lazy-load all route components so the initial JS chunk stays small.
@@ -88,6 +87,10 @@ function OfflineApp() {
         return <Dashboard />
     }
 
+    if (isDesktop()) {
+        return <DesktopWelcome />
+    }
+
     return <Landing />
 }
 
@@ -116,10 +119,47 @@ function AppRoutes() {
     // doesn't affect the fly deployment.
     useOAuthCallback()
 
-    // The deep-link hook listens for `selah://...` URLs the OS hands
-    // to the desktop app after the browser OAuth completes. On web
-    // it's a no-op (no Tauri runtime).
-    useDeepLinkOAuth()
+    // Desktop OAuth callback handling.
+    //
+    // After the system browser completes Google OAuth, the Rust
+    // listener navigates the webview to `/?<clerk-params>` (root
+    // path = `index.html`, the only path Tauri v2's asset server
+    // serves reliably — it has no SPA fallback). The React app
+    // re-mounts here and we render `<DesktopOAuthCallback />` while
+    // the Clerk SDK exchanges the callback params for a session in
+    // the webview's own client.
+    //
+    // We latch on mount when any known Clerk callback param is
+    // present (the handshake architecture uses `__clerk_handshake`;
+    // older/ticket flows use `rotating_token_nonce` /
+    // `__clerk_ticket`). Crucially we DON'T latch forever: once
+    // Clerk reports `isSignedIn`, we strip the params from the URL
+    // and release the latch so the normal routes (Dashboard) take
+    // over. Without this, Clerk silently consuming the handshake
+    // param would leave the user stuck on the spinner.
+    const { isSignedIn } = useAuth()
+    const [oauthPending, setOauthPending] = useState<boolean>(() => {
+        if (typeof window === 'undefined') return false
+        const params = new URLSearchParams(window.location.search)
+        return (
+            params.has('__clerk_handshake') ||
+            params.has('__clerk_ticket') ||
+            params.has('rotating_token_nonce')
+        )
+    })
+    useEffect(() => {
+        if (!oauthPending) return
+        if (isSignedIn) {
+            // Drop the callback params without a reload, then release
+            // the latch so the router renders the dashboard.
+            window.history.replaceState(
+                {},
+                '',
+                window.location.pathname + window.location.hash,
+            )
+            setOauthPending(false)
+        }
+    }, [oauthPending, isSignedIn])
 
     // App lifecycle: fire APP_INITIALIZED once + PAGE_VIEWED on every route change
     useEffect(() => {
@@ -144,6 +184,17 @@ function AppRoutes() {
         analytics.page(location.pathname)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [location.pathname])
+
+    // OAuth callback landing screen. Shown only while the callback
+    // params are present AND the session hasn't been established
+    // yet. The effect above releases this latch on `isSignedIn`.
+    if (oauthPending && !isSignedIn) {
+        return (
+            <RouteErrorBoundary name="oauth-callback">
+                <DesktopOAuthCallback />
+            </RouteErrorBoundary>
+        )
+    }
 
     if (isOffline) {
         return (
@@ -257,9 +308,9 @@ function App() {
                     <ConvexConnectionProvider convexUrl={CONVEX_URL}>
                         <ConvexErrorBoundary>
                             <QueryClientProvider client={queryClient}>
-                                <BrowserRouter>
+                                <HashRouter>
                                     <AppRoutes />
-                                </BrowserRouter>
+                                </HashRouter>
                             </QueryClientProvider>
                         </ConvexErrorBoundary>
                     </ConvexConnectionProvider>

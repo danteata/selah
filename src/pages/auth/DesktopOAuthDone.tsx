@@ -1,7 +1,7 @@
 /**
  * DesktopOAuthDone — page mounted at `/desktop-oauth-done`.
  *
- * Two execution contexts:
+ * Three execution contexts:
  *
  * 1. **Tauri webview** (the OAuth flow ran inside the desktop's
  *    webview). The Clerk callback has already been processed by
@@ -12,9 +12,18 @@
  *    This is the "one-step" path the user wants — no button click,
  *    no second sign-in, no server-side exchange.
  *
- * 2. **System browser** (the OAuth flow ran externally, e.g. via
- *    `shell.open()` in the Tauri shell plugin). The session is in
- *    the system browser, NOT in this webview. The Clerk SDK here
+ * 2. **Tauri webview, late landing** (the OAuth ran in the system
+ *    browser, the local Rust listener got the callback, the Rust
+ *    side pushed the handshake back into the Tauri webview via the
+ *    `oauth://callback` event, and `useOAuthCallback` finalized the
+ *    session here). The URL may carry `?__clerk_handshake=...` if
+ *    Clerk ever does the in-process handoff instead of the event
+ *    path. We auto-redirect to `/` once the session lands.
+ *
+ * 3. **System browser** (the OAuth flow ran externally, e.g. via
+ *    `shell.open()` in the Tauri shell plugin, and the user never
+ *    came back through the deep link). The session is in the
+ *    system browser, NOT in this webview. The Clerk SDK here
  *    has no session, so we show two paths:
  *      a) "Open Selah Desktop" with a `selah://oauth-complete` deep
  *         link — focuses the desktop app (which the user has to
@@ -27,16 +36,75 @@
  * after the callback completed on the previous route.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useSession } from '@clerk/clerk-react'
+import { useClerk, useSession } from '@clerk/clerk-react'
 import { isDesktop } from '../../platform'
 
 const DESKTOP_DEEP_LINK = 'selah://oauth-complete'
 
 export default function DesktopOAuthDone() {
     const { session, isLoaded } = useSession()
+    const clerk = useClerk()
     const navigate = useNavigate()
+    // Tracks whether the Tauri event path (`useOAuthCallback` →
+    // `clerk.handleRedirectCallback`) is currently running, so the
+    // session-poller doesn't race with it and bounce to the manual
+    // UI mid-handshake.
+    const [handshakeInFlight, setHandshakeInFlight] = useState(false)
+
+    // Late-landing handler: if Clerk's redirect lands directly on
+    // this page with `?__clerk_handshake=...` (which can happen when
+    // the Tauri webview follows the OAuth navigation itself, e.g.
+    // via a form submit that bypasses our `assign` patch), decode
+    // the handshake locally so the session lands in this webview's
+    // Clerk SDK. Without this, the spinner polls forever and the
+    // user is stuck — exactly the symptom reported after the
+    // `shell.open()` refactor.
+    useEffect(() => {
+        if (!isDesktop()) return
+        if (typeof window === 'undefined') return
+        const params = new URLSearchParams(window.location.search)
+        const handshake = params.get('__clerk_handshake')
+        if (!handshake) return
+        if (!clerk.loaded) return
+        if (session) return
+        if (handshakeInFlight) return
+        let cancelled = false
+        setHandshakeInFlight(true)
+        ;(async () => {
+            try {
+                // Reconstruct the absolute URL Clerk's
+                // handleRedirectCallback expects. The handshake
+                // token is a JWT — Clerk decodes it locally and
+                // finalizes the session without a server round
+                // trip, which is exactly what we want here.
+                const fullUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`
+                const result = await (
+                    clerk as unknown as {
+                        handleRedirectCallback: (params: {
+                            redirectUrl: string
+                        }) => Promise<{ status?: string }>
+                    }
+                ).handleRedirectCallback({ redirectUrl: fullUrl })
+                if (cancelled) return
+                const status = (result as { status?: string })?.status
+                if (status && status !== 'complete' && status !== 'signed_in') {
+                    console.warn(
+                        '[oauth] DesktopOAuthDone handshake returned unexpected status:',
+                        status,
+                    )
+                }
+            } catch (err) {
+                console.error('[oauth] DesktopOAuthDone handshake failed', err)
+            } finally {
+                if (!cancelled) setHandshakeInFlight(false)
+            }
+        })()
+        return () => {
+            cancelled = true
+        }
+    }, [clerk, session, handshakeInFlight])
 
     // One-step path: when the OAuth ran inside the Tauri webview
     // (so the session IS here) auto-navigate to the dashboard.
@@ -70,7 +138,7 @@ export default function DesktopOAuthDone() {
     // While the auto-navigate is in flight, show a spinner so the
     // user doesn't think the page is broken. Once `session` is
     // truthy, the navigate above will swap the route.
-    if (isDesktop() && isLoaded && !session) {
+    if (isDesktop() && (isLoaded || handshakeInFlight) && !session) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
                 <div className="text-center">
@@ -95,7 +163,7 @@ export default function DesktopOAuthDone() {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-primary-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4">
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-primary-100 dark:from-gray-900 dark:to-gray-900 dark:to-gray-800 p-4">
             <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-lg p-8 text-center">
                 {/* Success icon */}
                 <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
@@ -106,7 +174,7 @@ export default function DesktopOAuthDone() {
                     >
                         <path
                             fillRule="evenodd"
-                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a 1 1 0 01-1.414 0l-4-4a 1 1 0 011.414-1.414L8 12.586l7.293-7.293a 1 1 0 011.414 0z"
                             clipRule="evenodd"
                         />
                     </svg>

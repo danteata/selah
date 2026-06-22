@@ -715,23 +715,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        // Deep-link plugin: registers the `selah://` URL scheme with
-        // the OS. This is the RETURN path for OAuth on desktop — the
-        // user completes OAuth in the system browser, lands on
-        // `https://selah.fly.dev/desktop-oauth-done`, and the
-        // "Open Selah" button on that page deep-links to
-        // `selah://oauth-complete`. The OS routes the scheme back
-        // to the running Selah app, and the handler below emits
-        // `oauth://deep-link` with the full URL for the frontend's
-        // `useDeepLinkOAuth` hook to consume.
-        //
-        // We use `selah://` (not `app.selah.desktop://`) because:
-        //  - Shorter, less typo-prone for the OS-level scheme
-        //  - The OAuth redirect URL is now `https://selah.fly.dev/...`
-        //    (not a custom scheme — Clerk's API rejects those), so
-        //    the custom scheme is only used for the browser→desktop
-        //    handoff, not the OAuth callback itself.
-        .plugin(tauri_plugin_deep_link::init())
         .manage(WhisperServerState {
             child_pid: whisper_child_pid,
             server_pid: whisper_pid,
@@ -797,40 +780,6 @@ pub fn run() {
             start_oauth_listener,
         ])
         .setup(move |app| {
-            // Deep-link plugin: the OS launches the app or focuses
-            // the running instance when a `selah://...` URL is
-            // opened. Forward the URL to the frontend as a Tauri
-            // event so `useDeepLinkOAuth` can react (e.g., dismiss
-            // the "waiting for OAuth" state, prompt the user to
-            // sign in, etc.).
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let app_handle_for_deeplink = app.handle().clone();
-                app.deep_link().on_open_url(move |event| {
-                    for url in event.urls() {
-                        info!("[deep-link] received url: {}", url);
-                        let _ = app_handle_for_deeplink.emit(
-                            "oauth://deep-link",
-                            url.to_string(),
-                        );
-                    }
-                });
-                // Handle the cold-start case where the user clicks
-                // the deep link in a fresh browser tab while the
-                // app is closed. The plugin buffers the URL and
-                // replays it here when a listener is registered
-                // early enough.
-                if let Ok(Some(urls)) = app.deep_link().get_current() {
-                    let app_handle_for_cold_start = app.handle().clone();
-                    for url in urls {
-                        info!("[deep-link] cold-start url: {}", url);
-                        let _ = app_handle_for_cold_start.emit(
-                            "oauth://deep-link",
-                            url.to_string(),
-                        );
-                    }
-                }
-            }
             // Initialize file logging and crash detection
             let app_config_dir = app.path().app_config_dir()
                 .expect("Failed to get app config dir");
