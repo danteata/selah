@@ -192,13 +192,23 @@ function normalise(release: GitHubRelease): NormalisedRelease {
         const meta = classify(asset)
         if (!meta) continue
         const bucket = buckets[meta.os]
-        // Prefer the updater artifact (.app.tar.gz, .AppImage.tar.gz,
-        // .nsis.zip) when both are present, since that's what the
-        // Tauri updater itself consumes and what `latest.json` points at.
+        // Prefer raw installer bundles (.dmg, .msi, .AppImage, .deb, .rpm,
+        // .exe) over the Tauri updater artifacts (.app.tar.gz, .nsis.zip,
+        // .msi.zip, .AppImage.tar.gz). The updater artifacts still ship in
+        // the release — they're consumed by the in-app updater via
+        // `latest.json` — but the landing page should default to the
+        // familiar drag-to-Applications format users expect.
+        const isUpdaterBundleFile = (fileName: string): boolean =>
+            fileName.endsWith('.tar.gz') ||
+            fileName.endsWith('.nsis.zip') ||
+            fileName.endsWith('.msi.zip')
         const existing = bucket.get(meta.arch)
         if (existing) {
-            const preferNewer = meta.format.endsWith('.tar.gz') || meta.format === 'NSIS installer'
-            if (preferNewer) bucket.set(meta.arch, toAssetRef(asset, meta))
+            const newIsUpdater = isUpdaterBundleFile(asset.name)
+            const existingIsUpdater = isUpdaterBundleFile(existing.fileName)
+            if (!newIsUpdater && existingIsUpdater) {
+                bucket.set(meta.arch, toAssetRef(asset, meta))
+            }
         } else {
             bucket.set(meta.arch, toAssetRef(asset, meta))
         }
