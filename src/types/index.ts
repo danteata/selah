@@ -383,7 +383,9 @@ export interface AppSettings {
      */
     llm?: {
         enabled?: boolean
-        /** Base URL up to `/v1` (no trailing `/chat/completions`). */
+        /** Selected provider id (see llmProviders); 'custom' uses an explicit baseUrl. */
+        provider?: string
+        /** Base URL up to `/v1`. Preset from the provider; user-set for 'custom'. */
         baseUrl?: string
         apiKey?: string
         model?: string

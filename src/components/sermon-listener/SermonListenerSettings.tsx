@@ -5,6 +5,7 @@ import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDe
 import { audioFeedbackService } from '../../services/sermon-listener/audioFeedback'
 import { DEFAULT_NATIVE_MODEL_ID } from '../../services/sermon-listener/nativeModelManager'
 import { NativeModelPicker } from './NativeModelPicker'
+import { LLM_PROVIDERS, DEFAULT_LLM_PROVIDER_ID, getLlmProvider } from '../../services/sermon-listener/llmProviders'
 import { Mic, Monitor, RefreshCw, Info } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
@@ -44,6 +45,26 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                 ...settings.llm,
                 ...patch,
             },
+        })
+    }
+
+    // Resolve the active provider: explicit selection → inferred from a stored
+    // base URL (back-compat) → custom (if a URL exists) → default.
+    const llmProvider =
+        getLlmProvider(llm?.provider) ??
+        LLM_PROVIDERS.find((p) => !!p.baseUrl && p.baseUrl === llm?.baseUrl) ??
+        (llm?.baseUrl ? getLlmProvider('custom')! : getLlmProvider(DEFAULT_LLM_PROVIDER_ID)!)
+    const selectLlmProvider = (id: string) => {
+        const next = getLlmProvider(id)
+        if (!next) return
+        // Preset the base URL from the provider (custom keeps the user's value),
+        // and default the model to the provider's first suggestion if the current
+        // one isn't valid for the new provider.
+        const keepModel = llm?.model && next.models.includes(llm.model)
+        updateLlm({
+            provider: id,
+            baseUrl: next.isCustom ? (llm?.baseUrl ?? '') : next.baseUrl,
+            model: keepModel ? llm?.model : (next.models[0] ?? ''),
         })
     }
 
@@ -245,7 +266,17 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         </div>
                     </div>
                     <button
-                        onClick={() => updateLlm({ enabled: !(llm?.enabled ?? false) })}
+                        onClick={() => {
+                            const enabling = !(llm?.enabled ?? false)
+                            // On first enable, seed a default provider so the
+                            // base URL + model are populated (key is all that's left).
+                            if (enabling && !llm?.baseUrl && !llm?.provider) {
+                                const p = getLlmProvider(DEFAULT_LLM_PROVIDER_ID)!
+                                updateLlm({ enabled: true, provider: p.id, baseUrl: p.baseUrl, model: llm?.model || p.models[0] })
+                            } else {
+                                updateLlm({ enabled: enabling })
+                            }
+                        }}
                         className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${llm?.enabled ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
                         <span
@@ -257,30 +288,57 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
 
                 {llm?.enabled && (
                     <div className="space-y-2">
-                        <input
-                            type="text"
-                            value={llm?.baseUrl || ''}
-                            onChange={(e) => updateLlm({ baseUrl: e.target.value })}
-                            placeholder="Base URL (e.g. https://api.openai.com/v1)"
+                        {/* Provider */}
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">Provider</label>
+                        <select
+                            value={llmProvider.id}
+                            onChange={(e) => selectLlmProvider(e.target.value)}
                             className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
-                        />
+                        >
+                            {LLM_PROVIDERS.map((p) => (
+                                <option key={p.id} value={p.id}>{p.label}</option>
+                            ))}
+                        </select>
+
+                        {/* Base URL — only for the custom provider */}
+                        {llmProvider.isCustom && (
+                            <input
+                                type="text"
+                                value={llm?.baseUrl || ''}
+                                onChange={(e) => updateLlm({ baseUrl: e.target.value })}
+                                placeholder="Base URL (e.g. https://api.example.com/v1)"
+                                className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                            />
+                        )}
+
+                        {/* API key — optional for local providers */}
                         <input
                             type="password"
                             value={llm?.apiKey || ''}
                             onChange={(e) => updateLlm({ apiKey: e.target.value })}
-                            placeholder="API key (stored on this device)"
+                            placeholder={llmProvider.requiresKey ? 'API key (stored on this device)' : 'API key (optional for local servers)'}
                             className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
+
+                        {/* Model — suggestions via datalist, but any value allowed */}
                         <input
                             type="text"
+                            list="llm-model-suggestions"
                             value={llm?.model || ''}
                             onChange={(e) => updateLlm({ model: e.target.value })}
-                            placeholder="Model (e.g. gpt-4o-mini)"
+                            placeholder={llmProvider.models[0] ? `Model (e.g. ${llmProvider.models[0]})` : 'Model id'}
                             className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
+                        <datalist id="llm-model-suggestions">
+                            {llmProvider.models.map((m) => <option key={m} value={m} />)}
+                        </datalist>
+
+                        {llmProvider.hint && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{llmProvider.hint}</p>
+                        )}
                         <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                             <Info className="w-3 h-3 flex-shrink-0" />
-                            Verse references found by the AI are added to the detected list; your local detection always runs first.
+                            AI-found references are added to the detected list; your local detection always runs first.
                         </p>
                     </div>
                 )}
