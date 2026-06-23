@@ -19,10 +19,16 @@ jobs:
           - platform: 'macos-latest'
             target: 'aarch64-apple-darwin'
             name: 'macOS (Apple Silicon)'
-          # NOTE: Intel macOS (x86_64-apple-darwin) is intentionally omitted —
-          # the ONNX Runtime backend (`ort`) ships no prebuilt binary for it, so
-          # the native engine can't link without compiling ONNX Runtime from
-          # source. Apple Silicon covers modern Macs.
+          # macos-13 is the last Intel runner image — build x86_64 natively
+          # there so Homebrew installs an x86_64 ONNX Runtime (arm64 runners
+          # would give an arm64 dylib that can't link into an x86_64 binary).
+          - platform: 'macos-13'
+            target: 'x86_64-apple-darwin'
+            name: 'macOS (Intel)'
+            # `ort` publishes no prebuilt binary for Intel macOS, so this job
+            # links a Homebrew-installed ONNX Runtime (see the "system ONNX
+            # Runtime" step) and bundles its dylib via this config override.
+            tauri_args: '--config src-tauri/tauri.onnxruntime-system.conf.json'
           - platform: 'ubuntu-22.04'
             target: 'x86_64-unknown-linux-gnu'
             name: 'Linux'
@@ -75,6 +81,25 @@ jobs:
           "VULKAN_SDK=C:\VulkanSDK\$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
           "C:\VulkanSDK\$ver\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
+      # Intel macOS has no prebuilt `ort` binary, so link a Homebrew ONNX
+      # Runtime instead (ORT_STRATEGY=system). We stage a copy of the dylib with
+      # an @rpath install-name and point ORT_LIB_LOCATION at it, so the linked
+      # binary references @rpath/libonnxruntime.dylib — which the bundled .app
+      # then resolves from Contents/Frameworks (see tauri.onnxruntime-system.conf.json).
+      - name: Setup system ONNX Runtime (Intel macOS only)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          set -euo pipefail
+          brew install onnxruntime
+          PREFIX="$(brew --prefix onnxruntime)"
+          mkdir -p src-tauri/onnxruntime-libs
+          # -L follows the version symlink and copies the real dylib.
+          cp -L "$PREFIX/lib/libonnxruntime.dylib" src-tauri/onnxruntime-libs/libonnxruntime.dylib
+          chmod u+w src-tauri/onnxruntime-libs/libonnxruntime.dylib
+          install_name_tool -id @rpath/libonnxruntime.dylib src-tauri/onnxruntime-libs/libonnxruntime.dylib
+          echo "ORT_STRATEGY=system" >> "$GITHUB_ENV"
+          echo "ORT_LIB_LOCATION=$PWD/src-tauri/onnxruntime-libs" >> "$GITHUB_ENV"
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
@@ -103,5 +128,5 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} ${{ matrix.tauri_args }}
 
