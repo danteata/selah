@@ -262,12 +262,15 @@ impl MultiMonitorState {
             message: "No suitable monitor found for live output".to_string(),
         })?;
 
-        // Build the URL for the live view
+        // Build the URL for the live view. The frontend uses HashRouter, so the
+        // route must live in the URL *hash* (`/#/live`) — a plain `/live` path
+        // leaves the hash empty, and HashRouter would render the full app at `/`
+        // instead of the live output.
         let base_url = dev_url.unwrap_or("tauri://localhost");
         let url = if let Some(ref slide_id) = config.initial_slide_id {
-            format!("{}/live?slide={}", base_url, slide_id)
+            format!("{}/#/live?slide={}", base_url, slide_id)
         } else {
-            format!("{}/live", base_url)
+            format!("{}/#/live", base_url)
         };
 
         let webview_url = WebviewUrl::External(url.parse().map_err(|e| MultiMonitorError {
