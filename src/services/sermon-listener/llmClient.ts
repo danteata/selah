@@ -40,6 +40,50 @@ function hostOf(url: string): string {
     }
 }
 
+interface RawResponse {
+    status: number
+    body: string
+}
+
+function isTauri(): boolean {
+    return typeof window !== 'undefined' && '__TAURI__' in window
+}
+
+/**
+ * Perform an LLM HTTP request. On desktop this routes through the Rust
+ * `llm_proxy` command to bypass the webview's CORS restrictions (most provider
+ * APIs reject browser-origin requests); on web it uses fetch directly.
+ */
+async function httpRequest(
+    url: string,
+    init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: string; timeoutMs: number; signal?: AbortSignal },
+): Promise<RawResponse> {
+    if (isTauri()) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        return await invoke<RawResponse>('llm_proxy', {
+            req: {
+                url,
+                method: init.method,
+                headers: init.headers,
+                body: init.body,
+                timeoutSecs: Math.ceil(init.timeoutMs / 1000),
+            },
+        })
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), init.timeoutMs)
+    if (init.signal) {
+        if (init.signal.aborted) controller.abort()
+        else init.signal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+    try {
+        const res = await fetch(url, { method: init.method, headers: init.headers, body: init.body, signal: controller.signal })
+        return { status: res.status, body: await res.text() }
+    } finally {
+        clearTimeout(timer)
+    }
+}
+
 export interface LlmChatOptions {
     /** Sampling temperature. Defaults to 0 for deterministic extraction. */
     temperature?: number
@@ -66,14 +110,6 @@ export async function llmChatJson<T = unknown>(
 ): Promise<T> {
     const { temperature = 0, signal, timeoutMs = 20000 } = options
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), timeoutMs)
-    // Forward an external abort to our controller.
-    if (signal) {
-        if (signal.aborted) controller.abort()
-        else signal.addEventListener('abort', () => controller.abort(), { once: true })
-    }
-
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.apiKey ?? ''}`,
@@ -84,37 +120,36 @@ export async function llmChatJson<T = unknown>(
         headers['anthropic-dangerous-direct-browser-access'] = 'true'
     }
 
-    try {
-        const response = await fetch(endpointFor(config.baseUrl), {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                model: config.model,
-                temperature,
-                response_format: { type: 'json_object' },
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userContent },
-                ],
-            }),
-            signal: controller.signal,
-        })
+    const { status, body } = await httpRequest(endpointFor(config.baseUrl), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            model: config.model,
+            temperature,
+            response_format: { type: 'json_object' },
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userContent },
+            ],
+        }),
+        timeoutMs,
+        signal,
+    })
 
-        if (!response.ok) {
-            const body = await response.text().catch(() => '')
-            throw new Error(`LLM request failed: ${response.status} ${body.slice(0, 200)}`)
-        }
-
-        const data = (await response.json()) as {
-            choices?: Array<{ message?: { content?: string } }>
-        }
-        const content = data.choices?.[0]?.message?.content
-        if (!content) throw new Error('LLM response had no content')
-
-        return parseJsonLoose<T>(content)
-    } finally {
-        clearTimeout(timeout)
+    if (status < 200 || status >= 300) {
+        throw new Error(`LLM request failed: ${status} ${body.slice(0, 200)}`)
     }
+
+    let data: { choices?: Array<{ message?: { content?: string } }> }
+    try {
+        data = JSON.parse(body)
+    } catch {
+        throw new Error(`LLM response was not JSON: ${body.slice(0, 200)}`)
+    }
+    const content = data.choices?.[0]?.message?.content
+    if (!content) throw new Error('LLM response had no content')
+
+    return parseJsonLoose<T>(content)
 }
 
 /** Model-ish ids we never want to offer for chat extraction (embeddings, audio, etc.). */
@@ -141,12 +176,14 @@ export async function listModels(
         headers['anthropic-dangerous-direct-browser-access'] = 'true'
     }
     try {
-        const res = await fetch(`${config.baseUrl.replace(/\/+$/, '')}/models`, {
+        const { status, body } = await httpRequest(`${config.baseUrl.replace(/\/+$/, '')}/models`, {
+            method: 'GET',
             headers,
-            signal: signal ?? AbortSignal.timeout(8000),
+            timeoutMs: 8000,
+            signal,
         })
-        if (!res.ok) return []
-        const data = (await res.json()) as { data?: unknown[]; models?: unknown[] }
+        if (status < 200 || status >= 300) return []
+        const data = JSON.parse(body) as { data?: unknown[]; models?: unknown[] }
         const raw = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : []
         const ids = raw
             .map((m) => (typeof m === 'string' ? m : (m as { id?: string; name?: string }).id ?? (m as { name?: string }).name))

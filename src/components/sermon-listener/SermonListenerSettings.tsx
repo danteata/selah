@@ -80,13 +80,15 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
 
     // Fetch the provider's available models when the endpoint/key changes.
     useEffect(() => {
-        if (!llm?.enabled || !llm?.baseUrl || !llm?.apiKey?.trim()) {
+        const baseUrl = llm?.baseUrl
+        const apiKey = llm?.apiKey
+        if (!llm?.enabled || !baseUrl || !apiKey?.trim()) {
             setFetchedModels([])
             return
         }
         const controller = new AbortController()
         setModelsLoading(true)
-        listModels({ baseUrl: llm.baseUrl, apiKey: llm.apiKey }, controller.signal)
+        listModels({ baseUrl, apiKey }, controller.signal)
             .then(setFetchedModels)
             .catch(() => setFetchedModels([]))
             .finally(() => setModelsLoading(false))

@@ -101,8 +101,8 @@ describe('extractVersesWithLLM', () => {
 
     it('returns only new, validated verses when configured', async () => {
         const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({
+            status: 200,
+            text: async () => JSON.stringify({
                 choices: [{ message: { content: JSON.stringify({
                     cleanedText: 'Paul writes to the Philippians in chapter four',
                     verses: [

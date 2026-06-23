@@ -4,12 +4,68 @@
 //! which is engine-agnostic, so they compile on the default build. Engine
 //! load/transcribe commands live behind the `native-transcription` feature.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg_attr(not(feature = "native-transcription"), allow(unused_imports))]
 use tauri::Manager;
 use tauri::{AppHandle, State};
 
 use super::models::{ModelManager, ModelStatus};
+
+// ---------------------------------------------------------------------------
+// LLM HTTP proxy
+//
+// LLM calls (model listing + chat completions) run from the webview, where most
+// provider APIs reject browser-origin requests via CORS. Routing them through
+// Rust (reqwest) bypasses CORS entirely. Engine-agnostic; always compiled.
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmProxyRequest {
+    url: String,
+    /// "GET" or "POST" (default POST).
+    method: Option<String>,
+    headers: Option<HashMap<String, String>>,
+    /// Raw request body (already-serialized JSON) for POST.
+    body: Option<String>,
+    /// Request timeout in seconds (default 60).
+    timeout_secs: Option<u64>,
+}
+
+#[derive(serde::Serialize)]
+pub struct LlmProxyResponse {
+    status: u16,
+    body: String,
+}
+
+/// Perform an HTTP request to an LLM provider from Rust (no CORS).
+#[tauri::command]
+pub async fn llm_proxy(req: LlmProxyRequest) -> Result<LlmProxyResponse, String> {
+    let client = reqwest::Client::new();
+    let method = req.method.as_deref().unwrap_or("POST").to_uppercase();
+    let mut builder = match method.as_str() {
+        "GET" => client.get(&req.url),
+        _ => client.post(&req.url),
+    };
+    if let Some(headers) = req.headers {
+        for (k, v) in headers {
+            builder = builder.header(k, v);
+        }
+    }
+    if let Some(body) = req.body {
+        builder = builder.body(body);
+    }
+    let resp = builder
+        .timeout(Duration::from_secs(req.timeout_secs.unwrap_or(60)))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    let status = resp.status().as_u16();
+    let body = resp.text().await.map_err(|e| format!("Read body failed: {}", e))?;
+    Ok(LlmProxyResponse { status, body })
+}
 
 /// List the catalog with per-model downloaded/downloading state.
 #[tauri::command]

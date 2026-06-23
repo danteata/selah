@@ -53,8 +53,8 @@ describe('summarizeWithLLM', () => {
 
     it('parses a structured response when configured', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({
+            status: 200,
+            text: async () => JSON.stringify({
                 choices: [{ message: { content: JSON.stringify({
                     summary: 'A sermon about grace.',
                     keyPoints: ['Grace is free', 'Respond in faith'],

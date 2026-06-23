@@ -116,6 +116,7 @@ use transcription::commands::{
     unload_native_model,
     get_loaded_native_model,
     set_native_transcription_config,
+    llm_proxy,
 };
 use transcription::ModelManager;
 
@@ -272,6 +273,7 @@ pub fn run() {
             unload_native_model,
             get_loaded_native_model,
             set_native_transcription_config,
+            llm_proxy,
         ])
         .setup(move |app| {
             // Initialize file logging and crash detection
