@@ -19,9 +19,10 @@ jobs:
           - platform: 'macos-latest'
             target: 'aarch64-apple-darwin'
             name: 'macOS (Apple Silicon)'
-          - platform: 'macos-latest'
-            target: 'x86_64-apple-darwin'
-            name: 'macOS (Intel)'
+          # NOTE: Intel macOS (x86_64-apple-darwin) is intentionally omitted —
+          # the ONNX Runtime backend (`ort`) ships no prebuilt binary for it, so
+          # the native engine can't link without compiling ONNX Runtime from
+          # source. Apple Silicon covers modern Macs.
           - platform: 'ubuntu-22.04'
             target: 'x86_64-unknown-linux-gnu'
             name: 'Linux'
@@ -81,6 +82,15 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install
+
+      # Fetch the assets bundled as Tauri resources (the offline GGUF base.en
+      # model and the MiniLM embedding model). Both are plain curl/fetch
+      # downloads. The heavy verse-embedding pack is built lazily at runtime, so
+      # it isn't fetched here.
+      - name: Download bundled model assets
+        run: |
+          node scripts/download-gguf-model.mjs
+          node scripts/download-embedding-model.mjs
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
