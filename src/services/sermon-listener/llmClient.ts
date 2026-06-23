@@ -32,6 +32,14 @@ function endpointFor(baseUrl: string): string {
     return `${baseUrl.replace(/\/+$/, '')}/chat/completions`
 }
 
+function hostOf(url: string): string {
+    try {
+        return new URL(url).host
+    } catch {
+        return ''
+    }
+}
+
 export interface LlmChatOptions {
     /** Sampling temperature. Defaults to 0 for deterministic extraction. */
     temperature?: number
@@ -66,13 +74,20 @@ export async function llmChatJson<T = unknown>(
         else signal.addEventListener('abort', () => controller.abort(), { once: true })
     }
 
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey ?? ''}`,
+    }
+    // Anthropic's OpenAI-compatible endpoint blocks browser-origin requests
+    // unless this header is present.
+    if (/(^|\.)api\.anthropic\.com$/i.test(hostOf(config.baseUrl))) {
+        headers['anthropic-dangerous-direct-browser-access'] = 'true'
+    }
+
     try {
         const response = await fetch(endpointFor(config.baseUrl), {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${config.apiKey ?? ''}`,
-            },
+            headers,
             body: JSON.stringify({
                 model: config.model,
                 temperature,

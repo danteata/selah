@@ -4,9 +4,10 @@
  * users only enter an API key and choose a model. "Custom" exposes the base URL
  * for any other OpenAI-compatible endpoint.
  *
- * All entries must expose an OpenAI-style `/chat/completions` endpoint (that's
- * what `llmClient` speaks). Anthropic's native API is not OpenAI-compatible, so
- * Claude models are offered via OpenRouter rather than a direct Anthropic entry.
+ * All entries expose an OpenAI-style `/chat/completions` endpoint (that's what
+ * `llmClient` speaks). Anthropic, Gemini and Z.AI are reached via their
+ * official OpenAI-compatibility endpoints (Anthropic also needs the
+ * browser-access header, added in llmClient).
  */
 
 export interface LlmProvider {
@@ -34,18 +35,41 @@ export const LLM_PROVIDERS: readonly LlmProvider[] = [
         hint: 'Get a key at platform.openai.com. gpt-4o-mini is cheap and fast.',
     },
     {
+        id: 'anthropic',
+        label: 'Anthropic (Claude)',
+        baseUrl: 'https://api.anthropic.com/v1',
+        requiresKey: true,
+        models: ['claude-3-5-haiku-latest', 'claude-3-5-sonnet-latest', 'claude-3-7-sonnet-latest'],
+        hint: 'Claude via Anthropic’s OpenAI-compatible endpoint. Key at console.anthropic.com.',
+    },
+    {
+        id: 'gemini',
+        label: 'Google Gemini',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        requiresKey: true,
+        models: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+        hint: 'Get a key at aistudio.google.com. gemini-2.0-flash is fast and cheap.',
+    },
+    {
+        id: 'zai',
+        label: 'Z.AI (GLM)',
+        baseUrl: 'https://api.z.ai/api/paas/v4',
+        requiresKey: true,
+        models: ['glm-4.6', 'glm-4.5-air', 'glm-4-flash'],
+        hint: 'Zhipu GLM models via Z.AI. Key at z.ai.',
+    },
+    {
         id: 'openrouter',
-        label: 'OpenRouter (Claude, Gemini, Llama…)',
+        label: 'OpenRouter (many models, one key)',
         baseUrl: 'https://openrouter.ai/api/v1',
         requiresKey: true,
         models: [
-            'anthropic/claude-3.5-haiku',
-            'anthropic/claude-3.5-sonnet',
             'openai/gpt-4o-mini',
+            'anthropic/claude-3.5-haiku',
             'google/gemini-flash-1.5',
             'meta-llama/llama-3.1-70b-instruct',
         ],
-        hint: 'One key, many models — including Anthropic Claude. openrouter.ai/keys',
+        hint: 'Aggregator — access many providers with a single key. openrouter.ai/keys',
     },
     {
         id: 'groq',
