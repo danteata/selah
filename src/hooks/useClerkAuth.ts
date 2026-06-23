@@ -2,6 +2,11 @@ import { useState } from 'react'
 import { useSignIn, useSignUp, useClerk } from '@clerk/clerk-react'
 import { useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
+// Single source of truth for runtime detection — see `platform/index.ts`.
+// Using the shared, call-time `isTauri` avoids the bug where a divergent
+// local copy (or an import-time-frozen value) misdetects the packaged
+// build as web and routes Google sign-in to Clerk's hosted portal.
+import { isTauri } from '../platform'
 
 export type AuthMode = 'signin' | 'signup'
 
@@ -16,10 +21,6 @@ export type AuthMode = 'signin' | 'signup'
 // which uses Clerk's hooks directly) can reuse it without going
 // through this hook.
 export const TAURI_OAUTH_REDIRECT_URL = 'http://localhost:19888/oauth-callback'
-
-function isTauri(): boolean {
-    return typeof window !== 'undefined' && '__TAURI__' in window
-}
 
 // Turn a Clerk API error into a message that tells the user what to do
 // next, rather than surfacing Clerk's raw text. Clerk errors carry a
@@ -276,6 +277,28 @@ export function useClerkAuth(mode: AuthMode) {
         setIsLoading(true)
         setError('')
         try {
+            // Diagnostic breadcrumb. The console gets wiped when the web
+            // path navigates away, so ALSO persist to localStorage (our
+            // origin), which survives. After a failed attempt, relaunch
+            // the app and read `selah_oauth_debug` from
+            // Storage → Local Storage in the inspector.
+            const debug = {
+                tauri: isTauri(),
+                protocol:
+                    typeof window !== 'undefined' ? window.location.protocol : 'n/a',
+                host: typeof window !== 'undefined' ? window.location.host : 'n/a',
+                hasInternals:
+                    typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window,
+            }
+            console.info('[oauth] Google sign-in decision', debug)
+            try {
+                window.localStorage.setItem(
+                    'selah_oauth_debug',
+                    JSON.stringify(debug),
+                )
+            } catch {
+                /* ignore storage failures */
+            }
             if (isTauri()) {
                 // System-browser flow — see `startTauriOAuth` for
                 // the full rationale.

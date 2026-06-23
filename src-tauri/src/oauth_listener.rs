@@ -134,60 +134,89 @@ pub fn start_oauth_listener(app: AppHandle) -> Result<String, String> {
                 // same root path, also served by the asset
                 // server) and the `<SignedIn>` guard renders the
                 // dashboard.
-                let query_only = if let Some(idx) = url.find('?') {
-                    url[idx + 1..].to_string()
-                } else {
-                    String::new()
-                };
+                // IMPORTANT: we do NOT navigate/reload the webview here.
+                //
+                // Reloading the webview to `/?__clerk_handshake=...` made
+                // clerk-js process the handshake on a fresh page load, and
+                // on the packaged `tauri://localhost` origin that path
+                // redirected the webview to Clerk's hosted Account Portal
+                // ("Start building") instead of completing in-app.
+                //
+                // Instead we leave the webview exactly where it is (the
+                // welcome screen, which still holds the live in-memory
+                // `SignIn` created by `signIn.create(...)`), bring it to
+                // the foreground, and emit the callback event. The frontend
+                // (`useOAuthCallback`) completes the sign-in in place by
+                // reloading that `SignIn` and calling `setActive` — no page
+                // reload, no handshake redirect, no hosted portal.
                 if let Some(window) = app_handle.get_webview_window("main") {
-                    // The Tauri webview NEVER navigated to the listener —
-                    // only the system browser did the OAuth. So the
-                    // webview is still on the app origin
-                    // (`http://localhost:3000` in dev, `tauri://localhost`
-                    // in production). A ROOT-RELATIVE navigation therefore
-                    // resolves against the correct origin automatically,
-                    // with no origin detection needed.
-                    //
-                    // We deliberately do NOT read `config().build.dev_url`:
-                    // that field stays `http://localhost:3000` even in a
-                    // production build, so the old code navigated the
-                    // packaged app to a dead Vite URL.
-                    //
-                    // We carry Clerk's callback query string (e.g.
-                    // `?__clerk_handshake=...`) across to the React app.
-                    // `App.tsx` detects it and renders
-                    // `<DesktopOAuthCallback />`, letting the Clerk SDK
-                    // exchange the handshake for a session in the webview's
-                    // own client. `replace()` (not `href =`) avoids leaving
-                    // the listener URL in the webview history.
-                    //
-                    // The `{:?}` (Debug) formatting produces a properly
-                    // quoted, escaped JS string literal, which prevents the
-                    // query string from breaking out of the `eval` (the
-                    // Clerk params are URL-encoded ASCII, so no `\u{..}`
-                    // escapes that would be invalid JS are emitted).
-                    let target = format!("/?{}", query_only);
-                    let nav_script =
-                        format!("window.location.replace({:?});", target);
-                    if let Err(e) = window.eval(&nav_script) {
-                        eprintln!("[oauth] failed to navigate webview: {}", e);
-                    }
                     // Bring the desktop app back to the foreground — the
                     // system browser stole focus during the OAuth.
                     let _ = window.set_focus();
                 } else {
-                    eprintln!("[oauth] no main webview window to navigate");
+                    eprintln!("[oauth] no main webview window to focus");
                 }
-                // Tiny success page for the system browser. The
-                // Tauri webview is being navigated independently
-                // above; this is just to give the user something
-                // to look at in the system browser tab while the
-                // desktop app focuses.
-                let body = b"<html><body style=\"font-family:sans-serif;padding:32px;\">\
-                    <h2>Sign-in complete</h2>\
-                    <p>You can close this tab and return to Selah.</p>\
-                    </body></html>";
-                let resp = Response::from_data(body).with_header(
+                // Branded success page for the system browser. The Tauri
+                // webview is being navigated/finalized independently; this
+                // is what the user sees in the browser tab. It tries to
+                // close itself (works only for script-opened tabs) and
+                // otherwise tells the user they can return to Selah.
+                let body = br##"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signed in to Selah</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #0f2a27 0%, #08090c 60%);
+    color: #e7e5e4;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    text-align: center;
+    padding: 48px 40px;
+    max-width: 420px;
+    animation: rise .5s cubic-bezier(.2,.7,.2,1) both;
+  }
+  .badge {
+    width: 76px; height: 76px; margin: 0 auto 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #14b8a6, #0d9488);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 12px 40px -8px rgba(20,184,166,.55), inset 0 1px 0 rgba(255,255,255,.25);
+    animation: pop .5s .15s cubic-bezier(.2,.9,.2,1.2) both;
+  }
+  .badge svg { width: 38px; height: 38px; }
+  .badge path { stroke-dasharray: 30; stroke-dashoffset: 30; animation: draw .45s .35s ease forwards; }
+  h1 { font-size: 1.6rem; font-weight: 700; margin: 0 0 10px; letter-spacing: -.01em; color: #fafaf9; }
+  p { margin: 0; color: #a8a29e; font-size: .95rem; line-height: 1.6; }
+  .hint { margin-top: 22px; font-size: .8rem; color: #57534e; }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="badge" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="M5 13l4 4L19 7" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1>You're signed in</h1>
+    <p>Sign-in complete &mdash; head back to the Selah app to continue.</p>
+    <p class="hint">You can close this tab.</p>
+  </main>
+  <script>setTimeout(function(){ try { window.close(); } catch (e) {} }, 1200);</script>
+</body>
+</html>"##;
+                let resp = Response::from_data(body.to_vec()).with_header(
                     "Content-Type: text/html; charset=utf-8"
                         .parse::<tiny_http::Header>()
                         .expect("static header is valid"),

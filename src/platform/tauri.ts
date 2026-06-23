@@ -5,9 +5,16 @@
 
 import type { Platform, UpdateInfo, DialogOptions, SaveDialogOptions, MessageDialogOptions } from './types';
 
-// Check if running in Tauri
+// Check if running in Tauri. Use `__TAURI_INTERNALS__` (always injected
+// by Tauri v2) — `__TAURI__` is gated on `withGlobalTauri` and is
+// unreliable in packaged builds. See note in `platform/index.ts`.
 const isTauri = () => {
-    return typeof window !== 'undefined' && '__TAURI__' in window;
+    if (typeof window === 'undefined') return false;
+    return (
+        '__TAURI_INTERNALS__' in window ||
+        '__TAURI__' in window ||
+        window.location.protocol === 'tauri:'
+    );
 };
 
 const tauriFilesystem = {

@@ -1,95 +1,66 @@
 /**
- * useOAuthCallback — spins up the Rust one-shot OAuth listener
- * and (defensively) navigates the Tauri webview to the React
- * callback route if the Rust side emits the `oauth://callback`
- * event before the webview has been redirected.
+ * useOAuthCallback — drives the desktop (Tauri) Google OAuth flow.
  *
  * Why this hook exists
  * --------------------
- * On the web build the browser's normal redirect handling works
- * because `window.location.origin` is already http(s). On Tauri
- * desktop there is no such origin — the webview's URL is
- * `tauri://localhost` and Clerk's API refuses any redirect URL
- * that isn't `http://` or `https://` (custom URL schemes like
- * `app.selah.desktop://` are blocked server-side). So we run a
- * one-shot HTTP server on `http://localhost:19888` (Rust side,
- * see `src-tauri/src/oauth_listener.rs`) and the system browser
- * (NOT the Tauri webview) completes the OAuth against that URL.
+ * Clerk's API only accepts `http(s)` redirect URLs, never custom
+ * schemes, and the Tauri webview can't host Clerk's hosted sign-in.
+ * So the OAuth happens in the SYSTEM browser against a Rust loopback
+ * listener on `http://localhost:19888` (see
+ * `src-tauri/src/oauth_listener.rs`):
  *
- *   1. The Tauri webview calls `invoke('start_oauth_listener')`
- *      on mount to spin up the one-shot server and get its URL
- *      back. The hook stores that URL internally.
- *   2. The user clicks "Continue with Google" in
- *      `useClerkAuth.handleGoogleSignIn`, which calls Clerk's
- *      `signIn.create({ strategy, redirectUrl })` to mint an
- *      OAuth URL, then opens that URL in the OS default browser
- *      via `@tauri-apps/plugin-shell` `open()`.
- *   3. The system browser does the OAuth with Clerk's hosted
- *      sign-in and redirects to
- *      `http://localhost:19888/oauth-callback?__clerk_handshake=...`.
- *   4. The Rust listener captures the request, navigates the
- *      Tauri webview to the configured origin (Vite dev URL or
- *      `tauri://localhost` in production) with the handshake
- *      still in the query string, and emits `oauth://callback`
- *      with the path-and-query.
- *   5. `App.tsx`'s top-level `?__clerk_handshake` check sees the
- *      query string and renders `<DesktopOAuthCallback />`,
- *      which decodes the handshake JWT against the Tauri
- *      webview's own Clerk SDK and navigates to the dashboard.
- *   6. The `oauth://callback` event listener below is a backup
- *      that navigates the webview to the same
- *      `/desktop-oauth-callback` route if, for any reason, the
- *      Rust-side webview navigation didn't happen first.
+ *   1. On mount we `invoke('start_oauth_listener')` so the loopback
+ *      server is bound before the user clicks.
+ *   2. The user clicks "Continue with Google"
+ *      (`useClerkAuth.handleGoogleSignIn`), which calls
+ *      `signIn.create({ strategy, redirectUrl })` to mint an OAuth URL
+ *      and opens it in the OS browser. Crucially, the webview itself
+ *      does NOT navigate — the live in-memory `SignIn` stays on the
+ *      welcome screen.
+ *   3. The system browser completes the OAuth and Clerk redirects it
+ *      to the loopback listener.
+ *   4. Rust focuses the app window and emits `oauth://callback`. It
+ *      does NOT reload the webview.
+ *   5. The listener below completes the sign-in IN PLACE: it reloads
+ *      the live `SignIn`/`SignUp` (whose first-factor verification was
+ *      completed server-side via the OAuth `state`) and calls
+ *      `setActive`. No page reload, no handshake redirect, no detour
+ *      through Clerk's hosted Account Portal.
  *
- * On the web build, the hook is a no-op (no listener is
- * started, no event is subscribed). The web Login/Signup pages
- * use the same-origin `/sso-callback` path which Clerk handles
- * natively.
+ * The earlier approach reloaded the webview to
+ * `/?__clerk_handshake=...` and let clerk-js process the handshake.
+ * On the packaged `tauri://localhost` origin that consistently
+ * redirected the webview to Clerk's hosted "Start building" portal
+ * instead of completing in-app, which is why we complete in place now.
  *
- * Mount this once at the app shell level. It registers a single
- * Tauri event listener for the lifetime of the app; the listener
- * is auto-cleaned on unmount.
+ * On the web build the hook is a no-op. Mount it once at the app
+ * shell, inside <ClerkProvider>.
  */
 
 import { useEffect, useState } from 'react'
+import { useClerk } from '@clerk/clerk-react'
+import { useMutation } from 'convex/react'
+import { api } from '../../convex/_generated/api'
+import { isTauri } from '../platform'
 
-function isTauri(): boolean {
-    return typeof window !== 'undefined' && '__TAURI__' in window
-}
+const OAUTH_CALLBACK_EVENT = 'oauth://callback'
 
 export interface UseOAuthCallbackReturn {
-    /**
-     * True once the Rust loopback listener is bound and ready to
-     * accept Clerk's OAuth redirect. Callers can use this to gate
-     * the "Continue with Google" button, though the click path also
-     * re-invokes `start_oauth_listener` defensively (it's
-     * idempotent), so gating is optional.
-     */
+    /** True once the Rust loopback listener is bound and ready. */
     isReady: boolean
 }
 
 export function useOAuthCallback(): UseOAuthCallbackReturn {
+    const clerk = useClerk()
+    const upsertUser = useMutation(api.users.upsertUser)
     const [isReady, setIsReady] = useState(false)
 
-    // On Tauri, bind the loopback listener once on mount so it's
-    // ready by the time the user clicks "Continue with Google". The
-    // Rust side is idempotent — if a previous call is still bound it
-    // just returns the same URL.
-    //
-    // We intentionally do NOT subscribe to the `oauth://callback`
-    // event here. The Rust listener navigates the webview to
-    // `/?<clerk-params>` directly (origin-correct in dev and prod),
-    // and `App.tsx` renders the callback screen off that. An extra
-    // JS-side navigation would only race with the Rust one and, in a
-    // packaged build, could send the webview to a path the asset
-    // server can't serve.
+    // Bind the loopback listener once on mount.
     useEffect(() => {
         if (!isTauri()) return
         let cancelled = false
         ;(async () => {
             try {
-                // Dynamic import so the web bundle never pulls in the
-                // Tauri core API (the import path throws outside Tauri).
                 const { invoke } = await import('@tauri-apps/api/core')
                 if (cancelled) return
                 await invoke<string>('start_oauth_listener')
@@ -103,5 +74,114 @@ export function useOAuthCallback(): UseOAuthCallbackReturn {
         }
     }, [])
 
+    // Complete the OAuth in place when the system-browser flow returns.
+    //
+    // We trigger on TWO signals for robustness:
+    //   - the Rust `oauth://callback` Tauri event (fires the instant the
+    //     loopback listener receives Clerk's redirect), and
+    //   - the window `focus` event (a plain DOM signal that fires when the
+    //     app regains the foreground after the browser — works regardless
+    //     of whether Tauri events are delivered on the current origin).
+    // `completeOAuthInPlace` is idempotent and a no-op unless there's a
+    // freshly-completed OAuth attempt to activate, so firing on both (and
+    // on incidental focus changes) is harmless.
+    useEffect(() => {
+        if (!isTauri()) return
+        let unlisten: (() => void) | null = null
+        let cancelled = false
+
+        const complete = () =>
+            void completeOAuthInPlace(clerk, async (clerkId, fullname, email) => {
+                await upsertUser({ clerkId, fullname, email })
+            })
+
+        window.addEventListener('focus', complete)
+        ;(async () => {
+            try {
+                const { listen } = await import('@tauri-apps/api/event')
+                if (cancelled) return
+                unlisten = await listen<string>(OAUTH_CALLBACK_EVENT, complete)
+            } catch (err) {
+                console.error('[oauth] failed to subscribe to callback event', err)
+            }
+        })()
+
+        return () => {
+            cancelled = true
+            window.removeEventListener('focus', complete)
+            if (unlisten) unlisten()
+        }
+    }, [clerk, upsertUser])
+
     return { isReady }
+}
+
+type Clerk = ReturnType<typeof useClerk>
+
+/**
+ * Finalize a desktop OAuth sign-in/up using the live in-memory
+ * resource. The webview never reloaded, so `clerk.client.signIn` /
+ * `signUp` is still the attempt created by `signIn.create(...)`; the
+ * OAuth completed its first-factor verification server-side, so a
+ * `reload()` surfaces a `complete` status with a session to activate.
+ */
+async function completeOAuthInPlace(
+    clerk: Clerk,
+    upsert: (clerkId: string, fullname: string, email: string) => Promise<void>,
+): Promise<void> {
+    // Already signed in — nothing to finalize. Keeps the `focus`
+    // listener cheap (it fires on every foreground gain). Guard on a
+    // boolean snapshot so `clerk.user`'s type isn't narrowed for the
+    // re-read below (it becomes populated after `setActive`).
+    const alreadySignedIn = clerk.user != null
+    if (alreadySignedIn) return
+
+    const client = clerk.client
+    if (!client) return
+    // Only act when there's an in-flight auth attempt; otherwise this is
+    // just an incidental focus event with no OAuth to complete.
+    const hasPendingSignIn = !!client.signIn?.status && client.signIn.status !== 'complete'
+    const hasPendingSignUp = !!client.signUp?.status && client.signUp.status !== 'complete'
+    const hasCompletedSignIn = client.signIn?.status === 'complete'
+    const hasCompletedSignUp = client.signUp?.status === 'complete'
+    if (!hasPendingSignIn && !hasPendingSignUp && !hasCompletedSignIn && !hasCompletedSignUp) {
+        return
+    }
+
+    const tryComplete = async (
+        resource: { status: string | null; createdSessionId: string | null; reload: () => Promise<unknown> } | null | undefined,
+    ): Promise<boolean> => {
+        if (!resource || !resource.status) return false
+        if (resource.status !== 'complete') {
+            try {
+                await resource.reload()
+            } catch (err) {
+                console.error('[oauth] failed to reload auth resource', err)
+            }
+        }
+        if (resource.status === 'complete' && resource.createdSessionId) {
+            await clerk.setActive({ session: resource.createdSessionId })
+            return true
+        }
+        return false
+    }
+
+    const completed =
+        (await tryComplete(client.signIn)) || (await tryComplete(client.signUp))
+
+    if (!completed) {
+        console.warn(
+            '[oauth] resource not complete after reload — the OAuth attempt may have expired',
+        )
+        return
+    }
+
+    // Persist the Convex user row keyed by the Clerk USER id (matches
+    // `getUserIdentity().subject` on the backend).
+    const user = clerk.user
+    const clerkUserId = user?.id
+    if (clerkUserId) {
+        const email = user?.primaryEmailAddress?.emailAddress ?? ''
+        await upsert(clerkUserId, user?.fullName || email.split('@')[0] || 'User', email)
+    }
 }

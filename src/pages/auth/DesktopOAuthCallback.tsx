@@ -91,8 +91,15 @@ export default function DesktopOAuthCallback() {
             {/* Redeems the handshake / OAuth callback against the
                 webview's Clerk client and completes the sign-in. Mounted
                 unconditionally — this is the only thing that finalizes
-                the session. */}
+                the session.
+
+                FORCE (not fallback) redirect URLs: the dev instance
+                otherwise sends the webview to Clerk's hosted Account
+                Portal after the handshake. `force` always wins and keeps
+                us in-app. */}
             <AuthenticateWithRedirectCallback
+                signInForceRedirectUrl="/"
+                signUpForceRedirectUrl="/"
                 signInFallbackRedirectUrl="/"
                 signUpFallbackRedirectUrl="/"
             />

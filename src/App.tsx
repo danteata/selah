@@ -304,7 +304,24 @@ function App() {
     return (
         <RouteErrorBoundary name="app-root">
             <AnalyticsProvider providerType={ANALYTICS_PROVIDER} apiKey={ANALYTICS_KEY}>
-                <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY!}>
+                <ClerkProvider
+                    publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY!}
+                    // On desktop, FORCE every post-auth redirect back into the
+                    // app (`/`). Without this, the dev instance has no app
+                    // redirect configured and Clerk sends the `tauri://`
+                    // webview to its hosted Account Portal "Start building"
+                    // page after the OAuth handshake. `force` overrides any
+                    // redirect URL already baked into the flow (a `fallback`
+                    // URL does not). Scoped to desktop so the web deployment's
+                    // own redirect logic is untouched.
+                    {...(isDesktop()
+                        ? {
+                              signInForceRedirectUrl: '/',
+                              signUpForceRedirectUrl: '/',
+                              afterSignOutUrl: '/',
+                          }
+                        : {})}
+                >
                     <ConvexConnectionProvider convexUrl={CONVEX_URL}>
                         <ConvexErrorBoundary>
                             <QueryClientProvider client={queryClient}>
