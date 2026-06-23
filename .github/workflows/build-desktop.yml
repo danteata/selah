@@ -65,6 +65,16 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Activate the MSVC build environment so cl.exe + INCLUDE/LIB land on PATH.
+      # whisper.cpp's Vulkan backend builds a host tool (vulkan-shaders-gen) via
+      # a nested CMake ExternalProject; without the dev environment that nested
+      # configure fails with "No CMAKE_C_COMPILER could be found". This action is
+      # plain JS (no deprecated actions/cache), so resolving it doesn't break the
+      # other jobs the way a Vulkan-setup action did.
+      - name: Setup MSVC developer environment (Windows only)
+        if: matrix.platform == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
       # Install the Vulkan SDK with a plain `run:` step (NOT a third-party
       # action). GitHub resolves every `uses:` action in a job up front — even
       # `if:`-gated ones and their nested actions — so a Vulkan setup *action*
