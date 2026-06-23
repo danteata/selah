@@ -29,6 +29,29 @@ export function SermonListenerProvider({ children }: { children: ReactNode }) {
         enableVoiceCommands: true,
     })
 
+    // Let the desktop system tray toggle listening. The tray (Rust) emits
+    // `tray://toggle-listening`; we start/stop based on the current state.
+    const { isListening, start, stop } = sermonListener
+    useEffect(() => {
+        if (typeof window === 'undefined' || !('__TAURI__' in window)) return
+        let unlisten: (() => void) | undefined
+        let cancelled = false
+        import('@tauri-apps/api/event')
+            .then(({ listen }) => listen('tray://toggle-listening', () => {
+                if (isListening) stop()
+                else void start()
+            }))
+            .then((fn) => {
+                if (cancelled) fn()
+                else unlisten = fn
+            })
+            .catch(() => { /* not in Tauri / event API unavailable */ })
+        return () => {
+            cancelled = true
+            unlisten?.()
+        }
+    }, [isListening, start, stop])
+
     if (isLoading) {
         return <>{children}</>
     }
