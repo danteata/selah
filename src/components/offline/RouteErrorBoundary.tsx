@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, RotateCcw } from 'lucide-react'
+import { analytics, AnalyticsEventType } from '../../services/analytics'
 
 interface Props {
     children: ReactNode
@@ -34,6 +35,32 @@ export class RouteErrorBoundary extends Component<Props, State> {
         // Always surface in console.error so it is visible in production logs
         // (esbuild's `pure` list only drops console.log/debug/info).
         console.error('[RouteErrorBoundary]', this.props.name ?? 'app', error, info.componentStack)
+
+        // Track error in analytics — sanitize to avoid leaking PII
+        const errorCategory = this.categorizeError(error.message)
+        analytics.trackEvent(AnalyticsEventType.ERROR_OCCURRED, {
+            error_category: errorCategory,
+            route_name: this.props.name ?? 'app',
+            error_message: error.message?.slice(0, 120) ?? 'unknown',
+            component_stack: info.componentStack?.slice(0, 200) ?? '',
+        })
+    }
+
+    private categorizeError(message: string): string {
+        const m = message.toLowerCase()
+        if (m.includes('convex') || m.includes('exceeded the free plan') || m.includes('deployments have been disabled')) {
+            return 'convex_error'
+        }
+        if (m.includes('network') || m.includes('fetch') || m.includes('connection')) {
+            return 'network_error'
+        }
+        if (m.includes('undefined') || m.includes('null') || m.includes('cannot read') || m.includes('is not a')) {
+            return 'type_error'
+        }
+        if (m.includes('out of memory') || m.includes('heap') || m.includes('allocation')) {
+            return 'memory_error'
+        }
+        return 'runtime_error'
     }
 
     private handleReload = () => {

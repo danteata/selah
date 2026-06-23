@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Check, Loader2, ChevronDown, ChevronUp, ImagePlus, Film } from 'lucide-react'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import { pickLocalBackgroundAsset } from '../../utils/pickBackgroundAsset'
 
 export interface BackgroundSelection {
@@ -67,6 +69,16 @@ export function BackgroundPicker({ value, onChange, previewChildren }: Backgroun
     const [showTemplates, setShowTemplates] = useState(false)
     const [isUploading, setIsUploading] = useState<null | 'image' | 'video'>(null)
     const { templates, isLoading } = useTemplates()
+    const { trackEvent } = useAnalytics()
+
+    // Wrap onChange so every selection fires the analytics event
+    const handleChange = (selection: BackgroundSelection) => {
+        onChange(selection)
+        trackEvent(AnalyticsEventType.BACKGROUND_CHANGED, {
+            background_type: selection.backgroundType,
+            source: selection.localFilePath ? 'local' : selection.label ? 'template' : 'preset',
+        })
+    }
 
     // Resolve local file paths on desktop so the preview is loadable
     const previewUrl = useLocalBackground(value.background, value.localFilePath)
@@ -85,6 +97,11 @@ export function BackgroundPicker({ value, onChange, previewChildren }: Backgroun
                 localFilePath: picked.localFilePath,
                 backgroundStorageId: null,
                 label: picked.name,
+            })
+            trackEvent(AnalyticsEventType.BACKGROUND_CHANGED, {
+                background_type: picked.backgroundType,
+                source: 'local_upload',
+                file_name: picked.name,
             })
         } finally {
             setIsUploading(null)
@@ -107,7 +124,7 @@ export function BackgroundPicker({ value, onChange, previewChildren }: Backgroun
                             key={preset.label}
                             type="button"
                             title={preset.label}
-                            onClick={() => onChange(preset)}
+                            onClick={() => handleChange(preset)}
                             className="relative w-10 h-10 rounded-lg border-2 transition-all overflow-hidden flex-shrink-0"
                             style={{
                                 background: preset.background,
@@ -158,7 +175,7 @@ export function BackgroundPicker({ value, onChange, previewChildren }: Backgroun
                                             key={template._id}
                                             type="button"
                                             title={template.name}
-                                            onClick={() => onChange({ ...bg, label: template.name })}
+                                            onClick={() => handleChange({ ...bg, label: template.name })}
                                             className="relative rounded-lg overflow-hidden border-2 transition-all aspect-video"
                                             style={{
                                                 borderColor: sel ? '#3b82f6' : 'transparent',

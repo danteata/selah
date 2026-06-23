@@ -5,19 +5,20 @@
  * sentences from the transcript. Applies aggressive hallucination/gibberish
  * filtering before selection to avoid picking garbled ASR output.
  *
- * Architecture:
- * - Desktop (Tauri): Uses the whisper-server sidecar's /summarize endpoint
- *   which runs TextRank extractive summarization locally
- * - Web fallback: Uses semantic embedding similarity for extractive
- *   summarization — reuses the embedding model already loaded for verse
- *   detection, so no additional download is needed
- * - Heuristic fallback: Always available with no model dependency
+ * Architecture (best → fallback):
+ * 1. LLM (optional, OpenAI-compatible): genuine abstractive summary + structured
+ *    outline. Used whenever the user configured an endpoint.
+ * 2. Local abstractive (Transformers.js distilbart): offline paraphrased summary.
+ * 3. Embedding-based extractive: semantic similarity scoring, reuses the verse
+ *    embedding model (no extra download).
+ * 4. Heuristic: always available, no model dependency.
  */
 
 import type { TranscriptSegment } from '../../types/sermon-listener'
 import { embedBatch, isEmbedderReady } from './localEmbeddings'
-import { checkSummarizationStatus, summarizeAbstractiveWithDesktop, summarizeWithDesktop } from './desktopSummarizationService'
 import { isAbstractiveSummarizerReady, setupAbstractiveSummarizer, summarizeAbstractive } from './abstractiveSummarization'
+import { summarizeWithLLM, summaryToText, type SermonSummary } from './llmSummarization'
+import { useAppStore } from '../../store/appStore'
 
 // --- Quality filtering ---
 
@@ -319,11 +320,10 @@ export async function setupSummarizer(_localModelPath?: string | null): Promise<
  * Summarize text using the best available method.
  *
  * Priority:
- * 1. Local abstractive (distilbart via Transformers.js) — real paraphrased summary
- * 2. Desktop sidecar abstractive (distilbart via Python transformers) — paraphrased
- * 3. Desktop sidecar extractive (TextRank) — picks best sentences
- * 4. Embedding-based extractive — semantic similarity scoring
- * 5. Heuristic fallback — word frequency + quality scoring
+ * 1. LLM (OpenAI-compatible) — genuine abstractive summary, when configured
+ * 2. Local abstractive (distilbart via Transformers.js) — offline paraphrased
+ * 3. Embedding-based extractive — semantic similarity scoring
+ * 4. Heuristic fallback — word frequency + quality scoring
  */
 export async function summarizeText(
     text: string,
@@ -335,7 +335,15 @@ export async function summarizeText(
 
     const sentenceCount = options?.sentenceCount ?? 6
 
-    // 1. Try local abstractive model (runs in browser via Web Worker)
+    // 1. Try the configured LLM (best quality; no-op when not configured)
+    const llmConfig = useAppStore.getState().settings.llm
+    const llmResult = await summarizeWithLLM(text, llmConfig)
+    if (llmResult) {
+        console.log('[SermonNotes] Used LLM summarization')
+        return summaryToText(llmResult)
+    }
+
+    // 2. Try local abstractive model (runs in browser via Web Worker)
     if (isAbstractiveSummarizerReady()) {
         try {
             const result = await summarizeAbstractive(
@@ -349,54 +357,13 @@ export async function summarizeText(
             }
             console.log('[SermonNotes] Local abstractive returned too short (', result?.length ?? 0, 'chars), skipping')
         } catch (err) {
-            console.warn('[SermonNotes] Local abstractive failed, trying desktop:', err)
+            console.warn('[SermonNotes] Local abstractive failed, trying extractive:', err)
         }
     } else {
-        console.log('[SermonNotes] Local abstractive skipped — model not ready (not loaded or setup not called)')
+        console.log('[SermonNotes] Local abstractive skipped — model not ready')
     }
 
-    // 2. Try desktop abstractive summarization (Python transformers)
-    try {
-        const status = await checkSummarizationStatus()
-        if (status.abstractiveAvailable) {
-            const result = await summarizeAbstractiveWithDesktop({
-                text,
-                max_length: Math.max(sentenceCount * 20, 80),
-                min_length: Math.max(sentenceCount * 8, 30),
-            })
-            if (result?.summary && result.summary.length > 20) {
-                console.log('[SermonNotes] Used desktop abstractive summarization')
-                return result.summary
-            }
-            console.log('[SermonNotes] Desktop abstractive returned too short or null (', result?.summary?.length ?? 0, 'chars)')
-        } else {
-            console.log('[SermonNotes] Desktop abstractive skipped — not available (status:', JSON.stringify(status), ')')
-        }
-    } catch (err) {
-        console.warn('[SermonNotes] Desktop abstractive failed:', err)
-    }
-
-    // 3. Try desktop extractive (TextRank)
-    try {
-        const status = await checkSummarizationStatus()
-        if (status.available) {
-            const desktopResult = await summarizeWithDesktop({
-                text,
-                sentence_count: sentenceCount,
-            })
-            if (desktopResult?.summary) {
-                console.log('[SermonNotes] Used extractive desktop summarization')
-                return desktopResult.summary
-            }
-            console.log('[SermonNotes] Desktop extractive returned null/empty')
-        } else {
-            console.log('[SermonNotes] Desktop extractive skipped — not available (status:', JSON.stringify(status), ')')
-        }
-    } catch (err) {
-        console.warn('[SermonNotes] Desktop extractive failed, trying embedding extraction:', err)
-    }
-
-    // Fall back to embedding-based extractive summarization
+    // 3. Fall back to embedding-based extractive summarization
     console.log('[SermonNotes] Falling back to embedding-based extraction')
     try {
         const keyPoints = await extractiveSummarizeWithEmbeddings(text, sentenceCount)
@@ -429,6 +396,15 @@ export async function generateSermonNotes(
         return buildHeuristicNotes(segments, detectedVerses, fullText)
     }
 
+    // Prefer rich, structured notes from the LLM when configured.
+    const llmConfig = useAppStore.getState().settings.llm
+    const llmSummary = await summarizeWithLLM(fullText, llmConfig)
+    if (llmSummary) {
+        console.log('[SermonNotes] Built notes from LLM structured summary')
+        return buildNotesFromLLM(segments, detectedVerses, fullText, llmSummary)
+    }
+
+    // Offline path: best-effort summary + heuristic structure.
     let aiSummary = ''
     try {
         aiSummary = await summarizeText(fullText, { sentenceCount: 6 })
@@ -437,6 +413,52 @@ export async function generateSermonNotes(
     }
 
     return buildStructuredNotes(segments, detectedVerses, fullText, aiSummary)
+}
+
+/** Format rich sermon notes from the LLM's structured summary. */
+function buildNotesFromLLM(
+    segments: TranscriptSegment[],
+    detectedVerses: Array<{ reference: string; confidence?: string }>,
+    fullText: string,
+    summary: SermonSummary,
+): string {
+    const uniqueVerses = Array.from(
+        new Set(detectedVerses.filter(v => v.confidence !== 'low').map(v => v.reference)),
+    )
+
+    const lastSegment = segments[segments.length - 1]
+    const durationSec = lastSegment ? Math.round(lastSegment.endMs / 1000) : 0
+    const durationStr = durationSec > 0
+        ? `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}`
+        : `${(fullText.length / 5).toFixed(0)} words`
+
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━'
+    const section = (title: string, body: string) => [divider, title, divider, body, ''].join('\n')
+
+    const parts: string[] = [
+        `Sermon Notes — ${new Date().toLocaleString()}`,
+        `Duration: ${durationStr}`,
+        '',
+    ]
+
+    if (summary.summary) parts.push(section('SUMMARY', summary.summary))
+
+    parts.push(section(
+        'SCRIPTURE REFERENCES',
+        uniqueVerses.length ? uniqueVerses.map(v => `  • ${v}`).join('\n') : '  (No high-confidence verses detected)',
+    ))
+
+    if (summary.keyPoints.length) {
+        parts.push(section('KEY POINTS', summary.keyPoints.map((p, i) => `${i + 1}. ${p}`).join('\n')))
+    }
+    if (summary.outline.length) {
+        parts.push(section('OUTLINE', summary.outline.map(o => `  • ${o}`).join('\n')))
+    }
+    if (summary.application.length) {
+        parts.push(section('REFLECTION & APPLICATION', summary.application.map(a => `  • ${a}`).join('\n')))
+    }
+
+    return parts.join('\n').trimEnd()
 }
 
 // --- Note formatting ---

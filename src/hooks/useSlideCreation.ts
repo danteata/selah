@@ -1,5 +1,7 @@
 import { useCallback } from 'react'
 import { useAppStore } from '../store/appStore'
+import { useAnalytics } from './useAnalytics'
+import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from './useLocalBackground'
 import type {
     Slide,
@@ -163,6 +165,7 @@ export function useSlideCreation() {
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const { templates } = useTemplates()
+    const { trackEvent } = useAnalytics()
 
     const preSlideCreation = useCallback((): Slide => {
         const tempSlide: Slide = {
@@ -218,8 +221,14 @@ export function useSlideCreation() {
         tempSlide.id = generateObjectId()
         tempSlide.contents = ['']
 
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'text',
+            source: options?.template ? 'template' : 'quick_action',
+            has_template: !!templateToUse,
+        })
+
         return tempSlide
-    }, [preSlideCreation, settings, templates])
+    }, [preSlideCreation, settings, templates, trackEvent])
 
     const duplicateSlide = useCallback((slideToDuplicate?: Slide): Slide | null => {
         if (!slideToDuplicate) return null
@@ -228,8 +237,13 @@ export function useSlideCreation() {
         delete (tempSlide as Record<string, unknown>)._id
         tempSlide.id = generateObjectId()
 
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: tempSlide.type || 'unknown',
+            source: 'duplicate',
+        })
+
         return tempSlide
-    }, [])
+    }, [trackEvent])
 
     const createBibleSlide = useCallback((
         scripture: Scripture,
@@ -273,8 +287,24 @@ export function useSlideCreation() {
         tempSlide.data = scripture
         tempSlide.contents = generateSlideContent(tempSlide, scripture)
 
+        // Scripture has no top-level `book` field — derive from the first
+        // BibleVerse in `content` (when array) or parse the leading word off
+        // `label` (e.g. "John 3:16" -> "John"). Fall back to undefined.
+        const bookFromContent = Array.isArray(scripture.content)
+            ? scripture.content[0]?.book
+            : undefined
+        const bookFromLabel = scripture.label?.split(/\s+\d/)[0]?.trim() || undefined
+
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'bible',
+            source: options?.fromWholeBibleSearch ? 'bible_search' : 'quick_action',
+            version: scripture.version,
+            book: bookFromContent ?? bookFromLabel,
+            has_template: !!templateToUse,
+        })
+
         return tempSlide
-    }, [preSlideCreation, settings, templates])
+    }, [preSlideCreation, settings, templates, trackEvent])
 
     const createHymnSlide = useCallback((hymn: Hymn, verseIndex?: number, options?: { template?: TemplateItem | null }): Slide => {
         const tempSlide = preSlideCreation()
@@ -332,8 +362,14 @@ export function useSlideCreation() {
         tempSlide.contents = generateSlideContent(tempSlide, hymn, currentVerse)
         tempSlide.name = `${hymn.title} - ${verseLabel}`
 
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'hymn',
+            source: 'quick_action',
+            has_template: !!templateToUse,
+        })
+
         return tempSlide
-    }, [preSlideCreation, settings, templates])
+    }, [preSlideCreation, settings, templates, trackEvent])
 
     const createHymnSlides = useCallback((hymn: Hymn, options?: { template?: TemplateItem | null }): Slide[] => {
         const slides: Slide[] = []
@@ -397,8 +433,14 @@ export function useSlideCreation() {
         tempSlide.contents = generateSlideContent(tempSlide, song, currentVerse)
         tempSlide.name = `${song.title} - ${verseLabel}`
 
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'song',
+            source: 'quick_action',
+            has_template: !!templateToUse,
+        })
+
         return tempSlide
-    }, [preSlideCreation, settings, templates])
+    }, [preSlideCreation, settings, templates, trackEvent])
 
     const createSongSlides = useCallback((song: Song, options?: { template?: TemplateItem | null }): Slide[] => {
         console.log('createSongSlides called with song:', song)
@@ -480,8 +522,15 @@ export function useSlideCreation() {
             }
         }
 
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'media',
+            source: file.isExternal ? 'external_video' : 'media_picker',
+            media_type: file.type,
+            is_external: !!file.isExternal,
+        })
+
         return tempSlide
-    }, [preSlideCreation, settings])
+    }, [preSlideCreation, settings, trackEvent])
 
     const createMultipleMediaSlides = useCallback(async (files: ExtendedFileT[]): Promise<Slide[]> => {
         const slides: Slide[] = []
@@ -512,8 +561,13 @@ export function useSlideCreation() {
             font: settings.defaultFont,
         }
 
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'countdown',
+            source: 'quick_action',
+        })
+
         return tempSlide
-    }, [preSlideCreation, settings])
+    }, [preSlideCreation, settings, trackEvent])
 
     const createLowerThirdSlide = useCallback((title?: string, subtitle?: string): Slide => {
         const tempSlide = preSlideCreation()
@@ -544,8 +598,13 @@ export function useSlideCreation() {
             lowerThirdSubtitle: subtitle || '',
         }
 
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'lower_third',
+            source: 'quick_action',
+        })
+
         return tempSlide
-    }, [preSlideCreation, settings])
+    }, [preSlideCreation, settings, trackEvent])
 
     return {
         preSlideCreation,

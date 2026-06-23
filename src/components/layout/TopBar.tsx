@@ -101,7 +101,7 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
     }, [commandBarOpen, setCommandBarOpen])
 
     return (
-        <header className="studio-top-bar glass-panel border-b border-[var(--border-subtle)] flex items-center px-4 gap-3">
+        <header className="studio-top-bar glass-panel border-b border-[var(--border-subtle)] flex items-center px-2 sm:px-4 gap-1.5 sm:gap-3">
             {/* Logo */}
             <motion.div
                 className="flex items-center gap-2 flex-shrink-0"
@@ -120,11 +120,12 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                 </div>
             </motion.div>
 
-            {/* Schedule selector dropdown */}
-            <div className="relative" ref={scheduleMenuRef}>
+            {/* Schedule selector dropdown — hidden on small screens, surfaced
+                via the more-menu on mobile */}
+            <div className="relative hidden md:block" ref={scheduleMenuRef}>
                 <button
                     onClick={() => setShowScheduleMenu(!showScheduleMenu)}
-                    className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30 transition-colors text-xs"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30 transition-colors text-xs"
                 >
                     <Calendar className="w-3 h-3 text-[var(--accent-teal)]" />
                     <span className="text-[var(--text-secondary)] font-medium max-w-[120px] truncate">
@@ -207,14 +208,14 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                 </AnimatePresence>
             </div>
 
-            {/* Command Bar (center) */}
-            <div className="flex-1 flex justify-center max-w-xl mx-auto">
+            {/* Command Bar (center) — narrower on mobile, full width on desktop */}
+            <div className="flex-1 min-w-0 flex justify-center sm:max-w-xl sm:mx-auto">
                 <button
                     onClick={() => setCommandBarOpen(true)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30 transition-all text-xs group"
+                    className="w-full flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30 transition-all text-xs group"
                 >
-                    <Search className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:text-[var(--accent-teal)] transition-colors" />
-                    <span className="text-[var(--text-muted)] flex-1 text-left">
+                    <Search className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:text-[var(--accent-teal)] transition-colors flex-shrink-0" />
+                    <span className="text-[var(--text-muted)] flex-1 text-left truncate">
                         Search bible, hymns, songs, actions...
                     </span>
                     <kbd className="hidden sm:flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-muted)] font-mono">
@@ -223,20 +224,21 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                 </button>
             </div>
 
-            {/* Right actions */}
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-                {/* Collaboration: Presence & Live Session */}
+            {/* Right actions — desktop shows all, mobile collapses to theme + user */}
+            <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
+                {/* Collaboration: Presence & Live Session — desktop only, mobile users
+                    get the live status indicator in the bottom nav (added in AppShell). */}
                 {churchId && (
-                    <>
+                    <div className="hidden lg:flex items-center gap-1.5">
                         <PresenceAvatars churchId={churchId} maxVisible={3} />
                         <LiveSessionControls churchId={churchId} />
-                    </>
+                    </div>
                 )}
 
                 {/* Workspace Mode Toggle */}
                 <button
                     onClick={() => setWorkspaceMode(workspaceMode === 'studio' ? 'dashboard' : 'studio')}
-                    className={`p-1.5 rounded-lg transition-all ${
+                    className={`hidden sm:inline-flex p-1.5 rounded-lg transition-all ${
                         workspaceMode === 'dashboard'
                             ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                             : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
@@ -250,7 +252,7 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                 {canAccessAdmin && onToggleAdminPanel && (
                     <motion.button
                         onClick={onToggleAdminPanel}
-                        className={`p-1.5 rounded-lg transition-all ${
+                        className={`hidden md:inline-flex p-1.5 rounded-lg transition-all ${
                             showAdminPanel
                                 ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)]'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
@@ -296,21 +298,22 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                     </AnimatePresence>
                 </motion.button>
 
-                {/* User Menu */}
+                {/* User Menu — avatar only on mobile (no chevron / padding) for a
+                    larger tap target. The dropdown stays the same. */}
                 <div className="relative">
                     <motion.button
                         onClick={(e) => {
                             e.stopPropagation()
                             setShowUserMenu(!showUserMenu)
                         }}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
+                        className="flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                     >
-                        <div className="w-6 h-6 rounded-full bg-[var(--bg-tertiary)] border border-[var(--border-default)] flex items-center justify-center text-[var(--text-secondary)] text-[10px] font-semibold">
+                        <div className="w-7 h-7 sm:w-6 sm:h-6 rounded-full bg-[var(--bg-tertiary)] border border-[var(--border-default)] flex items-center justify-center text-[var(--text-secondary)] text-[10px] font-semibold">
                             {user.name.charAt(0).toUpperCase()}
                         </div>
-                        <ChevronDown className={`w-3 h-3 text-[var(--text-muted)] transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`hidden sm:block w-3 h-3 text-[var(--text-muted)] transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
                     </motion.button>
 
                     <AnimatePresence>

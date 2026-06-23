@@ -1,15 +1,18 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Church, ArrowRight, WifiOff } from 'lucide-react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
+import { useAnalytics } from '../hooks'
+import { AnalyticsEventType, sanitizeAuthError } from '../services/analytics/types'
 
 type ChurchSetupStep = 'create' | 'join'
 
 export default function ChurchSetup() {
     const navigate = useNavigate()
     const { isOffline } = useConvexConnection()
+    const { trackPage, trackEvent } = useAnalytics()
 
     const createChurch = useMutation(api.churches.createChurch)
     const joinChurch = useMutation(api.churches.joinChurch)
@@ -20,6 +23,11 @@ export default function ChurchSetup() {
 
     const [churchName, setChurchName] = useState('')
     const [churchCode, setChurchCode] = useState('')
+
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/church-setup')
+    }, [trackPage])
 
     if (isOffline) {
         return (
@@ -57,15 +65,18 @@ export default function ChurchSetup() {
                     name: churchName,
                     type: 'church',
                 })
+                trackEvent(AnalyticsEventType.CHURCH_CREATED)
                 navigate('/')
             } else {
                 // Join existing church
                 await joinChurch({ inviteCode: churchCode })
+                trackEvent(AnalyticsEventType.CHURCH_JOINED)
                 navigate('/')
             }
         } catch (err: any) {
             console.error('Church setup error:', err)
             setError(err.message || 'Failed to set up church.')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'church_setup', error_category: sanitizeAuthError(err.message || '') })
         } finally {
             setIsLoading(false)
         }

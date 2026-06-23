@@ -1,14 +1,20 @@
-import { useState } from 'react'
-import { useSignIn, useClerk, useUser } from '@clerk/clerk-react'
+import { useState, useEffect } from 'react'
+import { useSignIn, useClerk } from '@clerk/clerk-react'
+import { friendlyAuthError } from '../../hooks/useClerkAuth'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Cloud } from 'lucide-react'
 import { useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
+import { useAnalytics } from '../../hooks'
+import { AnalyticsEventType, sanitizeAuthError } from '../../services/analytics/types'
+import { isDesktop } from '../../platform'
 
 export default function LoginPage() {
     const { signIn, isLoaded, setActive } = useSignIn()
+    const clerk = useClerk()
     const navigate = useNavigate()
     const location = useLocation()
+    const { trackEvent, trackPage } = useAnalytics()
 
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
@@ -22,12 +28,18 @@ export default function LoginPage() {
     // Get redirect path from location state (for invite links)
     const from = (location.state as { from?: string })?.from
 
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/login')
+    }, [trackPage])
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!isLoaded) return
 
         setIsLoading(true)
         setError('')
+        trackEvent(AnalyticsEventType.AUTH_ATTEMPTED, { method: 'email', page: 'login' })
 
         try {
             const result = await signIn.create({
@@ -37,13 +49,20 @@ export default function LoginPage() {
 
             if (result.status === 'complete' && result.createdSessionId) {
                 await setActive({ session: result.createdSessionId })
-                // Create user record in Convex if it doesn't exist
-                // We'll try to extract user info from Clerk or use the provided email
-                await upsertUser({
-                    clerkId: result.createdSessionId,
-                    fullname: email.split('@')[0], // Use email username as fallback
-                    email,
-                })
+                trackEvent(AnalyticsEventType.USER_SIGNED_IN, { method: 'email' })
+                // Create/refresh the Convex user record, keyed by the Clerk
+                // USER id (`user_...`) — that's what the backend matches via
+                // `getUserIdentity().subject`. `createdSessionId` is a
+                // session id and would create an orphan row. `clerk.user`
+                // is populated once `setActive` resolves.
+                const clerkUserId = clerk.user?.id
+                if (clerkUserId) {
+                    await upsertUser({
+                        clerkId: clerkUserId,
+                        fullname: email.split('@')[0], // Use email username as fallback
+                        email,
+                    })
+                }
                 // Redirect to the original destination (invite link) or dashboard
                 navigate(from || '/dashboard')
             } else {
@@ -51,7 +70,9 @@ export default function LoginPage() {
             }
         } catch (err: any) {
             console.error('Sign in error:', err)
-            setError(err.errors?.[0]?.message || 'Failed to sign in. Please check your credentials.')
+            const errorMessage = friendlyAuthError(err, 'Failed to sign in. Please check your credentials.')
+            setError(errorMessage)
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', error_category: sanitizeAuthError(errorMessage) })
         } finally {
             setIsLoading(false)
         }
@@ -59,16 +80,48 @@ export default function LoginPage() {
 
     const handleGoogleSignIn = async () => {
         if (!isLoaded) return
+        trackEvent(AnalyticsEventType.AUTH_GOOGLE_CLICKED, { page: 'login' })
+        setError('')
 
         try {
+            // Clerk's API enforces that the redirect URL be
+            // `http` or `https` (rejects `tauri://` and any
+            // other custom scheme with `invalid_url_scheme`).
+            // The Tauri webview's own origin is `tauri://` —
+            // not acceptable to Clerk. We use the Rust-side
+            // localhost listener (oauth_listener.rs) as the
+            // redirect target: it's `http://`, the dev
+            // instance's wildcard allowlist accepts it, and the
+            // Rust side then navigates the Tauri webview back
+            // to the Tauri-served root path with the OAuth
+            // query string preserved. `App.tsx` reads the query
+            // string and renders `<DesktopOAuthCallback />`
+            // directly to process the handshake.
+            //
+            // Why this works in the Tauri webview: Clerk's
+            // `signIn.authenticateWithRedirect` doesn't
+            // navigate the system browser (it just does a
+            // hard `window.location.assign` to the OAuth URL).
+            // The Tauri webview follows the navigation, the
+            // Clerk hosted sign-in loads inside the webview,
+            // and the resulting redirects to the listener URL
+            // also stay inside the webview. The Rust side
+            // takes over the final hop back to the React app.
+            const callbackUrl = isDesktop()
+                ? 'http://localhost:19888/oauth-callback'
+                : `${window.location.origin}/sso-callback`
+            const callbackComplete = isDesktop()
+                ? 'http://localhost:19888/oauth-callback' // unused on Tauri; the Rust listener navigates
+                : from || '/'
             await signIn.authenticateWithRedirect({
                 strategy: 'oauth_google',
-                redirectUrl: '/sso-callback',
-                redirectUrlComplete: from || '/',
+                redirectUrl: callbackUrl,
+                redirectUrlComplete: callbackComplete,
             })
         } catch (err: any) {
-            console.error('Google sign in error:', err)
+            console.error('[auth] Google sign in error:', err)
             setError('Failed to sign in with Google.')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'google', error_category: 'oauth_redirect_failed' })
         }
     }
 

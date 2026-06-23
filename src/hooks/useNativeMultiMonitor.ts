@@ -22,6 +22,9 @@ import {
     type MultiMonitorState,
     identifyScreen as identifyScreenWeb,
 } from '../services/multi-monitor'
+import { useAnalytics } from './useAnalytics'
+import { AnalyticsEventType } from '../services/analytics/types'
+import { isDesktop as checkIsDesktop } from '../platform'
 
 export interface UseNativeMultiMonitorReturn {
     // State
@@ -87,6 +90,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
     const [selectedMonitorId, setSelectedMonitorId] = useState<string | null>(null)
     const [liveWindowState, setLiveWindowState] = useState<LiveWindowState>('Closed')
     const [isLoading, setIsLoading] = useState(false)
+    const { trackEvent } = useAnalytics()
 
     // Legacy web state
     const [webState, setWebState] = useState<MultiMonitorState>(multiMonitorService.getState())
@@ -223,9 +227,16 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 setSelectedMonitorId(config.monitor_id)
                 persistMonitorId(config.monitor_id)
             }
+            trackEvent(AnalyticsEventType.MULTI_MONITOR_OPENED, {
+                is_desktop: true,
+                monitor_count: monitors.length,
+                method: 'tauri_window',
+                fullscreen: config?.fullscreen !== false,
+            })
         } else {
             // Web fallback: start Presentation API or open popup window
             const liveViewUrl = `${window.location.origin}/live`
+            let method = 'popup'
             if (config?.monitor_id && config.monitor_id !== 'presentation-api') {
                 // Open on a specific screen
                 const win = await multiMonitorService.openLiveViewOnScreen(
@@ -237,12 +248,14 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     setLiveWindowState('Open')
                     setSelectedMonitorId(config.monitor_id)
                     persistMonitorId(config.monitor_id)
+                    method = 'screen_picker'
                 }
             } else {
                 // Use Presentation API or best available screen
                 const started = await multiMonitorService.startPresentation(liveViewUrl)
                 if (started) {
                     setLiveWindowState('Fullscreen')
+                    method = 'presentation_api'
                 } else {
                     // Fallback: open a popup window
                     const win = window.open(liveViewUrl, 'selah-live', 'width=1280,height=720')
@@ -251,8 +264,14 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     }
                 }
             }
+            trackEvent(AnalyticsEventType.MULTI_MONITOR_OPENED, {
+                is_desktop: false,
+                monitor_count: monitors.length,
+                method,
+                fullscreen: config?.fullscreen !== false,
+            })
         }
-    }, [isDesktop])
+    }, [isDesktop, monitors.length, trackEvent])
 
     // Close live window
     const closeLiveWindow = useCallback(async () => {

@@ -3,6 +3,8 @@ import { ConvexReactClient } from 'convex/react'
 import { ConvexProviderWithClerk } from 'convex/react-clerk'
 import { useAuth } from '@clerk/clerk-react'
 import { useOnlineStatus } from '../hooks/offline/useOnlineStatus'
+import { useAnalytics } from '../hooks/useAnalytics'
+import { AnalyticsEventType } from '../services/analytics/types'
 import { NullConvexProvider } from './NullConvexProvider'
 import { createContext, useContext } from 'react'
 
@@ -85,6 +87,7 @@ export function ConvexConnectionProvider({
     children: ReactNode
 }) {
     const { isOnline, isOffline: isBrowserOffline } = useOnlineStatus()
+    const { trackEvent } = useAnalytics()
     const [connectionState, setConnectionState] = useState<ConvexConnectionState['connectionState']>('connecting')
     const [isConvexConnected, setIsConvexConnected] = useState(false)
     const [isPlanLimit, setIsPlanLimit] = useState(() => {
@@ -93,6 +96,7 @@ export function ConvexConnectionProvider({
     const [lastConnectedAt, setLastConnectedAt] = useState<Date | null>(null)
     const [initialCheckDone, setInitialCheckDone] = useState(false)
     const checkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const wasOfflineRef = useRef(false)
 
     const realClientRef = useRef<ConvexReactClient | null>(null)
 
@@ -104,22 +108,35 @@ export function ConvexConnectionProvider({
         const result = await checkConvexHealth(convexUrl, isOnline)
 
         if (result.connected) {
+            const wasOffline = wasOfflineRef.current
             setIsConvexConnected(true)
             setIsPlanLimit(false)
             try { localStorage.removeItem(PLAN_LIMIT_KEY) } catch { }
             setConnectionState('connected')
             setLastConnectedAt(new Date())
+            if (wasOffline) {
+                // Just came back online
+                wasOfflineRef.current = false
+                trackEvent(AnalyticsEventType.SESSION_START, { reason: 'reconnected' })
+            }
         } else {
+            const justWentOffline = !wasOfflineRef.current
             setIsConvexConnected(false)
             setIsPlanLimit(result.planLimit)
             if (result.planLimit) {
                 try { localStorage.setItem(PLAN_LIMIT_KEY, 'true') } catch { }
             }
             setConnectionState('disconnected')
+            if (justWentOffline && initialCheckDone) {
+                wasOfflineRef.current = true
+                trackEvent(AnalyticsEventType.OFFLINE_MODE_ENTERED, {
+                    plan_limit: result.planLimit,
+                })
+            }
         }
 
         setInitialCheckDone(true)
-    }, [convexUrl, isOnline])
+    }, [convexUrl, isOnline, initialCheckDone, trackEvent])
 
     const retryConnection = useCallback(() => {
         setConnectionState('reconnecting')

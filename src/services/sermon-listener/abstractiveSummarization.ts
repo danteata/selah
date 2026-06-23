@@ -9,11 +9,6 @@
  * /summarize-abstractive endpoint.
  */
 
-const WORKER_URL = new URL(
-    './summarization-abstractive.worker.ts',
-    import.meta.url
-)
-
 type SummarizeCallback = (summary: string) => void
 type ErrorCallback = (error: string) => void
 type ProgressCallback = (progress: number) => void
@@ -29,7 +24,16 @@ const pendingCallbacks = new Map<number, {
 
 function getWorker(): Worker {
     if (!workerInstance) {
-        workerInstance = new Worker(WORKER_URL, { type: 'module' })
+        // NOTE: must be `new Worker(new URL('./…', import.meta.url), …)` inline
+        // — Vite's worker plugin only detects that exact pattern. Extracting
+        // the URL to a variable causes Vite to fall back to an inlined
+        // data: URL with the wrong MIME type, which the browser then refuses
+        // to load as a module script. See `localEmbeddings.ts` for the
+        // canonical pattern.
+        workerInstance = new Worker(
+            new URL('./summarization-abstractive.worker.ts', import.meta.url),
+            { type: 'module' }
+        )
         workerInstance.onmessage = (event) => {
             const data = event.data
             const callbacks = pendingCallbacks.get(data.id)

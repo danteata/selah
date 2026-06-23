@@ -21,6 +21,12 @@ pub struct VadConfig {
     pub min_silence_ms: u32,
     /// Padding to add around speech segments in milliseconds (default: 30)
     pub speech_pad_ms: u32,
+    /// Number of *consecutive* speech chunks required before a segment is
+    /// opened (onset smoothing). A value of 1 reproduces the old behaviour of
+    /// reacting to a single frame; higher values reject transient noise — a
+    /// cough, a chair scrape, a mic pop — that would otherwise open a bogus
+    /// segment. At 512 samples / 32 ms per chunk, 3 ≈ 96 ms. (default: 3)
+    pub onset_chunks: usize,
 }
 
 impl Default for VadConfig {
@@ -31,6 +37,7 @@ impl Default for VadConfig {
             min_speech_ms: 250,
             min_silence_ms: 100,
             speech_pad_ms: 30,
+            onset_chunks: 3,
         }
     }
 }
@@ -222,6 +229,10 @@ pub struct VadSegmenter {
     pre_speech_buffer: Vec<f32>,
     /// Pre-speech buffer duration in chunks
     pre_speech_chunks: usize,
+    /// Consecutive speech chunks required to open a segment (onset smoothing)
+    onset_chunks: usize,
+    /// Consecutive speech chunks seen so far while not yet speaking
+    onset_chunks_seen: usize,
 }
 
 impl VadSegmenter {
@@ -232,6 +243,7 @@ impl VadSegmenter {
 
     /// Create a VAD segmenter with custom configuration
     pub fn with_config(model_path: &Path, config: VadConfig) -> Result<Self, String> {
+        let onset_chunks = config.onset_chunks.max(1);
         let vad = SileroVad::with_config(model_path, config)?;
 
         Ok(Self {
@@ -244,7 +256,22 @@ impl VadSegmenter {
             chunk_size: 512, // 32ms at 16kHz
             pre_speech_buffer: Vec::new(),
             pre_speech_chunks: 10, // ~320ms pre-speech buffer
+            onset_chunks,
+            onset_chunks_seen: 0,
         })
+    }
+
+    /// Append a chunk to the rolling pre-speech buffer, trimming it to
+    /// `pre_speech_chunks` worth of samples. Used to keep a short pre-roll so
+    /// the first word isn't clipped, and to retain onset frames until a
+    /// segment is committed.
+    fn push_pre_speech(&mut self, chunk: &[f32]) {
+        self.pre_speech_buffer.extend_from_slice(chunk);
+        let cap = self.chunk_size * self.pre_speech_chunks;
+        if self.pre_speech_buffer.len() > cap {
+            let drain_count = self.pre_speech_buffer.len() - cap;
+            self.pre_speech_buffer.drain(..drain_count);
+        }
     }
 
     /// Process audio samples and return complete speech segments
@@ -264,22 +291,28 @@ impl VadSegmenter {
             let probability = self.vad.process(&chunk)?;
 
             if self.vad.is_speech(probability) {
-                if !self.is_speaking {
-                    // Speech started
-                    self.is_speaking = true;
-                    // Add pre-speech buffer to capture start of words
-                    self.speech_buffer
-                        .extend_from_slice(&self.pre_speech_buffer);
-                }
-                self.speech_buffer.extend_from_slice(&chunk);
-                self.silence_chunks = 0;
+                // Keep the rolling pre-speech buffer fresh first, so the prefill
+                // we prepend on commit already contains the onset frames.
+                self.push_pre_speech(&chunk);
 
-                // Update pre-speech buffer
-                self.pre_speech_buffer.extend_from_slice(&chunk);
-                if self.pre_speech_buffer.len() > self.chunk_size * self.pre_speech_chunks {
-                    let drain_count =
-                        self.pre_speech_buffer.len() - self.chunk_size * self.pre_speech_chunks;
-                    self.pre_speech_buffer.drain(..drain_count);
+                if !self.is_speaking {
+                    // Onset smoothing: require N consecutive speech chunks before
+                    // committing, so a single noisy frame can't open a segment.
+                    self.onset_chunks_seen += 1;
+                    if self.onset_chunks_seen >= self.onset_chunks {
+                        self.is_speaking = true;
+                        self.onset_chunks_seen = 0;
+                        self.silence_chunks = 0;
+                        // Prepend pre-speech buffer (already includes onset frames
+                        // and the current chunk) to capture the start of words.
+                        self.speech_buffer
+                            .extend_from_slice(&self.pre_speech_buffer);
+                    }
+                    // Otherwise stay tentatively silent; frames are preserved in
+                    // pre_speech_buffer and replayed when/if onset completes.
+                } else {
+                    self.speech_buffer.extend_from_slice(&chunk);
+                    self.silence_chunks = 0;
                 }
             } else if self.is_speaking {
                 // Still in speech segment but detected silence
@@ -305,13 +338,10 @@ impl VadSegmenter {
                     self.silence_chunks = 0;
                 }
             } else {
-                // Not speaking, update pre-speech buffer
-                self.pre_speech_buffer.extend_from_slice(&chunk);
-                if self.pre_speech_buffer.len() > self.chunk_size * self.pre_speech_chunks {
-                    let drain_count =
-                        self.pre_speech_buffer.len() - self.chunk_size * self.pre_speech_chunks;
-                    self.pre_speech_buffer.drain(..drain_count);
-                }
+                // Not speaking and this chunk is silence: the onset run (if any)
+                // is broken, so reset it. Keep the pre-speech buffer rolling.
+                self.onset_chunks_seen = 0;
+                self.push_pre_speech(&chunk);
             }
         }
 
@@ -339,6 +369,7 @@ impl VadSegmenter {
         self.pre_speech_buffer.clear();
         self.is_speaking = false;
         self.silence_chunks = 0;
+        self.onset_chunks_seen = 0;
     }
 
     /// Check if currently in a speech segment
@@ -358,5 +389,7 @@ mod tests {
         assert_eq!(config.silence_threshold, 0.35);
         assert_eq!(config.min_speech_ms, 250);
         assert_eq!(config.min_silence_ms, 100);
+        // Onset smoothing defaults to 3 consecutive speech chunks (~96 ms).
+        assert_eq!(config.onset_chunks, 3);
     }
 }

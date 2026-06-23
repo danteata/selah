@@ -3,6 +3,7 @@ import { NavRail } from './NavRail'
 import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
 import { ContextPanel } from './ContextPanel'
+import { MobileBottomNav } from './MobileBottomNav'
 import { QuickBibleBar } from '../bible/QuickBibleBar'
 import { SermonListenerProvider } from '../sermon-listener/SermonListenerContext'
 import { useAppStore } from '../../store/appStore'
@@ -102,6 +103,11 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
 
             {/* Status Bar */}
             <StatusBar />
+
+            {/* Mobile bottom nav — only renders on viewports below the
+                `md` breakpoint (768px). Provides access to all nav
+                sections since the side NavRail is hidden on mobile. */}
+            <MobileBottomNav />
         </div>
         </SermonListenerProvider>
     )

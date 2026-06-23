@@ -1,6 +1,9 @@
 import { Library, X } from 'lucide-react'
 import { LibraryContent } from './LibraryContent'
 import { useLibrary } from '../../hooks/useLibrary'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
+import { useEffect } from 'react'
 
 interface LibraryPanelProps {
     isOpen: boolean
@@ -9,6 +12,13 @@ interface LibraryPanelProps {
 
 export function LibraryPanel({ isOpen, onClose }: LibraryPanelProps) {
     const { libraryCount } = useLibrary()
+    const { trackEvent } = useAnalytics()
+
+    useEffect(() => {
+        if (isOpen) {
+            trackEvent(AnalyticsEventType.LIBRARY_ACCESSED, { library_count: libraryCount })
+        }
+    }, [isOpen, libraryCount, trackEvent])
 
     if (!isOpen) return null
 

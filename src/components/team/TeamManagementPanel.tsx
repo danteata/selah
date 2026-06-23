@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import {
@@ -15,6 +15,8 @@ import {
     X,
     Loader2,
 } from 'lucide-react'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import type { Id } from '../../../convex/_generated/dataModel'
 
 interface TeamManagementPanelProps {
@@ -28,6 +30,9 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
 
     const teamMembers = useQuery(api.invitations.getTeamMembers, { churchId })
     const invitations = useQuery(api.invitations.getInvitations, { churchId })
+    const { trackEvent } = useAnalytics()
+    const seenMemberIdsRef = useRef<Set<string>>(new Set())
+    const hasInitializedMembersRef = useRef(false)
 
     return (
         <div className="space-y-6">
@@ -100,6 +105,34 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
 
 // Members List Component
 function MembersList({ members }: { members: any[] }) {
+    const { trackEvent } = useAnalytics()
+    const seenMemberIdsRef = useRef<Set<string>>(new Set())
+    const hasInitializedRef = useRef(false)
+
+    // Detect new members joining the team (skip the initial load)
+    useEffect(() => {
+        if (!members || members.length === 0) {
+            hasInitializedRef.current = true
+            return
+        }
+        if (!hasInitializedRef.current) {
+            // First non-empty load — mark all as seen, no events
+            members.forEach((m) => seenMemberIdsRef.current.add(String(m._id)))
+            hasInitializedRef.current = true
+            return
+        }
+        for (const m of members) {
+            const id = String(m._id)
+            if (!seenMemberIdsRef.current.has(id)) {
+                seenMemberIdsRef.current.add(id)
+                trackEvent(AnalyticsEventType.TEAM_MEMBER_JOINED, {
+                    member_id: id,
+                    role: m.role,
+                })
+            }
+        }
+    }, [members, trackEvent])
+
     const getRoleBadge = (role: string) => {
         const styles: Record<string, string> = {
             superadmin: 'bg-gray-100 text-gray-700 dark:bg-gray-700/30 dark:text-gray-300',
@@ -379,6 +412,7 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
 
     const createInviteLink = useMutation(api.invitations.createInviteLink)
     const sendEmailInvitation = useMutation(api.invitations.sendEmailInvitation)
+    const { trackEvent } = useAnalytics()
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -393,6 +427,10 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
                     expiresInDays: expiresInDays || undefined,
                     message: message || undefined,
                 })
+                trackEvent(AnalyticsEventType.TEAM_INVITATION_SENT, {
+                    method: 'link',
+                    expires_in_days: expiresInDays || 0,
+                })
                 setSuccess({
                     code: result.code,
                     url: result.inviteUrl,
@@ -406,6 +444,11 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
                     email: email.trim(),
                     message: message || undefined,
                     expiresInDays,
+                })
+
+                trackEvent(AnalyticsEventType.TEAM_INVITATION_SENT, {
+                    method: 'email',
+                    expires_in_days: expiresInDays,
                 })
 
                 // Send the email via HTTP action

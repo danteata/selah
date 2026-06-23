@@ -4,5 +4,24 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Selah needs microphone access to listen to sermon and capture audio.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Selah uses speech recognition to transcribe spoken Bible references and song titles when you click the microphone icon. Speech is processed by your platform's recognition service (Google on web, Apple on macOS desktop).</string>
 </dict>
 </plist>
+<!--
+  IMPORTANT: This file's keys are merged into the bundled
+  Contents/Info.plist via the `tauri::embed_plist::embed_info_plist!`
+  macro in src-tauri/src/main.rs. Tauri 2.x's codegen auto-embeds
+  this file only when feature "custom-protocol" is OFF (i.e. in
+  `tauri dev`); when custom-protocol is on (default in Cargo.toml
+  and always on for `tauri build`), the codegen skips the embed and
+  the bundler writes a fresh Info.plist from tauri.conf.json that
+  drops our custom keys. The macro call in main.rs is gated on
+  `feature = "custom-protocol"` so it fires exactly when the
+  codegen would not, avoiding a double-embed link error.
+
+  Verify after every Tauri upgrade:
+    plutil -p "path/to/Selah.app/Contents/Info.plist" | grep -E "Microphone|Speech"
+  If those keys are absent from a release build, the embed call has
+  silently stopped working and the mic button will SIGABRT the app.
+-->

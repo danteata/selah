@@ -5,6 +5,8 @@ import type { Id } from '../../convex/_generated/dataModel'
 import { useAppStore } from '../store/appStore'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import { useUserRole } from './useUserRole'
+import { useAnalytics } from './useAnalytics'
+import { AnalyticsEventType } from '../services/analytics/types'
 import { canClientPushLiveSlide, selectDiscoveredSession } from './liveSessionUtils'
 import type { Slide } from '../types'
 
@@ -137,11 +139,13 @@ interface UseLiveSessionReturn {
 export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const { isConvexConnected, isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
+    const { trackEvent } = useAnalytics()
 
     const [sessionId, setSessionId] = useState<Id<"liveSessions"> | null>(null)
     const [sessionRole, setSessionRole] = useState<SessionRole>('contributor')
     const [collaborationMode, setCollaborationMode] = useState<CollaborationMode | null>(null)
     const [isStarting, setIsStarting] = useState(false)
+    const sessionStartTimeRef = useRef<number | null>(null)
 
     const activeScheduleId = useAppStore((s) => s.activeSchedule?._id)
     const effectiveScheduleId = scheduleId || (activeScheduleId as string | undefined)
@@ -358,6 +362,12 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             setSessionId(newSessionId)
             setSessionRole('operator')
             setCollaborationMode(collabMode)
+            sessionStartTimeRef.current = Date.now()
+            trackEvent(AnalyticsEventType.LIVE_SESSION_STARTED, {
+                schedule_id: schedId,
+                collaboration_mode: collabMode,
+                church_id: churchId,
+            })
             return newSessionId
         } catch (err) {
             console.error('[useLiveSession] Failed to start session:', err)
@@ -365,19 +375,28 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         } finally {
             setIsStarting(false)
         }
-    }, [isConvexConnected, isOffline, startSessionMutation])
+    }, [isConvexConnected, isOffline, startSessionMutation, trackEvent])
 
     const endSession = useCallback(async () => {
         if (!resolvedSessionId) return
 
         try {
             await endSessionMutation({ sessionId: resolvedSessionId })
+            const durationSeconds = sessionStartTimeRef.current
+                ? Math.round((Date.now() - sessionStartTimeRef.current) / 1000)
+                : undefined
+            trackEvent(AnalyticsEventType.LIVE_SESSION_ENDED, {
+                session_id: resolvedSessionId,
+                duration_seconds: durationSeconds,
+                collaboration_mode: collaborationMode,
+            })
             setSessionId(null)
             setSessionRole('contributor')
+            sessionStartTimeRef.current = null
         } catch (err) {
             console.error('[useLiveSession] Failed to end session:', err)
         }
-    }, [resolvedSessionId, endSessionMutation])
+    }, [resolvedSessionId, endSessionMutation, trackEvent, collaborationMode])
 
     const joinSession = useCallback(async (sessId: Id<"liveSessions">, role: 'contributor' | 'viewer' = 'contributor') => {
         if (!isConvexConnected || isOffline) return false
@@ -386,12 +405,16 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             await joinSessionMutation({ sessionId: sessId, role })
             setSessionId(sessId)
             setSessionRole(role)
+            trackEvent(AnalyticsEventType.LIVE_COLLABORATION_JOINED, {
+                session_id: sessId,
+                role,
+            })
             return true
         } catch (err) {
             console.error('[useLiveSession] Failed to join session:', err)
             return false
         }
-    }, [isConvexConnected, isOffline, joinSessionMutation])
+    }, [isConvexConnected, isOffline, joinSessionMutation, trackEvent])
 
     const leaveSession = useCallback(async () => {
         if (!resolvedSessionId) return
@@ -593,21 +616,29 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         if (resolvedSessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
             try {
                 await reorderQueueMutation({ sessionId: resolvedSessionId, orderedSlideIds })
+                trackEvent(AnalyticsEventType.SLIDE_REORDERED, {
+                    scope: 'queue',
+                    slide_count: orderedSlideIds.length,
+                })
             } catch (err) {
                 console.error('[useLiveSession] Failed to reorder queue:', err)
             }
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, reorderQueueMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, reorderQueueMutation, trackEvent])
 
     const handleSyncOperatorSlides = useCallback(async (slideIds: string[]) => {
         if (resolvedSessionId && isConvexConnected && !isOffline && sessionRole === 'operator') {
             try {
                 await setOperatorSlidesMutation({ sessionId: resolvedSessionId, slideIds })
+                trackEvent(AnalyticsEventType.SLIDE_REORDERED, {
+                    scope: 'operator_deck',
+                    slide_count: slideIds.length,
+                })
             } catch (err) {
                 console.error('[useLiveSession] Failed to sync operator slides:', err)
             }
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation, trackEvent])
 
     const handleSyncSlideContent = useCallback(async (slide: Slide) => {
         if (!sessionScheduleId || !isConvexConnected || isOffline) return
@@ -669,6 +700,12 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
     const handleSetOverlay = useCallback(async (overlay?: string, alertId?: string) => {
         setActiveOverlay(overlay || 'none')
+        if (alertId) {
+            trackEvent(AnalyticsEventType.ALERT_TRIGGERED, {
+                alert_id: alertId,
+                overlay,
+            })
+        }
         if (resolvedSessionId && isConvexConnected && !isOffline) {
             try {
                 await setOverlayMutation({ sessionId: resolvedSessionId, overlay, alertId })
@@ -676,7 +713,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
                 console.error('[useLiveSession] Failed to set overlay:', err)
             }
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, setOverlayMutation, setActiveOverlay])
+    }, [resolvedSessionId, isConvexConnected, isOffline, setOverlayMutation, setActiveOverlay, trackEvent])
 
     const handleTransferOperator = useCallback(async (newOperatorId: string) => {
         if (resolvedSessionId && isConvexConnected && !isOffline) {

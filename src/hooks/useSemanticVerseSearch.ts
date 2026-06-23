@@ -16,6 +16,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useConvex } from 'convex/react'
 import { api } from '../../convex/_generated/api'
+import { useAnalytics } from './useAnalytics'
+import { AnalyticsEventType } from '../services/analytics/types'
 import {
     embedText,
     isEmbedderReady as checkEmbedderReady,
@@ -97,6 +99,7 @@ export function useSemanticVerseSearch(
     } = options
 
     const convex = useConvex()
+    const { trackEvent } = useAnalytics()
     const [results, setResults] = useState<SemanticVerseResult[]>([])
     const [isSearching, setIsSearching] = useState(false)
     const cacheKey = version || 'KJV'
@@ -359,6 +362,12 @@ export function useSemanticVerseSearch(
                 )
 
                 setResults(validatedResults.length > 0 ? validatedResults : searchResults)
+                trackEvent(AnalyticsEventType.BIBLE_SEMANTIC_SEARCH, {
+                    query_length: query.length,
+                    result_count: (validatedResults.length > 0 ? validatedResults : searchResults).length,
+                    used_local: preferLocal && hasLocalEmbeddings && !!loadedIdx,
+                    version: workingVersion,
+                })
             } catch (err) {
                 if (!abortController.signal.aborted) {
                     console.error('[useSemanticVerseSearch] Search failed:', err)
@@ -371,7 +380,7 @@ export function useSemanticVerseSearch(
                 }
             }
         }, debounceMs)
-    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, convex, threshold, limit, version, debounceMs, preferLocal, minQueryLength])
+    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, convex, threshold, limit, version, debounceMs, preferLocal, minQueryLength, trackEvent])
 
     // Clear results
     const clearResults = useCallback(() => {

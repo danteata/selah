@@ -14,6 +14,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useAnalytics } from "./useAnalytics";
+import { AnalyticsEventType } from "../services/analytics/types";
 
 export type UpdateState =
     | "idle"
@@ -33,13 +35,23 @@ export interface UseAppUpdaterResult {
 export function useAppUpdater(): UseAppUpdaterResult {
     const [state, setState] = useState<UpdateState>("idle");
     const [message, setMessage] = useState<string | null>(null);
+    const { trackEvent } = useAnalytics();
 
     const runCheck = useCallback(async () => {
         if (state === "checking" || state === "downloading" || state === "restarting") {
             return;
         }
+        // `invoke` from `@tauri-apps/api/core` reads `window.__TAURI_INTERNALS__`
+        // synchronously and throws TypeError if it's missing (the web build).
+        // Skip the call entirely instead of swallowing the throw.
+        if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+            setState("error");
+            setMessage("Updates are only available in the desktop app.");
+            return;
+        }
         setState("checking");
         setMessage(null);
+        trackEvent(AnalyticsEventType.DESKTOP_UPDATE_CHECKED);
         try {
             const result = await invoke<string>("check_update");
             // `check_update` only returns Ok() on two paths: "up to date" (no
@@ -50,17 +62,23 @@ export function useAppUpdater(): UseAppUpdaterResult {
                 setMessage("You're on the latest version.");
             } else {
                 setState("restarting");
+                trackEvent(AnalyticsEventType.DESKTOP_UPDATE_INSTALLED, { result });
             }
         } catch (e) {
             setState("error");
             setMessage(typeof e === "string" ? e : (e as Error).message ?? String(e));
         }
-    }, [state]);
+    }, [state, trackEvent]);
 
     // Silent background check 5 s after mount.  We delay so we don't compete
     // with the initial React render, and we don't surface errors from this
     // pass — only the on-demand check shows error toasts.
     useEffect(() => {
+        // Web build: no Tauri runtime, skip the silent background check
+        // entirely. The on-demand `runCheck()` shows the same error message.
+        if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+            return;
+        }
         const t = setTimeout(() => {
             invoke<string>("check_update")
                 .then((result) => {

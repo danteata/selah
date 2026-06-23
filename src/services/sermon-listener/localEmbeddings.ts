@@ -155,6 +155,28 @@ export function isEmbedderReady(): boolean {
 }
 
 /**
+ * Tear down the embedding worker and free the in-memory model. Safe to call
+ * when idle; the next embed call transparently re-creates the worker and
+ * reloads the (browser/Tauri-cached) model. Used by the sync manager's idle
+ * unload timer to reclaim memory between syncs (item #3).
+ */
+export function disposeEmbedder(): void {
+    if (!workerInstance) return
+    try {
+        workerInstance.terminate()
+    } catch {
+        /* terminate is best-effort */
+    }
+    workerInstance = null
+    setupPromise = null
+    // Fail any in-flight requests rather than leaving them to hang forever.
+    for (const [, h] of pending) {
+        h.reject(new Error('Embedding worker disposed'))
+    }
+    pending.clear()
+}
+
+/**
  * Initialise the worker (triggers model download in the worker).
  */
 export async function initializeEmbedder(): Promise<{

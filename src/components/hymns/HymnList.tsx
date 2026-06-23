@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, X, ChevronLeft, Music } from 'lucide-react'
-import { useHymn, useSlideCreation } from '../../hooks'
+import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
+import { AnalyticsEventType } from '../../services/analytics/types'
+import { useVoiceSearch } from '../../hooks/useVoiceSearch'
+import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
 import { TemplateSelector } from '../templates/TemplateSelector'
 import { type TemplateItem } from '../../hooks/useTemplates'
@@ -21,7 +24,12 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
 
     const { getAllHymns } = useHymn()
     const { createHymnSlides } = useSlideCreation()
+    const { trackEvent } = useAnalytics()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+
+    const voice = useVoiceSearch({
+        onFinal: (text) => setQuery(text),
+    })
 
     // Load hymns
     useEffect(() => {
@@ -54,9 +62,15 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
             slides.forEach(slide => {
                 appendActiveSlide(slide)
             })
+            trackEvent(AnalyticsEventType.HYMN_VIEWED, {
+                hymn_number: selectedHymn.number,
+                title: selectedHymn.title,
+                slide_count: slides.length,
+                has_template: !!selectedTemplate,
+            })
             onClose()
         }
-    }, [selectedHymn, createHymnSlides, appendActiveSlide, onClose])
+    }, [selectedHymn, createHymnSlides, appendActiveSlide, onClose, selectedTemplate, trackEvent])
 
     if (loading) {
         return (
@@ -89,11 +103,19 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                     <input
                         type="text"
-                        value={query}
+                        value={voice.isListening ? voice.transcript : query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search hymns by number or title..."
-                        className="w-full pl-10 pr-4 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                        placeholder={voice.isListening ? 'Listening…' : 'Search hymns by number or title…'}
+                        className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                     />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <VoiceSearchButton
+                            isListening={voice.isListening}
+                            isSupported={voice.isSupported}
+                            error={voice.error}
+                            onClick={voice.isListening ? voice.stop : voice.start}
+                        />
+                    </div>
                 </div>
             </div>
 

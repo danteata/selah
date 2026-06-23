@@ -49,6 +49,21 @@
 ### Architecture
 The live output system has **two code paths**: native (Tauri desktop) and web (browser Presentation API). Both are managed through `useNativeMultiMonitor`, which auto-detects the environment.
 
+### Microphone Access (Web Speech + Desktop Whisper)
+`getUserMedia({ audio: true })` is gated differently on each platform:
+
+- **Web** — browser shows its own permission prompt. Failure (`not-allowed`) means the user denied or an extension blocked the prompt.
+- **macOS desktop (Tauri)** — `src-tauri/Info.plist` carries `NSMicrophoneUsageDescription` **and** `NSSpeechRecognitionUsageDescription` (the latter is required for the WKWebView Web Speech API — without it, the host app SIGABRTs the first time the user clicks the mic). Tauri 2.x's codegen auto-embeds this file's keys when feature `custom-protocol` is **off** (i.e. `tauri dev`); when it is **on** (default in `Cargo.toml` and always on for `tauri build` / release bundling), the codegen skips the embed and the bundler writes a fresh `Info.plist` from `tauri.conf.json` that drops our custom keys. `src-tauri/src/main.rs` calls `tauri::embed_plist::embed_info_plist!` manually under `#[cfg(all(target_os = "macos", feature = "custom-protocol"))]` to close that gap. macOS shows its own prompt the first time the app calls `getUserMedia`. If the user denies it, they must re-enable in **System Settings → Privacy & Security → Microphone** (and Speech Recognition for the second key).
+- **Windows desktop (Tauri)** — WebView2 requires the host executable's **application manifest** to declare `<DeviceCapability Name="microphone"/>`. Without it, `getUserMedia` fails **immediately with `NotAllowedError` before any user prompt** — the user never sees a dialog. We embed the manifest via `src-tauri/app.manifest` and wire it through `tauri_build::WindowsAttributes::app_manifest(include_str!("app.manifest"))` in `build.rs`. If the OS-level toggle is off, the user must enable it in **Settings → Privacy & security → Microphone**.
+
+**Error messages MUST branch on `isDesktop()`** — Tauri has no "browser settings" page to point users at, so the generic "Enable microphone access in browser settings" copy is wrong on desktop and confuses users. See:
+- `src/hooks/useVoiceSearch.ts` (line ~242) — Tauri/desktop-specific message.
+- `src/services/sermon-listener/speechRecognition.ts:521-528` — same pattern for the old sermon-listener path.
+- `src/services/sermon-listener/transcriptionErrors.ts:70-82` — same for the `TranscriptionError.userAction` string.
+
+**Verification after every Tauri upgrade:** `plutil -p path/to/Selah.app/Contents/Info.plist | grep -E "Microphone|Speech"` — both keys must be present in the shipped RELEASE app or the WebKit speech recognition TCC check will SIGABRT the app.
+
+
 ### Critical Rule: Every desktop-only code path MUST have a web fallback
 When adding features to `useNativeMultiMonitor`, `ScreenPicker`, or `LiveOutput`:
 - Every `if (isDesktop)` branch MUST have an `else` that handles web mode

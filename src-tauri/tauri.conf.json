@@ -12,16 +12,12 @@
     "bundle": {
         "active": true,
         "targets": "all",
-        "createUpdaterArtifacts": false,
-        "externalBin": [
-            "binaries/selah-whisper-server"
-        ],
+        "createUpdaterArtifacts": true,
         "resources": [
             "assets/*",
-            "assets/whisper-models/**/*",
+            "assets/whisper-models-gguf/**/*",
             "assets/embedding-models/**/*",
-            "assets/embedding-packs/**/*",
-            "assets/whisper-server/**/*"
+            "assets/embedding-packs/**/*"
         ],
         "icon": [
             "icons/32x32.png",
@@ -44,11 +40,11 @@
         "security": {
             "csp": {
                 "default-src": "'self' asset: https: data:",
-                "script-src": "'self'",
-                "style-src": "'self' 'unsafe-inline'",
+                "script-src": "'self' https://*.clerk.accounts.dev",
+                "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com",
                 "img-src": "'self' asset: https: data: blob:",
-                "font-src": "'self' asset: https:",
-                "connect-src": "'self' https: wss: http://127.0.0.1:17493",
+                "font-src": "'self' asset: https: data: https://fonts.gstatic.com",
+                "connect-src": "'self' https: wss: ipc: http://ipc.localhost http://asset.localhost asset: tauri: http://127.0.0.1:17493",
                 "media-src": "'self' https: blob:",
                 "worker-src": "'self' blob:"
             },
@@ -81,7 +77,7 @@
     "plugins": {
         "updater": {
             "endpoints": [
-                "http://localhost:8787/latest.json"
+                "https://github.com/danteata/selah/releases/latest/download/latest.json"
             ],
             "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwQTJGQTJFQTA0MDlFREEKUldUYW5rQ2dMdnFpTUkxQmhYcUY0eXd3VnRNb01UVzZTaG9xVlNVaGVsY1ovMkRYYTFaZ3czb3UK",
             "dangerousInsecureTransportProtocol": true

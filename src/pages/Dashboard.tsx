@@ -2,7 +2,8 @@ import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Shield, Database, Book, X, Mic } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
-import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates } from '../hooks'
+import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics } from '../hooks'
+import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from '../hooks/useLocalBackground'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
@@ -102,6 +103,25 @@ export default function Dashboard() {
 
     // Templates hook for creating custom templates
     const { createTemplate } = useTemplates()
+
+    // Analytics
+    const { trackEvent, trackPage, identify } = useAnalytics()
+
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/')
+    }, [trackPage])
+
+    // Identify user if available
+    useEffect(() => {
+        if (currentUser) {
+            identify(currentUser._id, {
+                church_id: currentUser.churchId,
+                is_superadmin: isSuperadmin,
+                role: currentUser.role,
+            })
+        }
+    }, [currentUser, isSuperadmin, identify])
 
     const toggleTheme = useCallback(() => {
         const newIsDark = !isDark
@@ -241,6 +261,7 @@ export default function Dashboard() {
 
     // Handle media selection
     const handleMediaSelect = (media: { id: string; url: string; name: string }) => {
+        trackEvent(AnalyticsEventType.MEDIA_SELECTED, { media_id: media.id, media_type: 'image' })
         // Create a media slide from selected media
         const slide: Slide = {
             id: `slide_${Date.now()}`,
@@ -291,8 +312,9 @@ export default function Dashboard() {
             backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId,
             localFilePath: templateSlide?.localFilePath || undefined,
         };
-        appendActiveSlide(slide);
-        closeModal('templateBrowser');
+        appendActiveSlide(slide)
+        trackEvent(AnalyticsEventType.SLIDE_TEMPLATE_USED, { template_name: template.name })
+        closeModal('templateBrowser')
     }
 
     // Handle creating custom template from current slide
@@ -371,7 +393,12 @@ export default function Dashboard() {
             activeSchedule={activeSchedule}
             user={{
                 name: clerkUser?.firstName || clerkUser?.username || 'User',
-                onSignOut: () => signOut()
+                onSignOut: () => {
+                    trackEvent(AnalyticsEventType.USER_SIGNED_OUT, {
+                        method: 'menu',
+                    })
+                    signOut()
+                }
             }}
             showAdminPanel={showAdminPanel}
             onToggleAdminPanel={() => setShowAdminPanel(prev => !prev)}

@@ -27,7 +27,17 @@
         "core:event:default",
         "core:event:allow-emit",
         "core:event:allow-listen",
-        "shell:allow-open",
+        {
+            "identifier": "shell:allow-open",
+            "allow": [
+                {
+                    "url": "https://*"
+                },
+                {
+                    "url": "http://*"
+                }
+            ]
+        },
         "shell:allow-spawn",
         "shell:allow-kill",
         "dialog:default",

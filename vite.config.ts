@@ -66,6 +66,7 @@ export default defineConfig({
           'clerk': ['@clerk/clerk-react'],
           'tiptap': ['@tiptap/react', '@tiptap/starter-kit'],
           'icons': ['lucide-react'],
+          'three': ['three'],
           'query': ['@tanstack/react-query'],
         },
       },

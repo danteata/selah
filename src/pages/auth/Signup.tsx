@@ -1,9 +1,17 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useSignUp, useUser } from '@clerk/clerk-react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Eye, EyeOff, Mail, Lock, User, Church, ArrowRight, Cloud, Check, Users } from 'lucide-react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
+import { useAnalytics } from '../../hooks'
+import { AnalyticsEventType, sanitizeAuthError } from '../../services/analytics/types'
+import { isDesktop } from '../../platform'
+import {
+    TAURI_OAUTH_REDIRECT_URL,
+    getExternalVerificationRedirectURL,
+    friendlyAuthError,
+} from '../../hooks/useClerkAuth'
 
 type SignupStep = 'account' | 'church' | 'verify'
 
@@ -11,6 +19,7 @@ export default function SignupPage() {
     const { signUp, isLoaded, setActive } = useSignUp()
     const navigate = useNavigate()
     const location = useLocation()
+    const { trackEvent, trackPage } = useAnalytics()
 
     // Convex mutations
     const createChurch = useMutation(api.churches.createChurch)
@@ -52,12 +61,18 @@ export default function SignupPage() {
     // Verification
     const [verificationCode, setVerificationCode] = useState('')
 
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/signup')
+    }, [trackPage])
+
     const handleAccountSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!isLoaded) return
 
         setIsLoading(true)
         setError('')
+        trackEvent(AnalyticsEventType.AUTH_ATTEMPTED, { method: 'email', page: 'signup' })
 
         try {
             await signUp.create({
@@ -69,10 +84,14 @@ export default function SignupPage() {
 
             // Send email verification
             await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
+            trackEvent(AnalyticsEventType.EMAIL_VERIFICATION_SENT)
+            trackEvent(AnalyticsEventType.SIGNUP_STEP_COMPLETED, { step: 'account' })
             setStep('verify')
         } catch (err: any) {
             console.error('Sign up error:', err)
-            setError(err.errors?.[0]?.message || 'Failed to create account.')
+            const errorMessage = friendlyAuthError(err, 'Failed to create account.')
+            setError(errorMessage)
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', page: 'signup', error_category: sanitizeAuthError(errorMessage) })
         } finally {
             setIsLoading(false)
         }
@@ -84,6 +103,7 @@ export default function SignupPage() {
 
         setIsLoading(true)
         setError('')
+        trackEvent(AnalyticsEventType.EMAIL_VERIFICATION_ATTEMPTED)
 
         try {
             const result = await signUp.attemptEmailAddressVerification({
@@ -92,12 +112,20 @@ export default function SignupPage() {
 
             if (result.status === 'complete' && result.createdSessionId) {
                 await setActive({ session: result.createdSessionId })
-                // Create user record in Convex
-                await upsertUser({
-                    clerkId: result.createdSessionId,
-                    fullname: fullName,
-                    email,
-                })
+                trackEvent(AnalyticsEventType.USER_SIGNED_UP, { method: 'email' })
+                // Create user record in Convex keyed by the Clerk USER id
+                // (`user_...`) — that's what the backend matches via
+                // `getUserIdentity().subject`. `createdSessionId` is a
+                // session id and would create an orphan row.
+                const clerkUserId = result.createdUserId
+                if (clerkUserId) {
+                    await upsertUser({
+                        clerkId: clerkUserId,
+                        fullname: fullName,
+                        email,
+                    })
+                }
+                trackEvent(AnalyticsEventType.SIGNUP_STEP_COMPLETED, { step: 'verify' })
                 // If in invite flow, go directly to the join page to accept
                 // Otherwise continue to church setup
                 if (isInviteFlow && from) {
@@ -108,7 +136,9 @@ export default function SignupPage() {
             }
         } catch (err: any) {
             console.error('Verification error:', err)
-            setError(err.errors?.[0]?.message || 'Invalid verification code.')
+            const errorMessage = friendlyAuthError(err, 'Invalid verification code.')
+            setError(errorMessage)
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', page: 'signup-verify', error_category: sanitizeAuthError(errorMessage) })
         } finally {
             setIsLoading(false)
         }
@@ -126,17 +156,22 @@ export default function SignupPage() {
                     name: churchName,
                     type: 'church',
                 })
+                trackEvent(AnalyticsEventType.CHURCH_CREATED)
+                trackEvent(AnalyticsEventType.SIGNUP_STEP_COMPLETED, { step: 'church', action: 'create' })
                 // Redirect to the original destination (invite link) or home
                 navigate(from || '/')
             } else {
                 // Join existing church
                 await joinChurch({ inviteCode: churchCode })
+                trackEvent(AnalyticsEventType.CHURCH_JOINED)
+                trackEvent(AnalyticsEventType.SIGNUP_STEP_COMPLETED, { step: 'church', action: 'join' })
                 // Redirect to the original destination (invite link) or home
                 navigate(from || '/')
             }
         } catch (err: any) {
             console.error('Church setup error:', err)
             setError(err.message || 'Failed to set up church.')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'church_setup', error_category: sanitizeAuthError(err.message || '') })
         } finally {
             setIsLoading(false)
         }
@@ -144,16 +179,54 @@ export default function SignupPage() {
 
     const handleGoogleSignUp = async () => {
         if (!isLoaded) return
+        trackEvent(AnalyticsEventType.AUTH_GOOGLE_CLICKED, { page: 'signup' })
 
         try {
-            await signUp.authenticateWithRedirect({
-                strategy: 'oauth_google',
-                redirectUrl: '/sso-callback',
-                redirectUrlComplete: from || '/',
-            })
+            if (isDesktop()) {
+                // System-browser flow — see `useClerkAuth` for the
+                // full rationale. The Tauri webview can't host the
+                // Clerk Account Portal (its `window.opener` postMessage
+                // handshake has no listener), so we hand the OAuth URL
+                // to the OS default browser. The system browser
+                // completes the OAuth against the Rust one-shot
+                // listener at `localhost:19888`, which then navigates
+                // the Tauri webview back to the React app with the
+                // handshake in the query string. `App.tsx` picks up
+                // the handshake and renders `<DesktopOAuthCallback />`.
+                const { invoke } = await import('@tauri-apps/api/core')
+                const { open } = await import('@tauri-apps/plugin-shell')
+                await invoke('start_oauth_listener') // idempotent
+                const result = await signUp.create({
+                    strategy: 'oauth_google',
+                    redirectUrl: TAURI_OAUTH_REDIRECT_URL,
+                })
+                const oauthUrl = getExternalVerificationRedirectURL(result)
+                if (!oauthUrl) {
+                    throw new Error(
+                        'Clerk did not return an OAuth redirect URL. ' +
+                            'Check that oauth_google is enabled on your Clerk ' +
+                            'instance and that http://localhost:19888 is on the ' +
+                            'allowed redirect list.',
+                    )
+                }
+                await open(oauthUrl)
+            } else {
+                // Web flow — Clerk's hosted sign-in loads in this same
+                // tab and the OAuth callback lands on the same-origin
+                // `/sso-callback` route, which the App's
+                // <ClerkProvider> handles natively.
+                const callbackUrl = `${window.location.origin}/sso-callback`
+                const callbackComplete = from || '/'
+                await signUp.authenticateWithRedirect({
+                    strategy: 'oauth_google',
+                    redirectUrl: callbackUrl,
+                    redirectUrlComplete: callbackComplete,
+                })
+            }
         } catch (err: any) {
-            console.error('Google sign up error:', err)
+            console.error('[auth] Google sign up error:', err)
             setError('Failed to sign up with Google.')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'google', page: 'signup', error_category: 'oauth_redirect_failed' })
         }
     }
 

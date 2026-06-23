@@ -12,10 +12,9 @@
  */
 
 import { speechRecognitionService } from './speechRecognition'
-import { desktopWhisperTranscriptionService } from './desktopWhisperTranscription'
-import type { DesktopWhisperTranscriptionResult } from './desktopWhisperTranscription'
+import { nativeTranscriptionService } from './nativeTranscription'
 
-export type TranscriptionProvider = 'web-speech' | 'desktop-whisper'
+export type TranscriptionProvider = 'web-speech' | 'native'
 
 /** Segment timing from whisper transcription (seconds) */
 export interface WhisperSegmentTiming {
@@ -67,7 +66,8 @@ export interface TranscriptionStatus {
 /**
  * Unified Transcription Service
  *
- * Switches between Web Speech API and Desktop Whisper based on settings.
+ * Switches between the Web Speech API (browser) and the native in-process
+ * engine (desktop) based on settings.
  */
 class UnifiedTranscriptionService {
     private currentProvider: TranscriptionProvider = 'web-speech'
@@ -76,7 +76,6 @@ class UnifiedTranscriptionService {
     private isLoading = false
     private error: string | null = null
     private options: UnifiedTranscriptionOptions = {}
-    private desktopWhisperInitialized = false
 
     /**
      * Check if a provider is available
@@ -85,8 +84,8 @@ class UnifiedTranscriptionService {
         switch (provider) {
             case 'web-speech':
                 return speechRecognitionService.isSupported()
-            case 'desktop-whisper':
-                return desktopWhisperTranscriptionService.isConfigured()
+            case 'native':
+                return nativeTranscriptionService.isConfigured()
             default:
                 return false
         }
@@ -102,9 +101,7 @@ class UnifiedTranscriptionService {
             isReady: this.isReady,
             isLoading: this.isLoading,
             error: this.error,
-            modelLoaded: this.currentProvider === 'desktop-whisper'
-                ? this.desktopWhisperInitialized
-                : undefined,
+            modelLoaded: this.currentProvider === 'native' ? this.isReady : undefined,
         }
     }
 
@@ -119,30 +116,6 @@ class UnifiedTranscriptionService {
         this.currentProvider = provider
         this.options = { ...this.options, ...options }
 
-        if (provider === 'desktop-whisper') {
-            this.isLoading = true
-            this.options.onStatusChange?.(this.getStatus())
-
-            const initialized = await desktopWhisperTranscriptionService.init({
-                language: options?.language || 'en',
-                useVAD: options?.useVAD,
-                initialPrompt: options?.initialPrompt,
-                microphoneDeviceId: options?.microphoneDeviceId,
-                onProgress: options?.onProgress,
-                onStatus: (status) => console.log('[DesktopWhisper]', status),
-            })
-
-            this.desktopWhisperInitialized = initialized
-            this.isLoading = false
-            this.isReady = initialized
-
-            if (!initialized) {
-                this.error = 'Failed to initialize Desktop Whisper. Make sure you are running in the desktop app.'
-                this.options.onStatusChange?.(this.getStatus())
-                return false
-            }
-        }
-
         if (provider === 'web-speech' && !speechRecognitionService.isSupported()) {
             this.error = 'Web Speech API is not supported in this browser'
             this.isReady = false
@@ -152,7 +125,7 @@ class UnifiedTranscriptionService {
 
         this.isReady = provider === 'web-speech'
             ? speechRecognitionService.isSupported()
-            : this.desktopWhisperInitialized
+            : nativeTranscriptionService.isConfigured()
         this.options.onStatusChange?.(this.getStatus())
         return true
     }
@@ -183,8 +156,8 @@ class UnifiedTranscriptionService {
             if (this.currentProvider === 'web-speech') {
                 return await this.startWebSpeech()
             }
-            if (this.currentProvider === 'desktop-whisper') {
-                return await this.startDesktopWhisper()
+            if (this.currentProvider === 'native') {
+                return await this.startNative()
             }
             return false
         } catch (err) {
@@ -227,42 +200,28 @@ class UnifiedTranscriptionService {
     }
 
     /**
-     * Start Desktop Whisper transcription (bundled faster-whisper in Tauri)
+     * Start native (in-process) Whisper/Parakeet transcription. Audio capture
+     * and inference both run in Rust; results arrive via transcription-result.
      */
-    private async startDesktopWhisper(): Promise<boolean> {
-        if (!this.desktopWhisperInitialized) {
-            const initialized = await desktopWhisperTranscriptionService.init({
-                language: this.options.language || 'en',
-                useVAD: this.options.useVAD,
-                initialPrompt: this.options.initialPrompt,
-                microphoneDeviceId: this.options.microphoneDeviceId,
-                onProgress: this.options.onProgress,
-                enableStreaming: this.options.enableStreaming,
-                onPartialSegment: this.options.onPartialSegment,
-            })
-            if (!initialized) {
-                this.error = 'Desktop Whisper is only available in the desktop app.'
-                return false
-            }
-            this.desktopWhisperInitialized = true
-        }
-
-        const started = await desktopWhisperTranscriptionService.startRealtimeTranscription(
-            (result: DesktopWhisperTranscriptionResult) => {
-                this.options.onResult?.(result.text, true, undefined, result.segments)
+    private async startNative(): Promise<boolean> {
+        const started = await nativeTranscriptionService.start({
+            language: this.options.language,
+            initialPrompt: this.options.initialPrompt,
+            captureSource: this.options.captureSource,
+            microphoneDeviceId: this.options.microphoneDeviceId,
+            onResult: (text) => {
+                this.options.onResult?.(text, true, undefined, undefined)
             },
-            (error) => {
+            onError: (error) => {
                 this.error = error
                 this.isListening = false
                 this.options.onError?.(error)
                 this.options.onStatusChange?.(this.getStatus())
             },
-            undefined,
-            this.options.captureSource
-        )
+        })
 
         if (!started) {
-            this.error = 'Failed to start Desktop Whisper transcription'
+            this.error = 'Failed to start native transcription'
             this.options.onStatusChange?.(this.getStatus())
             return false
         }
@@ -281,8 +240,8 @@ class UnifiedTranscriptionService {
 
         if (this.currentProvider === 'web-speech') {
             speechRecognitionService.stop()
-        } else if (this.currentProvider === 'desktop-whisper') {
-            await desktopWhisperTranscriptionService.stop()
+        } else if (this.currentProvider === 'native') {
+            await nativeTranscriptionService.stop()
         }
 
         this.isListening = false
@@ -303,8 +262,8 @@ class UnifiedTranscriptionService {
      */
     getMediaStream(): MediaStream | null {
         switch (this.currentProvider) {
-            case 'desktop-whisper':
-                return desktopWhisperTranscriptionService.getMediaStream()
+            case 'native':
+                return nativeTranscriptionService.getMediaStream()
             default:
                 return null
         }

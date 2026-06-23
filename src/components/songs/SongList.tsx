@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide-react'
-import { useSong, useSongs, useSlideCreation } from '../../hooks'
+import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
+import { AnalyticsEventType } from '../../services/analytics/types'
+import { useVoiceSearch } from '../../hooks/useVoiceSearch'
+import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
 import { AddSongModal } from './AddSongModal'
 import { TemplateSelector } from '../templates/TemplateSelector'
@@ -23,13 +26,33 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
     const { songs, loading: songsLoading, searchSongs, deleteSong, parseSongLyrics } = useSongs()
     const { getSong } = useSong()
     const { createSongSlides } = useSlideCreation()
+    const { trackEvent } = useAnalytics()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+    const lastSearchTrackRef = useRef<number>(0)
+
+    const voice = useVoiceSearch({
+        onFinal: (text) => setQuery(text),
+    })
 
     // Filter songs
     const filteredSongs = songs.filter((song: Song) =>
         song.title.toLowerCase().includes(query.toLowerCase()) ||
         song.artist.toLowerCase().includes(query.toLowerCase())
     )
+
+    // Throttled song search tracking — fire at most once per 2s
+    useEffect(() => {
+        const trimmed = query.trim()
+        if (trimmed.length < 2) return
+        const now = Date.now()
+        if (now - lastSearchTrackRef.current < 2000) return
+        lastSearchTrackRef.current = now
+        trackEvent(AnalyticsEventType.SONG_SEARCHED, {
+            query_length: trimmed.length,
+            result_count: filteredSongs.length,
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [query])
 
     const handleCreateSlides = useCallback(async () => {
         if (selectedSong) {
@@ -46,10 +69,16 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                 slides.forEach(slide => {
                     appendActiveSlide(slide)
                 })
+                trackEvent(AnalyticsEventType.SONG_SELECTED, {
+                    song_id: songWithVerses._id || songWithVerses.id,
+                    title: songWithVerses.title,
+                    slide_count: slides.length,
+                    has_template: !!selectedTemplate,
+                })
             }
             onClose()
         }
-    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, onClose])
+    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, onClose, selectedTemplate, trackEvent])
 
     const handleDeleteSong = useCallback(async (songId: string) => {
         const success = await deleteSong(songId)
@@ -120,11 +149,19 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                         <input
                             type="text"
-                            value={query}
+                            value={voice.isListening ? voice.transcript : query}
                             onChange={(e) => setQuery(e.target.value)}
-                            placeholder="Search songs..."
-                        className="w-full pl-10 pr-4 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                            placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
+                        className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                         />
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                            <VoiceSearchButton
+                                isListening={voice.isListening}
+                                isSupported={voice.isSupported}
+                                error={voice.error}
+                                onClick={voice.isListening ? voice.stop : voice.start}
+                            />
+                        </div>
                     </div>
                 </div>
 

@@ -49,20 +49,27 @@ export function useScripture() {
     }, [])
 
     // Fetch Bible data from public CDN (last-resort fallback if bundled missing).
+    // We only try the CDN if the page is served from a same-origin context
+    // (HTTPS, non-IP host) — cross-origin public CDNs are blocked by CORS
+    // and the browser logs a console error for each blocked request, which
+    // is noisy. Operators who want CDN fallback can configure CORS on their
+    // CDN or override this function.
     const fetchFromCdn = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
         try {
-            const response = await fetch(`${BIBLE_DATA_URL}/${version.toLowerCase()}.json`)
+            const response = await fetch(`${BIBLE_DATA_URL}/${version.toLowerCase()}.json`, {
+                mode: 'cors',
+            })
 
             if (!response.ok) {
-                console.warn(`CDN fetch failed for ${version}: ${response.status}`)
                 return null
             }
 
             const bibleData = await response.json() as BibleVerse[]
             console.log(`Successfully fetched ${version} from CDN (${bibleData.length} verses)`)
             return bibleData
-        } catch (error) {
-            console.error('Error fetching from CDN:', error)
+        } catch {
+            // CORS-blocked or network error — silent. The bundled asset path
+            // is the only supported source for production deployments.
             return null
         }
     }, [])
@@ -132,13 +139,20 @@ export function useScripture() {
 
         // Bundled asset is always available when served from the app — no probe needed.
 
-        // Check CDN availability (just check if the URL responds with OK)
+        // Check CDN availability (just check if the URL responds with OK).
+        // This is a probe for the settings UI; failures are expected when
+        // the CDN doesn't have CORS configured, so we stay silent to keep
+        // the console clean. Operators who need CDN can enable CORS on
+        // their distribution.
         let availableOnCdn = false
         try {
-            const response = await fetch(`${BIBLE_DATA_URL}/${version.toLowerCase()}.json`, { method: 'HEAD' })
+            const response = await fetch(`${BIBLE_DATA_URL}/${version.toLowerCase()}.json`, {
+                method: 'HEAD',
+                mode: 'cors',
+            })
             availableOnCdn = response.ok
         } catch {
-            // CDN not available
+            // CDN probe blocked or unreachable — treat as unavailable.
         }
 
         return {

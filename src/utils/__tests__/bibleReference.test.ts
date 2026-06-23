@@ -5,6 +5,7 @@ import {
     getBookSuggestions,
     bookAbbreviations,
     buildVerseRows,
+    normalizeBibleReference,
 } from '../bibleReference'
 import { bibleBooks } from '../../types'
 
@@ -425,5 +426,73 @@ describe('buildVerseRows', () => {
         ]
         const rows = buildVerseRows(true, 19, 23, current, { prev: [], next: [] }, [])
         expect(rows[0].reference).toBe('Psalms 23:1')
+    })
+})
+
+describe('normalizeBibleReference', () => {
+    // This helper exists to clean up voice transcripts and mistyped
+    // references before they reach the parser. The goal is "do no
+    // harm" to non-reference input while normalizing obvious refs.
+    it('returns the input unchanged for non-reference text', () => {
+        const samples = [
+            'God so loved the world',
+            'how great thou art',
+            'Amazing grace how sweet the sound',
+            '',
+            'love',
+        ]
+        for (const s of samples) {
+            expect(normalizeBibleReference(s)).toBe(s)
+        }
+    })
+
+    it('normalizes digit-space-digit to colon', () => {
+        expect(normalizeBibleReference('John 3 16')).toBe('John 3:16')
+        expect(normalizeBibleReference('Romans 8 28')).toBe('Romans 8:28')
+        expect(normalizeBibleReference('1 corinthians 13 4')).toBe('1 corinthians 13:4')
+    })
+
+    it('collapses spaces around colons', () => {
+        expect(normalizeBibleReference('John 3 : 16')).toBe('John 3:16')
+        expect(normalizeBibleReference('John  3:16')).toBe('John 3:16')
+    })
+
+    it('accepts comma as a separator', () => {
+        expect(normalizeBibleReference('John 3, 16')).toBe('John 3:16')
+    })
+
+    it('normalizes ranges to colon-dash format', () => {
+        expect(normalizeBibleReference('John 3 16 20')).toBe('John 3:16-20')
+        expect(normalizeBibleReference('John 3:16-20')).toBe('John 3:16-20')
+    })
+
+    it('handles numbered book abbreviations', () => {
+        expect(normalizeBibleReference('1 John 4 8')).toBe('1 John 4:8')
+        expect(normalizeBibleReference('2 Kings 5 1')).toBe('2 Kings 5:1')
+    })
+
+    it('preserves case of the book name', () => {
+        expect(normalizeBibleReference('JOHN 3 16')).toBe('JOHN 3:16')
+    })
+
+    // Regression: STT hands us "John 316" (no space) when the user says
+    // "John three sixteen". The previous regex matched ch=31, v=6 and
+    // emitted the bogus "John 31:6". We now validate ch against the
+    // book's max-chapter and reject impossible splits.
+    it('does NOT split "John 316" into the bogus "John 31:6"', () => {
+        expect(normalizeBibleReference('John 316')).toBe('John 316')
+    })
+
+    it('does NOT split "John 31 6" into "John 31:6"', () => {
+        expect(normalizeBibleReference('John 31 6')).toBe('John 31 6')
+    })
+
+    it('DOES split "Psalms 316" into "Psalms 31:6" (ch=31 is valid for Psalms)', () => {
+        expect(normalizeBibleReference('Psalms 316')).toBe('Psalms 31:6')
+    })
+
+    it('handles voice transcript: "John three sixteen" stays as text', () => {
+        // "three sixteen" is parsed by parseSpokenNumber upstream, not here.
+        expect(normalizeBibleReference('John three sixteen')).toBe('John three sixteen')
     })
 })

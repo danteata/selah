@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { ChevronDown, Settings } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { getIndexedDB } from '../../hooks/useIndexedDB'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import type { BibleVersion } from '../../types'
 
 interface BibleVersionSelectProps {
@@ -17,6 +19,7 @@ export function BibleVersionSelect({
 }: BibleVersionSelectProps) {
     const [isOpen, setIsOpen] = useState(false)
     const [downloadedVersions, setDownloadedVersions] = useState<BibleVersion[]>([])
+    const { trackEvent } = useAnalytics()
 
     const bibleVersions = useAppStore((state) => state.bibleVersions) as BibleVersion[]
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
@@ -48,6 +51,10 @@ export function BibleVersionSelect({
             openModal('settings')
             setIsOpen(false)
         } else {
+            trackEvent(AnalyticsEventType.BIBLE_VERSION_SELECTED, {
+                version: versionId,
+                from_default: versionId === currentVersion,
+            })
             onChange(versionId)
             setIsOpen(false)
         }

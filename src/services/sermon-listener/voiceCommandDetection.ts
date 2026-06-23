@@ -1,6 +1,6 @@
 import { bibleVersionObjects } from '../../types'
 import type { BibleVersion } from '../../types'
-import { BOOK_PATTERN, normalizeBookName, parseSpokenNumber } from './verseDetection'
+import { BOOK_PATTERN, BOOK_MAX_CHAPTER, BOOK_MAX_VERSES, normalizeBookName, parseSpokenNumber } from './verseDetection'
 
 export interface VoiceCommand {
     type: 'change_version' | 'next_verse' | 'previous_verse' | 'next_chapter' | 'previous_chapter' | 'go_to_verse' | 'go_to_reference' | 'display' | 'stop_listening' | 'start_listening'
@@ -315,8 +315,28 @@ function detectGoToVerseCommands(text: string): VoiceCommand[] {
 // Also handles spoken numbers: "Matthew chapter six" → chapter 6
 // Negative lookahead ensures we don't capture "Psalm 23:1" which is handled by verse detection.
 const SPOKEN_NUMBERS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|first|second|third'
+
+// BOOK + CHAPTER + VERSE — runs BEFORE the chapter-only detector so that
+// "John 3:16" / "John 3 16" / "John chapter three sixteen" all dispatch as
+// go_to_reference with the actual verse, instead of falling through to the
+// search normalization path (which mangles them into nonsense like "John 31:6").
+// Order in the alternation matters — colon/dot/dash/verse/×/x before space,
+// so "John 3:16" wins over "John 3 16" when both could match.
+const BOOK_CHAPTER_VERSE_REGEX = new RegExp(
+    `\\b(${BOOK_PATTERN})(?:[,\\s]+(?:chapter\\s+)?)?(\\d{1,3}|${SPOKEN_NUMBERS})\\s*(?:[:\\.\\-x×]|vs\\.?|verse)\\s*(\\d{1,3}|${SPOKEN_NUMBERS})(?:\\s*(?:to|through|-|–|—)\\s*(\\d{1,3}))?\\b`,
+    'gi',
+)
+
+// Looser fallback: "John 3 16" / "John three sixteen" (no separator). Only used
+// if the strict regex above produced nothing, and we validate the numbers
+// against BOOK_MAX_CHAPTER / BOOK_MAX_VERSES to reject "John 31 6" / "Psalms 200 5".
+const BOOK_CHAPTER_VERSE_LOOSE_REGEX = new RegExp(
+    `\\b(${BOOK_PATTERN})[,\\s]+(?:chapter\\s+)?(\\d{1,3}|${SPOKEN_NUMBERS})\\s+(\\d{1,3}|${SPOKEN_NUMBERS})\\b`,
+    'gi',
+)
+
 const BOOK_CHAPTER_REGEX = new RegExp(
-    `\\b(${BOOK_PATTERN})[,]?\\s*(?:chapter\\s+)?(\\d{1,3}|${SPOKEN_NUMBERS})\\b(?!\\s*(?:[:\\.\\-]|x|vs\\.?|verse)\\s*\\d)`,
+    `\\b(${BOOK_PATTERN})[,]?\\s*(?:chapter\\s+)?(\\d{1,3}|${SPOKEN_NUMBERS})\\b(?!\\s*(?:[:\\.\\-x×]|vs\\.?|verse)\\s*\\d)`,
     'gi',
 )
 
@@ -345,7 +365,8 @@ function detectGoToReferenceCommands(text: string): VoiceCommand[] {
         if (bcMatch) {
             const book = normalizeBookName(bcMatch[1])
             const chapter = parseChapter(bcMatch[2])
-            if (book && chapter !== null) {
+            const maxChapter = book ? BOOK_MAX_CHAPTER[book] : undefined
+            if (book && chapter !== null && maxChapter !== undefined && chapter <= maxChapter) {
                 commands.push({
                     type: 'go_to_reference',
                     raw: actionMatch[0].trim(),
@@ -365,7 +386,8 @@ function detectGoToReferenceCommands(text: string): VoiceCommand[] {
         while ((bcMatch = BOOK_CHAPTER_REGEX.exec(text)) !== null) {
             const book = normalizeBookName(bcMatch[1])
             const chapter = parseChapter(bcMatch[2])
-            if (book && chapter !== null) {
+            const maxChapter = book ? BOOK_MAX_CHAPTER[book] : undefined
+            if (book && chapter !== null && maxChapter !== undefined && chapter <= maxChapter) {
                 commands.push({
                     type: 'go_to_reference',
                     raw: bcMatch[0].trim(),
@@ -373,6 +395,84 @@ function detectGoToReferenceCommands(text: string): VoiceCommand[] {
                     book,
                     chapter,
                     verse: 1,
+                })
+            }
+        }
+    }
+
+    return commands
+}
+
+/**
+ * Detect a fully-qualified book + chapter + verse reference like
+ * "John 3:16", "John 3.16", "John 3-16", "John 3 16", "John chapter three sixteen".
+ * Returns commands with verse populated, ready for `go_to_reference` dispatch.
+ *
+ * Optional action-verb prefix ("open John 3:16") gets high confidence;
+ * bare reference ("John 3 16") gets medium confidence. Numbers are
+ * validated against BOOK_MAX_CHAPTER / BOOK_MAX_VERSES so a transcript
+ * like "John 31 6" doesn't produce a nonsense reference.
+ */
+function detectBookChapterVerseCommands(text: string): VoiceCommand[] {
+    const commands: VoiceCommand[] = []
+
+    const actionPrefix = '\\b(?:open|go to|turn to|return to|show|read|display|present|take me to|jump to|find|navigate to)\\s+(?:the\\s+)?(?:book\\s+of\\s+)?'
+
+    // 1. Strict: explicit separator (`John 3:16`, `John 3.16`, `John 3-16`,
+    //    `John 3×16`, `John 3 x 16`, `John 3 vs 16`, `John 3 verse 16`).
+    BOOK_CHAPTER_VERSE_REGEX.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = BOOK_CHAPTER_VERSE_REGEX.exec(text)) !== null) {
+        const prefixMatch = text.slice(0, m.index).match(new RegExp(actionPrefix + '$', 'i'))
+        const book = normalizeBookName(m[1])
+        const chapter = parseChapter(m[2])
+        const verse = parseSpokenNumber(m[3])
+        const bookMaxVerses = book ? BOOK_MAX_VERSES[book] : undefined
+        if (book && chapter !== null && verse !== null) {
+            const maxVerse = bookMaxVerses?.[chapter - 1]
+            if (!maxVerse || verse <= maxVerse) {
+                commands.push({
+                    type: 'go_to_reference',
+                    raw: m[0].trim(),
+                    confidence: prefixMatch ? 'high' : 'medium',
+                    book,
+                    chapter,
+                    verse,
+                })
+            }
+        }
+    }
+
+    // 2. Loose: no separator, "John 3 16" / "John three sixteen".
+    //    Validate against max chapter / max verse to reject "John 31 6" /
+    //    "Psalms 200 5" (both numbers must be plausible).
+    if (commands.length === 0) {
+        BOOK_CHAPTER_VERSE_LOOSE_REGEX.lastIndex = 0
+        let lm: RegExpExecArray | null
+        while ((lm = BOOK_CHAPTER_VERSE_LOOSE_REGEX.exec(text)) !== null) {
+            const prefixMatch = text.slice(0, lm.index).match(new RegExp(actionPrefix + '$', 'i'))
+            const book = normalizeBookName(lm[1])
+            const chapter = parseChapter(lm[2])
+            const verse = parseSpokenNumber(lm[3])
+            const maxChapter = book ? BOOK_MAX_CHAPTER[book] : undefined
+            const maxVerse = book && chapter !== null ? BOOK_MAX_VERSES[book]?.[chapter - 1] : undefined
+            if (
+                book &&
+                chapter !== null &&
+                verse !== null &&
+                maxChapter !== undefined &&
+                maxVerse !== undefined &&
+                chapter <= maxChapter &&
+                verse <= maxVerse &&
+                verse >= 1
+            ) {
+                commands.push({
+                    type: 'go_to_reference',
+                    raw: lm[0].trim(),
+                    confidence: prefixMatch ? 'high' : 'medium',
+                    book,
+                    chapter,
+                    verse,
                 })
             }
         }
@@ -427,8 +527,17 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
     // they are not blocked by the keyword-intent filter.
     const referenceCommands = detectGoToReferenceCommands(recentText)
 
+    // Book + chapter + verse (e.g. "John 3:16", "John 3 16", "John chapter three sixteen")
+    // — runs BEFORE the chapter-only detector and BEFORE falling through to search,
+    // so the verse is captured instead of being mangled by the search normalizer.
+    const bookChapterVerseCommands = detectBookChapterVerseCommands(recentText)
+
     const hasIntent = hasCommandIntent(recentText)
-    if (!hasIntent && referenceCommands.length === 0) {
+    if (
+        !hasIntent &&
+        referenceCommands.length === 0 &&
+        bookChapterVerseCommands.length === 0
+    ) {
         console.log('[VoiceCommand] No command intent in:', recentText.slice(-80))
         return []
     }
@@ -437,6 +546,7 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
         ...detectVersionChangeCommands(recentText),
         ...detectNavigationCommands(recentText),
         ...detectGoToVerseCommands(recentText),
+        ...bookChapterVerseCommands,
         ...referenceCommands,
         ...detectControlCommands(recentText),
     ]

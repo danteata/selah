@@ -69,8 +69,17 @@ export function getMaxRetries(code: string): number {
 
 export function getUserAction(code: string): string | null {
     switch (code) {
-        case transcriptionErrorCodes.MICROPHONE_DENIED:
-            return 'Grant microphone permission in your browser settings.'
+        case transcriptionErrorCodes.MICROPHONE_DENIED: {
+            // Desktop users don't have a "browser settings" page — the
+            // failure happens at the OS layer (Windows Privacy /
+            // macOS Privacy & Security) and the WebView can't surface
+            // a prompt on its own. Tailor the message to the runtime.
+            const isDesktop =
+                typeof window !== 'undefined' && '__TAURI__' in window
+            return isDesktop
+                ? "Open your OS settings and grant microphone access to Selah. On Windows: Settings → Privacy & security → Microphone. On macOS: System Settings → Privacy & Security → Microphone."
+                : 'Grant microphone permission in your browser settings.'
+        }
         case transcriptionErrorCodes.MICROPHONE_NOT_FOUND:
             return 'Connect a microphone and try again.'
         case transcriptionErrorCodes.MODEL_NOT_FOUND:

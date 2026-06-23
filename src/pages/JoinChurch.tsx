@@ -1,14 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { Church, Check, X, Loader2, Users, ArrowRight } from 'lucide-react'
+import { useAnalytics } from '../hooks'
+import { AnalyticsEventType, sanitizeAuthError } from '../services/analytics/types'
 
 export default function JoinChurch() {
     const { code } = useParams<{ code: string }>()
     const navigate = useNavigate()
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState('')
+    const { trackPage, trackEvent } = useAnalytics()
 
     // Get invitation details
     const invitationData = useQuery(
@@ -19,6 +22,11 @@ export default function JoinChurch() {
     // Accept invitation mutation
     const acceptInvitation = useMutation(api.invitations.acceptInvitation)
 
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/join')
+    }, [trackPage])
+
     const handleAccept = async () => {
         if (!code) return
 
@@ -27,10 +35,12 @@ export default function JoinChurch() {
 
         try {
             const result = await acceptInvitation({ code })
+            trackEvent(AnalyticsEventType.INVITATION_ACCEPTED)
             // Redirect to dashboard on success
             navigate('/')
         } catch (err: any) {
             setError(err.message || 'Failed to accept invitation')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'invitation', error_category: sanitizeAuthError(err.message || '') })
         } finally {
             setIsLoading(false)
         }

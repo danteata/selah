@@ -169,6 +169,131 @@ Tag content\\par
             expect(verses.find(v => v.label === 'Bridge')).toBeDefined();
             expect(verses.find(v => v.label === 'Tag')).toBeDefined();
         });
+
+        // Regression: EasyWorship 6/7 wraps every line in its own group with a
+        // long EasyWorship-specific header (\sdewparatemplatestyle101, etc.)
+        // and inline `{\*\sdfsreal 60}{\*\sdfsdef 93.75}` font/size markers
+        // between the header and the text. Two bugs previously broke this:
+        //   1. The parser treated `\sdewparatemplatestyle101` as a destination
+        //      and skipped the entire group, returning an empty string.
+        //   2. The `\*\sdfsreal 60` form leaked the "60" into the output AND
+        //      the first `\par` ended processing because `skipNextGroup` was
+        //      sticky across group boundaries, eating the rest of the song.
+        it('should parse EasyWorship 6/7 per-line groups without leaking control values', () => {
+            const ewHeader = '{\\rtf1\\ansi\\deff0\\sdeasyworship2\\par';
+            const ewLine1 = '{\\pard\\qc\\qdef\\sdewparatemplatestyle101\\plain\\sdewtemplatestyle101\\fs120{\\*\\sdfsreal 60}{\\*\\sdfsdef 93.75}There is an outpouring of abundance\\par}';
+            const ewLine2 = '{\\pard\\qc\\qdef\\sdewparatemplatestyle101\\plain\\sdewtemplatestyle101\\fs120{\\*\\sdfsreal 60}{\\*\\sdfsdef 93.75}new doors have been opened\\par}';
+            const ewClose = '}';
+            const rtf = ewHeader + ewLine1 + ewLine2 + ewClose;
+
+            const result = parseRTF(rtf);
+
+            // Both lines must be present, neither should be preceded by
+            // the leaked "60" from the font-size property.
+            expect(result).not.toMatch(/^60/);
+            expect(result).not.toContain('60There');
+            expect(result).toContain('There is an outpouring of abundance');
+            expect(result).toContain('new doors have been opened');
+
+            // The control words themselves must not appear in the output.
+            expect(result).not.toContain('sdewparatemplatestyle');
+            expect(result).not.toContain('sdfsreal');
+            expect(result).not.toContain('sdfsdef');
+        });
+    });
+
+    describe('extractVerseStructureFromRTF — strategy precedence', () => {
+        // Regression: a song in mixed "Slide N" + label format was being
+        // split one-verse-per-slide because Strategy 1 (slide delimiters)
+        // fired before Strategy 2 (verse labels). For songs that have
+        // explicit labels, labels always reflect the songwriter's intent
+        // and must take precedence — a chorus split across 4 slides should
+        // still be one chorus.
+        it('should prefer verse labels over slide markers when both are present', () => {
+            // Valid RTF: a space follows every control word so the parser
+            // doesn't greedily consume "Line" as part of "\parLine".
+            const rtf =
+                '{\\rtf1\\par ' +
+                '{\\sdparawysiwghidden\\par }' +
+                'Verse 1\\par ' +
+                'Line one of verse one\\par ' +
+                'Line two of verse one\\par ' +
+                '{\\sdparawysiwghidden\\par }' +
+                '{\\sdparawysiwghidden\\par }' +
+                'Chorus\\par ' +
+                'Chorus line one\\par ' +
+                'Chorus line two\\par ' +
+                '{\\sdparawysiwghidden\\par }' +
+                'Verse 2\\par ' +
+                'Line one of verse two\\par ' +
+                '}'
+
+            const verses = extractVerseStructureFromRTF(rtf)
+
+            // Should be 3 verses, not 5+ (one per slide marker)
+            expect(verses.length).toBe(3)
+            expect(verses[0].label).toBe('Verse 1')
+            expect(verses[0].content).toContain('Line one of verse one')
+            expect(verses[0].content).toContain('Line two of verse one')
+            expect(verses[1].label).toBe('Chorus')
+            expect(verses[2].label).toBe('Verse 2')
+        });
+
+        it('should still use slide-based splitting when no labels exist', () => {
+            const rtf =
+                '{\\rtf1\\par ' +
+                '{\\sdparawysiwghidden\\par }' +
+                'First slide lyric\\par ' +
+                '{\\sdparawysiwghidden\\par }' +
+                'Second slide lyric\\par ' +
+                '{\\sdparawysiwghidden\\par }' +
+                'Third slide lyric\\par ' +
+                '}'
+
+            const verses = extractVerseStructureFromRTF(rtf)
+            expect(verses.length).toBe(3)
+            expect(verses[0].content).toBe('First slide lyric')
+            expect(verses[1].content).toBe('Second slide lyric')
+            expect(verses[2].content).toBe('Third slide lyric')
+        });
+
+        // Regression: real EasyWorship 6/7 exports write style values as
+        // space-prefixed decimals (e.g. `\sdasbaseline 166.66667175293`)
+        // rather than numeric parameters. The raw `166.66667175293` would
+        // otherwise leak into the lyrics as a 13-digit float-precision
+        // string. This was reported by users seeing lyrics like
+        // `48.5999984741211TITLE` for short songs.
+        it('should drop space-prefixed values of EasyWorship data-bearing control words', () => {
+            const rtf =
+                '{\\rtf1\\par ' +
+                '\\sdasbaseline 48.5999984741211TITLE\\par ' +
+                '\\sdasfactor 1.5\\par ' +
+                'Amazing grace how sweet the sound\\par ' +
+                '}'
+
+            const text = parseRTF(rtf)
+
+            // The 13-digit float must not appear in the output
+            expect(text).not.toContain('48.5999984741211')
+            expect(text).not.toContain('1.5')
+            // The trailing `TITLE` label also shouldn't survive — the
+            // data-bearing value consumes up to the next whitespace.
+            expect(text).not.toContain('TITLE')
+            // The real lyric must be preserved
+            expect(text).toContain('Amazing grace how sweet the sound')
+        });
+
+        it('should preserve lyrics after a data-bearing control word that has a numeric parameter', () => {
+            // When the value is in a numeric parameter, the lyrics that
+            // follow on the same line must NOT be consumed.
+            const rtf =
+                '{\\rtf1\\par ' +
+                '\\sdewtemplatestyle101There is a real lyric\\par ' +
+                '}'
+
+            const text = parseRTF(rtf)
+            expect(text).toContain('There is a real lyric')
+        });
     });
 });
 

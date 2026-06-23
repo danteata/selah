@@ -3,6 +3,8 @@ import { useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useEmbeddingStatus } from '../../hooks/useEmbeddingStatus'
 import { useScripture } from '../../hooks/useScripture'
+import { useAnalytics } from '../../hooks/useAnalytics'
+import { AnalyticsEventType } from '../../services/analytics/types'
 import { isEmbedderReady } from '../../services/sermon-listener/localEmbeddings'
 import type { SyncStage } from '../../services/sermon-listener/embeddingSyncManager'
 import { Check, Loader2, Download, Trash2, RefreshCw, Bell, BellOff } from 'lucide-react'
@@ -26,6 +28,7 @@ interface LocalEmbeddingSyncProps {
 export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
     const bibleVersions = useQuery(api.bibleVersions.listBibleVersions)
     const { downloadBibleVersion } = useScripture()
+    const { trackEvent } = useAnalytics()
 
     const {
         states: embeddingStatuses,
@@ -70,12 +73,22 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
     const handleSeed = useCallback(async (versionId: string, withFragments = false) => {
         const versionName = bibleVersions?.find(v => v.id === versionId)?.name ?? versionId
         const getBibleVerses = () => downloadBibleVersion(versionId)
+        const startedAt = Date.now()
+        trackEvent(AnalyticsEventType.BIBLE_EMBEDDING_SYNC_STARTED, {
+            version: versionId,
+            with_fragments: withFragments,
+        })
         try {
             const result = await startSync(versionId, getBibleVerses, withFragments)
             if (result.success) {
                 showNotification('Search ready', `You can now find verses in ${versionName}`)
                 setShowSuccess(versionId)
                 setTimeout(() => setShowSuccess(null), 2000)
+                trackEvent(AnalyticsEventType.BIBLE_EMBEDDING_SYNC_COMPLETED, {
+                    version: versionId,
+                    with_fragments: withFragments,
+                    elapsed_ms: Date.now() - startedAt,
+                })
 
                 // Auto-upgrade to fragments in the background after fast full-verse seed completes
                 if (!withFragments) {
@@ -89,7 +102,7 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
         } catch {
             showNotification('Setup failed', `Could not prepare ${versionName} for search`)
         }
-    }, [bibleVersions, startSync, upgradeToFragments, downloadBibleVersion, showNotification])
+    }, [bibleVersions, startSync, upgradeToFragments, downloadBibleVersion, showNotification, trackEvent])
 
     const handleClear = useCallback(async (versionId: string) => {
         await clearEmbeddings(versionId)

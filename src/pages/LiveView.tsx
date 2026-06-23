@@ -10,6 +10,8 @@ import { useLocalBackground } from '../hooks/useLocalBackground'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import { AutoFitText } from '../components/live/AutoFitText'
 import { VideoBackground } from '../components/live/VideoBackground'
+import { useAnalytics } from '../hooks'
+import { AnalyticsEventType } from '../services/analytics/types'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -35,6 +37,7 @@ export default function LiveView() {
     const [liveState, setLiveState] = useState<LiveState | null>(null)
     const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
     const [isDesktop, setIsDesktop] = useState(false)
+    const { trackPage, trackEvent } = useAnalytics()
 
     const [flashColor, setFlashColor] = useState<string | null>(null)
     const monitorId = searchParams.get('monitorId') || null
@@ -43,6 +46,11 @@ export default function LiveView() {
 
     const { isSignedIn } = useAuth()
     const sessionId = searchParams.get('session')
+
+    // Track page view on mount
+    useEffect(() => {
+        trackPage('/live', { has_session: !!sessionId })
+    }, [trackPage, sessionId])
 
     const sharedSession = useQuery(
         api.liveSessions.getSession,
