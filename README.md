@@ -164,6 +164,7 @@ selah/
 - Node.js 18+ or [Bun](https://bun.sh/)
 - A [Convex](https://convex.dev/) account (free tier available)
 - A [Clerk](https://clerk.com/) account (free tier available)
+- **Desktop builds only:** [Rust](https://rustup.rs/) (latest stable) and **CMake** — the native transcription engine compiles whisper.cpp from source. See [BUILD.md](BUILD.md) for the full desktop toolchain.
 
 ### Installation
 
@@ -198,15 +199,14 @@ selah/
    bunx convex dev
    ```
 
-5. (Optional — Desktop only) Set up the Whisper transcription sidecar:
+5. (Desktop only) Run the desktop app — transcription runs **in-process** via the
+   native engine (whisper.cpp + ONNX), so install CMake first (see [BUILD.md](BUILD.md)):
    ```bash
-   # Build the whisper server binary for your platform
-   cd src-tauri/binaries && ./build-whisper.sh && cd ../..
-
-   # Download the Whisper base.en model (~105MB)
-   ./scripts/download-whisper-model.sh
+   # Downloads the bundled GGUF model + embedding assets, then launches Tauri.
+   bun run desktop:dev
    ```
-   The sidecar binary must be rebuilt on each target platform (macOS, Linux, Windows) using `build-whisper.sh` (or `build-whisper.bat` on Windows). The desktop app will fall back to downloading the model at runtime if the download script is skipped.
+   Additional/larger models (Parakeet, multilingual Whisper, etc.) are downloaded
+   on demand from the in-app model picker. There is no Python sidecar.
 
 6. Start the frontend dev server:
    ```bash
@@ -227,10 +227,9 @@ selah/
 | `lint` | Run ESLint |
 | `test` | Run all tests once |
 | `test:watch` | Run tests in watch mode |
-| `whisper:start` | Build and start the local Whisper.cpp server via Docker |
-| `download-whisper-model` | Download the bundled Whisper model for desktop transcription |
-| `desktop:dev` | Start Tauri desktop app in dev mode |
-| `desktop:build` | Build Tauri desktop app for production |
+| `download-gguf-model` | Download the bundled GGUF Whisper model for native transcription |
+| `desktop:dev` | Download assets, then start the Tauri desktop app in dev mode |
+| `desktop:build` | Build the Tauri desktop app for production |
 
 ## Sermon Listener
 
