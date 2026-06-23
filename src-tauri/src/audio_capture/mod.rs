@@ -322,6 +322,77 @@ struct VadAudioChunkEvent {
     is_speaking: bool,
     /// Sermon-relative start offset in milliseconds (when this segment began)
     start_offset_ms: u32,
+    /// Terminal marker emitted once after capture stops and the final segment
+    /// has been flushed. The JS side waits for this before tearing down its
+    /// listener so the last utterance isn't dropped (see nativeAudioCapture).
+    #[serde(default)]
+    end_of_stream: bool,
+}
+
+/// Event payload for in-process transcription results (native engine path).
+#[cfg(feature = "native-transcription")]
+#[derive(Clone, serde::Serialize)]
+struct TranscriptionResultEvent {
+    text: String,
+    duration_ms: u32,
+    start_offset_ms: u32,
+}
+
+/// Handle a complete VAD speech segment.
+///
+/// When the native engine has a model loaded, transcribe the samples in-process
+/// and emit `transcription-result`. Otherwise emit the segment as a base64 WAV
+/// `vad-audio-chunk` for the Python sidecar (the path used until cutover).
+fn handle_speech_segment(
+    app: &tauri::AppHandle,
+    samples: Vec<f32>,
+    start_offset_ms: u32,
+    is_speaking: bool,
+) {
+    use tauri::Emitter;
+    let duration_ms = (samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
+
+    #[cfg(feature = "native-transcription")]
+    {
+        use tauri::Manager;
+        if let Some(tm) = app.try_state::<crate::transcription::TranscriptionManager>() {
+            if tm.is_model_loaded() {
+                match tm.transcribe(samples) {
+                    Ok(out) => {
+                        let text = out.text.trim().to_string();
+                        if !text.is_empty() {
+                            let _ = app.emit(
+                                "transcription-result",
+                                TranscriptionResultEvent { text, duration_ms, start_offset_ms },
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("[native-transcription] {}", e),
+                }
+                return;
+            }
+        }
+    }
+
+    // Sidecar fallback: emit the speech segment as a WAV chunk.
+    let chunk = AudioChunk {
+        samples,
+        duration_ms,
+        sample_rate: TARGET_SAMPLE_RATE,
+    };
+    let wav_base64 = chunk.to_wav_base64();
+    if !wav_base64.is_empty() {
+        let _ = app.emit(
+            "vad-audio-chunk",
+            VadAudioChunkEvent {
+                wav_base64,
+                duration_ms,
+                is_speaking,
+                start_offset_ms,
+                end_of_stream: false,
+            },
+        );
+    }
 }
 
 /// Tauri command: Initialize VAD with model path
@@ -442,29 +513,9 @@ pub fn start_capture_with_vad(
             if let Some(ref mut vad) = *segmenter {
                 match vad.process(&samples) {
                     Ok(Some(speech_samples)) => {
-                        // Complete speech segment detected
-                        let duration_ms = (speech_samples.len() as f64 / TARGET_SAMPLE_RATE as f64
-                            * 1000.0) as u32;
-
-                        // Create WAV from speech samples
-                        let chunk = AudioChunk {
-                            samples: speech_samples,
-                            duration_ms,
-                            sample_rate: TARGET_SAMPLE_RATE,
-                        };
-
-                        let wav_base64 = chunk.to_wav_base64();
-                        if !wav_base64.is_empty() {
-                            let _ = app.emit(
-                                "vad-audio-chunk",
-                                VadAudioChunkEvent {
-                                    wav_base64,
-                                    duration_ms,
-                                    is_speaking: true,
-                                    start_offset_ms,
-                                },
-                            );
-                        }
+                        // Complete speech segment: transcribe in-process (native
+                        // engine) or emit a WAV chunk for the sidecar.
+                        handle_speech_segment(&app, speech_samples, start_offset_ms, true);
                     }
                     Ok(None) => {
                         // No complete segment yet, emit speaking status
@@ -475,6 +526,7 @@ pub fn start_capture_with_vad(
                                 duration_ms: 0,
                                 is_speaking: vad.is_speaking(),
                                 start_offset_ms,
+                                end_of_stream: false,
                             },
                         );
                     }
@@ -487,33 +539,32 @@ pub fn start_capture_with_vad(
             std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
         }
 
-        // Flush any remaining speech when capture stops
+        // Flush any remaining speech when capture stops. Without this drain the
+        // last cpal buffer (the tail of the final utterance — often a verse
+        // reference) would be lost on stop.
         let mut segmenter = vad_segmenter.lock();
         if let Some(ref mut vad) = *segmenter {
             if let Some(speech_samples) = vad.flush() {
-                let duration_ms =
-                    (speech_samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
                 let start_offset_ms = session_start.elapsed().as_millis() as u32;
-                let chunk = AudioChunk {
-                    samples: speech_samples,
-                    duration_ms,
-                    sample_rate: TARGET_SAMPLE_RATE,
-                };
-                let wav_base64 = chunk.to_wav_base64();
-                if !wav_base64.is_empty() {
-                    let _ = app.emit(
-                        "vad-audio-chunk",
-                        VadAudioChunkEvent {
-                            wav_base64,
-                            duration_ms,
-                            is_speaking: false,
-                            start_offset_ms,
-                        },
-                    );
-                }
+                handle_speech_segment(&app, speech_samples, start_offset_ms, false);
             }
             vad.reset();
         }
+        drop(segmenter);
+
+        // Terminal marker: tells the JS listener the flush is complete and it is
+        // safe to tear down. Emitted last so any flushed segment above is
+        // delivered first.
+        let _ = app.emit(
+            "vad-audio-chunk",
+            VadAudioChunkEvent {
+                wav_base64: String::new(),
+                duration_ms: 0,
+                is_speaking: false,
+                start_offset_ms: session_start.elapsed().as_millis() as u32,
+                end_of_stream: true,
+            },
+        );
     });
 
     Ok(())

@@ -11,21 +11,25 @@ edition = "2021"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0", features = ["webview-data-url", "macos-private-api", "protocol-asset", "devtools"] }
+tauri = { version = "2.0", features = ["webview-data-url", "macos-private-api", "protocol-asset", "devtools", "tray-icon"] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-fs = "2.0"
 tauri-plugin-shell = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 cpal = "0.15"
 rubato = "0.15"  # For audio resampling
 parking_lot = "0.12"  # For thread-safe mutex
 lazy_static = "1.4"
 base64 = "0.22"  # For encoding audio to base64
 hound = "3.5"  # For WAV encoding
+sha2 = "0.10"  # SHA-256 verification for model downloads
+flate2 = "1.0"  # gzip decompression for Parakeet model tarballs
+tar = "0.4"  # tar extraction for Parakeet model tarballs
 scopeguard = "1.2.0"  # For RAII guards (COM cleanup, etc.)
+anyhow = "1"  # Ergonomic error handling in the native transcription engine
 tiny_http = "0.12"  # One-shot HTTP listener for the OAuth callback (port 19888)
 ort = "2.0.0-rc.11"  # ONNX Runtime for Silero VAD
 ndarray = "0.17"  # For tensor operations with ort (must match ort's ndarray version)
@@ -34,6 +38,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 chrono = "0.4"  # For date-based log rotation
 grafton-ndi = { version = "0.11", features = ["tokio"], optional = true }
+# In-process transcription engine (Whisper via whisper.cpp + Parakeet via ONNX).
+# Optional + behind the `native-transcription` feature so the default build and
+# the existing Python sidecar path are completely unaffected until cutover.
+# Per-platform GPU backends are added in the target tables below.
+transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "onnx"], optional = true }
 
 # Platform-specific dependencies for system audio capture
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -41,6 +50,7 @@ screencapturekit = "0.3"  # macOS 12.3+ system audio capture
 core-foundation = "0.10"  # CFError type from screencapturekit
 core-media-rs = "0.3"    # RetainedAudioBufferList from screencapturekit
 core-audio-types-rs = "0.3"  # AudioBuffer type
+transcribe-rs = { version = "0.3", features = ["whisper-metal"], optional = true }  # Metal GPU on macOS
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.22"  # WASAPI loopback for system audio capture
@@ -48,13 +58,18 @@ windows = { version = "0.58", features = [
     "Win32_System_Com",
     "Win32_Foundation",
 ] }
+transcribe-rs = { version = "0.3", features = ["whisper-vulkan", "ort-directml"], optional = true }  # Vulkan + DirectML on Windows
+
+[target.'cfg(target_os = "linux")'.dependencies]
+transcribe-rs = { version = "0.3", features = ["whisper-vulkan"], optional = true }  # Vulkan on Linux
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2.0"
 tauri-plugin-process = "2.0"
 
 [features]
-default = ["custom-protocol"]
+# Native in-process transcription is now the default engine (transcribe-rs).
+default = ["custom-protocol", "native-transcription"]
 custom-protocol = ["tauri/custom-protocol"]
 ndi = ["dep:grafton-ndi"]
-whisper-sidecar = []
+native-transcription = ["dep:transcribe-rs"]

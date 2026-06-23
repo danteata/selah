@@ -69,3 +69,6 @@ coverage/
 # Lock files (use pnpm)
 package-lock.json
 yarn.lock
+
+# Native GGUF Whisper model (fetched at build time by download-gguf-model.mjs)
+src-tauri/assets/whisper-models-gguf/*.bin
