@@ -303,20 +303,69 @@ testing section so reviewers know the path exists and is covered by
 
 ## Quick-win prioritisation
 
-| # | Idea | Impact | Effort |
-|---|---|---|---|
-| 1 | `catch_unwind` engine recovery | High (no more frozen UI) | Medium |
-| 5 | Smoothed VAD wrapper | High (cleaner transcripts) | Low |
-| 11 | EOS drain on stop | Medium (no dropped verses) | Low |
-| 8 | Language-aware filler filter | Medium | Low (port from Handy) |
-| 6 | Whisper `initial_prompt` | Medium | Low |
-| 2 | RAII loading guard | Medium (no double-upgrades) | Low |
-| 7 | Fuzzy custom-word correction | Medium | Medium (port + test) |
-| 3 | Idle model-unload timeout | Medium (UX) | Low |
-| 4 | Resumable + verified downloads | Medium | Medium |
-| 12 | Failure-injection env flag | Low | Trivial |
-| 10 | Short-clip padding | Low | Trivial |
-| 9 | Always-on mic mode | Low (future) | High |
+Status legend: ✅ done · ⬜ todo
+
+| # | Idea | Impact | Effort | Status |
+|---|---|---|---|---|
+| 1 | `catch_unwind` engine recovery | High (no more frozen UI) | Medium | ✅ |
+| 5 | Smoothed VAD wrapper | High (cleaner transcripts) | Low | ✅ |
+| 11 | EOS drain on stop | Medium (no dropped verses) | Low | ✅ |
+| 8 | Language-aware filler filter | Medium | Low (port from Handy) | ✅ |
+| 6 | Whisper `initial_prompt` | Medium | Low | ✅ |
+| 2 | RAII loading guard | Medium (no double-upgrades) | Low | ✅ |
+| 7 | Fuzzy custom-word correction | Medium | Medium (port + test) | ✅ |
+| 3 | Idle model-unload timeout | Medium (UX) | Low | ✅ |
+| 4 | Resumable + verified downloads | Medium | Medium | N/A (see below) |
+| 12 | Failure-injection env flag | Low | Trivial | ✅ (with #1) |
+| 10 | Short-clip padding | Low | Trivial | ✅ |
+| 9 | Always-on mic mode | Low (future) | High | ⬜ |
 
 The top four (1, 5, 11, 8) are all small wins and address bugs the current
 Selah implementation is exposed to during a live sermon — start there.
+
+---
+
+## Implementation log
+
+**Done (this pass):** 1, 5, 7, 8, 11 (+ 12, bundled with 1).
+
+- **#8** → `src/services/sermon-listener/fillerFilter.ts` (+ tests). Wired into
+  `useSermonListener.ts` post-processing: `raw → hallucination → filler → custom-words`.
+- **#7** → `src/services/sermon-listener/customWords.ts` (+ tests). Levenshtein +
+  Soundex + 1–3-gram, case/punctuation preserving. Phonetic-boost and n-gram width
+  are options; the always-on `SERMON_PROPER_NOUNS` list uses a SAFE profile
+  (`maxNgram: 1`, `usePhonetic: false`, threshold `0.25`) to avoid over-matching
+  (`prophet`→`propitiation`, n-gram eating `of righteousness`). User-curated vocab
+  can still use the full Handy profile.
+- **#5** → `src-tauri/src/audio_capture/vad.rs`. Added `onset_chunks` (default 3 ≈
+  96 ms) to `VadConfig`/`VadSegmenter` so a single noisy frame can't open a segment.
+- **#11** → `src-tauri/src/audio_capture/mod.rs` + `nativeAudioCapture.ts`. Added an
+  `end_of_stream` terminal event; JS now stops capture first and drains (2 s cap)
+  before unlistening, so the final flushed utterance isn't dropped.
+- **#1 / #12** → `desktopWhisperService.ts`. Structured `recovering/recovered/failed`
+  events (`onWhisperEngineEvent`) surfaced as `engineStatus` + a non-fatal banner in
+  `SermonListenerPanel`. Dev-gated `__forceTranscriptionFailure()` injection hook.
+
+**Done (second pass):** 6, 10, 2, 3.
+
+- **#10** → `desktopWhisperTranscription.ts` `padShortClip()` (+ tests). Pads sub-1s
+  VAD utterances with trailing silence to a 1.25s floor before encoding.
+- **#6** → `bibleInitialPrompt.ts` `buildBibleInitialPrompt()` (+ tests). Replaces the
+  inline prompt string; now also biases toward the hard `SERMON_PROPER_NOUNS`, and
+  accepts session-specific `extraTerms` (church/staff names, current passage).
+- **#2** → `embeddingSyncManager.ts` `ensureModelReady()` (+ tests). Dedups concurrent
+  embedder loads and clears `modelLoading` in `finally` (fixes a stuck-flag bug where
+  a failed `initializeEmbedder()` left `modelLoading` true forever).
+- **#3** → `embeddingSyncManager.ts` idle-unload timer + `localEmbeddings.disposeEmbedder()`
+  (+ tests). Keeps the embedder warm for 5 min after the last sync, then frees the
+  worker/model. Configurable via `setIdleUnloadTimeout(ms)` (`Infinity` = never, `0` = immediate).
+
+**Not applicable:** #4 (resumable + SHA-256-verified downloads). The premise (a ~380 MB
+CDN download) doesn't match Selah: the MiniLM embedding model is ~22 MB and **bundled as
+a Tauri resource on desktop** (`assets/embedding-models/`, see `localEmbeddings.resolveLocalModelPath`),
+with Transformers.js managing its own Cache-API storage on web. There is no large
+network download to resume or checksum, so Range-resume + SHA-256 would be speculative
+infrastructure with no real payoff. Revisit only if a large model is ever fetched from a CDN.
+
+**Remaining:** #9 (always-on mic) — deferred, high-effort and lower value for the
+desktop/web split (see section 9).
