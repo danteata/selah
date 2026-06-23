@@ -109,7 +109,7 @@ export interface OfflineTranscriptRecord {
     updatedAt: string
 }
 
-class WorshipCloudDatabase extends Dexie {
+class SelahDatabase extends Dexie {
     songs!: Table<Song>
     media!: Table<Media>
     library!: Table<LibraryItem, string>
@@ -132,7 +132,7 @@ class WorshipCloudDatabase extends Dexie {
     templateBlobs!: Table<CachedTemplateBlob, string>
 
     constructor() {
-        super('WorshipCloudDatabase')
+        super('SelahDatabase')
         this.version(2).stores({
             songs: 'id,lyrics,title,album,cover,artist,verses,createdAt,updatedAt',
             media: 'id,content,data,createdAt,updatedAt',
@@ -183,16 +183,16 @@ class WorshipCloudDatabase extends Dexie {
 }
 
 // Singleton instance to avoid creating multiple connections
-let dbInstance: WorshipCloudDatabase | null = null
+let dbInstance: SelahDatabase | null = null
 
-export function getIndexedDB(): WorshipCloudDatabase {
+export function getIndexedDB(): SelahDatabase {
     if (!dbInstance) {
-        dbInstance = new WorshipCloudDatabase()
+        dbInstance = new SelahDatabase()
     }
     return dbInstance
 }
 
-export function useIndexedDB(): WorshipCloudDatabase {
+export function useIndexedDB(): SelahDatabase {
     return getIndexedDB()
 }
 
