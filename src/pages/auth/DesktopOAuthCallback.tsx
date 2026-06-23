@@ -7,20 +7,19 @@
  *   1. The user clicks "Continue with Google" in the Tauri webview.
  *   2. We mint a Clerk OAuth URL and open it in the SYSTEM browser.
  *   3. The system browser completes the OAuth and Clerk redirects to
- *      the Rust loopback listener at `localhost:19888`.
- *   4. The Rust listener navigates the webview to
- *      `/?<clerk-params>` and `App.tsx` mounts this screen.
+ *      the Rust loopback listener at `localhost:19888` with the
+ *      callback params (`__clerk_handshake=...`).
+ *   4. The Rust listener navigates the webview to `/?<params>` and
+ *      `App.tsx` mounts this screen.
  *
- * Completing the sign-in:
- *   - For the handshake architecture (`__clerk_handshake`), the
- *     Clerk SDK processes the param automatically during
- *     `ClerkProvider` load — no component action needed. `App.tsx`
- *     watches `isSignedIn` and unmounts this screen once the session
- *     lands.
- *   - For the older ticket/nonce flow (`rotating_token_nonce` /
- *     `__clerk_ticket` / `code`), we mount
- *     `<AuthenticateWithRedirectCallback />`, which calls
- *     `clerk.handleRedirectCallback()` to finish the exchange.
+ * `<AuthenticateWithRedirectCallback />` calls
+ * `clerk.handleRedirectCallback()` under the hood. That's what
+ * redeems the handshake against the webview's own Clerk client and
+ * completes the in-progress sign-in created by `signIn.create(...)`.
+ * It MUST be mounted unconditionally — the handshake param is exactly
+ * the case we get on desktop, and gating it out leaves nothing to
+ * complete the sign-in. Once the session lands, `App.tsx` (watching
+ * `isSignedIn`) unmounts this screen and routes to the dashboard.
  *
  * If nothing completes within `TIMEOUT_MS` (network failure, the
  * user closed the browser mid-flow, a misconfigured redirect URL),
@@ -34,20 +33,18 @@ import { isDesktop } from '../../platform'
 
 const TIMEOUT_MS = 20_000
 
-function hasCodeOrNonceFlow(): boolean {
-    if (typeof window === 'undefined') return false
-    const params = new URLSearchParams(window.location.search)
-    return (
-        params.has('code') ||
-        params.has('rotating_token_nonce') ||
-        params.has('__clerk_ticket')
-    )
-}
-
 export default function DesktopOAuthCallback() {
     const [timedOut, setTimedOut] = useState(false)
 
     useEffect(() => {
+        // Visibility for debugging which params actually arrived in the
+        // webview after the Rust listener's navigation.
+        if (typeof window !== 'undefined') {
+            const params = Array.from(
+                new URLSearchParams(window.location.search).keys(),
+            )
+            console.info('[oauth] callback screen mounted; params:', params)
+        }
         const id = window.setTimeout(() => setTimedOut(true), TIMEOUT_MS)
         return () => window.clearTimeout(id)
     }, [])
@@ -91,16 +88,14 @@ export default function DesktopOAuthCallback() {
                 </p>
             </div>
 
-            {/* Only the code/nonce/ticket flow needs an explicit
-                callback exchange. The `__clerk_handshake` flow is
-                processed automatically by ClerkProvider, and mounting
-                this component without callback params can throw. */}
-            {hasCodeOrNonceFlow() && (
-                <AuthenticateWithRedirectCallback
-                    signInFallbackRedirectUrl="/"
-                    signUpFallbackRedirectUrl="/"
-                />
-            )}
+            {/* Redeems the handshake / OAuth callback against the
+                webview's Clerk client and completes the sign-in. Mounted
+                unconditionally — this is the only thing that finalizes
+                the session. */}
+            <AuthenticateWithRedirectCallback
+                signInFallbackRedirectUrl="/"
+                signUpFallbackRedirectUrl="/"
+            />
         </div>
     )
 }
