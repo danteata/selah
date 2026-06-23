@@ -11,6 +11,7 @@ import {
     getSyncProgress,
     saveSyncProgress,
     clearSyncProgress,
+    disposeEmbedder,
 } from './localEmbeddings'
 import { extractVerseFragments } from '../../lib/extractVerseFragments'
 import type { BibleVerse } from '../../types'
@@ -86,6 +87,12 @@ class EmbeddingSyncManager {
     private abortControllers = new Map<string, AbortController>()
     private modelLoading = false
     private modelReady = false
+    /** In-flight embedder init, shared so concurrent syncs don't double-load. */
+    private modelInitPromise: Promise<boolean> | null = null
+    /** Idle timer that unloads the embedder model after a period of inactivity. */
+    private idleUnloadTimer: ReturnType<typeof setTimeout> | null = null
+    /** How long the model stays warm after the last sync before being unloaded. */
+    private idleUnloadMs = 5 * 60 * 1000 // 5 minutes
 
     subscribe(listener: SyncListener): () => void {
         this.listeners.add(listener)
@@ -147,6 +154,95 @@ class EmbeddingSyncManager {
 
     private isControllerCurrent(versionId: string, controller: AbortController): boolean {
         return this.abortControllers.get(versionId) === controller
+    }
+
+    /**
+     * Ensure the embedding model is loaded. Concurrent callers (e.g. two
+     * versions syncing at once) share a single in-flight init instead of each
+     * kicking off their own. The `modelLoading` flag is cleared in `finally`
+     * so a failed load can't leave it stuck `true` forever — the TS analog of
+     * Handy's RAII `LoadingGuard` (Drop) (item #2).
+     */
+    /**
+     * Cancel a pending idle-unload — called whenever the model is about to be
+     * used so it isn't torn down underneath an active sync.
+     */
+    private cancelIdleUnload(): void {
+        if (this.idleUnloadTimer) {
+            clearTimeout(this.idleUnloadTimer)
+            this.idleUnloadTimer = null
+        }
+    }
+
+    /**
+     * Arm the idle-unload timer after a sync finishes. Keeps the model warm for
+     * `idleUnloadMs` so back-to-back version syncs don't pay the load cost
+     * again, then frees it to reclaim memory (item #3). No-op if the model
+     * isn't loaded or unloading is disabled (`idleUnloadMs` not finite).
+     */
+    private scheduleIdleUnload(): void {
+        this.cancelIdleUnload()
+        if (!isEmbedderReady() || !Number.isFinite(this.idleUnloadMs)) return
+
+        if (this.idleUnloadMs <= 0) {
+            this.unloadModel()
+            return
+        }
+
+        this.idleUnloadTimer = setTimeout(() => {
+            this.idleUnloadTimer = null
+            // Don't unload if a sync slipped in while the timer was pending.
+            if (this.isSyncing()) return
+            this.unloadModel()
+        }, this.idleUnloadMs)
+    }
+
+    private unloadModel(): void {
+        disposeEmbedder()
+        this.modelReady = false
+    }
+
+    /**
+     * Configure how long the embedder stays warm after the last sync.
+     * Pass `Infinity` to never unload, `0` to unload immediately on completion.
+     */
+    setIdleUnloadTimeout(ms: number): void {
+        this.idleUnloadMs = ms
+    }
+
+    private async ensureModelReady(): Promise<void> {
+        // The model is about to be used — don't let the idle timer kill it.
+        this.cancelIdleUnload()
+
+        if (isEmbedderReady()) {
+            this.modelReady = true
+            return
+        }
+
+        // Join an init already in flight.
+        if (this.modelInitPromise) {
+            const ready = await this.modelInitPromise
+            if (!ready) throw new Error('Failed to load embedding model')
+            return
+        }
+
+        this.modelLoading = true
+        this.modelInitPromise = (async () => {
+            try {
+                const result = await initializeEmbedder()
+                this.modelReady = result.ready
+                return result.ready
+            } finally {
+                this.modelLoading = false
+            }
+        })()
+
+        try {
+            const ready = await this.modelInitPromise
+            if (!ready) throw new Error('Failed to load embedding model')
+        } finally {
+            this.modelInitPromise = null
+        }
     }
 
     async checkStatus(versionId: string): Promise<VersionSyncState> {
@@ -217,15 +313,7 @@ class EmbeddingSyncManager {
                 error: null,
             })
 
-            if (!isEmbedderReady()) {
-                this.modelLoading = true
-                const result = await initializeEmbedder()
-                this.modelReady = result.ready
-                this.modelLoading = false
-                if (!result.ready) throw new Error('Failed to load embedding model')
-            } else {
-                this.modelReady = true
-            }
+            await this.ensureModelReady()
 
             if (signal.aborted) throw new Error('Sync cancelled')
 
@@ -402,6 +490,10 @@ class EmbeddingSyncManager {
             if (this.isControllerCurrent(versionId, controller)) {
                 this.abortControllers.delete(versionId)
             }
+            // Arm the idle-unload timer once nothing else is syncing.
+            if (!this.isSyncing()) {
+                this.scheduleIdleUnload()
+            }
         }
     }
 
@@ -421,15 +513,7 @@ class EmbeddingSyncManager {
         try {
             this.updateState(versionId, { stage: 'upgrading', progress: 0, total: 0, startedAt, eta: null, error: null })
 
-            if (!isEmbedderReady()) {
-                this.modelLoading = true
-                const result = await initializeEmbedder()
-                this.modelReady = result.ready
-                this.modelLoading = false
-                if (!result.ready) throw new Error('Failed to load embedding model')
-            } else {
-                this.modelReady = true
-            }
+            await this.ensureModelReady()
 
             if (signal.aborted) throw new Error('Sync cancelled')
 
@@ -584,6 +668,10 @@ class EmbeddingSyncManager {
         } finally {
             if (this.isControllerCurrent(versionId, controller)) {
                 this.abortControllers.delete(versionId)
+            }
+            // Arm the idle-unload timer once nothing else is syncing.
+            if (!this.isSyncing()) {
+                this.scheduleIdleUnload()
             }
         }
     }
