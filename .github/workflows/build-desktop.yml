@@ -40,12 +40,12 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
@@ -56,6 +56,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Setup Vulkan SDK (Windows only)
+        if: matrix.platform == 'windows-latest'
+        uses: mozilla-actions/setup-vulkan@v1
+        with:
+          vulkan-version: '1.3.290.0'
+          vulkan-components: ''
+          cached: true
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -76,5 +84,5 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          target: ${{ matrix.target }}
+          args: --target ${{ matrix.target }}
 
