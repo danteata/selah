@@ -23,7 +23,7 @@ export interface DetectedVerse {
     /** Whether this was the best match from its query (primary vs probable) */
     isBestMatch?: boolean
     /** Detection type - how this verse was detected */
-    detectionType?: 'regex' | 'semantic'
+    detectionType?: 'regex' | 'semantic' | 'llm'
     /** How many times this verse has been re-activated after initial detection */
     retriggerCount?: number
     /** Timestamp of the last activation (initial or re-trigger), used for cooldown */
