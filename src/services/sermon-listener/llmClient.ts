@@ -117,6 +117,49 @@ export async function llmChatJson<T = unknown>(
     }
 }
 
+/** Model-ish ids we never want to offer for chat extraction (embeddings, audio, etc.). */
+const NON_CHAT_MODEL = /embed|whisper|tts|audio|dall|image|moderation|rerank|vision-only|search|distil|babbage|ada(-|$)|davinci-002/i
+
+/**
+ * Fetch the provider's available model ids via the OpenAI-compatible
+ * `GET /models` endpoint, filtered to plausible chat models. Returns `[]` on any
+ * failure (no key, unsupported endpoint, CORS, 401/403) so callers fall back to
+ * the curated catalog list.
+ */
+export async function listModels(
+    config: Pick<LlmConfig, 'baseUrl' | 'apiKey'>,
+    signal?: AbortSignal,
+): Promise<string[]> {
+    if (!config.baseUrl) return []
+    // No key → skip the request entirely. Most providers 401 on an empty Bearer
+    // token, and the curated catalog already covers the common cases.
+    if (!config.apiKey || !config.apiKey.trim()) return []
+    const headers: Record<string, string> = {
+        Authorization: `Bearer ${config.apiKey}`,
+    }
+    if (/(^|\.)api\.anthropic\.com$/i.test(hostOf(config.baseUrl))) {
+        headers['anthropic-dangerous-direct-browser-access'] = 'true'
+    }
+    try {
+        const res = await fetch(`${config.baseUrl.replace(/\/+$/, '')}/models`, {
+            headers,
+            signal: signal ?? AbortSignal.timeout(8000),
+        })
+        if (!res.ok) return []
+        const data = (await res.json()) as { data?: unknown[]; models?: unknown[] }
+        const raw = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : []
+        const ids = raw
+            .map((m) => (typeof m === 'string' ? m : (m as { id?: string; name?: string }).id ?? (m as { name?: string }).name))
+            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+            // Gemini returns "models/gemini-..." — strip the prefix.
+            .map((id) => id.replace(/^models\//, ''))
+            .filter((id) => !NON_CHAT_MODEL.test(id))
+        return Array.from(new Set(ids)).sort()
+    } catch {
+        return []
+    }
+}
+
 /**
  * Parse JSON from a model reply, tolerating ```json fences and surrounding prose
  * by falling back to the first balanced `{...}` block.

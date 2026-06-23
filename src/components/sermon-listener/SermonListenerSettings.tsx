@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeAudioCapture } from '../../services/sermon-listener/nativeAudioCapture'
 import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDevices'
@@ -6,7 +6,10 @@ import { audioFeedbackService } from '../../services/sermon-listener/audioFeedba
 import { DEFAULT_NATIVE_MODEL_ID } from '../../services/sermon-listener/nativeModelManager'
 import { NativeModelPicker } from './NativeModelPicker'
 import { LLM_PROVIDERS, DEFAULT_LLM_PROVIDER_ID, getLlmProvider } from '../../services/sermon-listener/llmProviders'
-import { Mic, Monitor, RefreshCw, Info } from 'lucide-react'
+import { listModels } from '../../services/sermon-listener/llmClient'
+import { Mic, Monitor, RefreshCw, Info, Loader2 } from 'lucide-react'
+
+const CUSTOM_MODEL_OPTION = '__custom__'
 
 interface SermonListenerSettingsProps {
     onClose?: () => void
@@ -54,6 +57,12 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         getLlmProvider(llm?.provider) ??
         LLM_PROVIDERS.find((p) => !!p.baseUrl && p.baseUrl === llm?.baseUrl) ??
         (llm?.baseUrl ? getLlmProvider('custom')! : getLlmProvider(DEFAULT_LLM_PROVIDER_ID)!)
+    // Live model list fetched from the provider (where supported), plus a manual
+    // "custom model" override.
+    const [fetchedModels, setFetchedModels] = useState<string[]>([])
+    const [modelsLoading, setModelsLoading] = useState(false)
+    const [customModelMode, setCustomModelMode] = useState(false)
+
     const selectLlmProvider = (id: string) => {
         const next = getLlmProvider(id)
         if (!next) return
@@ -61,12 +70,33 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         // and default the model to the provider's first suggestion if the current
         // one isn't valid for the new provider.
         const keepModel = llm?.model && next.models.includes(llm.model)
+        setCustomModelMode(false)
         updateLlm({
             provider: id,
             baseUrl: next.isCustom ? (llm?.baseUrl ?? '') : next.baseUrl,
             model: keepModel ? llm?.model : (next.models[0] ?? ''),
         })
     }
+
+    // Fetch the provider's available models when the endpoint/key changes.
+    useEffect(() => {
+        if (!llm?.enabled || !llm?.baseUrl || !llm?.apiKey?.trim()) {
+            setFetchedModels([])
+            return
+        }
+        const controller = new AbortController()
+        setModelsLoading(true)
+        listModels({ baseUrl: llm.baseUrl, apiKey: llm.apiKey }, controller.signal)
+            .then(setFetchedModels)
+            .catch(() => setFetchedModels([]))
+            .finally(() => setModelsLoading(false))
+        return () => controller.abort()
+    }, [llm?.enabled, llm?.baseUrl, llm?.apiKey])
+
+    // Curated suggestions first, then any extra live models; deduped.
+    const modelOptions = Array.from(new Set([...llmProvider.models, ...fetchedModels]))
+    const isCustomModel = !!llm?.model && !modelOptions.includes(llm.model)
+    const showCustomModelInput = customModelMode || isCustomModel
 
     const { devices: micDevices, isLoading: isLoadingDevices, refresh: refreshDevices, resolvedDeviceId } = useAudioDevices()
 
@@ -320,18 +350,38 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
                         />
 
-                        {/* Model — suggestions via datalist, but any value allowed */}
-                        <input
-                            type="text"
-                            list="llm-model-suggestions"
-                            value={llm?.model || ''}
-                            onChange={(e) => updateLlm({ model: e.target.value })}
-                            placeholder={llmProvider.models[0] ? `Model (e.g. ${llmProvider.models[0]})` : 'Model id'}
-                            className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
-                        />
-                        <datalist id="llm-model-suggestions">
-                            {llmProvider.models.map((m) => <option key={m} value={m} />)}
-                        </datalist>
+                        {/* Model — a selector of available (live + curated) models, overridable */}
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={showCustomModelInput ? CUSTOM_MODEL_OPTION : (llm?.model || '')}
+                                onChange={(e) => {
+                                    if (e.target.value === CUSTOM_MODEL_OPTION) {
+                                        setCustomModelMode(true)
+                                        updateLlm({ model: '' })
+                                    } else {
+                                        setCustomModelMode(false)
+                                        updateLlm({ model: e.target.value })
+                                    }
+                                }}
+                                className="flex-1 p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                            >
+                                {modelOptions.length === 0 && !showCustomModelInput && (
+                                    <option value="" disabled>Select a model…</option>
+                                )}
+                                {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                                <option value={CUSTOM_MODEL_OPTION}>Custom model…</option>
+                            </select>
+                            {modelsLoading && <Loader2 className="w-4 h-4 animate-spin text-gray-400 flex-shrink-0" />}
+                        </div>
+                        {showCustomModelInput && (
+                            <input
+                                type="text"
+                                value={llm?.model || ''}
+                                onChange={(e) => updateLlm({ model: e.target.value })}
+                                placeholder={llmProvider.models[0] ? `Model id (e.g. ${llmProvider.models[0]})` : 'Model id'}
+                                className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                            />
+                        )}
 
                         {llmProvider.hint && (
                             <p className="text-xs text-gray-500 dark:text-gray-400">{llmProvider.hint}</p>
