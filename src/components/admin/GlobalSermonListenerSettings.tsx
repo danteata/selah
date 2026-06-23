@@ -1,9 +1,9 @@
 /**
  * Global Sermon Listener Settings Panel
  *
- * Allows super admins to configure the global sermon listener provider.
- * Only two providers are now supported: Web Speech API (browser) and
- * Desktop Whisper (local transcription).
+ * Allows super admins to configure the global sermon listener provider:
+ * Web Speech API (browser) or the Native engine (in-process Whisper/Parakeet/
+ * etc. on desktop).
  */
 
 import { useEffect, useState } from 'react'
@@ -35,7 +35,7 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
     const [providerError, setProviderError] = useState<string | null>(null)
     const [showSaveSuccess, setShowSaveSuccess] = useState(false)
     const [webSpeechAvailable, setWebSpeechAvailable] = useState(false)
-    const [desktopWhisperAvailable, setDesktopWhisperAvailable] = useState(false)
+    const [nativeWhisperAvailable, setNativeWhisperAvailable] = useState(false)
 
     useEffect(() => {
         if (settings) {
@@ -47,7 +47,7 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
 
     useEffect(() => {
         unifiedTranscriptionService.isProviderAvailable('web-speech').then(setWebSpeechAvailable)
-        unifiedTranscriptionService.isProviderAvailable('desktop-whisper').then(setDesktopWhisperAvailable)
+        unifiedTranscriptionService.isProviderAvailable('native').then(setNativeWhisperAvailable)
     }, [])
 
     const handleProviderChange = async (newProvider: TranscriptionProvider) => {
@@ -58,9 +58,14 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
             return
         }
 
-        if (newProvider === 'desktop-whisper' && !isDesktop()) {
+        if (newProvider === 'native' && !isDesktop()) {
             setProvider('web-speech')
             setProviderError('Local transcription is only available in the desktop app.')
+            return
+        }
+
+        // Native engine needs no server init; the model is loaded on start.
+        if (newProvider === 'native') {
             return
         }
 
@@ -175,36 +180,32 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
                         </div>
                     </button>
 
-                    {/* Desktop Whisper - Only show in desktop mode */}
+                    {/* Native (in-process) engine — desktop only. Whisper GPU + Parakeet. */}
                     {isDesktop() && (
                         <button
-                            onClick={() => !isLoadingProvider && handleProviderChange('desktop-whisper')}
-                            disabled={isLoadingProvider}
-                            className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'desktop-whisper'
+                            onClick={() => !isLoadingProvider && handleProviderChange('native')}
+                            disabled={isLoadingProvider || !nativeWhisperAvailable}
+                            className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'native'
                                 ? 'border-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/20'
                                 : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                                }`}
+                                } ${!nativeWhisperAvailable ? 'opacity-60' : ''}`}
                         >
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <Monitor className="w-5 h-5 text-indigo-500" />
                                     <div>
-                                <div className="font-medium text-gray-900 dark:text-white">Local Transcription (Offline)</div>
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    On-device transcription — works offline, no server needed
+                                        <div className="font-medium text-gray-900 dark:text-white">
+                                            Native Engine (Beta) — GPU + multilingual
+                                        </div>
+                                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                                            In-process transcription — Whisper (GPU), Parakeet, and other
+                                            multilingual models. Choose the model in Sermon Listener settings.
                                         </div>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    {!desktopWhisperAvailable && (
-                                        <span className="text-xs text-gray-400 dark:text-gray-500">
-                                            Starting...
-                                        </span>
-                                    )}
-                                    {provider === 'desktop-whisper' && (
-                                        <IconWrapper name="i-bx-check" className="text-indigo-500" />
-                                    )}
-                                </div>
+                                {provider === 'native' && (
+                                    <IconWrapper name="i-bx-check" className="text-indigo-500" />
+                                )}
                             </div>
                         </button>
                     )}
@@ -232,34 +233,6 @@ export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListe
                 </div>
             )}
 
-            {/* Desktop Whisper Settings */}
-            {provider === 'desktop-whisper' && (
-                <div className="mb-6 space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Desktop Whisper Configuration</h3>
-
-                    {/* VAD Toggle */}
-                    <div className="p-4 rounded-lg bg-cyan-50 dark:bg-cyan-900/30 border border-cyan-200 dark:border-cyan-700">
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    id="useVAD"
-                                    checked={useVAD}
-                                    onChange={(e) => setUseVAD(e.target.checked)}
-                                    className="rounded border-gray-300 dark:border-gray-600"
-                                />
-                                <label htmlFor="useVAD" className="font-medium text-cyan-800 dark:text-cyan-300">
-                                    Enable VAD Smart Chunking
-                                </label>
-                            </div>
-                        </div>
-                        <p className="text-sm text-cyan-700 dark:text-cyan-400">
-                            <strong>Recommended for best quality.</strong> Uses browser-based Voice Activity Detection
-                            to detect speech boundaries and avoid word cutoffs.
-                        </p>
-                    </div>
-                </div>
-            )}
 
             {/* Default Language */}
             <div className="mb-6">

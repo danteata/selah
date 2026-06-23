@@ -56,6 +56,8 @@ interface VadAudioChunkEvent {
     duration_ms: number
     start_offset_ms?: number
     is_speaking: boolean
+    /** Terminal marker emitted once after the final segment is flushed on stop. */
+    end_of_stream?: boolean
 }
 
 export type CaptureStatus = 'idle' | 'starting' | 'capturing' | 'stopping' | 'error'
@@ -98,10 +100,13 @@ export async function listAudioDevices(): Promise<AudioDeviceInfo[]> {
  */
 class NativeAudioCaptureService {
     private isCapturing = false
+    private isDraining = false
     private pollInterval: ReturnType<typeof setInterval> | null = null
     private eventUnlisten: UnlistenFn | null = null
     private config: NativeCaptureConfig | null = null
     private eventConfig: NativeCaptureEventConfig | null = null
+    /** Resolver armed while draining; fired by the end_of_stream event. */
+    private eosResolve: (() => void) | null = null
 
     /**
      * Check if currently capturing
@@ -137,15 +142,22 @@ class NativeAudioCaptureService {
             this.eventUnlisten = await listen<VadAudioChunkEvent>(
                 'vad-audio-chunk',
                 (event) => {
+                    const payload = event.payload
                     // Process chunks with actual audio data (wav_base64 is non-empty)
                     // The is_speaking flag is informational but should not block processing
-                    // of valid speech segments
-                    if (this.isCapturing && event.payload.wav_base64) {
+                    // of valid speech segments. Accept chunks while draining too, so the
+                    // final flushed utterance after stop is not dropped.
+                    if ((this.isCapturing || this.isDraining) && payload.wav_base64) {
                         config.onWavChunk?.(
-                            event.payload.wav_base64,
-                            event.payload.duration_ms,
-                            event.payload.start_offset_ms || 0
+                            payload.wav_base64,
+                            payload.duration_ms,
+                            payload.start_offset_ms || 0
                         )
+                    }
+                    // Terminal marker — the Rust thread has flushed and is done.
+                    if (payload.end_of_stream && this.eosResolve) {
+                        this.eosResolve()
+                        this.eosResolve = null
                     }
                 }
             )
@@ -228,11 +240,12 @@ class NativeAudioCaptureService {
             this.pollInterval = null
         }
 
-        // Stop event listener
-        if (this.eventUnlisten) {
-            this.eventUnlisten()
-            this.eventUnlisten = null
-        }
+        // Begin draining: stop the Rust capture FIRST, then keep the listener
+        // alive until the terminal end_of_stream marker (or a timeout) so the
+        // final flushed utterance is delivered instead of dropped.
+        const wasEventDriven = this.eventUnlisten !== null
+        this.isCapturing = false
+        this.isDraining = wasEventDriven
 
         try {
             await invoke('stop_capture')
@@ -241,9 +254,39 @@ class NativeAudioCaptureService {
             console.error('[NativeCapture] Error stopping:', error)
         }
 
-        this.isCapturing = false
+        if (wasEventDriven) {
+            // Wait for the Rust thread to flush + emit end_of_stream (2s cap).
+            await this.waitForEndOfStream(2000)
+            this.isDraining = false
+        }
+
+        // Now it is safe to tear down the listener.
+        if (this.eventUnlisten) {
+            this.eventUnlisten()
+            this.eventUnlisten = null
+        }
+
         this.config?.onStatus?.('idle')
         this.eventConfig?.onStatus?.('idle')
+    }
+
+    /**
+     * Resolves when an end_of_stream marker arrives, or after `timeoutMs`.
+     * Bounds the stop() drain so a missing terminal event can't hang teardown.
+     */
+    private waitForEndOfStream(timeoutMs: number): Promise<void> {
+        return new Promise((resolve) => {
+            let settled = false
+            const finish = () => {
+                if (settled) return
+                settled = true
+                this.eosResolve = null
+                clearTimeout(timer)
+                resolve()
+            }
+            const timer = setTimeout(finish, timeoutMs)
+            this.eosResolve = finish
+        })
     }
 
     /**

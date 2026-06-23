@@ -359,8 +359,8 @@ export interface AppSettings {
     sermonListener?: {
         /** Enable sermon listener feature */
         enabled?: boolean
-        /** Transcription provider: 'web-speech' | 'desktop-whisper' */
-        transcriptionProvider?: 'web-speech' | 'desktop-whisper'
+        /** Transcription provider: 'web-speech' | 'native' */
+        transcriptionProvider?: 'web-speech' | 'native'
         /** Enable VAD (Voice Activity Detection) for smart chunking - works with desktop-whisper */
         useVAD?: boolean
         /** Auto-display detected verses */
@@ -373,6 +373,20 @@ export interface AppSettings {
         captureSource?: 'microphone' | 'system'
         /** Selected microphone device ID (browser deviceId or native device name) */
         selectedMicrophoneId?: string
+        /** Selected Whisper model id (catalog id, e.g. "base.en", "small.en"). */
+        whisperModel?: string
+    }
+    /**
+     * Optional OpenAI-compatible LLM for transcript cleanup + verse extraction.
+     * Entirely optional: when `enabled` is false or fields are blank, the app
+     * uses only its offline local detection. API key is stored locally.
+     */
+    llm?: {
+        enabled?: boolean
+        /** Base URL up to `/v1` (no trailing `/chat/completions`). */
+        baseUrl?: string
+        apiKey?: string
+        model?: string
     }
     /** Default collaboration mode for live sessions */
     defaultCollaborationMode?: 'strict' | 'moderated' | 'open'

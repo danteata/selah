@@ -15,7 +15,7 @@ import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, AlertTriangle, Copy, MoreHorizontal } from 'lucide-react'
+import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, Copy, MoreHorizontal } from 'lucide-react'
 import type { Scripture } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
@@ -108,7 +108,6 @@ function SermonListenerPanelInner({
         isInitializingProvider,
         providerReady,
         rawUtterances,
-        droppedChunkInfo,
         start,
         stop,
         reset,
@@ -271,7 +270,7 @@ function SermonListenerPanelInner({
     }
 
     if (isSupported === false) {
-        const unsupportedMessage = provider === 'desktop-whisper'
+        const unsupportedMessage = provider === 'native'
             ? 'Local transcription is only available in the desktop app. Please use the desktop version of Selah.'
             : "Your browser doesn't support speech recognition. Please try Chrome, Edge, or Safari."
 
@@ -435,16 +434,6 @@ function SermonListenerPanelInner({
                 )
             })()}
 
-            {/* Dropped chunk warning (desktop-whisper only) */}
-            {isListening && droppedChunkInfo.total > 10 && droppedChunkInfo.dropped / droppedChunkInfo.total > 0.05 && (
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-300">
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span className="text-[10px] font-medium">
-                        {droppedChunkInfo.dropped}/{droppedChunkInfo.total} chunks dropped ({Math.round(droppedChunkInfo.dropped / droppedChunkInfo.total * 100)}%)
-                    </span>
-                    <span className="text-[10px] opacity-70">— transcription may have gaps</span>
-                </div>
-            )}
 
             {/* Detected verses link to Bible panel */}
             {uniqueDetectedVerses.length > 0 && (

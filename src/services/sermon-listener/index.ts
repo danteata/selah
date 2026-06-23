@@ -9,8 +9,6 @@ export {
     NUMBER_TO_BOOK,
 } from './verseDetection'
 export type { DetectedVerse } from './verseDetection'
-export { desktopWhisperTranscriptionService } from './desktopWhisperTranscription'
-export type { DesktopWhisperTranscriptionConfig, DesktopWhisperTranscriptionResult } from './desktopWhisperTranscription'
 export { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
 export { unifiedTranscriptionService } from './unifiedTranscription'
 export type { TranscriptionProvider, UnifiedTranscriptionOptions, TranscriptionStatus, WhisperSegmentTiming } from './unifiedTranscription'
@@ -118,13 +116,6 @@ export {
 export type { SummarizeOptions } from './sermonNotes'
 
 // Desktop summarization service
-export {
-    checkSummarizationStatus,
-    summarizeAbstractiveWithDesktop,
-    summarizeWithDesktop,
-} from './desktopSummarizationService'
-export type { SummarizationStatus, SummarizationResult, SummarizationRequest } from './desktopSummarizationService'
-
 // Local abstractive summarization (Transformers.js Web Worker)
 export {
     isAbstractiveSummarizerReady,

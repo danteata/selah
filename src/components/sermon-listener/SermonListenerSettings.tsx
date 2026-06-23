@@ -1,6 +1,10 @@
+import { useState } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeAudioCapture } from '../../services/sermon-listener/nativeAudioCapture'
 import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDevices'
+import { audioFeedbackService } from '../../services/sermon-listener/audioFeedback'
+import { DEFAULT_NATIVE_MODEL_ID } from '../../services/sermon-listener/nativeModelManager'
+import { NativeModelPicker } from './NativeModelPicker'
 import { Mic, Monitor, RefreshCw, Info } from 'lucide-react'
 
 interface SermonListenerSettingsProps {
@@ -12,6 +16,14 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     const setAppSettings = useAppStore((state) => state.setAppSettings)
     const { systemAudioSupported } = useNativeAudioCapture()
 
+    const [audioFeedback, setAudioFeedbackState] = useState(() => audioFeedbackService.isEnabled())
+    const toggleAudioFeedback = () => {
+        const next = !audioFeedback
+        audioFeedbackService.setEnabled(next)
+        setAudioFeedbackState(next)
+        if (next) audioFeedbackService.playStart() // preview the cue when enabling
+    }
+
     const sermon = settings.sermonListener
 
     const update = (patch: Record<string, unknown>) => {
@@ -19,6 +31,17 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
             ...settings,
             sermonListener: {
                 ...settings.sermonListener,
+                ...patch,
+            },
+        })
+    }
+
+    const llm = settings.llm
+    const updateLlm = (patch: Record<string, unknown>) => {
+        setAppSettings({
+            ...settings,
+            llm: {
+                ...settings.llm,
                 ...patch,
             },
         })
@@ -79,6 +102,24 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         <span
                             className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
                             style={{ transform: (sermon?.autoDisplay ?? false) ? 'translateX(28px)' : 'translateX(0)' }}
+                        />
+                    </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                    <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Audio feedback</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                            Play a chime when listening starts and stops
+                        </div>
+                    </div>
+                    <button
+                        onClick={toggleAudioFeedback}
+                        className={`relative w-12 h-6 rounded-full transition-colors ${audioFeedback ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                        <span
+                            className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
+                            style={{ transform: audioFeedback ? 'translateX(28px)' : 'translateX(0)' }}
                         />
                     </button>
                 </div>
@@ -176,6 +217,73 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                     <option value="ko-KR">Korean</option>
                     <option value="ar-SA">Arabic</option>
                 </select>
+            </div>
+
+            {/* Transcription model */}
+            <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Transcription model</label>
+                <NativeModelPicker
+                    selectedId={sermon?.whisperModel || DEFAULT_NATIVE_MODEL_ID}
+                    onSelect={(id) => update({ whisperModel: id })}
+                />
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                    <Info className="w-3 h-3 flex-shrink-0" />
+                    All models run on-device and download once. Whisper is GPU-accelerated;
+                    Parakeet and other multilingual models add automatic language detection.
+                    Higher accuracy generally means slower.
+                </p>
+            </div>
+
+            {/* AI verse extraction (optional, OpenAI-compatible) */}
+            <div className="space-y-3 border-t border-gray-200 dark:border-gray-700 pt-4">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <div className="font-medium text-gray-900 dark:text-white">AI verse extraction</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                            Optional. Uses an OpenAI-compatible LLM to catch references the
+                            detector misses. Leave off to stay fully offline.
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => updateLlm({ enabled: !(llm?.enabled ?? false) })}
+                        className={`relative w-12 h-6 rounded-full transition-colors flex-shrink-0 ${llm?.enabled ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                        <span
+                            className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
+                            style={{ transform: llm?.enabled ? 'translateX(28px)' : 'translateX(0)' }}
+                        />
+                    </button>
+                </div>
+
+                {llm?.enabled && (
+                    <div className="space-y-2">
+                        <input
+                            type="text"
+                            value={llm?.baseUrl || ''}
+                            onChange={(e) => updateLlm({ baseUrl: e.target.value })}
+                            placeholder="Base URL (e.g. https://api.openai.com/v1)"
+                            className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                        />
+                        <input
+                            type="password"
+                            value={llm?.apiKey || ''}
+                            onChange={(e) => updateLlm({ apiKey: e.target.value })}
+                            placeholder="API key (stored on this device)"
+                            className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                        />
+                        <input
+                            type="text"
+                            value={llm?.model || ''}
+                            onChange={(e) => updateLlm({ model: e.target.value })}
+                            placeholder="Model (e.g. gpt-4o-mini)"
+                            className="w-full p-2 text-sm rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                            <Info className="w-3 h-3 flex-shrink-0" />
+                            Verse references found by the AI are added to the detected list; your local detection always runs first.
+                        </p>
+                    </div>
+                )}
             </div>
         </div>
     )

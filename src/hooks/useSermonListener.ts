@@ -19,8 +19,6 @@ import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
 import type { TranscriptionProvider, TranscriptionStatus, WhisperSegmentTiming } from '../services/sermon-listener'
-import { desktopWhisperTranscriptionService } from '../services/sermon-listener/desktopWhisperTranscription'
-import { subscribeWhisperReadiness } from '../services/sermon-listener/whisperReadiness'
 import { detectVerses,
     verseToLabel,
     getSemanticDetector,
@@ -39,6 +37,12 @@ import type { ActiveReferenceContext } from '../services/sermon-listener'
 import type { Scripture, BibleVersion } from '../types'
 import type { TranscriptSegment } from '../types/sermon-listener'
 import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
+import { filterFillers } from '../services/sermon-listener/fillerFilter'
+import { applyCustomWords, SERMON_PROPER_NOUNS } from '../services/sermon-listener/customWords'
+import { buildBibleInitialPrompt } from '../services/sermon-listener/bibleInitialPrompt'
+import { audioFeedbackService } from '../services/sermon-listener/audioFeedback'
+import { extractVersesWithLLM } from '../services/sermon-listener/llmVerseExtraction'
+import { isLlmConfigured } from '../services/sermon-listener/llmClient'
 import { startKeepAwake, stopKeepAwake, setupVisibilityKeepAwake } from '../services/sermon-listener/keepAwake'
 import { getNextChapter, getPreviousChapter } from '../utils/bibleReference'
 import {
@@ -53,6 +57,7 @@ import {
 } from './useIndexedDB'
 
 const MAX_DETECTED_VERSES_PER_QUERY = 3 // Max verses per semantic search query
+const LLM_EXTRACTION_DEBOUNCE_MS = 3500 // Wait for speech to settle before an LLM pass
 
 export interface SavedSermonTranscript {
     id: string
@@ -141,8 +146,6 @@ export interface SermonListenerState {
     rawUtterances: Array<{ text: string; timestamp: number; confidence?: number }>
     /** Active capture source */
     captureSource: 'microphone' | 'system' | null
-    /** Dropped chunk stats for desktop-whisper (for quality warning) */
-    droppedChunkInfo: { dropped: number; total: number }
 }
 
 export interface SermonListenerActions {
@@ -219,8 +222,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const language = languageOverride || sermonSettings?.language || globalSettings?.sermonListener_defaultLanguage || 'en-US'
 
     // Provider from global settings (managed by super admin)
-    // Default to desktop-whisper on Tauri, web-speech on browser
-    const defaultProvider: TranscriptionProvider = typeof window !== 'undefined' && '__TAURI__' in window ? 'desktop-whisper' : 'web-speech'
+    // Default to the native in-process engine on Tauri, web-speech on browser
+    const defaultProvider: TranscriptionProvider = typeof window !== 'undefined' && '__TAURI__' in window ? 'native' : 'web-speech'
     const globalProvider = (globalSettings?.sermonListener_transcriptionProvider as TranscriptionProvider) || defaultProvider
     const targetProvider = providerOverride || globalProvider
 
@@ -278,11 +281,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [voiceCommands, setVoiceCommands] = useState<VoiceCommand[]>([])
     const [rawUtterances, setRawUtterances] = useState<Array<{ text: string; timestamp: number; confidence?: number }>>([])
 
-    // Dropped chunk tracking for desktop-whisper
-    const [droppedChunkInfo, setDroppedChunkInfo] = useState<{ dropped: number; total: number }>({ dropped: 0, total: 0 })
-
-    // Track dropped chunk subscription so we can clean it up
-    const droppedChunkUnsubRef = useRef<(() => void) | null>(null)
+    // Optional LLM verse-extraction pass (debounced; only runs when configured)
+    const llmDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const llmAbortRef = useRef<AbortController | null>(null)
 
     // Debounce timestamp for SERMON_LISTENER_TRANSCRIPTION — fires at most
     // once every 5s while the listener is active.
@@ -699,7 +700,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // don't surface a "falling back" banner for it. On desktop, only
             // flag the fallback if the sidecar genuinely failed (dev without
             // whisper.cpp running, for example).
-            if (!available && targetProvider === 'desktop-whisper') {
+            if (!available && targetProvider === 'native') {
                 const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
                 if (cancelled) return
                 if (webSpeechAvailable) {
@@ -707,7 +708,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     setIsSupported(true)
                     setProviderReady(true)
                     if (isDesktop()) {
-                        setError('Desktop Whisper unavailable. Falling back to Web Speech API.')
+                        setError('Native transcription unavailable. Falling back to Web Speech API.')
                     }
                     return
                 }
@@ -721,8 +722,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 return
             }
 
-            // Web speech needs no model load; mark ready immediately.
-            if (targetProvider === 'web-speech') {
+            // Neither web-speech nor the native engine needs a server warm-up:
+            // web-speech is built-in, and the native engine loads its model
+            // lazily when listening starts. Mark ready immediately.
+            if (targetProvider === 'web-speech' || targetProvider === 'native') {
                 setProviderReady(true)
                 return
             }
@@ -754,23 +757,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         initialize()
 
-        // Subscribe to the Rust readiness event. The bridge replays its current
-        // state synchronously, so if the sidecar is already up we flip ready
-        // immediately without waiting for the next emission.
-        const unsubscribe = subscribeWhisperReadiness((state) => {
-            if (cancelled) return
-            if (targetProvider !== 'desktop-whisper') return
-            if (state.ready) {
-                setProviderReady(true)
-                setError(null)
-            } else if (state.error) {
-                setError(`Desktop Whisper: ${state.error}`)
-            }
-        })
-
         return () => {
             cancelled = true
-            unsubscribe()
         }
     }, [
         targetProvider,
@@ -1013,6 +1001,80 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         })
         return true
     }, [resolveBibleVersionId, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide])
+
+    /**
+     * Activate verses surfaced by the optional LLM pass. Mirrors the regex
+     * activation branch but is kept separate so the fast local path is never
+     * affected by the LLM augmentation. Only ever ADDS verses.
+     */
+    const activateLlmVerses = useCallback((newVerses: DetectedVerse[]) => {
+        const fresh = newVerses.filter((v) => !detectedRefsRef.current.has(v.reference))
+        if (fresh.length === 0) return
+
+        const now = Date.now()
+        const stamped = fresh.map((v) => ({
+            ...v,
+            isBestMatch: true,
+            detectionType: 'llm' as const,
+            lastActivatedAt: now,
+            retriggerCount: 0,
+        }))
+        for (const v of stamped) {
+            detectedRefsRef.current.add(v.reference)
+            reactivationCooldownRef.current.set(v.reference, now)
+            lastMatchTimeRef.current.set(v.reference, now)
+            // Slightly below an explicit regex hit (1.0) so a later regex match
+            // in the same chapter still wins chapter-dedup comparisons.
+            lastScoreByReferenceRef.current.set(v.reference, 0.9)
+        }
+
+        setDetectedVerses((prev) => dedupeVerses([...prev, ...stamped]))
+        const latest = stamped[stamped.length - 1]
+        setCurrentVerse(latest)
+        activeReferenceContextRef.current = updateContextFromVerse(latest)
+
+        trackEvent(AnalyticsEventType.SERMON_LISTENER_VERSE_DETECTED, {
+            reference: latest.reference,
+            confidence: latest.confidence,
+            detection_type: 'llm',
+            verse_count: stamped.length,
+        })
+
+        if (autoLookup) {
+            lookupVerse(latest).then((scripture) => {
+                optionsRef.current.onVerseDetected?.(latest, scripture)
+                if (autoDisplay && scripture) {
+                    const slide = createBibleSlide(scripture)
+                    appendActiveSlide(slide)
+                    setLiveSlide(slide.id)
+                }
+            })
+        } else {
+            optionsRef.current.onVerseDetected?.(latest, null)
+        }
+    }, [dedupeVerses, lookupVerse, autoLookup, autoDisplay, createBibleSlide, appendActiveSlide, setLiveSlide])
+
+    /**
+     * Debounced, optional LLM extraction pass over the latest transcript text.
+     * No-op unless the user configured an OpenAI-compatible endpoint, so the
+     * default experience stays fully offline.
+     */
+    const scheduleLlmExtraction = useCallback((text: string) => {
+        const llm = useAppStore.getState().settings.llm
+        if (!isLlmConfigured(llm)) return
+
+        if (llmDebounceRef.current) clearTimeout(llmDebounceRef.current)
+        llmDebounceRef.current = setTimeout(() => {
+            llmDebounceRef.current = null
+            llmAbortRef.current?.abort()
+            const controller = new AbortController()
+            llmAbortRef.current = controller
+            const alreadyDetected = Array.from(detectedRefsRef.current)
+            extractVersesWithLLM(text, llm, alreadyDetected, controller.signal)
+                .then((result) => activateLlmVerses(result.newVerses))
+                .catch(() => { /* best-effort augmentation */ })
+        }, LLM_EXTRACTION_DEBOUNCE_MS)
+    }, [activateLlmVerses])
 
     /**
      * Process transcript for verse detection
@@ -1275,6 +1337,24 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             })
             cleanText = hallucinationResult.cleanedText
         }
+
+        // Post-process in the order: raw → hallucination → filler → custom-words
+        // (each layer assumes a clean input from the previous one — see fillerFilter.ts).
+        // Filler/stutter removal is language-aware; custom-word correction fixes
+        // distinctive proper nouns Whisper mangles (e.g. "Nebuchadnezzar").
+        cleanText = filterFillers(cleanText, { lang: language })
+        // Safe profile for an always-on vocabulary: single-token matching only
+        // (no n-gram word-eating) and no phonetic boost (no cross-word
+        // collisions). The length pre-filter + tight Levenshtein threshold keep
+        // it from touching short common words.
+        cleanText = applyCustomWords(cleanText, [...SERMON_PROPER_NOUNS], 0.25, {
+            maxNgram: 1,
+            usePhonetic: false,
+        })
+
+        // Optional LLM augmentation: debounced pass that catches references the
+        // local detector missed. No-op unless the user configured an endpoint.
+        scheduleLlmExtraction(cleanText)
 
         const regexDetectionIdAtStart = regexVerseDetectionRef.current
         const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
@@ -1686,7 +1766,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setIsSemanticSearching(false)
             })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange, scheduleLlmExtraction])
 
     /**
      * Set transcription provider
@@ -1769,6 +1849,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }
         }
 
+        // NOTE: model loading is moving to the in-process native engine
+        // (transcribe-rs, Phase 3b). The selected model is configured in
+        // Sermon Listener settings and downloaded there; the engine loads it on
+        // demand. The current desktop-whisper sidecar auto-loads its bundled
+        // base.en, so no per-start model switch is needed here during migration.
+
         // Initialize semantic detector on first use if not already ready
         if (!semanticDetectorReady) {
             initSemanticDetector().catch(err => {
@@ -1783,12 +1869,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             console.warn('[useSermonListener] Keep-awake failed (non-fatal):', err)
         })
 
-        // Subscribe to dropped chunk notifications from desktop-whisper
-        if (provider === 'desktop-whisper') {
-            droppedChunkUnsubRef.current = desktopWhisperTranscriptionService.onDroppedChunk((dropped, total) => {
-                setDroppedChunkInfo({ dropped, total })
-            })
-        }
 
         // Unlock AudioContext early so the VAD's internal AudioContext can resume
         try {
@@ -1810,7 +1890,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             continuous: true,
             interimResults: true,
             useVAD: globalSettings?.sermonListener_useVAD,
-            initialPrompt: 'Bible sermon. Books: Genesis Exodus Leviticus Numbers Deuteronomy Joshua Judges Ruth Samuel Kings Chronicles Ezra Nehemiah Esther Job Psalms Proverbs Ecclesiastes Song Isaiah Jeremiah Lamentations Ezekiel Daniel Hosea Joel Amos Obadiah Jonah Micah Nahum Habakkuk Zephaniah Haggai Zechariah Malachi Matthew Mark Luke John Acts Romans Corinthians Galatians Ephesians Philippians Colossians Thessalonians Timothy Titus Philemon Hebrews James Peter John Jude Revelation. Chapter verse.',
+            initialPrompt: buildBibleInitialPrompt(),
             enableStreaming: true,
             onPartialSegment: (segment) => {
                 console.log('[useSermonListener] Partial segment:', segment.text.substring(0, 50))
@@ -1822,6 +1902,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             onStart: () => {
                 setIsListening(true)
                 setError(null)
+                audioFeedbackService.playStart()
                 sessionStartTimeRef.current = Date.now()
                 chunkStartTimeRef.current = 0
                 trackEvent(AnalyticsEventType.SERMON_LISTENER_STARTED, {
@@ -1873,7 +1954,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     const now = Date.now()
                     const sessionStart = sessionStartTimeRef.current || now
 
-                    if (whisperSegments && whisperSegments.length > 0 && provider === 'desktop-whisper') {
+                    if (whisperSegments && whisperSegments.length > 0 && provider === 'native') {
                         // Whisper returns segment timing in seconds relative to the utterance start.
                         // These are already adjusted by the desktop whisper service to be
                         // session-relative (VAD adds vadSpeechStartMs, native adds startOffsetMs).
@@ -1905,7 +1986,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             text: cleanedText,
                             startMs: Math.max(0, segmentStart - sessionStart),
                             endMs: Math.max(0, now - sessionStart),
-                            source: provider === 'desktop-whisper' ? 'whisper' : 'web-speech',
+                            source: provider === 'native' ? 'whisper' : 'web-speech',
                         }
 
                         setTranscriptSegments(prev => {
@@ -2000,19 +2081,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      * Stop listening
      */
     const stop = useCallback(() => {
-        if (droppedChunkUnsubRef.current) {
-            droppedChunkUnsubRef.current()
-            droppedChunkUnsubRef.current = null
+        if (llmDebounceRef.current) {
+            clearTimeout(llmDebounceRef.current)
+            llmDebounceRef.current = null
         }
+        llmAbortRef.current?.abort()
+        llmAbortRef.current = null
         const wasListening = isListening
         const durationMs = sessionStartTimeRef.current
             ? Date.now() - sessionStartTimeRef.current
             : 0
+        if (wasListening) audioFeedbackService.playStop()
         unifiedTranscriptionService.stop()
         setIsListening(false)
         setInterimTranscript('')
         setIsSpeechDetected(false)
-        setDroppedChunkInfo({ dropped: 0, total: 0 })
         stopKeepAwake().catch((err: unknown) => {
             console.warn('[useSermonListener] Keep-awake release failed (non-fatal):', err)
         })
@@ -2041,7 +2124,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         setLastVoiceCommand(null)
         setVoiceCommands([])
         setRawUtterances([])
-        setDroppedChunkInfo({ dropped: 0, total: 0 })
         setActiveBibleVersion(defaultBibleVersion)
         processedCommandTimesRef.current = new Map()
         transcriptBufferRef.current = ''
@@ -2171,7 +2253,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         lastVoiceCommand,
         voiceCommands,
         rawUtterances,
-        droppedChunkInfo,
         // Actions
         start,
         stop,
