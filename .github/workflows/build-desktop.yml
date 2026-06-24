@@ -143,6 +143,22 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      # The npm `rc` config package installs an `rc` shim into node_modules/.bin,
+      # which `bun`/`npm` prepend to PATH when running the build. On Windows that
+      # shim SHADOWS the Windows SDK Resource Compiler (rc.exe), so CMake's link
+      # step picks the wrong `rc` and fails: "LNK1104: cannot open manifest.res".
+      # Removing the shim lets CMake find the real SDK rc.exe on PATH.
+      - name: Remove rc shim shadowing the Windows SDK resource compiler (Windows only)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (Test-Path node_modules/.bin) {
+            Get-ChildItem node_modules/.bin -Filter 'rc*' -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "Removing shadowing shim: $($_.FullName)"
+              Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+            }
+          }
+
       # Fetch the assets bundled as Tauri resources (the offline GGUF base.en
       # model and the MiniLM embedding model). Both are plain curl/fetch
       # downloads. The heavy verse-embedding pack is built lazily at runtime, so
