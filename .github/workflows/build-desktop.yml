@@ -10,6 +10,13 @@ on:
         description: 'Version to build (e.g., 0.1.0)'
         required: false
 
+# tauri-action creates/updates the GitHub Release and uploads the bundles, which
+# requires write access to repository contents (releases). Without this the
+# default GITHUB_TOKEN is read-only and the upload fails with
+# "Resource not accessible by integration".
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
