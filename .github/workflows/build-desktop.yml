@@ -91,18 +91,25 @@ jobs:
         if: matrix.platform == 'windows-latest'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # Build whisper.cpp with Ninja instead of the Visual Studio generator. The
-      # VS generator builds whisper.cpp's vulkan-shaders-gen as a nested CMake
-      # ExternalProject whose configure is re-invoked by MSBuild WITHOUT the VS
-      # toolset context, so it fails "No CMAKE_C_COMPILER could be found". Ninja
-      # uses cl.exe directly from PATH (provided by msvc-dev-cmd above) for both
-      # the parent and the nested build, sidestepping the lost-toolset problem.
-      - name: Force Ninja generator (Windows only)
+      # Two Windows-specific build settings for whisper.cpp's Vulkan backend:
+      #
+      # 1. CMAKE_GENERATOR=Ninja — the VS generator builds vulkan-shaders-gen as a
+      #    nested CMake ExternalProject whose configure is re-invoked by MSBuild
+      #    WITHOUT the VS toolset context ("No CMAKE_C_COMPILER could be found").
+      #    Ninja uses cl.exe straight from PATH (from msvc-dev-cmd) for both the
+      #    parent and nested builds.
+      #
+      # 2. CARGO_TARGET_DIR=C:\s — vulkan-shaders-gen's ExternalProject nests
+      #    build dirs so deeply that the default target path pushes TryCompile PDB
+      #    paths past Windows' 260-char MAX_PATH ("C1041: cannot open program
+      #    database"). A short target root keeps every nested path under the limit.
+      - name: Configure Windows build env (Ninja + short target dir)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
           if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja -y }
           "CMAKE_GENERATOR=Ninja" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CARGO_TARGET_DIR=C:\s" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       # Install the Vulkan SDK with a plain `run:` step (NOT a third-party
       # action). GitHub resolves every `uses:` action in a job up front — even
