@@ -24,7 +24,13 @@ export const SELAH_REPO = {
     repo: 'selah',
 } as const
 
-const GITHUB_API = `https://api.github.com/repos/${SELAH_REPO.owner}/${SELAH_REPO.repo}/releases/latest`
+// The repo is private, so we can't hit api.github.com from the browser (404 to
+// anonymous requests, and asset downloads need auth). Instead we go through the
+// Convex HTTP proxy (convex/http.ts), which runs server-side with a token and
+// rewrites asset URLs to flow through itself. Convex HTTP actions are served on
+// the `.site` domain (vs `.convex.cloud` for the data API).
+const CONVEX_SITE_URL = (import.meta.env.VITE_CONVEX_URL ?? '').replace(/\.convex\.cloud$/, '.convex.site')
+const RELEASES_ENDPOINT = `${CONVEX_SITE_URL}/releases/latest`
 
 export interface AssetRef {
     /** Display label, e.g. "Apple Silicon", "Intel", "x64", "ARM64". */
@@ -65,9 +71,7 @@ interface UseLatestReleaseState {
 }
 
 async function fetchLatestRelease(): Promise<NormalisedRelease> {
-    const res = await fetch(GITHUB_API, {
-        headers: { Accept: 'application/vnd.github+json' },
-    })
+    const res = await fetch(RELEASES_ENDPOINT)
     if (!res.ok) {
         if (res.status === 403 || res.status === 429) {
             throw new Error(
