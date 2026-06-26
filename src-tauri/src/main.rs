@@ -29,6 +29,7 @@
 tauri::embed_plist::embed_info_plist!(concat!(env!("CARGO_MANIFEST_DIR"), "/Info.plist"));
 
 mod audio_capture;
+mod license;
 mod logging;
 mod multi_monitor;
 mod ndi_output;
@@ -45,6 +46,13 @@ use tauri_plugin_updater::UpdaterExt;
 use tracing::info;
 
 use crate::oauth_listener::start_oauth_listener;
+
+use license::{
+    get_license_status,
+    save_license,
+    clear_license,
+    fetch_and_store_license,
+};
 
 use audio_capture::{
     AudioCaptureState,
@@ -274,6 +282,10 @@ pub fn run() {
             get_loaded_native_model,
             set_native_transcription_config,
             llm_proxy,
+            get_license_status,
+            save_license,
+            clear_license,
+            fetch_and_store_license,
         ])
         .setup(move |app| {
             // Initialize file logging and crash detection

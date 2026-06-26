@@ -107,6 +107,12 @@ export interface Plan {
 
 // ============================================================================
 // Paystack Implementation
+//
+// DEPRECATED for client use. This adapter talks to the Paystack REST API with
+// the secret key and is only safe to run server-side. In Selah the privileged
+// operations live in Convex (convex/paystack.ts + convex/http.ts); the client
+// uses the `api.paystack.*` Convex functions via LicenseProvider instead. The
+// adapter is kept for reference / potential Node-side reuse.
 // ============================================================================
 class PaystackAdapter implements PaymentAdapter {
     private config: PaymentConfig | null = null
@@ -450,9 +456,13 @@ export function getPayments(): PaymentAdapter {
 export async function initPayments(): Promise<void> {
     const payments = getPayments()
 
+    // SECURITY: the Paystack *secret* key must never reach the client — it would
+    // ship inside the desktop bundle / web JS. All privileged Paystack calls
+    // (transaction init, subscription management, webhooks) now run server-side
+    // in convex/paystack.ts and convex/http.ts. The client only ever holds the
+    // publishable key. Entitlements come from LicenseProvider, not from here.
     await payments.init({
         publicKey: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '',
-        secretKey: import.meta.env.VITE_PAYSTACK_SECRET_KEY,
         currency: import.meta.env.VITE_PAYMENT_CURRENCY || 'GHS',
         debug: import.meta.env.DEV,
     })

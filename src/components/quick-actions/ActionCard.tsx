@@ -58,7 +58,7 @@ export function ActionCard({ action, dataActionIndex, isFocused, onClick }: Acti
             <div className={`
                 flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center
                 transition-colors duration-150
-                ${action.tier === 'teams'
+                ${action.tier === 'pro'
                     ? 'bg-amber-100/80 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
                     : 'bg-blue-100/80 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400'
                 }
@@ -71,7 +71,7 @@ export function ActionCard({ action, dataActionIndex, isFocused, onClick }: Acti
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate">
                         {action.name}
                     </span>
-                    {action.tier === 'teams' && (
+                    {action.tier === 'pro' && (
                         <span className="text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 rounded-full font-semibold uppercase tracking-wider flex-shrink-0">
                             Pro
                         </span>

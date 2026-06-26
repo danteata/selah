@@ -17,8 +17,10 @@ export default defineSchema({
         theme: v.string(),
         churchId: v.string(),
         emailVerified: v.optional(v.boolean()),
+        // "teams" is a legacy value kept so pre-migration documents still
+        // validate; new writes use "free" | "pro" (see convex/migration.ts).
         subscription: v.optional(v.object({
-            plan: v.union(v.literal("free"), v.literal("teams")),
+            plan: v.union(v.literal("free"), v.literal("pro"), v.literal("teams")),
             startDate: v.string(),
             endDate: v.union(v.string(), v.null()),
         })),
@@ -40,12 +42,50 @@ export default defineSchema({
         pastor: v.string(),
         userIds: v.optional(v.array(v.string())),
         storageUsed: v.optional(v.number()),
-        subscriptionPlan: v.union(v.literal("free"), v.literal("teams")),
+        subscriptionPlan: v.union(v.literal("free"), v.literal("pro"), v.literal("teams")),
         // Default invite code for quick sharing
         defaultInviteCode: v.optional(v.string()),
         createdAt: v.string(),
         updatedAt: v.string(),
     }),
+
+    // Subscriptions table — the server-side source of truth for billing,
+    // kept in sync with Paystack via webhooks (convex/http.ts). The signed
+    // license files handed to the desktop app (convex/licensing.ts) are
+    // derived from these rows. Keyed by the Paystack customer email so a
+    // webhook can land before the user has ever signed in to Selah.
+    subscriptions: defineTable({
+        // Paystack customer email, always stored lowercased.
+        email: v.string(),
+        // Linked Selah user id once we can resolve one (may be unknown at first).
+        userId: v.optional(v.string()),
+        plan: v.union(v.literal("free"), v.literal("pro")),
+        // Mirrors Paystack subscription status plus a local "past_due" we set
+        // while charges are being retried, so the app doesn't hard-lock mid-retry.
+        status: v.union(
+            v.literal("active"),
+            v.literal("non-renewing"),
+            v.literal("attention"),
+            v.literal("past_due"),
+            v.literal("cancelled")
+        ),
+        paystackCustomerCode: v.optional(v.string()),
+        paystackSubscriptionCode: v.optional(v.string()),
+        paystackPlanCode: v.optional(v.string()),
+        // End of the current paid period (ISO 8601) — becomes the license's
+        // `expires_at`. Null before the first successful charge.
+        currentPeriodEnd: v.union(v.string(), v.null()),
+        // How long the app keeps working past `currentPeriodEnd` while offline.
+        gracePeriodDays: v.number(),
+        // Timestamps for auditing / debugging the webhook stream.
+        lastEventAt: v.optional(v.string()),
+        lastChargeAt: v.optional(v.string()),
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    })
+        .index("by_email", ["email"])
+        .index("by_subscription_code", ["paystackSubscriptionCode"])
+        .index("by_user", ["userId"]),
 
     // Schedules table
     schedules: defineTable({

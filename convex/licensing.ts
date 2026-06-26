@@ -1,0 +1,277 @@
+/**
+ * Offline license issuance.
+ *
+ * Selah's desktop app verifies entitlements completely offline by checking an
+ * Ed25519 signature over a small JSON payload. This module is the *only* place
+ * that holds the private signing key (`LICENSE_SIGNING_KEY`, an env var on the
+ * Convex deployment) and turns a subscription row into a signed license file.
+ *
+ * Flow:
+ *   Paystack webhook ──▶ applyPaystackEvent (writes `subscriptions`)
+ *   App GET /license  ──▶ getSubscriptionForEmail ──▶ buildLicense + signPayload
+ *
+ * The license file ships the *exact bytes* that were signed (base64 in
+ * `payload_b64`), so the client never re-serializes the payload — there is no
+ * canonical-JSON mismatch to worry about. The client base64-decodes those
+ * bytes, verifies the signature over them, and only then parses the JSON.
+ *
+ * Key management:
+ *   - Generate a keypair with `node scripts/gen-license-keys.mjs`.
+ *   - `npx convex env set LICENSE_SIGNING_KEY <seed-hex>` (32-byte seed, hex).
+ *   - Bake the matching public key into the Tauri app (src-tauri/src/license.rs).
+ *   - Rotate by bumping LICENSE_KEY_ID and shipping an app that trusts both keys.
+ */
+
+import { internalQuery, internalMutation } from './_generated/server'
+import { v } from 'convex/values'
+import * as ed from '@noble/ed25519'
+import { sha512 } from '@noble/hashes/sha2.js'
+
+// @noble/ed25519 v3 needs the synchronous SHA-512 wired up before sign/verify.
+ed.hashes.sha512 = sha512
+
+/** Bump when the payload shape changes in a non-additive way. */
+export const LICENSE_VERSION = 1
+/** Identifies which signing key produced a license; bump on key rotation. */
+export const LICENSE_KEY_ID = 'k1'
+/** Default offline grace window applied when a subscription has none set. */
+export const DEFAULT_GRACE_PERIOD_DAYS = 14
+
+export type Plan = 'free' | 'pro'
+
+export interface LicensePayload {
+    /** Payload schema version. */
+    v: number
+    /** Signing key id, so the client can pick the right public key. */
+    key_id: string
+    /** Stable id for this license (audit / future revocation list). */
+    license_id: string
+    /** Selah user id if known, else the email (the app keys off email anyway). */
+    user_id: string
+    email: string
+    plan: Plan
+    /** Subscription status at issue time (informational for the UI). */
+    status: string
+    /** ISO 8601 instant the license was minted. Also used for anti-rollback. */
+    issued_at: string
+    /** ISO 8601 end of the paid period. Null for free (never expires). */
+    expires_at: string | null
+    /** Days the app keeps working past `expires_at` while it can't reach us. */
+    grace_period_days: number
+}
+
+export interface LicenseFile {
+    alg: 'ed25519'
+    key_id: string
+    /** base64 of the exact UTF-8 JSON bytes that were signed. */
+    payload_b64: string
+    /** base64 of the Ed25519 signature over those bytes. */
+    signature: string
+}
+
+// --- base64 (runtime-agnostic; avoids depending on btoa/Buffer) -------------
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+function bytesToBase64(bytes: Uint8Array): string {
+    let out = ''
+    for (let i = 0; i < bytes.length; i += 3) {
+        const b0 = bytes[i]
+        const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0
+        const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0
+        const triple = (b0 << 16) | (b1 << 8) | b2
+        out += B64[(triple >> 18) & 0x3f]
+        out += B64[(triple >> 12) & 0x3f]
+        out += i + 1 < bytes.length ? B64[(triple >> 6) & 0x3f] : '='
+        out += i + 2 < bytes.length ? B64[triple & 0x3f] : '='
+    }
+    return out
+}
+
+// --- signing ----------------------------------------------------------------
+
+function getSigningSeed(): Uint8Array {
+    const hex = process.env.LICENSE_SIGNING_KEY
+    if (!hex) {
+        throw new Error(
+            'LICENSE_SIGNING_KEY is not configured. Run scripts/gen-license-keys.mjs ' +
+            'and `npx convex env set LICENSE_SIGNING_KEY <seed-hex>`.'
+        )
+    }
+    const seed = ed.etc.hexToBytes(hex.trim())
+    if (seed.length !== 32) {
+        throw new Error(`LICENSE_SIGNING_KEY must be a 32-byte hex seed (got ${seed.length} bytes).`)
+    }
+    return seed
+}
+
+/** Sign a payload, returning a self-contained license file. */
+export function signPayload(payload: LicensePayload): LicenseFile {
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(payload))
+    const signature = ed.sign(payloadBytes, getSigningSeed())
+    return {
+        alg: 'ed25519',
+        key_id: payload.key_id,
+        payload_b64: bytesToBase64(payloadBytes),
+        signature: bytesToBase64(signature),
+    }
+}
+
+/** True when a subscription should currently confer the Pro plan. */
+function isProActive(sub: SubscriptionRow | null, now: Date): boolean {
+    if (!sub || sub.plan !== 'pro') return false
+    if (sub.status === 'cancelled') return false
+    if (!sub.currentPeriodEnd) return sub.status === 'active'
+    // Still within the paid period (the client adds its own grace on top).
+    return new Date(sub.currentPeriodEnd).getTime() > now.getTime()
+}
+
+/**
+ * Build the license payload for a user, given their subscription row (or null).
+ * Downgrades to `free` whenever Pro isn't currently active.
+ */
+export function buildLicense(args: {
+    email: string
+    userId?: string | null
+    subscription: SubscriptionRow | null
+    nowIso: string
+}): LicensePayload {
+    const now = new Date(args.nowIso)
+    const pro = isProActive(args.subscription, now)
+    const sub = args.subscription
+    return {
+        v: LICENSE_VERSION,
+        key_id: LICENSE_KEY_ID,
+        license_id: `lic_${args.email}_${args.nowIso}`,
+        user_id: args.userId ?? sub?.userId ?? args.email,
+        email: args.email,
+        plan: pro ? 'pro' : 'free',
+        status: sub?.status ?? 'none',
+        issued_at: args.nowIso,
+        expires_at: pro ? (sub?.currentPeriodEnd ?? null) : null,
+        grace_period_days: sub?.gracePeriodDays ?? DEFAULT_GRACE_PERIOD_DAYS,
+    }
+}
+
+// --- subscription row type (mirrors schema.ts) ------------------------------
+
+export interface SubscriptionRow {
+    email: string
+    userId?: string
+    plan: Plan
+    status: 'active' | 'non-renewing' | 'attention' | 'past_due' | 'cancelled'
+    paystackCustomerCode?: string
+    paystackSubscriptionCode?: string
+    paystackPlanCode?: string
+    currentPeriodEnd: string | null
+    gracePeriodDays: number
+    lastEventAt?: string
+    lastChargeAt?: string
+    createdAt: string
+    updatedAt: string
+}
+
+// --- data access ------------------------------------------------------------
+
+/** Look up a subscription by (lowercased) email. Used by GET /license. */
+export const getSubscriptionForEmail = internalQuery({
+    args: { email: v.string() },
+    handler: async (ctx, args) => {
+        const email = args.email.toLowerCase()
+        return await ctx.db
+            .query('subscriptions')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+    },
+})
+
+/**
+ * Upsert a subscription from a normalized Paystack webhook event.
+ *
+ * Matching order: by Paystack subscription code (most precise), then by email.
+ * We never *downgrade the period* here — `currentPeriodEnd` only moves forward,
+ * so a late/out-of-order webhook can't shorten a user's paid time. Status and
+ * plan are updated to reflect the latest event.
+ */
+export const applyPaystackEvent = internalMutation({
+    args: {
+        email: v.string(),
+        status: v.union(
+            v.literal('active'),
+            v.literal('non-renewing'),
+            v.literal('attention'),
+            v.literal('past_due'),
+            v.literal('cancelled')
+        ),
+        plan: v.union(v.literal('free'), v.literal('pro')),
+        paystackCustomerCode: v.optional(v.string()),
+        paystackSubscriptionCode: v.optional(v.string()),
+        paystackPlanCode: v.optional(v.string()),
+        currentPeriodEnd: v.optional(v.union(v.string(), v.null())),
+        chargedAt: v.optional(v.string()),
+        eventAt: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const email = args.email.toLowerCase()
+
+        // Prefer matching on the subscription code; fall back to email.
+        let existing = null
+        if (args.paystackSubscriptionCode) {
+            existing = await ctx.db
+                .query('subscriptions')
+                .withIndex('by_subscription_code', (q) =>
+                    q.eq('paystackSubscriptionCode', args.paystackSubscriptionCode)
+                )
+                .unique()
+        }
+        if (!existing) {
+            existing = await ctx.db
+                .query('subscriptions')
+                .withIndex('by_email', (q) => q.eq('email', email))
+                .unique()
+        }
+
+        // Period only ever moves forward.
+        const incomingEnd = args.currentPeriodEnd ?? null
+        const mergedEnd = (() => {
+            if (!existing?.currentPeriodEnd) return incomingEnd
+            if (!incomingEnd) return existing.currentPeriodEnd
+            return new Date(incomingEnd) > new Date(existing.currentPeriodEnd)
+                ? incomingEnd
+                : existing.currentPeriodEnd
+        })()
+
+        const now = args.eventAt
+        const patch = {
+            email,
+            plan: args.plan,
+            status: args.status,
+            paystackCustomerCode: args.paystackCustomerCode ?? existing?.paystackCustomerCode,
+            paystackSubscriptionCode:
+                args.paystackSubscriptionCode ?? existing?.paystackSubscriptionCode,
+            paystackPlanCode: args.paystackPlanCode ?? existing?.paystackPlanCode,
+            currentPeriodEnd: mergedEnd,
+            gracePeriodDays: existing?.gracePeriodDays ?? DEFAULT_GRACE_PERIOD_DAYS,
+            lastEventAt: now,
+            lastChargeAt: args.chargedAt ?? existing?.lastChargeAt,
+            updatedAt: now,
+        }
+
+        if (existing) {
+            await ctx.db.patch(existing._id, patch)
+            return existing._id
+        }
+
+        // Link to a Selah user if one already exists for this email.
+        const user = await ctx.db
+            .query('users')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+
+        return await ctx.db.insert('subscriptions', {
+            ...patch,
+            userId: user?._id,
+            createdAt: now,
+        })
+    },
+})

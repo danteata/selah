@@ -6,6 +6,7 @@ import { Toaster } from 'sonner'
 import { isDesktop } from './platform'
 import { ConvexConnectionProvider, useConvexConnection } from './providers/ConvexConnectionProvider'
 import { ConvexErrorBoundary } from './components/offline/ConvexErrorBoundary'
+import { LicenseProvider } from './providers/LicenseProvider'
 import { RouteErrorBoundary } from './components/offline/RouteErrorBoundary'
 import { AnalyticsProvider, useAnalyticsContext } from './providers/AnalyticsProvider'
 import type { AnalyticsProviderType as AnalyticsType } from './services/analytics/types'
@@ -325,9 +326,11 @@ function App() {
                     <ConvexConnectionProvider convexUrl={CONVEX_URL}>
                         <ConvexErrorBoundary>
                             <QueryClientProvider client={queryClient}>
-                                <HashRouter>
-                                    <AppRoutes />
-                                </HashRouter>
+                                <LicenseProvider>
+                                    <HashRouter>
+                                        <AppRoutes />
+                                    </HashRouter>
+                                </LicenseProvider>
                             </QueryClientProvider>
                         </ConvexErrorBoundary>
                     </ConvexConnectionProvider>

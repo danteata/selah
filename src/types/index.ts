@@ -64,7 +64,7 @@ export interface User {
     churchId: string
     emailVerified?: boolean
     subscription?: {
-        plan: 'free' | 'teams'
+        plan: 'free' | 'pro'
         startDate: string
         endDate: string | null
     }
@@ -79,7 +79,7 @@ export interface Church {
     userIds?: string[]
     users: User[]
     storageUsed?: number
-    subscriptionPlan: 'free' | 'teams'
+    subscriptionPlan: 'free' | 'pro'
 }
 
 export interface Slide {
@@ -170,7 +170,7 @@ export interface QuickAction {
     hymnIndex?: string
     searchableOnly?: boolean
     meta?: string
-    tier?: 'free' | 'teams'
+    tier?: 'free' | 'pro'
 }
 
 export interface Scripture {
@@ -679,7 +679,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newSong,
         meta: '',
         type: slideTypes.song,
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-bx-text',
@@ -697,7 +697,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newMedia,
         meta: '',
         type: slideTypes.media,
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-bx-slideshow',
@@ -705,7 +705,7 @@ export const quickActionsArr: QuickAction[] = [
         desc: 'Use pre-made, fancy slide templates',
         action: appWideActions.newTemplates,
         meta: 'template preset saved design layout',
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-bx-bell',
@@ -713,7 +713,7 @@ export const quickActionsArr: QuickAction[] = [
         desc: 'Notify your audience without disruption',
         action: appWideActions.newAlert,
         meta: '',
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-bx-trash',
@@ -722,7 +722,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.removeAlert,
         searchableOnly: true,
         meta: 'trash alert remove banner',
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-bx-time',
@@ -731,7 +731,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newCountdown,
         meta: '',
         type: slideTypes.countdown,
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-lucide-panel-bottom',
@@ -740,7 +740,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newLowerThird,
         meta: 'lower third name title speaker overlay banner',
         type: slideTypes.text,
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-mdi-youtube',
@@ -749,7 +749,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newYouTubeVideo,
         meta: 'youtube external video embed',
         type: slideTypes.media,
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-mdi-vimeo',
@@ -758,7 +758,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newVimeoVideo,
         meta: 'vimeo external video embed',
         type: slideTypes.media,
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-bx-cog',
@@ -792,7 +792,7 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.openInviteModal,
         meta: 'teammates share link invite workspace',
         searchableOnly: true,
-        tier: 'teams',
+        tier: 'pro',
     },
     {
         icon: 'i-bxs-keyboard',

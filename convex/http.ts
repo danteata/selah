@@ -19,6 +19,10 @@
 
 import { httpRouter } from 'convex/server'
 import { httpAction } from './_generated/server'
+import { internal } from './_generated/api'
+import { hmac } from '@noble/hashes/hmac.js'
+import { sha512 } from '@noble/hashes/sha2.js'
+import { buildLicense, signPayload } from './licensing'
 
 const GITHUB_OWNER = 'danteata'
 const GITHUB_REPO = 'selah'
@@ -128,9 +132,169 @@ const downloadAsset = httpAction(async (_ctx, request) => {
 
 const preflight = httpAction(async () => new Response(null, { status: 204, headers: CORS_HEADERS }))
 
+// ---------------------------------------------------------------------------
+// Licensing: Paystack webhook + signed license issuance.
+// ---------------------------------------------------------------------------
+
+// /license is called by the app with an Authorization: Bearer <Clerk JWT>, so
+// the preflight must advertise that header (the /releases CORS does not).
+const LICENSE_CORS: Record<string, string> = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
+const licensePreflight = httpAction(
+    async () => new Response(null, { status: 204, headers: LICENSE_CORS })
+)
+
+function bytesToHex(bytes: Uint8Array): string {
+    let hex = ''
+    for (const b of bytes) hex += b.toString(16).padStart(2, '0')
+    return hex
+}
+
+/** Length-checked constant-time string compare (avoids signature timing leaks). */
+function timingSafeEqual(a: string, b: string): boolean {
+    if (a.length !== b.length) return false
+    let diff = 0
+    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+    return diff === 0
+}
+
+type NormalizedEvent = {
+    email: string
+    status: 'active' | 'non-renewing' | 'attention' | 'past_due' | 'cancelled'
+    plan: 'free' | 'pro'
+    paystackCustomerCode?: string
+    paystackSubscriptionCode?: string
+    paystackPlanCode?: string
+    currentPeriodEnd?: string | null
+    chargedAt?: string
+}
+
+/**
+ * Map a Paystack webhook into our subscription model. Returns null for events
+ * we don't act on. We deliberately keep `plan: 'pro'` through payment-retry and
+ * non-renewing states so the user keeps Pro until the paid period actually ends
+ * (licensing.isProActive downgrades them once `currentPeriodEnd` passes).
+ */
+function normalizePaystackEvent(event: {
+    event?: string
+    data?: Record<string, any>
+}): NormalizedEvent | null {
+    const type = event.event
+    const data = event.data ?? {}
+    const customer = data.customer ?? data.subscription?.customer ?? {}
+    const email: string | undefined =
+        customer.email ?? data.metadata?.email ?? data.subscription?.customer?.email
+    if (!email) return null
+
+    const subNode = data.subscription ?? data
+    const base = {
+        email,
+        plan: 'pro' as const,
+        paystackCustomerCode: customer.customer_code,
+        paystackSubscriptionCode: subNode.subscription_code,
+        paystackPlanCode: (data.plan ?? subNode.plan)?.plan_code,
+        currentPeriodEnd: subNode.next_payment_date ?? undefined,
+    }
+
+    switch (type) {
+        case 'subscription.create':
+            return { ...base, status: 'active' }
+        case 'charge.success':
+            // Only subscription charges carry a plan; ignore one-off charges.
+            if (!base.paystackPlanCode && !base.paystackSubscriptionCode) return null
+            return { ...base, status: 'active', chargedAt: data.paid_at }
+        case 'invoice.create':
+        case 'invoice.update':
+            return {
+                ...base,
+                status: data.status === 'success' ? 'active' : 'past_due',
+                chargedAt: data.paid_at,
+            }
+        case 'invoice.payment_failed':
+            // Paystack auto-retries; mark past_due but DON'T downgrade yet.
+            return { ...base, status: 'past_due' }
+        case 'subscription.not_renew':
+        case 'subscription.disable':
+            // Stops renewing; let the current period run out naturally.
+            return { ...base, status: 'non-renewing' }
+        default:
+            return null
+    }
+}
+
+const paystackWebhook = httpAction(async (ctx, request) => {
+    const secret = process.env.PAYSTACK_SECRET_KEY
+    if (!secret) return new Response('Webhook not configured', { status: 500 })
+
+    const raw = await request.text()
+    const provided = request.headers.get('x-paystack-signature') ?? ''
+    const expected = bytesToHex(
+        hmac(sha512, new TextEncoder().encode(secret), new TextEncoder().encode(raw))
+    )
+    if (!timingSafeEqual(provided, expected)) {
+        return new Response('Invalid signature', { status: 401 })
+    }
+
+    let event: { event?: string; data?: Record<string, any> }
+    try {
+        event = JSON.parse(raw)
+    } catch {
+        return new Response('Bad JSON', { status: 400 })
+    }
+
+    const normalized = normalizePaystackEvent(event)
+    if (normalized) {
+        await ctx.runMutation(internal.licensing.applyPaystackEvent, {
+            ...normalized,
+            eventAt: new Date().toISOString(),
+        })
+    }
+
+    // Always 200 quickly so Paystack stops retrying a successfully received event.
+    return new Response('ok', { status: 200 })
+})
+
+const issueLicense = httpAction(async (ctx, request) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity?.email) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json', ...LICENSE_CORS },
+        })
+    }
+
+    const email = identity.email.toLowerCase()
+    const subscription = await ctx.runQuery(internal.licensing.getSubscriptionForEmail, { email })
+    const license = signPayload(
+        buildLicense({
+            email,
+            userId: subscription?.userId ?? null,
+            subscription,
+            nowIso: new Date().toISOString(),
+        })
+    )
+
+    return new Response(JSON.stringify(license), {
+        status: 200,
+        headers: {
+            'Content-Type': 'application/json',
+            // Licenses are per-user and time-sensitive — never cache.
+            'Cache-Control': 'no-store',
+            ...LICENSE_CORS,
+        },
+    })
+})
+
 const http = httpRouter()
 http.route({ path: '/releases/latest', method: 'GET', handler: latestRelease })
 http.route({ path: '/releases/latest', method: 'OPTIONS', handler: preflight })
 http.route({ pathPrefix: '/releases/asset/', method: 'GET', handler: downloadAsset })
+http.route({ path: '/paystack/webhook', method: 'POST', handler: paystackWebhook })
+http.route({ path: '/license', method: 'GET', handler: issueLicense })
+http.route({ path: '/license', method: 'OPTIONS', handler: licensePreflight })
 
 export default http

@@ -77,10 +77,10 @@ describe('ActionCard', () => {
         expect(button?.className).not.toContain('bg-blue-50')
     })
 
-    it('shows Pro badge for teams tier actions', () => {
+    it('shows Pro badge for pro tier actions', () => {
         render(
             <ActionCard
-                action={{ ...baseAction, tier: 'teams' }}
+                action={{ ...baseAction, tier: 'pro' }}
                 dataActionIndex={0}
                 isFocused={false}
                 onClick={vi.fn()}
@@ -89,7 +89,7 @@ describe('ActionCard', () => {
         expect(screen.getByText('Pro')).toBeInTheDocument()
     })
 
-    it('does not show Pro badge for non-teams actions', () => {
+    it('does not show Pro badge for non-pro actions', () => {
         render(
             <ActionCard
                 action={baseAction}
