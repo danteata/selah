@@ -209,6 +209,12 @@ export const applyPaystackEvent = internalMutation({
         paystackPlanCode: v.optional(v.string()),
         currentPeriodEnd: v.optional(v.union(v.string(), v.null())),
         chargedAt: v.optional(v.string()),
+        // Saved card token, only present on charge.success — needed to start the
+        // normal-priced subscription when an intro discount rolls over.
+        authorizationCode: v.optional(v.string()),
+        // True only for charge.success, so we count exactly one discounted cycle
+        // per charge (invoice.* events for the same charge don't double-count).
+        isCharge: v.optional(v.boolean()),
         eventAt: v.string(),
     },
     handler: async (ctx, args) => {
@@ -241,6 +247,31 @@ export const applyPaystackEvent = internalMutation({
                 : existing.currentPeriodEnd
         })()
 
+        // Intro-discount countdown: spend one discounted cycle per charge. When
+        // the last one is spent and a revert plan is set, signal the caller to
+        // start the normal-priced subscription off the saved card.
+        let introCyclesRemaining = existing?.introCyclesRemaining ?? null
+        let rollover:
+            | {
+                  customerCode?: string
+                  authorizationCode?: string
+                  revertPlanCode: string
+                  startDate: string | null
+              }
+            | null = null
+        if (args.isCharge && introCyclesRemaining != null && introCyclesRemaining > 0) {
+            introCyclesRemaining -= 1
+            if (introCyclesRemaining <= 0 && existing?.revertPlanCode) {
+                rollover = {
+                    customerCode: args.paystackCustomerCode ?? existing.paystackCustomerCode,
+                    authorizationCode:
+                        args.authorizationCode ?? existing.paystackAuthorizationCode,
+                    revertPlanCode: existing.revertPlanCode,
+                    startDate: mergedEnd,
+                }
+            }
+        }
+
         const now = args.eventAt
         const patch = {
             email,
@@ -250,8 +281,11 @@ export const applyPaystackEvent = internalMutation({
             paystackSubscriptionCode:
                 args.paystackSubscriptionCode ?? existing?.paystackSubscriptionCode,
             paystackPlanCode: args.paystackPlanCode ?? existing?.paystackPlanCode,
+            paystackAuthorizationCode:
+                args.authorizationCode ?? existing?.paystackAuthorizationCode,
             currentPeriodEnd: mergedEnd,
             gracePeriodDays: existing?.gracePeriodDays ?? DEFAULT_GRACE_PERIOD_DAYS,
+            introCyclesRemaining,
             lastEventAt: now,
             lastChargeAt: args.chargedAt ?? existing?.lastChargeAt,
             updatedAt: now,
@@ -259,7 +293,7 @@ export const applyPaystackEvent = internalMutation({
 
         if (existing) {
             await ctx.db.patch(existing._id, patch)
-            return existing._id
+            return { id: existing._id, rollover }
         }
 
         // Link to a Selah user if one already exists for this email.
@@ -268,10 +302,154 @@ export const applyPaystackEvent = internalMutation({
             .withIndex('by_email', (q) => q.eq('email', email))
             .unique()
 
-        return await ctx.db.insert('subscriptions', {
+        const id = await ctx.db.insert('subscriptions', {
             ...patch,
+            source: 'paystack' as const,
             userId: user?._id,
             createdAt: now,
+        })
+        return { id, rollover }
+    },
+})
+
+/**
+ * Grant comped Pro (no payment) for `days`, via a promo. Idempotent-ish: an
+ * existing row is extended only if the comp window is longer than what's there.
+ * Returns the new `expires_at` (ISO).
+ */
+export const grantCompSubscription = internalMutation({
+    args: { email: v.string(), compDays: v.number(), promoCode: v.string() },
+    handler: async (ctx, args): Promise<string> => {
+        const email = args.email.toLowerCase()
+        const now = new Date()
+        const expires = new Date(now.getTime() + args.compDays * 24 * 60 * 60 * 1000)
+        const expiresIso = expires.toISOString()
+        const nowIso = now.toISOString()
+
+        const existing = await ctx.db
+            .query('subscriptions')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+
+        // Don't shorten an existing longer paid/comp period.
+        const periodEnd =
+            existing?.currentPeriodEnd && new Date(existing.currentPeriodEnd) > expires
+                ? existing.currentPeriodEnd
+                : expiresIso
+
+        if (existing) {
+            await ctx.db.patch(existing._id, {
+                plan: 'pro',
+                status: 'active',
+                source: 'promo',
+                promoCode: args.promoCode,
+                currentPeriodEnd: periodEnd,
+                gracePeriodDays: existing.gracePeriodDays ?? DEFAULT_GRACE_PERIOD_DAYS,
+                lastEventAt: nowIso,
+                updatedAt: nowIso,
+            })
+            return periodEnd
+        }
+
+        const user = await ctx.db
+            .query('users')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+
+        await ctx.db.insert('subscriptions', {
+            email,
+            userId: user?._id,
+            plan: 'pro',
+            status: 'active',
+            source: 'promo',
+            promoCode: args.promoCode,
+            currentPeriodEnd: periodEnd,
+            gracePeriodDays: DEFAULT_GRACE_PERIOD_DAYS,
+            lastEventAt: nowIso,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+        })
+        return periodEnd
+    },
+})
+
+/**
+ * Pre-create a pending subscription row for a discount-promo checkout, so the
+ * intro plan, revert plan, and cycle count are persisted before any webhook
+ * (which can't reliably carry our metadata). Status stays "attention" until the
+ * first charge.success flips it active.
+ */
+export const preparePromoSubscription = internalMutation({
+    args: {
+        email: v.string(),
+        promoCode: v.string(),
+        introPlanCode: v.string(),
+        introCycles: v.number(),
+        revertPlanCode: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const email = args.email.toLowerCase()
+        const nowIso = new Date().toISOString()
+        const existing = await ctx.db
+            .query('subscriptions')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+
+        const fields = {
+            plan: 'pro' as const,
+            status: 'attention' as const,
+            source: 'paystack' as const,
+            promoCode: args.promoCode,
+            paystackPlanCode: args.introPlanCode,
+            revertPlanCode: args.revertPlanCode,
+            introCyclesRemaining: args.introCycles,
+            updatedAt: nowIso,
+        }
+
+        if (existing) {
+            await ctx.db.patch(existing._id, fields)
+            return existing._id
+        }
+
+        const user = await ctx.db
+            .query('users')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+
+        return await ctx.db.insert('subscriptions', {
+            email,
+            userId: user?._id,
+            currentPeriodEnd: null,
+            gracePeriodDays: DEFAULT_GRACE_PERIOD_DAYS,
+            lastEventAt: nowIso,
+            createdAt: nowIso,
+            ...fields,
+        })
+    },
+})
+
+/**
+ * Finish an intro→normal rollover after the webhook has created the new
+ * normal-priced subscription on Paystack. Points the row at the new plan and
+ * clears the intro/discount bookkeeping.
+ */
+export const finalizeRollover = internalMutation({
+    args: { email: v.string(), newSubscriptionCode: v.string(), planCode: v.string() },
+    handler: async (ctx, args) => {
+        const email = args.email.toLowerCase()
+        const existing = await ctx.db
+            .query('subscriptions')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+        if (!existing) return
+        await ctx.db.patch(existing._id, {
+            status: 'active',
+            paystackSubscriptionCode: args.newSubscriptionCode,
+            paystackPlanCode: args.planCode,
+            introCyclesRemaining: null,
+            revertPlanCode: undefined,
+            promoCode: undefined,
+            updatedAt: new Date().toISOString(),
         })
     },
 })

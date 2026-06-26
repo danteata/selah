@@ -171,6 +171,10 @@ type NormalizedEvent = {
     paystackPlanCode?: string
     currentPeriodEnd?: string | null
     chargedAt?: string
+    /** Saved card token (charge.success only) — used for intro→normal rollover. */
+    authorizationCode?: string
+    /** True only for charge.success, so discounted cycles count once per charge. */
+    isCharge?: boolean
 }
 
 /**
@@ -206,7 +210,13 @@ function normalizePaystackEvent(event: {
         case 'charge.success':
             // Only subscription charges carry a plan; ignore one-off charges.
             if (!base.paystackPlanCode && !base.paystackSubscriptionCode) return null
-            return { ...base, status: 'active', chargedAt: data.paid_at }
+            return {
+                ...base,
+                status: 'active',
+                chargedAt: data.paid_at,
+                authorizationCode: data.authorization?.authorization_code,
+                isCharge: true,
+            }
         case 'invoice.create':
         case 'invoice.update':
             return {
@@ -248,10 +258,48 @@ const paystackWebhook = httpAction(async (ctx, request) => {
 
     const normalized = normalizePaystackEvent(event)
     if (normalized) {
-        await ctx.runMutation(internal.licensing.applyPaystackEvent, {
+        const result = await ctx.runMutation(internal.licensing.applyPaystackEvent, {
             ...normalized,
             eventAt: new Date().toISOString(),
         })
+
+        // Intro discount used up → start the normal-priced subscription off the
+        // saved card so billing continues seamlessly at full price.
+        const rollover = result?.rollover
+        if (rollover?.revertPlanCode && rollover.customerCode && rollover.authorizationCode) {
+            try {
+                const res = await fetch('https://api.paystack.co/subscription', {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${secret}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        customer: rollover.customerCode,
+                        plan: rollover.revertPlanCode,
+                        authorization: rollover.authorizationCode,
+                        // Begin right when the discounted period ends (omit to start now).
+                        ...(rollover.startDate ? { start_date: rollover.startDate } : {}),
+                    }),
+                })
+                const body = (await res.json()) as {
+                    status: boolean
+                    data?: { subscription_code: string }
+                }
+                if (res.ok && body.status && body.data?.subscription_code) {
+                    await ctx.runMutation(internal.licensing.finalizeRollover, {
+                        email: normalized.email,
+                        newSubscriptionCode: body.data.subscription_code,
+                        planCode: rollover.revertPlanCode,
+                    })
+                }
+                // On failure we intentionally leave the row as-is; the user keeps
+                // the (now-ended) intro row and we can retry/repair out of band.
+            } catch {
+                // Swallow — never fail the webhook over a rollover; Paystack would
+                // just retry the whole event.
+            }
+        }
     }
 
     // Always 200 quickly so Paystack stops retrying a successfully received event.

@@ -16,6 +16,7 @@
 import { action, query } from './_generated/server'
 import { internal } from './_generated/api'
 import { v } from 'convex/values'
+import { normalizeCode } from './promos'
 
 const PAYSTACK_API = 'https://api.paystack.co'
 
@@ -54,13 +55,58 @@ async function paystack<T>(
  * Returns the hosted authorization URL to open in a browser.
  */
 export const initializeProCheckout = action({
-    args: { callbackUrl: v.optional(v.string()) },
-    handler: async (ctx, args): Promise<{ authorizationUrl: string; reference: string; accessCode: string }> => {
+    args: { callbackUrl: v.optional(v.string()), promoCode: v.optional(v.string()) },
+    handler: async (
+        ctx,
+        args
+    ): Promise<{ authorizationUrl: string; reference: string; accessCode: string }> => {
         const identity = await ctx.auth.getUserIdentity()
         if (!identity?.email) throw new Error('Not authenticated')
+        const email = identity.email.toLowerCase()
 
-        const planCode = process.env.PAYSTACK_PRO_PLAN_CODE
-        if (!planCode) throw new Error('PAYSTACK_PRO_PLAN_CODE is not configured on this deployment.')
+        const normalPlan = process.env.PAYSTACK_PRO_PLAN_CODE
+        if (!normalPlan) throw new Error('PAYSTACK_PRO_PLAN_CODE is not configured on this deployment.')
+
+        // Default: full-price Pro. A "discount" promo swaps in its cheaper intro
+        // plan and records the intent so the webhook can roll over to normal
+        // pricing once the discounted cycles are used up.
+        let planCode = normalPlan
+        let appliedPromo: string | undefined
+        if (args.promoCode) {
+            const promo = await ctx.runQuery(internal.promos.getPromoByCode, { code: args.promoCode })
+            const nowMs = Date.now()
+            if (!promo || !promo.active) throw new Error('Invalid or inactive promo code')
+            if (promo.expiresAt && new Date(promo.expiresAt).getTime() <= nowMs) {
+                throw new Error('Code has expired')
+            }
+            if (promo.maxRedemptions != null && promo.timesRedeemed >= promo.maxRedemptions) {
+                throw new Error('Code has reached its redemption limit')
+            }
+            if (promo.kind !== 'discount') {
+                throw new Error('This code is redeemed directly, not at checkout')
+            }
+            if (!promo.introPlanCode || !promo.introCycles) throw new Error('Code is misconfigured')
+
+            const revertPlanCode = promo.revertPlanCode ?? normalPlan
+            planCode = promo.introPlanCode
+            appliedPromo = normalizeCode(args.promoCode)
+
+            // Reserve the redemption (idempotent per user) and persist the intro
+            // intent before checkout, so the rollover bookkeeping survives even
+            // if the webhook can't echo our metadata.
+            await ctx.runMutation(internal.promos.recordRedemption, {
+                code: args.promoCode,
+                email,
+                kind: 'discount',
+            })
+            await ctx.runMutation(internal.licensing.preparePromoSubscription, {
+                email,
+                promoCode: appliedPromo,
+                introPlanCode: promo.introPlanCode,
+                introCycles: promo.introCycles,
+                revertPlanCode,
+            })
+        }
 
         const data = await paystack<{
             authorization_url: string
@@ -71,7 +117,7 @@ export const initializeProCheckout = action({
             plan: planCode,
             callback_url: args.callbackUrl ?? process.env.PAYSTACK_CALLBACK_URL,
             // Echoed back on the webhook so we can resolve the user reliably.
-            metadata: { email: identity.email.toLowerCase(), plan: 'pro' },
+            metadata: { email, plan: 'pro', promoCode: appliedPromo },
         })
 
         return {

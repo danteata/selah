@@ -17,10 +17,8 @@ export default defineSchema({
         theme: v.string(),
         churchId: v.string(),
         emailVerified: v.optional(v.boolean()),
-        // "teams" is a legacy value kept so pre-migration documents still
-        // validate; new writes use "free" | "pro" (see convex/migration.ts).
         subscription: v.optional(v.object({
-            plan: v.union(v.literal("free"), v.literal("pro"), v.literal("teams")),
+            plan: v.union(v.literal("free"), v.literal("pro")),
             startDate: v.string(),
             endDate: v.union(v.string(), v.null()),
         })),
@@ -42,7 +40,7 @@ export default defineSchema({
         pastor: v.string(),
         userIds: v.optional(v.array(v.string())),
         storageUsed: v.optional(v.number()),
-        subscriptionPlan: v.union(v.literal("free"), v.literal("pro"), v.literal("teams")),
+        subscriptionPlan: v.union(v.literal("free"), v.literal("pro")),
         // Default invite code for quick sharing
         defaultInviteCode: v.optional(v.string()),
         createdAt: v.string(),
@@ -77,6 +75,22 @@ export default defineSchema({
         currentPeriodEnd: v.union(v.string(), v.null()),
         // How long the app keeps working past `currentPeriodEnd` while offline.
         gracePeriodDays: v.number(),
+        // How this subscription was granted. "promo" rows are comped Pro (no
+        // Paystack billing); "paystack" rows are billed normally (possibly on a
+        // discounted intro plan that later rolls over — see the fields below).
+        source: v.optional(v.union(v.literal("paystack"), v.literal("promo"))),
+        // The promo code applied, if any (for audit / UI).
+        promoCode: v.optional(v.string()),
+        // --- intro-discount rollover (kind: "discount" promos) ---------------
+        // Saved card authorization, captured from charge.success, used to start
+        // the normal-priced subscription once the discounted cycles are spent.
+        paystackAuthorizationCode: v.optional(v.string()),
+        // The normal plan to roll into after the intro cycles end.
+        revertPlanCode: v.optional(v.string()),
+        // Remaining discounted billing cycles. Decremented on each charge; when
+        // it hits 0 we create the normal-priced subscription. Null = not on an
+        // intro discount.
+        introCyclesRemaining: v.optional(v.union(v.number(), v.null())),
         // Timestamps for auditing / debugging the webhook stream.
         lastEventAt: v.optional(v.string()),
         lastChargeAt: v.optional(v.string()),
@@ -86,6 +100,43 @@ export default defineSchema({
         .index("by_email", ["email"])
         .index("by_subscription_code", ["paystackSubscriptionCode"])
         .index("by_user", ["userId"]),
+
+    // Promo codes — there is no native Paystack coupon system, so codes are
+    // modeled here. Two kinds:
+    //   "comp"     → grants Pro free for `compDays` with no payment at all.
+    //   "discount" → checkout uses `introPlanCode` (a cheaper Paystack plan with
+    //                invoice_limit = introCycles); after those cycles the
+    //                subscription rolls over to `revertPlanCode` (normal price).
+    promoCodes: defineTable({
+        code: v.string(), // stored UPPERCASED
+        kind: v.union(v.literal("comp"), v.literal("discount")),
+        description: v.optional(v.string()),
+        active: v.boolean(),
+        // The code itself stops working after this instant (null = never).
+        expiresAt: v.optional(v.union(v.string(), v.null())),
+        // Total redemptions allowed across all users (null = unlimited).
+        maxRedemptions: v.optional(v.union(v.number(), v.null())),
+        timesRedeemed: v.number(),
+        // comp:
+        compDays: v.optional(v.number()),
+        // discount:
+        introPlanCode: v.optional(v.string()),
+        introCycles: v.optional(v.number()),
+        revertPlanCode: v.optional(v.string()), // defaults to PAYSTACK_PRO_PLAN_CODE
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    }).index("by_code", ["code"]),
+
+    // One row per (code, email) so a user can't redeem the same code twice and
+    // so we can audit who used what.
+    promoRedemptions: defineTable({
+        code: v.string(),
+        email: v.string(),
+        kind: v.string(),
+        redeemedAt: v.string(),
+    })
+        .index("by_code", ["code"])
+        .index("by_code_email", ["code", "email"]),
 
     // Schedules table
     schedules: defineTable({

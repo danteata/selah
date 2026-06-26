@@ -219,39 +219,3 @@ export const updateImportedSong = mutation({
         return { success: true };
     },
 });
-
-/**
- * One-shot plan rename: legacy "teams" plan → "pro".
- *
- * Run once after deploying the schema that adds "pro" to the plan unions:
- *   npx convex run migration:migrateTeamsToPro
- *
- * Safe to run repeatedly — it only touches documents still on "teams".
- */
-export const migrateTeamsToPro = mutation({
-    args: {},
-    handler: async (ctx) => {
-        const now = new Date().toISOString();
-        let users = 0;
-        let churches = 0;
-
-        for (const user of await ctx.db.query("users").collect()) {
-            if (user.subscription?.plan === "teams") {
-                await ctx.db.patch(user._id, {
-                    subscription: { ...user.subscription, plan: "pro" },
-                    updatedAt: now,
-                });
-                users++;
-            }
-        }
-
-        for (const church of await ctx.db.query("churches").collect()) {
-            if (church.subscriptionPlan === "teams") {
-                await ctx.db.patch(church._id, { subscriptionPlan: "pro", updatedAt: now });
-                churches++;
-            }
-        }
-
-        return { migratedUsers: users, migratedChurches: churches };
-    },
-});

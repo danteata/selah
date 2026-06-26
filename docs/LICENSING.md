@@ -40,7 +40,8 @@ issuance, and signing all live there. Other corrections baked in:
 |---|---|---|
 | Schema | `convex/schema.ts` | `subscriptions` table (source of truth) |
 | Signing + data | `convex/licensing.ts` | build + Ed25519-sign payload, upsert from webhook |
-| Paystack (server) | `convex/paystack.ts` | checkout init, manage link, `getMySubscription` |
+| Paystack (server) | `convex/paystack.ts` | checkout init (+promo), manage link, `getMySubscription` |
+| Promo codes | `convex/promos.ts` | validate / redeem / admin; comp + discount codes |
 | HTTP | `convex/http.ts` | `POST /paystack/webhook`, `GET /license` |
 | Verify (client) | `src-tauri/src/license.rs` | offline verify + expiry/grace/anti-rollback |
 | Entitlements | `src/providers/LicenseProvider.tsx` | `useEntitlements()` for the whole app |
@@ -98,12 +99,6 @@ long Pro keeps working past it while the app can't reach the server.
 4. **Register the Paystack webhook** → `https://<deployment>.convex.site/paystack/webhook`.
    Paystack signs it with HMAC-SHA512 of your secret key; the handler verifies it.
 
-5. **Migrate legacy plans** (one-time, renames `teams` → `pro`):
-
-   ```bash
-   npx convex run migration:migrateTeamsToPro
-   ```
-
 ## Using it in the UI
 
 ```tsx
@@ -129,8 +124,12 @@ is the app re-reading entitlements from `useEntitlements()` — there is no manu
 
 ### Upgrade (free → Pro)
 
-1. User hits a gated feature (`<ProGate>` → `ProUpsell`) or a pricing button and
-   clicks **Upgrade to Pro**, calling `startProCheckout()`.
+1. User hits a gated feature (`<ProGate>` → `ProUpsell`) or a pricing button.
+   They may enter a **promo code** ("Have a promo code?"):
+   - a **comp** code redeems immediately (`redeemComp`) — Pro unlocks with no
+     payment, skip to the end;
+   - a **discount** code is carried into checkout;
+   otherwise they click **Upgrade to Pro**, calling `startProCheckout(code?)`.
 2. The app asks Convex (`paystack.initializeProCheckout`, authenticated by the
    Clerk session) to create a transaction against `PAYSTACK_PRO_PLAN_CODE`.
 3. The Paystack **hosted checkout** opens — in the system browser on desktop
@@ -194,6 +193,80 @@ active ──payment fails──▶ past_due ──(Paystack retries)──┬�
   to update the card or cancel. Selah never stores Paystack email tokens.
 - On cancel, Paystack fires `subscription.disable` → status `non-renewing`. The
   user keeps Pro until `currentPeriodEnd`, then naturally falls back to free.
+
+## Promo codes
+
+Paystack has **no native coupon system**, so codes are modeled in Convex
+(`promoCodes` / `promoRedemptions`). Two kinds, redeemed differently:
+
+| Kind | What it does | Path | Paystack? |
+|---|---|---|---|
+| `comp` | Free Pro for `compDays`, no card | `promos.redeemComp` → signed license | No |
+| `discount` | First `introCycles` billed on a cheaper plan, then **auto-reverts to normal price** | `paystack.initializeProCheckout({ promoCode })` | Yes |
+
+Redemptions are **one per (code, email)**; `maxRedemptions` caps total uses;
+`expiresAt` ages out the code itself.
+
+### How "discount for N cycles, then normal price" works
+
+Paystack can't change a subscription's amount mid-flight, so the rollover is
+synthesized:
+
+1. **You** create two Paystack plans: the normal one (`PAYSTACK_PRO_PLAN_CODE`)
+   and a discounted **intro plan** with the same interval and
+   **`invoice_limit = introCycles`** (so Paystack stops it after N charges).
+2. Create the code:
+   ```bash
+   npx convex run promos:createPromoCode '{"code":"LAUNCH50","kind":"discount","introPlanCode":"PLN_intro50","introCycles":3,"description":"50% off 3 months"}'
+   ```
+   (`revertPlanCode` defaults to `PAYSTACK_PRO_PLAN_CODE`.) This is an internal
+   function — run it as the operator via the CLI or Convex dashboard.
+3. At checkout the intro plan is used and a pending `subscriptions` row records
+   `introCyclesRemaining` + `revertPlanCode`.
+4. Each `charge.success` decrements `introCyclesRemaining` and captures the
+   card `authorization_code`. When it hits 0, the webhook calls Paystack to
+   **create a new subscription on the normal plan** (using the saved card,
+   `start_date` = end of the discounted period) and points the row at it. The
+   intro subscription completes on its own via `invoice_limit`.
+
+```
+checkout(LAUNCH50) ─▶ intro plan, cycles=3 ─charge─▶ 2 ─charge─▶ 1 ─charge─▶ 0
+                                                                              │
+                                            create normal-plan subscription off saved card
+                                                                              ▼
+                                                                normal price, recurring
+```
+
+> If a user cancels during the intro (`introCyclesRemaining > 0`), no rollover
+> happens. If the rollover API call fails, the webhook still returns 200 and the
+> row is left on the (now-ended) intro plan to repair out of band — it never
+> double-bills.
+
+### Comp codes
+
+```bash
+npx convex run promos:createPromoCode '{"code":"BETA90","kind":"comp","compDays":90,"maxRedemptions":100,"description":"Beta testers"}'
+```
+
+`promos.redeemComp` writes a `subscriptions` row (`source: "promo"`) with
+`currentPeriodEnd = now + compDays`; the next license refresh grants Pro until
+then. No Paystack involvement.
+
+### Managing codes
+
+Two ways in:
+
+- **In-app (superadmins)** — Dashboard → Admin Panel → **Promo Codes** tab
+  (`src/components/admin/PromoCodeManager.tsx`). Create comp/discount codes,
+  enable/disable them, and see redemption counts. Backed by the
+  superadmin-gated `adminCreatePromoCode` / `adminSetPromoActive` /
+  `adminListPromoCodes` (role checked server-side in `convex/promos.ts`).
+- **Operator (CLI/dashboard)** — the equivalent `createPromoCode` /
+  `setPromoActive` / `listPromoCodes` are **internal** functions for
+  provisioning without a signed-in user (`npx convex run …`).
+
+`validatePromo` / `redeemComp` are the public, signed-in-user functions surfaced
+in `ProUpsell`'s "Have a promo code?" input.
 
 ## Webhook → state mapping
 

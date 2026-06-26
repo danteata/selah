@@ -1,6 +1,6 @@
 import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Shield, Database, Book, X, Mic } from 'lucide-react'
+import { Shield, Database, Book, X, Mic, Ticket } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
@@ -19,7 +19,7 @@ import { AppShell } from '../components/layout/AppShell'
 import { StudioWorkspace } from '../components/layout/StudioWorkspace'
 import { DashboardLayout } from '../components/dashboard'
 import { CommandBar } from '../components/layout/CommandBar'
-import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../components/admin'
+import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel, PromoCodeManager } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import { EmbeddingSyncIndicator } from '../components/settings/EmbeddingSyncIndicator'
@@ -94,7 +94,7 @@ export default function Dashboard() {
 
     // Admin panel state
     const [showAdminPanel, setShowAdminPanel] = useState(false)
-    const [adminTab, setAdminTab] = useState<'bible' | 'embeddings' | 'sermon-settings'>('bible')
+    const [adminTab, setAdminTab] = useState<'bible' | 'embeddings' | 'sermon-settings' | 'promos'>('bible')
 
     const workspaceMode = useAppStore((s) => s.workspaceMode)
 
@@ -568,6 +568,18 @@ export default function Dashboard() {
                                     <Mic className="w-4 h-4" />
                                     Sermon Settings
                                 </button>
+                                {isSuperadmin && (
+                                    <button
+                                        onClick={() => setAdminTab('promos')}
+                                        className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'promos'
+                                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                                            : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                                            }`}
+                                    >
+                                        <Ticket className="w-4 h-4" />
+                                        Promo Codes
+                                    </button>
+                                )}
                             </div>
 
                             {/* Content */}
@@ -582,6 +594,9 @@ export default function Dashboard() {
                                     <GlobalSermonListenerSettingsPanel
                                         onClose={() => setShowAdminPanel(false)}
                                     />
+                                )}
+                                {adminTab === 'promos' && isSuperadmin && (
+                                    <PromoCodeManager onClose={() => setShowAdminPanel(false)} />
                                 )}
                             </div>
                         </div>

@@ -23,7 +23,7 @@ import {
     type ReactNode,
 } from 'react'
 import { useAuth } from '@clerk/clerk-react'
-import { useAction, useQuery } from 'convex/react'
+import { useAction, useQuery, useConvex } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { isDesktop } from '../platform'
 
@@ -68,10 +68,23 @@ export interface Entitlements {
     source: 'license' | 'subscription' | 'none'
     /** Force a re-fetch (e.g. after returning from checkout). */
     refresh: () => Promise<void>
-    /** Begin a Pro checkout and open Paystack's hosted page. */
-    startProCheckout: () => Promise<void>
+    /** Begin a Pro checkout and open Paystack's hosted page. Pass a discount code. */
+    startProCheckout: (promoCode?: string) => Promise<void>
     /** Open Paystack's hosted "manage subscription" page. */
     manageSubscription: () => Promise<void>
+    /** Redeem a comp code (free Pro, no payment), then refresh entitlements. */
+    redeemComp: (code: string) => Promise<{ success: boolean; expiresAt: string }>
+    /** Validate a promo code for the current user (does not redeem). */
+    validatePromo: (code: string) => Promise<PromoValidation>
+}
+
+export interface PromoValidation {
+    valid: boolean
+    reason?: string
+    kind?: 'comp' | 'discount'
+    description?: string
+    compDays?: number
+    introCycles?: number
 }
 
 const DEFAULT: Entitlements = {
@@ -85,6 +98,8 @@ const DEFAULT: Entitlements = {
     refresh: async () => {},
     startProCheckout: async () => {},
     manageSubscription: async () => {},
+    redeemComp: async () => ({ success: false, expiresAt: '' }),
+    validatePromo: async () => ({ valid: false }),
 }
 
 const LicenseContext = createContext<Entitlements>(DEFAULT)
@@ -104,8 +119,10 @@ async function openUrl(url: string): Promise<void> {
 
 export function LicenseProvider({ children }: { children: ReactNode }) {
     const { isSignedIn, isLoaded, getToken } = useAuth()
+    const convex = useConvex()
     const initializeProCheckout = useAction(api.paystack.initializeProCheckout)
     const getManageLink = useAction(api.paystack.getSubscriptionManageLink)
+    const redeemCompAction = useAction(api.promos.redeemComp)
 
     // Web path: read the subscription row directly. Skipped on desktop (and
     // when signed out, the query returns null).
@@ -166,15 +183,34 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
         // Web relies on Convex reactivity; nothing to do.
     }, [refreshDesktop])
 
-    const startProCheckout = useCallback(async () => {
-        const { authorizationUrl } = await initializeProCheckout({})
-        await openUrl(authorizationUrl)
-    }, [initializeProCheckout])
+    const startProCheckout = useCallback(
+        async (promoCode?: string) => {
+            const { authorizationUrl } = await initializeProCheckout(
+                promoCode ? { promoCode } : {}
+            )
+            await openUrl(authorizationUrl)
+        },
+        [initializeProCheckout]
+    )
 
     const manageSubscription = useCallback(async () => {
         const { link } = await getManageLink({})
         if (link) await openUrl(link)
     }, [getManageLink])
+
+    const redeemComp = useCallback(
+        async (code: string) => {
+            const result = await redeemCompAction({ code })
+            await refresh()
+            return result
+        },
+        [redeemCompAction, refresh]
+    )
+
+    const validatePromo = useCallback(
+        (code: string) => convex.query(api.promos.validatePromo, { code }),
+        [convex]
+    )
 
     // --- derive entitlements ----------------------------------------------
     let value: Entitlements
@@ -192,6 +228,8 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
             refresh,
             startProCheckout,
             manageSubscription,
+            redeemComp,
+            validatePromo,
         }
     } else {
         // Web: Pro while active/non-renewing/past_due and still within period.
@@ -214,6 +252,8 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
             refresh,
             startProCheckout,
             manageSubscription,
+            redeemComp,
+            validatePromo,
         }
     }
 
