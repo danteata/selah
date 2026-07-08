@@ -63,7 +63,16 @@ pub async fn llm_proxy(req: LlmProxyRequest) -> Result<LlmProxyResponse, String>
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| format!("Read body failed: {}", e))?;
+    // Read as bytes + lossy UTF-8 rather than `.text()`: reqwest's `.text()`
+    // strictly charset-decodes and errors ("error decoding response body") on
+    // any non-UTF-8 byte. Decompression (gzip/brotli/deflate/zstd) is handled
+    // transparently now that those reqwest features are enabled, so `.bytes()`
+    // yields the decoded payload regardless of the provider's Content-Encoding.
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Read body failed: {}", e))?;
+    let body = String::from_utf8_lossy(&bytes).into_owned();
     Ok(LlmProxyResponse { status, body })
 }
 
