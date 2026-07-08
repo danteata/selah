@@ -10,6 +10,7 @@ import { useLocalBackground } from '../hooks/useLocalBackground'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import { AutoFitText } from '../components/live/AutoFitText'
 import { VideoBackground } from '../components/live/VideoBackground'
+import { AudioReactiveBackground } from '../components/live/AudioReactiveBackground'
 import { useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 
@@ -417,6 +418,9 @@ export default function LiveView() {
             ) : (
                 <div className="absolute inset-0 bg-gradient-to-br from-gray-900 to-black" />
             )}
+
+            {/* Audio-reactive motion layer (behind lyrics; self-gates on setting) */}
+            <AudioReactiveBackground />
 
             {/* Content */}
             {slide.layout === 'lower-third' ? (

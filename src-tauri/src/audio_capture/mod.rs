@@ -338,6 +338,58 @@ struct TranscriptionResultEvent {
     start_offset_ms: u32,
 }
 
+/// Continuous audio-feature event for the audio-reactive visualizer + level
+/// meter. Emitted at ~30fps from the capture loop for ALL capture sources
+/// (microphone AND system loopback), so the webview has a live signal even in
+/// native desktop mode where there is no JS-side MediaStream. Mirrors the
+/// `AudioFeatures` shape consumed by the JS `audioFeatures` bus.
+#[derive(Clone, serde::Serialize)]
+struct AudioFeaturesEvent {
+    rms: f32,
+    bass: f32,
+    mid: f32,
+    treble: f32,
+}
+
+/// Compute coarse band energies from a mono sample buffer in the time domain
+/// (no FFT dependency). A one-pole low-pass approximates bass; the high-pass
+/// residual approximates treble. Values are gained and clamped to 0..1 to suit
+/// the visualizer, which smooths them further. Empty input yields silence.
+fn compute_audio_features(samples: &[f32]) -> AudioFeaturesEvent {
+    let n = samples.len();
+    if n == 0 {
+        return AudioFeaturesEvent { rms: 0.0, bass: 0.0, mid: 0.0, treble: 0.0 };
+    }
+
+    // One-pole low-pass coefficient (~bass), high-pass residual (~treble).
+    let a = 0.9_f32;
+    let mut lp = 0.0_f32;
+    let mut sq = 0.0_f32;
+    let mut bass_sq = 0.0_f32;
+    let mut treble_sq = 0.0_f32;
+    for &x in samples {
+        sq += x * x;
+        lp = a * lp + (1.0 - a) * x;
+        bass_sq += lp * lp;
+        let hp = x - lp;
+        treble_sq += hp * hp;
+    }
+    let inv = 1.0 / n as f32;
+    let rms = (sq * inv).sqrt();
+    let bass = (bass_sq * inv).sqrt();
+    let treble = (treble_sq * inv).sqrt();
+
+    // Raw 16kHz mono RMS is small (~0.05-0.2 for speech); gain so typical
+    // levels land in a lively 0.2-0.8 range, then clamp.
+    let g = |v: f32, gain: f32| (v * gain).clamp(0.0, 1.0);
+    AudioFeaturesEvent {
+        rms: g(rms, 4.0),
+        bass: g(bass, 6.0),
+        mid: g(rms, 4.0),
+        treble: g(treble, 8.0),
+    }
+}
+
 /// Handle a complete VAD speech segment.
 ///
 /// When the native engine has a model loaded, transcribe the samples in-process
@@ -486,6 +538,9 @@ pub fn start_capture_with_vad(
         let check_interval_ms = 10; // Check every 10ms for low latency
         // Record session start time for sermon-relative offset calculation
         let session_start = std::time::Instant::now();
+        // Throttle continuous audio-feature emission to ~30fps for the visualizer.
+        let mut last_features_emit = std::time::Instant::now();
+        let features_interval_ms = 33u128;
 
         while is_capturing.load(Ordering::SeqCst) {
             if !vad_enabled.load(Ordering::SeqCst) {
@@ -507,6 +562,14 @@ pub fn start_capture_with_vad(
 
             // Compute sermon-relative offset (ms since capture started)
             let start_offset_ms = session_start.elapsed().as_millis() as u32;
+
+            // Emit continuous audio features for the visualizer / level meter,
+            // throttled. Independent of VAD so it reflects music and instrumental
+            // stretches, and works for system loopback (no JS MediaStream there).
+            if last_features_emit.elapsed().as_millis() >= features_interval_ms {
+                let _ = app.emit("audio-features", compute_audio_features(&samples));
+                last_features_emit = std::time::Instant::now();
+            }
 
             // Process through VAD
             let mut segmenter = vad_segmenter.lock();
