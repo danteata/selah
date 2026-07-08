@@ -22,6 +22,7 @@ import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSerm
 import { classifyTranscriptionError, getUserAction, transcriptionErrorCodes, isRetryableError } from '../../services/sermon-listener/transcriptionErrors'
 import { downloadTranscript, type ExportFormat } from '../../services/sermon-listener/transcriptExport'
 import { generateSermonNotes } from '../../services/sermon-listener/sermonNotes'
+import { SongTrackingControl } from './SongTrackingControl'
 
 interface SermonListenerPanelProps {
     autoDisplay?: boolean
@@ -64,7 +65,6 @@ function SermonListenerPanelInner({
     onHide,
     sermonListener,
 }: SermonListenerPanelInnerProps) {
-    const [autoDisplayEnabled, setAutoDisplayEnabled] = useState(autoDisplay)
     const [showSavedTranscripts, setShowSavedTranscripts] = useState(false)
     const [showSaveDialog, setShowSaveDialog] = useState(false)
     const [showExportPicker, setShowExportPicker] = useState(false)
@@ -83,6 +83,25 @@ function SermonListenerPanelInner({
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const openBibleFromSermon = useAppStore((state) => state.openBibleFromSermon)
+    const visualizerEnabled = useAppStore((state) => state.visualizerEnabled)
+    const setVisualizerEnabled = useAppStore((state) => state.setVisualizerEnabled)
+    const songAutoDetect = useAppStore((state) => state.songTracking.autoDetect)
+    const setSongAutoDetect = useAppStore((state) => state.setSongAutoDetect)
+
+    // Auto-display detected verses. This is the SAME persisted setting the
+    // listener reads (settings.sermonListener.autoDisplay) and the Settings
+    // screen writes — not local state — so the checkbox actually takes effect
+    // and stays in sync everywhere. (Song slide auto-advance is a separate
+    // toggle in SongTrackingControl.)
+    const appSettings = useAppStore((state) => state.settings)
+    const setAppSettings = useAppStore((state) => state.setAppSettings)
+    const autoDisplayEnabled = appSettings.sermonListener?.autoDisplay ?? autoDisplay
+    const setAutoDisplayEnabled = (value: boolean) => {
+        setAppSettings({
+            ...appSettings,
+            sermonListener: { ...appSettings.sermonListener, autoDisplay: value },
+        })
+    }
 
     const {
         corrections,
@@ -94,6 +113,7 @@ function SermonListenerPanelInner({
 
     const {
         isListening,
+        isStarting,
         isSupported,
         transcript,
         transcriptSegments,
@@ -323,17 +343,8 @@ function SermonListenerPanelInner({
                     )}
                 </div>
 
-                {/* Audio waveform visualization - driven by real audio level */}
-                {isListening && captureSource === 'system' && (
-                    <div className="flex items-center gap-1.5 h-6 px-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-[10px] font-medium text-blue-500">
-                        <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                        </span>
-                        System Audio
-                    </div>
-                )}
-                {isListening && captureSource !== 'system' && (
+                {/* Live audio level — driven by the real signal for mic and system */}
+                {isListening && (
                     <div className={`flex items-end justify-center gap-[2px] h-6 min-w-[48px] ${(isSpeechDetected || audioLevel > 0.02) ? 'opacity-100' : 'opacity-35'} transition-opacity duration-200`}>
                         {[4, 7, 5, 9, 6, 8, 5, 7].map((weight, i) => {
                             const minH = 3
@@ -353,7 +364,12 @@ function SermonListenerPanelInner({
 
                 <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium truncate text-gray-700 dark:text-gray-300">
-                        {isListening ? 'Listening...' : isInitializingProvider ? 'Loading model...' : (provider !== 'web-speech' && !providerReady && isSupported) ? 'Starting transcription...' : 'Sermon Listener'}
+                        {isListening
+                            ? (captureSource === 'system' ? 'Listening · System Audio' : 'Listening · Microphone')
+                            : isStarting ? 'Starting…'
+                            : isInitializingProvider ? 'Loading model...'
+                            : (provider !== 'web-speech' && !providerReady && isSupported) ? 'Starting transcription...'
+                            : 'Sermon Listener'}
                     </p>
                     {activeSchedule && (
                         <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
@@ -365,8 +381,8 @@ function SermonListenerPanelInner({
                     )}
                 </div>
 
-                {/* Auto-display toggle - compact */}
-                <label className="flex items-center gap-1 cursor-pointer flex-shrink-0">
+                {/* Auto-display detected verses - compact */}
+                <label className="flex items-center gap-1 cursor-pointer flex-shrink-0" title="Auto-display detected Bible verses on the live output">
                     <input
                         type="checkbox"
                         checked={autoDisplayEnabled}
@@ -374,7 +390,33 @@ function SermonListenerPanelInner({
                         className="w-3 h-3 rounded"
                     />
                     <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                        Auto
+                        Verses
+                    </span>
+                </label>
+
+                {/* Auto-detect songs from the library - compact */}
+                <label className="flex items-center gap-1 cursor-pointer flex-shrink-0" title="Detect the song being sung and pull it up from the library automatically">
+                    <input
+                        type="checkbox"
+                        checked={songAutoDetect}
+                        onChange={(e) => setSongAutoDetect(e.target.checked)}
+                        className="w-3 h-3 rounded"
+                    />
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                        Songs
+                    </span>
+                </label>
+
+                {/* Audio-reactive visuals toggle - compact */}
+                <label className="flex items-center gap-1 cursor-pointer flex-shrink-0" title="Audio-reactive motion background on the live output">
+                    <input
+                        type="checkbox"
+                        checked={visualizerEnabled}
+                        onChange={(e) => setVisualizerEnabled(e.target.checked)}
+                        className="w-3 h-3 rounded"
+                    />
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                        Visuals
                     </span>
                 </label>
 
@@ -390,20 +432,28 @@ function SermonListenerPanelInner({
                     </button>
                 )}
 
-                {/* Start/Stop button */}
+                {/* Start/Stop button. `isStarting` covers the window between the
+                    click and the provider's onStart (native spins up a model +
+                    capture first), so the button never falsely reads "Start"
+                    while a session is launching. */}
                 <button
-                    onClick={isListening ? stop : start}
-                    disabled={!isListening && (isInitializingProvider || (provider !== 'web-speech' && !providerReady))}
+                    onClick={isListening || isStarting ? stop : start}
+                    disabled={!isListening && !isStarting && (isInitializingProvider || (provider !== 'web-speech' && !providerReady))}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-all shadow-sm flex-shrink-0 ${isListening
                         ? 'bg-red-500 hover:bg-red-600 text-white'
-                        : isInitializingProvider || (provider !== 'web-speech' && !providerReady)
-                            ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-wait'
-                            : 'bg-[var(--accent-teal)] hover:brightness-110 text-white'
+                        : isStarting
+                            ? 'bg-amber-500 text-white cursor-wait'
+                            : isInitializingProvider || (provider !== 'web-speech' && !providerReady)
+                                ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-wait'
+                                : 'bg-[var(--accent-teal)] hover:brightness-110 text-white'
                     }`}
                 >
-                    {isListening ? 'Stop' : isInitializingProvider ? 'Loading model...' : (provider !== 'web-speech' && !providerReady) ? 'Starting...' : 'Start'}
+                    {isListening ? 'Stop' : isStarting ? 'Starting…' : isInitializingProvider ? 'Loading model...' : (provider !== 'web-speech' && !providerReady) ? 'Starting...' : 'Start'}
                 </button>
             </div>
+
+            {/* Predictive song-lyric auto-advance control (shown when a song is live) */}
+            <SongTrackingControl />
 
             {/* Error message with structured actions */}
             {error && (() => {

@@ -8,6 +8,7 @@ import { NativeModelPicker } from './NativeModelPicker'
 import { LLM_PROVIDERS, DEFAULT_LLM_PROVIDER_ID, getLlmProvider } from '../../services/sermon-listener/llmProviders'
 import { listModels } from '../../services/sermon-listener/llmClient'
 import { Mic, Monitor, RefreshCw, Info, Loader2 } from 'lucide-react'
+import { AudioLevelTest } from './AudioLevelTest'
 
 const CUSTOM_MODEL_OPTION = '__custom__'
 
@@ -18,6 +19,11 @@ interface SermonListenerSettingsProps {
 export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps = {}) {
     const settings = useAppStore((state) => state.settings)
     const setAppSettings = useAppStore((state) => state.setAppSettings)
+    const songAutoDetect = useAppStore((state) => state.songTracking.autoDetect)
+    const setSongAutoDetect = useAppStore((state) => state.setSongAutoDetect)
+    const songExternalLyrics = useAppStore((state) => state.songTracking.externalLyrics)
+    const setSongExternalLyrics = useAppStore((state) => state.setSongExternalLyrics)
+    const llmConfigured = useAppStore((state) => !!(state.settings.llm?.enabled && state.settings.llm?.baseUrl && state.settings.llm?.model))
     const { systemAudioSupported } = useNativeAudioCapture()
 
     const [audioFeedback, setAudioFeedbackState] = useState(() => audioFeedbackService.isEnabled())
@@ -248,8 +254,52 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDevices ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
+
+                    {/* Live signal test for the selected microphone */}
+                    <div className="mt-3">
+                        <AudioLevelTest deviceId={activeMicId || undefined} />
+                    </div>
                 </div>
             )}
+
+            {/* Song detection */}
+            <div>
+                <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Song detection</label>
+                <div className="space-y-2">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={songAutoDetect}
+                            onChange={(e) => setSongAutoDetect(e.target.checked)}
+                            className="w-4 h-4 rounded mt-0.5"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                            Auto-detect songs from your library
+                            <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                                When singing starts and nothing is on screen, identify the song and pull it up.
+                            </span>
+                        </span>
+                    </label>
+
+                    <label className={`flex items-start gap-2 ${llmConfigured ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+                        <input
+                            type="checkbox"
+                            checked={songExternalLyrics && llmConfigured}
+                            disabled={!llmConfigured}
+                            onChange={(e) => setSongExternalLyrics(e.target.checked)}
+                            className="w-4 h-4 rounded mt-0.5"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                            Look up unknown songs online
+                            <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                                {llmConfigured
+                                    ? 'If a song isn’t in your library, find it via AI + LRCLIB and import it. Only display songs your church is licensed for (e.g. CCLI).'
+                                    : 'Requires an AI provider configured below.'}
+                            </span>
+                        </span>
+                    </label>
+                </div>
+            </div>
 
             {/* Language */}
             <div>
