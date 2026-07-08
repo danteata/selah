@@ -13,6 +13,8 @@ import type { AnalyticsProviderType as AnalyticsType } from './services/analytic
 import { AnalyticsEventType } from './services/analytics/types'
 import { useAppStore } from './store/appStore'
 import { useOAuthCallback } from './hooks/useOAuthCallback'
+import { seedLocalSongs } from './services/songLibrary/localSongSeeder'
+import { notifySongsChanged } from './hooks/useSongs'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
 // Lazy-load all route components so the initial JS chunk stays small.
@@ -271,6 +273,22 @@ function App() {
         getVersion().then(setVersion).catch(() => {
             // Silently ignore — version is informational only
         })
+    }, [])
+
+    useEffect(() => {
+        // Seed the structured EasyWorship song corpus into the local library
+        // for now (Convex bulk load comes later). Idempotent + version-guarded.
+        // Gated to dev and desktop so web-prod visitors don't download the
+        // bundled asset while this feature is still in development.
+        if (!import.meta.env.DEV && !isDesktop()) return
+        const ac = new AbortController()
+        seedLocalSongs({ signal: ac.signal }).then((r) => {
+            if (r.seeded > 0) {
+                console.info(`[songs] Seeded ${r.seeded} songs into local library.`)
+                notifySongsChanged()
+            }
+        })
+        return () => ac.abort()
     }, [])
 
     // Deep-link listener for Tauri OAuth callbacks is mounted inside

@@ -18,6 +18,8 @@ import { useSlideCreation } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
+import { audioFeatures } from '../services/visualizer/audioFeatures'
+import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
 import type { TranscriptionProvider, TranscriptionStatus, WhisperSegmentTiming } from '../services/sermon-listener'
 import { detectVerses,
     verseToLabel,
@@ -96,6 +98,8 @@ export interface SermonListenerOptions {
 export interface SermonListenerState {
     /** Whether the listener is active */
     isListening: boolean
+    /** Whether a session is starting (clicked Start, provider spinning up) */
+    isStarting: boolean
     /** Whether speech recognition is supported */
     isSupported: boolean
     /** Current full transcript */
@@ -234,6 +238,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // State
     const [isListening, setIsListening] = useState(false)
+    // True between clicking Start and the provider's onStart firing (native
+    // capture spins up a model + Rust stream first). Without this the button
+    // reads "Start" during that window even though a session is launching.
+    const [isStarting, setIsStarting] = useState(false)
     const [isSupported, setIsSupported] = useState(false)
     const [transcript, setTranscript] = useState('')
     const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([])
@@ -270,6 +278,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const audioContextRef = useRef<AudioContext | null>(null)
     const audioStreamRef = useRef<MediaStream | null>(null)
     const audioLevelRafRef = useRef<number | null>(null)
+    // Cleanup for the desktop native audio-features subscription (visualizer + meter).
+    const nativeFeaturesUnlistenRef = useRef<(() => void) | null>(null)
 
     // Voice command state
     const [activeBibleVersion, setActiveBibleVersion] = useState(defaultBibleVersion)
@@ -391,6 +401,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Ref for start function to avoid TDZ issues (start is defined after processTranscript)
     const startRef = useRef<() => Promise<boolean>>(async () => false)
+    const stopRef = useRef<() => void>(() => {})
     const versionChangeRequestIdRef = useRef(0)
     const verseLookupRequestIdRef = useRef(0)
     const activeLookupCountRef = useRef(0)
@@ -408,6 +419,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const startAudioAnalyser = useCallback(async () => {
         try {
             const userCaptureSource = sermonSettings?.captureSource || 'microphone'
+
+            // Desktop with Rust capture: the native engine captures BOTH the
+            // microphone and system loopback in Rust and emits `audio-features`
+            // (Phase 5). Drive the meter + visualizer from that event rather
+            // than a WebView getUserMedia stream. This (a) works for system
+            // loopback, which getUserMedia can't reach, (b) avoids a duplicate
+            // mic device open, and (c) means `tauri dev` never touches a
+            // privacy-sensitive WebView API, so it won't hit the macOS TCC
+            // hard-crash. `system` always goes here because only Rust can
+            // capture speaker output.
+            if (isDesktop() && (provider === 'native' || userCaptureSource === 'system')) {
+                setCaptureSource(userCaptureSource === 'system' ? 'system' : 'microphone')
+                const unlisten = await startNativeAudioFeatures((rms) => setAudioLevel(rms))
+                nativeFeaturesUnlistenRef.current = unlisten
+                return
+            }
+
+            // Web, or a desktop sidecar/cloud provider using a browser stream:
+            // use a getUserMedia AnalyserNode (feeds both the level meter and
+            // the visualizer bus — see the analyser poll below).
             let stream = unifiedTranscriptionService.getMediaStream()
 
             if (!stream) {
@@ -470,13 +501,16 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 const avg = sum / dataArray.length
                 const level = Math.min(avg / 128, 1)
                 setAudioLevel(level)
+                // Feed the audio-reactive visualizer from this same analyser so
+                // we don't open a second audio stream (Phase 4).
+                audioFeatures.publish(dataArray)
                 audioLevelRafRef.current = requestAnimationFrame(poll)
             }
             poll()
         } catch (e) {
             console.warn('[useSermonListener] Could not start audio analyser:', e)
         }
-    }, [sermonSettings?.selectedMicrophoneId, sermonSettings?.captureSource])
+    }, [sermonSettings?.selectedMicrophoneId, sermonSettings?.captureSource, provider])
 
     const stopAudioAnalyser = useCallback(() => {
         if (audioLevelRafRef.current != null) {
@@ -484,6 +518,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             audioLevelRafRef.current = null
         }
         audioAnalyserRef.current = null
+        audioFeatures.reset()
+        if (nativeFeaturesUnlistenRef.current) {
+            nativeFeaturesUnlistenRef.current()
+            nativeFeaturesUnlistenRef.current = null
+        }
         if (audioContextRef.current) {
             audioContextRef.current.close().catch(() => {})
             audioContextRef.current = null
@@ -1863,6 +1902,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
 
         console.log('[useSermonListener] Starting transcription with provider:', provider)
+        setIsStarting(true)
 
         // Prevent device from sleeping during sermon recording
         startKeepAwake().catch(err => {
@@ -1882,6 +1922,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             console.warn('[useSermonListener] AudioContext unlock failed:', e)
         }
 
+        // `unifiedTranscriptionService` is a module-level singleton, so its
+        // internal `isListening` can outlive our React state (e.g. after this
+        // provider remounts on navigation). When that happens our state resets
+        // to false but the service still thinks it's running, so start() would
+        // no-op with "Already listening" and the button would stay on "Start".
+        // Reconcile by stopping the stale session before starting fresh.
+        if (unifiedTranscriptionService.getStatus().isListening) {
+            console.warn('[useSermonListener] Reconciling stale listening state before start')
+            try {
+                await unifiedTranscriptionService.stop()
+            } catch (e) {
+                console.warn('[useSermonListener] Failed to stop stale session:', e)
+            }
+        }
+
         const success = await unifiedTranscriptionService.start({
             provider,
             language,
@@ -1890,7 +1945,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             continuous: true,
             interimResults: true,
             useVAD: globalSettings?.sermonListener_useVAD,
-            initialPrompt: buildBibleInitialPrompt(),
+            // The Bible-biased prompt steers Whisper toward scripture vocabulary,
+            // which garbles sung lyrics and surfaces spurious verses. When song
+            // auto-detect is on (worship mode), use a neutral prompt so lyrics
+            // transcribe cleanly; keep the scripture bias for sermon mode.
+            initialPrompt: useAppStore.getState().songTracking.autoDetect ? '' : buildBibleInitialPrompt(),
             enableStreaming: true,
             onPartialSegment: (segment) => {
                 console.log('[useSermonListener] Partial segment:', segment.text.substring(0, 50))
@@ -1901,6 +1960,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             },
             onStart: () => {
                 setIsListening(true)
+                setIsStarting(false)
                 setError(null)
                 audioFeedbackService.playStart()
                 sessionStartTimeRef.current = Date.now()
@@ -2033,6 +2093,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 const resolvedError = message || err
                 setError(resolvedError)
                 setIsListening(false)
+                setIsStarting(false)
                 onError?.(resolvedError)
                 trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, {
                     provider,
@@ -2050,6 +2111,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             },
         })
 
+        // Safety net: if the provider resolved without ever firing onStart
+        // (e.g. it failed silently), don't leave the button stuck on "Starting".
+        setIsStarting(false)
         return success
     }, [
         isSupported,
@@ -2094,6 +2158,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         if (wasListening) audioFeedbackService.playStop()
         unifiedTranscriptionService.stop()
         setIsListening(false)
+        setIsStarting(false)
         setInterimTranscript('')
         setIsSpeechDetected(false)
         stopKeepAwake().catch((err: unknown) => {
@@ -2107,6 +2172,40 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             })
         }
     }, [provider, trackEvent])
+
+    // Keep stopRef current for the watchdog (stop is defined just above).
+    useEffect(() => {
+        stopRef.current = stop
+    }, [stop])
+
+    // Watchdog: recover from a silently-dead capture. While listening, the
+    // audio-features bus is fed continuously (Rust on desktop, the analyser on
+    // web) — even during silence, since the mic still delivers buffers. If that
+    // signal goes stale for a sustained window *after* we've seen it flowing,
+    // the capture has died under us (the "Stop button but nothing happening"
+    // case) and we restart it automatically instead of making the operator do it.
+    useEffect(() => {
+        if (!isListening) return
+        let seenSignal = false
+        let lastRecoveryMs = 0
+        const STALE_MS = 9000
+        const timer = setInterval(() => {
+            if (!audioFeatures.isStale(2000)) {
+                seenSignal = true
+                return
+            }
+            if (!seenSignal) return // never started flowing — not a mid-session death
+            if (!audioFeatures.isStale(STALE_MS)) return
+            const nowMs = typeof performance !== 'undefined' ? performance.now() : 0
+            if (nowMs - lastRecoveryMs < 30000) return // debounce restarts
+            lastRecoveryMs = nowMs
+            seenSignal = false
+            console.warn('[useSermonListener] Audio signal lost mid-session — restarting capture')
+            stopRef.current()
+            setTimeout(() => { void startRef.current() }, 400)
+        }, 2500)
+        return () => clearInterval(timer)
+    }, [isListening])
 
     /**
      * Reset state
@@ -2228,6 +2327,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     return {
         // State
         isListening,
+        isStarting,
         isSupported,
         transcript,
         transcriptSegments,

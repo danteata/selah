@@ -17,6 +17,7 @@ import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/Bi
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import { VideoBackground } from './VideoBackground'
+import { AudioReactiveBackground } from './AudioReactiveBackground'
 
 // Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
 function parseTimeStringToSeconds(timeStr: string): number {
@@ -737,6 +738,7 @@ export function LiveOutput() {
                                                 className="absolute inset-0 w-full h-full object-cover"
                                             />
                                         )}
+                                        <AudioReactiveBackground />
                                         {liveSlide.type === 'countdown' ? (
                                             <div className="absolute inset-0 flex items-center justify-center p-6">
                                                 <AutoFitText
