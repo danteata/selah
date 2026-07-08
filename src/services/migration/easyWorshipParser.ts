@@ -639,11 +639,26 @@ export async function parseEasyWorshipFile(file: File): Promise<{
  * Convert ParsedSong to SelahSongImport format
  */
 export function toSelahSong(song: ParsedSong): SelahSongImport {
+    // Prefer sections already derived upstream; otherwise derive from the
+    // separated verse blocks (labels were folded into `verses` by the RTF
+    // parser, so we hand them in as unlabelled blocks and let the deriver's
+    // repeat-detection recover choruses). Falls back to freeform lyrics.
+    let sections = song.sections;
+    let defaultArrangement = song.defaultArrangement;
+    if (!sections || sections.length === 0) {
+        const blocks = (song.verses ?? []).map(content => ({ label: '', content }));
+        const derived = deriveSongStructure(song.lyrics, blocks);
+        sections = derived.sections;
+        defaultArrangement = derived.defaultArrangement;
+    }
+
     return {
         title: song.title,
         artist: song.author,
         lyrics: song.lyrics,
         verses: song.verses,
+        sections,
+        defaultArrangement,
         author: song.author,
         copyright: song.copyright,
         ccli: song.ccli,
@@ -652,3 +667,4 @@ export function toSelahSong(song: ParsedSong): SelahSongImport {
 
 // Import the type for SelahSongImport
 import type { SelahSongImport } from './types';
+import { deriveSongStructure } from '../../lib/songSections';

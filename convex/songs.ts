@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import { songSectionValidator } from "./schema";
 
 // Get all songs for current user (fallback when no churchId)
 export const getAllSongsForUser = query({
@@ -124,6 +125,8 @@ export const createSong = mutation({
         cover: v.optional(v.string()),
         author: v.optional(v.string()),
         verses: v.optional(v.array(v.string())),
+        sections: v.optional(v.array(songSectionValidator)),
+        defaultArrangement: v.optional(v.array(v.string())),
         isPublic: v.optional(v.boolean()),
         churchId: v.optional(v.string()),
     },
@@ -152,6 +155,8 @@ export const createSong = mutation({
             cover: args.cover,
             author: args.author,
             verses: args.verses,
+            sections: args.sections,
+            defaultArrangement: args.defaultArrangement,
             isPublic: args.isPublic || false,
             createdBy: user._id!,
             churchId: args.churchId || user.churchId,
@@ -175,6 +180,8 @@ export const updateSong = mutation({
             cover: v.optional(v.string()),
             author: v.optional(v.string()),
             verses: v.optional(v.array(v.string())),
+            sections: v.optional(v.array(songSectionValidator)),
+            defaultArrangement: v.optional(v.array(v.string())),
             isPublic: v.optional(v.boolean()),
         }),
     },
