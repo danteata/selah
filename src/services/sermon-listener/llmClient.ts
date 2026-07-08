@@ -54,7 +54,7 @@ function isTauri(): boolean {
  * `llm_proxy` command to bypass the webview's CORS restrictions (most provider
  * APIs reject browser-origin requests); on web it uses fetch directly.
  */
-async function httpRequest(
+export async function httpRequest(
     url: string,
     init: { method: 'GET' | 'POST'; headers: Record<string, string>; body?: string; timeoutMs: number; signal?: AbortSignal },
 ): Promise<RawResponse> {

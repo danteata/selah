@@ -18,7 +18,7 @@ tauri-plugin-shell = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "gzip", "brotli", "deflate", "zstd"] }
 cpal = "0.15"
 rubato = "0.15"  # For audio resampling
 parking_lot = "0.12"  # For thread-safe mutex

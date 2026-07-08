@@ -6,6 +6,7 @@ import { ContextPanel } from './ContextPanel'
 import { MobileBottomNav } from './MobileBottomNav'
 import { QuickBibleBar } from '../bible/QuickBibleBar'
 import { SermonListenerProvider } from '../sermon-listener/SermonListenerContext'
+import { SongTrackerBridge } from '../sermon-listener/SongTrackerBridge'
 import { useAppStore } from '../../store/appStore'
 import type { Schedule } from '../../types'
 
@@ -63,6 +64,7 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
 
     return (
         <SermonListenerProvider>
+        <SongTrackerBridge />
         <div className={`studio-shell ${isDark ? 'dark' : ''}`}>
             {/* Subtle Background Elements */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">

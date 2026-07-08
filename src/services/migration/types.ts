@@ -2,6 +2,8 @@
  * Migration Types for EasyWorship to Selah
  */
 
+import type { SongSection } from '../../types';
+
 // EasyWorship 6/7 song format from Songs.db
 export interface EWSongSQLite {
     rowid?: number;                         // Primary key
@@ -61,6 +63,9 @@ export interface ParsedSong {
     author: string;
     lyrics: string;
     verses: string[];
+    // Structured sections + play order for the predictive lyric tracker.
+    sections?: SongSection[];
+    defaultArrangement?: string[];
     copyright?: string;
     ccli?: string;
     alternateTitle?: string;
@@ -76,6 +81,8 @@ export interface SelahSongImport {
     artist: string;
     lyrics: string;
     verses: string[];
+    sections?: SongSection[];
+    defaultArrangement?: string[];
     author?: string;
     copyright?: string;
     ccli?: string;

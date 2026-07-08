@@ -27,7 +27,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 // Cross-instance refresh signal — fired whenever any useSongs() instance mutates
 // IndexedDB so every other instance (Songs panel, MusicBrowser, etc.) reloads.
 const songsChangeTarget = new EventTarget()
-const notifySongsChanged = () => songsChangeTarget.dispatchEvent(new Event('songs-changed'))
+export const notifySongsChanged = () => songsChangeTarget.dispatchEvent(new Event('songs-changed'))
 
 export interface UseSongsReturn {
     songs: Song[]
@@ -170,6 +170,8 @@ export function useSongs(): UseSongsReturn {
                 cover: songData.cover,
                 author: songData.author,
                 verses: songData.verses,
+                sections: songData.sections,
+                defaultArrangement: songData.defaultArrangement,
                 isPublic,
                 churchId,
                 createdAt: new Date().toISOString(),
@@ -198,6 +200,8 @@ export function useSongs(): UseSongsReturn {
                             cover: songData.cover,
                             author: songData.author,
                             verses: songData.verses,
+                            sections: songData.sections,
+                            defaultArrangement: songData.defaultArrangement,
                             isPublic,
                             churchId,
                         }),
@@ -273,6 +277,8 @@ export function useSongs(): UseSongsReturn {
                                 cover: updateData.cover,
                                 author: updateData.author,
                                 verses: updateData.verses,
+                                sections: updateData.sections,
+                                defaultArrangement: updateData.defaultArrangement,
                                 isPublic: updateData.isPublic,
                             },
                         }),

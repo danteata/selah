@@ -1,6 +1,27 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+// Structured song section — mirrors SongSection in src/types/index.ts.
+// Additive/optional wherever it appears; songs without it fall back to the
+// freeform `lyrics` string. Used by the predictive lyric tracker.
+export const songSectionValidator = v.object({
+    id: v.string(),
+    type: v.union(
+        v.literal("verse"),
+        v.literal("chorus"),
+        v.literal("prechorus"),
+        v.literal("bridge"),
+        v.literal("tag"),
+        v.literal("intro"),
+        v.literal("ending"),
+        v.literal("other"),
+    ),
+    label: v.optional(v.string()),
+    number: v.optional(v.number()),
+    lines: v.array(v.string()),
+    slideId: v.optional(v.string()),
+});
+
 export default defineSchema({
     // Users table
     users: defineTable({
@@ -182,6 +203,8 @@ export default defineSchema({
                 cover: v.optional(v.string()),
                 author: v.optional(v.string()),
                 verses: v.optional(v.array(v.string())),
+                sections: v.optional(v.array(songSectionValidator)),
+                defaultArrangement: v.optional(v.array(v.string())),
                 isPublic: v.optional(v.boolean()),
                 createdBy: v.optional(v.string()),
                 churchId: v.optional(v.string()),
@@ -274,6 +297,10 @@ export default defineSchema({
         cover: v.optional(v.string()),
         author: v.optional(v.string()),
         verses: v.optional(v.array(v.string())),
+        // Structured lyrics for the predictive tracker (additive; see SongSection).
+        sections: v.optional(v.array(songSectionValidator)),
+        // Default play order as a list of section ids, e.g. ["v1","c1","v2","c1"].
+        defaultArrangement: v.optional(v.array(v.string())),
         copyright: v.optional(v.string()),
         ccli: v.optional(v.string()),
         isPublic: v.optional(v.boolean()),
@@ -550,6 +577,12 @@ export default defineSchema({
         isBlank: v.optional(v.boolean()),
         activeAlertId: v.optional(v.string()),
         activeOverlay: v.optional(v.string()),
+        // Predictive lyric tracking (Phase 1 groundwork): the song currently
+        // being tracked and the play order in effect for this service, which
+        // defaults to the song's `defaultArrangement` but can be edited live.
+        // Empty/absent arrangement => freeform tracking across all sections.
+        trackedSongId: v.optional(v.string()),
+        songArrangement: v.optional(v.array(v.string())),
         status: v.union(v.literal("active"), v.literal("ended")),
         startedAt: v.string(),
         endedAt: v.optional(v.string()),

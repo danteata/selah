@@ -221,6 +221,38 @@ export interface Hymn {
     meta: string
 }
 
+/**
+ * Structural type of a song section, used by the predictive lyric tracker to
+ * key positions and by the arrangement editor to label blocks.
+ */
+export type SongSectionType =
+    | 'verse'
+    | 'chorus'
+    | 'prechorus'
+    | 'bridge'
+    | 'tag'
+    | 'intro'
+    | 'ending'
+    | 'other'
+
+/**
+ * A structured block of a song (a verse, chorus, etc.). This is the tracker's
+ * unit of "position": it knows which section and which line within it is live.
+ * Derived from the freeform `Song.lyrics` string via parseLyricsIntoSections().
+ */
+export interface SongSection {
+    /** Stable id within the song, e.g. "v1", "c1", "b1". */
+    id: string
+    type: SongSectionType
+    /** Human label, e.g. "Verse 1", "Chorus". */
+    label?: string
+    /** Ordinal for repeated section types (Verse 1 vs Verse 2). */
+    number?: number
+    lines: string[]
+    /** Optional link to the slides row used to render this section. */
+    slideId?: string
+}
+
 export interface Song {
     _id?: string
     id: string
@@ -231,6 +263,17 @@ export interface Song {
     cover?: string
     author?: string
     verses?: string[]
+    /**
+     * Structured sections parsed from `lyrics`. Optional and additive — songs
+     * without this fall back to the freeform `lyrics`/`verses` splitting.
+     */
+    sections?: SongSection[]
+    /**
+     * Default play order as a list of `SongSection.id`s, e.g.
+     * ["v1","c1","v2","c1","c1","b1","c1"]. A live session may override this
+     * with its own arrangement. Absent => freeform/section-order playback.
+     */
+    defaultArrangement?: string[]
     isPublic?: boolean
     createdBy?: string
     churchId?: string

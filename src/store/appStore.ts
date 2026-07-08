@@ -34,6 +34,64 @@ export interface ModalState {
     lowerThirdEditor: boolean
 }
 
+/** One step of the live arrangement, for the operator's position chips. */
+export interface SongTrackingStep {
+    stepIndex: number
+    sectionId: string
+    label: string
+    /** Live slide this section maps to, if the song is on the output. */
+    slideId: string | null
+}
+
+/** Live status of the predictive song-lyric tracker, for the operator UI. */
+export interface SongTrackingStatus {
+    songId: string | null
+    songTitle: string | null
+    phase: 'idle' | 'searching' | 'tracking' | 'lost'
+    confidence: number
+    /** Section currently shown / led-to on the projector. */
+    displaySectionId: string | null
+    /** Section we believe the singer is actually on. */
+    singerSectionId: string | null
+    /** Human label of where we believe the singer is, e.g. "Chorus". */
+    singerLabel: string | null
+    /** The expanded arrangement (stable per song) for position chips. */
+    arrangement: SongTrackingStep[]
+}
+
+export interface SongTrackingState {
+    /** Master opt-in — the tracker never moves the live slide unless true. */
+    enabled: boolean
+    /** Temporarily freeze auto-advance without losing tracking. */
+    locked: boolean
+    /** Auto-identify a song from the library and pull it up when singing starts
+     *  and no song is displayed (the "Searching" phase). */
+    autoDetect: boolean
+    /** When auto-detect finds no library match, look the song up online
+     *  (LLM-identify → LRCLIB) and import it. Off by default; needs an LLM
+     *  configured; carries a copyright caveat. */
+    externalLyrics: boolean
+    /** Live readout (not persisted). */
+    status: SongTrackingStatus
+}
+
+export const DEFAULT_SONG_TRACKING: SongTrackingState = {
+    enabled: false,
+    locked: false,
+    autoDetect: false,
+    externalLyrics: false,
+    status: {
+        songId: null,
+        songTitle: null,
+        phase: 'idle',
+        confidence: 0,
+        displaySectionId: null,
+        singerSectionId: null,
+        singerLabel: null,
+        arrangement: [],
+    },
+}
+
 export interface AppState {
     // State
     activeAdvert: Advert | null
@@ -43,6 +101,10 @@ export interface AppState {
     liveOutputSlidesId: string[] | null
     sharedQueueSlideIds: string[]
     liveSlideId: string | null
+    // Predictive song-lyric auto-advance (Phase 2 wiring).
+    songTracking: SongTrackingState
+    // Audio-reactive motion-graphics layer on the live output (Phase 4).
+    visualizerEnabled: boolean
     emitter: Emitter<Record<EventType, unknown>> | null
     settings: AppSettings
     backgroundVideos: BackgroundVideo[]
@@ -141,6 +203,8 @@ const initialState: AppState = {
     liveOutputSlidesId: null,
     sharedQueueSlideIds: [],
     liveSlideId: null,
+    songTracking: DEFAULT_SONG_TRACKING,
+    visualizerEnabled: false,
     emitter: null,
     settings: defaultSettings,
     backgroundVideos: [],
@@ -212,6 +276,12 @@ interface AppStore extends AppState {
     addSharedQueueSlideIds: (slideIds: string[]) => void
     removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string | null) => void
+    setSongTrackingEnabled: (enabled: boolean) => void
+    setSongTrackingLocked: (locked: boolean) => void
+    setSongAutoDetect: (autoDetect: boolean) => void
+    setSongExternalLyrics: (externalLyrics: boolean) => void
+    setSongTrackingStatus: (status: SongTrackingStatus) => void
+    setVisualizerEnabled: (enabled: boolean) => void
     setEmitter: (emitter: Emitter<Record<EventType, unknown>> | null) => void
     setAppSettings: (settings: AppSettings) => void
     setSlideStyles: (styles: SlideStyle) => void
@@ -545,6 +615,30 @@ export const useAppStore = create<AppStore>()(
 
             setLiveSlide: (slideId) => {
                 set({ liveSlideId: slideId })
+            },
+
+            setSongTrackingEnabled: (enabled) => {
+                set((state) => ({ songTracking: { ...state.songTracking, enabled } }))
+            },
+
+            setSongTrackingLocked: (locked) => {
+                set((state) => ({ songTracking: { ...state.songTracking, locked } }))
+            },
+
+            setSongAutoDetect: (autoDetect) => {
+                set((state) => ({ songTracking: { ...state.songTracking, autoDetect } }))
+            },
+
+            setSongExternalLyrics: (externalLyrics) => {
+                set((state) => ({ songTracking: { ...state.songTracking, externalLyrics } }))
+            },
+
+            setSongTrackingStatus: (status) => {
+                set((state) => ({ songTracking: { ...state.songTracking, status } }))
+            },
+
+            setVisualizerEnabled: (enabled) => {
+                set({ visualizerEnabled: enabled })
             },
 
             setEmitter: (emitter) => {
@@ -1091,6 +1185,15 @@ export const useAppStore = create<AppStore>()(
                 panelPosition: state.panelPosition,
                 activeNavSection: state.activeNavSection,
                 workspaceMode: state.workspaceMode,
+                // Persist the operator's opt-in/lock, but never the live status.
+                songTracking: {
+                    enabled: state.songTracking.enabled,
+                    locked: state.songTracking.locked,
+                    autoDetect: state.songTracking.autoDetect,
+                    externalLyrics: state.songTracking.externalLyrics,
+                    status: DEFAULT_SONG_TRACKING.status,
+                },
+                visualizerEnabled: state.visualizerEnabled,
             }),
         }
     )
