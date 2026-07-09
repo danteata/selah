@@ -120,6 +120,20 @@ pub async fn send_slide_to_live(
     state.emit_to_live_window("slide-update", payload)
 }
 
+/// Send display-settings update (font, verse ref position, etc.) to live window
+#[tauri::command]
+pub async fn send_settings_to_live(
+    state: State<'_, Arc<MultiMonitorState>>,
+    settings: serde_json::Value,
+) -> Result<(), MultiMonitorError> {
+    let payload = serde_json::json!({
+        "type": "settings-update",
+        "settings": settings,
+    });
+
+    state.emit_to_live_window("settings-update", payload)
+}
+
 /// Send clear/blank command to live window
 #[tauri::command]
 pub async fn clear_live_output(

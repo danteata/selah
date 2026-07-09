@@ -839,7 +839,7 @@ export function LiveOutput() {
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(20px, 4cqw, 56px)',
-                                                            lineHeight: 1.3,
+                                                            lineHeight: 1.05,
                                                             fontWeight: 600,
                                                         }}
                                                         dangerouslySetInnerHTML={{ __html: liveRefHtml }}
@@ -854,7 +854,7 @@ export function LiveOutput() {
                                                         fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                         textAlign: (liveSlide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
                                                         textTransform: (liveSlide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
-                                                        lineHeight: 1.2,
+                                                        lineHeight: 1.0,
                                                         textShadow: liveSlide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
                                                     }}
                                                 />
@@ -864,7 +864,7 @@ export function LiveOutput() {
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             fontSize: 'clamp(20px, 4cqw, 56px)',
-                                                            lineHeight: 1.3,
+                                                            lineHeight: 1.05,
                                                             fontWeight: 600,
                                                         }}
                                                         dangerouslySetInnerHTML={{ __html: liveRefHtml }}

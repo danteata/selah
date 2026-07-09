@@ -115,9 +115,27 @@ export default function LiveView() {
                     setCurrentSlideId('')
                 })
 
+                // Listen for display-settings updates (font, verse ref
+                // position, etc.) — the desktop live window is a separate
+                // native WebviewWindow, so it can't rely on the
+                // BroadcastChannel/localStorage path below to receive
+                // settings changes made after it opened.
+                const unlistenSettings = await nativeMultiMonitorService.onLiveWindowEvent<{
+                    settings: LiveState['settings']
+                }>('settings-update', (payload) => {
+                    setLiveState(prev => ({
+                        slides: prev?.slides ?? [],
+                        liveSlideId: prev?.liveSlideId ?? null,
+                        settings: payload.settings,
+                        overlay: prev?.overlay,
+                        alert: prev?.alert,
+                    }))
+                })
+
                 return () => {
                     unlistenSlide()
                     unlistenClear()
+                    unlistenSettings()
                 }
             }
             return () => { }
@@ -589,7 +607,7 @@ export default function LiveView() {
                                     style={{
                                         fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                         fontSize: 'clamp(28px, 3.2vw, 80px)',
-                                        lineHeight: 1.3,
+                                        lineHeight: 1.05,
                                         fontWeight: 600,
                                         letterSpacing: '0.01em',
                                         textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
@@ -609,7 +627,7 @@ export default function LiveView() {
                                     fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                     textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
                                     textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
-                                    lineHeight: 1.2,
+                                    lineHeight: 1.0,
                                     textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
                                 }}
                             />
@@ -619,7 +637,7 @@ export default function LiveView() {
                                     style={{
                                         fontFamily: slide.slideStyle?.font || settings.defaultFont,
                                         fontSize: 'clamp(28px, 3.2vw, 80px)',
-                                        lineHeight: 1.3,
+                                        lineHeight: 1.05,
                                         fontWeight: 600,
                                         letterSpacing: '0.01em',
                                         textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,

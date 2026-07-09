@@ -42,6 +42,7 @@ export interface UseNativeMultiMonitorReturn {
     toggleFullscreen: () => Promise<boolean>
     moveToMonitor: (monitorId: string) => Promise<void>
     sendSlideToLive: (slideId: string, slideData?: Record<string, unknown>) => Promise<void>
+    sendSettingsToLive: (settings: Record<string, unknown>) => Promise<void>
     clearLiveOutput: (mode?: 'clear' | 'black' | 'logo') => Promise<void>
     identifyScreen: (monitorId: string) => Promise<void>
 
@@ -312,6 +313,15 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         }
     }, [isDesktop])
 
+    // Send display-settings update to live window (desktop only — web mode
+    // relies on useLiveSync's BroadcastChannel/localStorage broadcast, which
+    // reaches other tabs/windows of the same origin directly).
+    const sendSettingsToLive = useCallback(async (settings: Record<string, unknown>) => {
+        if (isDesktop) {
+            await nativeMultiMonitorService.sendSettingsToLive(settings)
+        }
+    }, [isDesktop])
+
     // Clear live output
     const clearLiveOutput = useCallback(async (mode?: 'clear' | 'black' | 'logo') => {
         if (isDesktop) {
@@ -449,6 +459,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         toggleFullscreen,
         moveToMonitor,
         sendSlideToLive,
+        sendSettingsToLive,
         clearLiveOutput,
         identifyScreen,
 

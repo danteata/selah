@@ -320,6 +320,19 @@ class NativeMultiMonitorService {
     }
 
     /**
+     * Send display-settings update (font, verse ref position, etc.) to live window
+     */
+    async sendSettingsToLive(settings: Record<string, unknown>): Promise<void> {
+        if (!await this.isDesktop()) return
+
+        try {
+            await this.tauriApis!.invoke('send_settings_to_live', { settings })
+        } catch (e) {
+            console.error('Failed to send settings to live:', e)
+        }
+    }
+
+    /**
      * Clear/blank the live output
      */
     async clearLiveOutput(mode?: 'clear' | 'black' | 'logo'): Promise<void> {

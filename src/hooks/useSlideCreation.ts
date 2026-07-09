@@ -186,7 +186,6 @@ export function useSlideCreation() {
             slideStyle: {
                 alignment: settings.slideStyles.alignment,
                 fontSizePercent: settings.slideStyles.fontSizePercent,
-                font: settings.defaultFont,
                 isMediaMuted: true,
                 isMediaPlaying: false,
                 lettercase: settings.slideStyles.lettercase,
@@ -281,7 +280,6 @@ export function useSlideCreation() {
         tempSlide.slideStyle = {
             ...tempSlide.slideStyle,
             fontSize: Number(fontSize),
-            font: settings.defaultFont,
             bibleVersion: scripture.version,
         }
         tempSlide.data = scripture
@@ -356,7 +354,6 @@ export function useSlideCreation() {
         tempSlide.slideStyle = {
             ...tempSlide.slideStyle,
             fontSize: Number(fontSize),
-            font: settings.defaultFont,
         }
         tempSlide.data = hymn
         tempSlide.contents = generateSlideContent(tempSlide, hymn, currentVerse)
@@ -427,7 +424,6 @@ export function useSlideCreation() {
         tempSlide.slideStyle = {
             ...tempSlide.slideStyle,
             fontSize: Number(fontSize),
-            font: settings.defaultFont,
         }
         tempSlide.data = song
         tempSlide.contents = generateSlideContent(tempSlide, song, currentVerse)
@@ -558,7 +554,6 @@ export function useSlideCreation() {
             ...tempSlide.slideStyle,
             fontSize: 17.5,
             alignment: 'center',
-            font: settings.defaultFont,
         }
 
         trackEvent(AnalyticsEventType.SLIDE_CREATED, {
@@ -591,7 +586,6 @@ export function useSlideCreation() {
             ...tempSlide.slideStyle,
             fontSize: 3.5,
             alignment: 'left',
-            font: settings.defaultFont,
             lowerThirdStyle: 'standard',
             lowerThirdPosition: 'left',
             lowerThirdAccentColor: '#0d9488',
