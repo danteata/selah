@@ -5,16 +5,20 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{ndi_lib}");
     }
 
-    // Embed a custom Windows app manifest (microphone + webcam device
-    // capabilities, PerMonitorV2 DPI awareness, asInvoker trust level).
+    // Embed a custom Windows app manifest (PerMonitorV2 DPI awareness,
+    // asInvoker trust level, Common-Controls 6 for visual styles).
     //
-    // Without the microphone capability, WebView2 refuses
-    // `navigator.mediaDevices.getUserMedia({ audio: true })` immediately
-    // with `NotAllowedError` — the user never sees a permission prompt and
-    // our voice search / desktop-whisper pipeline can never start. The
-    // manifest is the only place to declare this on Windows; there's no
-    // Tauri capability for it because the WebView2 process is a child of
-    // selah.exe, not the Tauri runtime itself.
+    // NOTE: mic/camera access for WebView2's getUserMedia() on Windows is
+    // NOT controlled by this manifest. <capabilities>/<devicecapability>
+    // are AppX/MSIX package-manifest elements (sandboxed UWP apps only);
+    // they aren't valid in this classic Win32 SxS assembly manifest and
+    // Windows refuses to load the exe if they're present here ("element
+    // capabilities ... not supported by this version of Windows"). A
+    // regular desktop process isn't AppContainer-sandboxed, so device
+    // access instead goes through Windows' Privacy Settings consent
+    // model and/or handling WebView2's `CoreWebView2.PermissionRequested`
+    // event in Rust — if `NotAllowedError` shows up on Windows, look
+    // there, not here.
     //
     // We use `try_build` so a non-Windows build host still produces a
     // valid build script — `WindowsAttributes` is cfg-gated by
@@ -22,6 +26,17 @@ fn main() {
     // `windows` so a Mac/Linux dev never needs it on disk to compile,
     // but the `include_str!` below is fine because the file is checked
     // into the repo regardless.
+    //
+    // app.manifest must stay PURE XML with no comments and no XML
+    // declaration, and every character must be ASCII. tauri-build's
+    // Windows resource embedding round-trips the manifest text through
+    // an RC string literal: it collapses all newlines to spaces (so a
+    // multi-line `<!-- ... -->` comment becomes one line containing
+    // "--", which XML forbids anywhere but the closing delimiter) and
+    // can mangle non-ASCII bytes. Any of that produces a corrupted
+    // RT_MANIFEST resource that fails to launch at runtime with
+    // `os error 14001` / "Invalid Xml syntax" — a generic error that
+    // gives no indication the manifest itself is the culprit.
     let mut windows_attrs = tauri_build::WindowsAttributes::new();
     windows_attrs = windows_attrs.app_manifest(include_str!("app.manifest"));
 

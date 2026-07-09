@@ -31,13 +31,13 @@ export function useMultiMonitor() {
 
     // Open live view on a specific screen
     const openLiveViewOnScreen = useCallback(async (screenId: string, currentSlideId?: string) => {
-        const liveViewUrl = `${window.location.origin}/live`
+        const liveViewUrl = `${window.location.origin}/#/live`
         return multiMonitorService.openLiveViewOnScreen(screenId, liveViewUrl, currentSlideId)
     }, [])
 
     // Start presentation using Presentation API
     const startPresentation = useCallback(async () => {
-        const liveViewUrl = `${window.location.origin}/live`
+        const liveViewUrl = `${window.location.origin}/#/live`
         return multiMonitorService.startPresentation(liveViewUrl)
     }, [])
 

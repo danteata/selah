@@ -40,8 +40,34 @@ GPU acceleration uses **Vulkan** (install your distro's Vulkan loader/ICD).
 #### Windows
 - Visual Studio Build Tools (MSVC, "Desktop development with C++")
 - CMake: `winget install Kitware.CMake`
+- Ninja: `winget install Ninja-build.Ninja` (or `choco install ninja`)
 
-GPU acceleration uses **Vulkan + DirectML**.
+GPU acceleration uses **Vulkan + DirectML**. The Vulkan backend builds a nested
+CMake sub-project (`vulkan-shaders-gen`) that trips up two Windows-specific
+issues, both worked around in CI (see `.github/workflows/build-desktop.yml`):
+
+1. **Wrong generator** — the default Visual Studio generator re-invokes the
+   nested project's configure step *without* the VS toolset context, failing
+   with `No CMAKE_C_COMPILER could be found`. The **Ninja** generator doesn't
+   have this problem (it picks up `cl.exe` from `PATH` directly).
+2. **MAX_PATH (260 chars)** — `vulkan-shaders-gen`'s nested build directories
+   are deeply nested (`...\ggml-vulkan\vulkan-shaders-gen-prefix\src\
+   vulkan-shaders-gen-build\CMakeFiles\...`). Combined with a normal project
+   checkout path, generated file paths blow past 260 characters and MSBuild's
+   `GetOutOfDateItems` fails with a path-length error. A **short**
+   `CARGO_TARGET_DIR` keeps every nested path under the limit.
+
+Set these as **permanent** environment variables (not `$env:...`, which only
+lasts for the current terminal session and is lost on restart — this is a
+common source of "it worked yesterday" confusion):
+```powershell
+setx CMAKE_GENERATOR "Ninja"
+setx CARGO_TARGET_DIR "C:\st"
+```
+Then **fully close and reopen** your terminal/IDE (`setx` only affects new
+processes) and build from a shell with the MSVC dev environment loaded (the
+**Developer Command Prompt/PowerShell for VS**, or run `vcvarsall.bat x64`
+first) so `cl.exe` is on `PATH`.
 
 ## Setup
 
@@ -120,7 +146,22 @@ cd src-tauri && cargo check                    # Rust (native engine builds here
 
 - **`is cmake not installed?` / whisper-rs-sys build fails** — install CMake
   (`brew install cmake` / `winget install Kitware.CMake` / `apt install cmake`).
+- **Windows: `CMake Error: CMake was unable to find a build program
+  corresponding to "Ninja"`** — `CMAKE_GENERATOR=Ninja` is set (required for
+  the Vulkan backend, see above) but `ninja.exe` isn't on `PATH` for the
+  process running the build. Install it (`winget install Ninja-build.Ninja`),
+  then verify with `ninja --version` in a **brand-new** terminal window. If
+  that works but the build still fails, the app you're launching
+  `desktop:dev` from (VS Code, a terminal app, etc.) was already running
+  before Ninja was installed and is still holding the old `PATH` — opening a
+  new tab/panel inside it isn't enough. Fully quit and reopen that app, then
+  retry.
+- **Windows: MSBuild `GetOutOfDateItems` fails with "exceeds the OS max path
+  limit"** — the nested `vulkan-shaders-gen` sub-build's paths blew past the
+  260-char `MAX_PATH` limit. Set a short `CARGO_TARGET_DIR` (e.g. `C:\st`) and
+  `CMAKE_GENERATOR=Ninja` as **permanent** env vars via `setx` (see Windows
+  prerequisites above), then fully restart your terminal/IDE before retrying.
 - **First build is very slow** — expected; whisper.cpp + ONNX Runtime compile
-  once, then cache in `src-tauri/target`.
-- **Disk usage** — `src-tauri/target` can grow to several GB. `cargo clean`
-  (or remove `target/release`) to reclaim space.
+  once, then cache in `src-tauri/target` (or `%CARGO_TARGET_DIR%` on Windows).
+- **Disk usage** — the target dir can grow to several GB. `cargo clean` (or
+  remove `target/release`) to reclaim space.
