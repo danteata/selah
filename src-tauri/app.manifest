@@ -1,40 +1,3 @@
-<!--
-  Windows application manifest for Selah.
-
-  Why this file exists
-  --------------------
-  WebView2 (Edge/Chromium) is the host process for our Tauri app on Windows.
-  When the WebView asks the OS for a hardware device via `navigator.mediaDevices
-  .getUserMedia({ audio: true })`, the OS checks the host executable's
-  application manifest for a matching <DeviceCapability>. If the capability
-  is missing, the call fails IMMEDIATELY with `NotAllowedError` — no user
-  prompt, no audio permission dialog, no fallback path. That is what the user
-  sees as "Microphone permission denied" in our error banner.
-
-  The two `<DeviceCapability>` entries below are what unblock `getUserMedia`:
-    - `microphone` → covers `getUserMedia({ audio: true })` for voice search
-      and the desktop-whisper pipeline.
-    - `webcam`     → covers `getUserMedia({ video: true })` if/when we add
-      background-video recording or live camera capture.
-
-  Tauri's default windows-app-manifest only includes the Common-Controls
-  dependency. We override it here via `tauri_build::WindowsAttributes
-  ::app_manifest(include_str!("app.manifest"))` in `build.rs`, so the
-  resulting `selah.exe` is built with this manifest embedded as a Win32
-  resource.
-
-  Sections:
-    - dependency: Common-Controls 6 for visual styles (theme rendering).
-    - trustInfo:  asInvoker — we don't need UAC elevation.
-    - compatibility: declares Windows 10/11 as supported.
-    - applications: PerMonitorV2 DPI awareness so the UI scales correctly
-      on mixed-DPI multi-monitor setups (the live-output window often
-      lands on a different monitor than the operator's).
-    - capabilities: microphone + webcam.
-
-  Reference: https://learn.microsoft.com/en-us/windows/uwp/packaging/app-capability-declarations
-             https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-remoteassistance-remoteassistance-enable
--->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <dependency>
     <dependentAssembly>
@@ -57,21 +20,13 @@
   </trustInfo>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
-      <!-- Windows 10 -->
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
-      <!-- Windows 11 reports the same GUID as Windows 10 -->
     </application>
   </compatibility>
-  <applications xmlns="urn:schemas-microsoft-com:asm.v3">
-    <application>
-      <windowsSettings>
-        <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>
-        <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-      </windowsSettings>
-    </application>
-  </applications>
-  <capabilities>
-    <devicecapability name="microphone" />
-    <devicecapability name="webcam" />
-  </capabilities>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
 </assembly>
