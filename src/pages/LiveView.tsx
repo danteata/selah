@@ -11,6 +11,9 @@ import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import { AutoFitText } from '../components/live/AutoFitText'
 import { VideoBackground } from '../components/live/VideoBackground'
 import { AudioReactiveBackground } from '../components/live/AudioReactiveBackground'
+import { KineticText } from '../components/live/KineticText'
+import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
+import { audioFeatures } from '../services/visualizer/audioFeatures'
 import { useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { getVerseRefStyle } from '../utils/verseRefStyle'
@@ -32,6 +35,7 @@ interface LiveState {
         verseRefSizePercent?: number
         animations?: boolean
         transitionInterval?: number
+        visualizerEnabled?: boolean
     }
     overlay?: string
     alert?: unknown
@@ -138,10 +142,21 @@ export default function LiveView() {
                     }))
                 })
 
+                // The audio-reactive visualizer's `audioFeatures` bus is
+                // per-window state — Rust broadcasts `audio-features` to
+                // every window, but only whichever window actually calls
+                // `startNativeAudioFeatures()` gets its own bus fed. The
+                // Sermon Listener panel (and its call to this) only lives in
+                // the main operator window, so without this the separate
+                // live/projector window's copy of the bus stays permanently
+                // stale and AudioReactiveBackground never draws anything.
+                const unlistenAudioFeatures = await startNativeAudioFeatures()
+
                 return () => {
                     unlistenSlide()
                     unlistenClear()
                     unlistenSettings()
+                    unlistenAudioFeatures()
                 }
             }
             return () => { }
@@ -384,6 +399,15 @@ export default function LiveView() {
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [toggleFullscreen])
 
+    // Read the beat pulse once, exactly when the slide changes (not on every
+    // unrelated re-render) — a slide change landing right on a beat gets a
+    // punchier entrance instead of the plain fade.
+    const isBeatTransition = useMemo(
+        () => (settings.visualizerEnabled ?? false) && audioFeatures.beatPulse > 0.5,
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [slide?.id]
+    )
+
     if (!slide) {
         return (
             <div
@@ -413,11 +437,11 @@ export default function LiveView() {
     return (
         <div
             key={slide?.id}
-            className={`h-screen w-screen bg-black relative overflow-hidden studio-slide-transition ${settings.animations === false ? 'no-transition' : ''}`}
+            className={`h-screen w-screen bg-black relative overflow-hidden studio-slide-transition ${settings.animations === false ? 'no-transition' : ''} ${isBeatTransition ? 'beat-punch' : ''}`}
             style={
                 {
                     ...(monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : {}),
-                    '--studio-transition-duration': `${settings.transitionInterval ?? 0.7}s`,
+                    '--studio-transition-duration': `${isBeatTransition ? Math.min(settings.transitionInterval ?? 0.7, 0.35) : (settings.transitionInterval ?? 0.7)}s`,
                 } as React.CSSProperties
             }
             onDoubleClick={toggleFullscreen}
@@ -443,8 +467,11 @@ export default function LiveView() {
                 <div className="absolute inset-0 bg-gradient-to-br from-gray-900 to-black" />
             )}
 
-            {/* Audio-reactive motion layer (behind lyrics; self-gates on setting) */}
-            <AudioReactiveBackground />
+            {/* Audio-reactive motion layer (behind lyrics). Passes the synced
+                `visualizerEnabled` explicitly — this window's own Zustand
+                store only hydrates from localStorage at load time and won't
+                see the operator toggling it live in the main window. */}
+            <AudioReactiveBackground enabled={settings.visualizerEnabled ?? false} />
 
             {/* Content */}
             {slide.layout === 'lower-third' ? (
@@ -515,18 +542,20 @@ export default function LiveView() {
                                 }}
                             >
                                 {captionOnTop && captionNode}
-                                <AutoFitText
-                                    html={bodyHtml}
-                                    className="w-full flex-1 min-h-0 text-white drop-shadow-lg tiptap-preview"
-                                    minPx={18}
-                                    maxPx={160}
-                                    style={{
-                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                        textAlign,
-                                        fontWeight: 600,
-                                        lineHeight: 1.2,
-                                    }}
-                                />
+                                <KineticText enabled={settings.visualizerEnabled ?? false} className="w-full flex-1 min-h-0">
+                                    <AutoFitText
+                                        html={bodyHtml}
+                                        className="w-full h-full text-white drop-shadow-lg tiptap-preview"
+                                        minPx={18}
+                                        maxPx={160}
+                                        style={{
+                                            fontFamily: slide.slideStyle?.font || settings.defaultFont,
+                                            textAlign,
+                                            fontWeight: 600,
+                                            lineHeight: 1.2,
+                                        }}
+                                    />
+                                </KineticText>
                                 {!captionOnTop && captionNode}
                             </div>
                         </div>
@@ -622,19 +651,21 @@ export default function LiveView() {
                                     ))}
                                 </div>
                             )}
-                            <AutoFitText
-                                html={slide.contents[0] || ''}
-                                className="flex-1 min-h-0 text-white drop-shadow-lg tiptap-preview"
-                                minPx={24}
-                                maxPx={640}
-                                style={{
-                                    fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                    textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
-                                    textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
-                                    lineHeight: 1.0,
-                                    textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
-                                }}
-                            />
+                            <KineticText enabled={settings.visualizerEnabled ?? false} className="flex-1 min-h-0">
+                                <AutoFitText
+                                    html={slide.contents[0] || ''}
+                                    className="w-full h-full text-white drop-shadow-lg tiptap-preview"
+                                    minPx={24}
+                                    maxPx={640}
+                                    style={{
+                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
+                                        textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
+                                        textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
+                                        lineHeight: 1.0,
+                                        textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
+                                    }}
+                                />
+                            </KineticText>
                             {refOnBottom && (
                                 <div
                                     className="shrink-0 text-center pt-3 drop-shadow-lg"

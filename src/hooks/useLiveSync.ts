@@ -13,6 +13,7 @@ export function useLiveSync() {
     const settings = useAppStore((state) => state.settings)
     const activeOverlay = useAppStore((state) => state.activeOverlay)
     const activeAlert = useAppStore((state) => state.activeAlert)
+    const visualizerEnabled = useAppStore((state) => state.visualizerEnabled)
 
     const liveSlide = useMemo(() => {
         if (!liveSlideId) return null
@@ -34,7 +35,8 @@ export function useLiveSync() {
         verseRefSizePercent: settings.slideStyles?.verseRefSizePercent,
         animations: settings.animations ?? true,
         transitionInterval: settings.transitionInterval ?? 0.7,
-    }), [settings])
+        visualizerEnabled,
+    }), [settings, visualizerEnabled])
 
     useEffect(() => {
         broadcastChannelRef.current = new BroadcastChannel('selah-live-channel')

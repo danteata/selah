@@ -14,8 +14,24 @@ import { audioFeatures } from '../../services/visualizer/audioFeatures'
  *
  * Deliberately subtle: worship visuals should enhance, not distract.
  */
-export function AudioReactiveBackground({ className }: { className?: string }) {
-    const enabled = useAppStore((s) => s.visualizerEnabled)
+interface AudioReactiveBackgroundProps {
+    className?: string
+    /**
+     * Overrides the store read below when provided. The separate native
+     * live/projector window has its own Zustand store instance (a different
+     * JS context entirely) that only hydrates `visualizerEnabled` from
+     * localStorage at that window's own load time — it won't see the
+     * operator toggling the setting live in the main window. Callers in that
+     * window pass the value synced over native IPC instead (see
+     * `useLiveSync`/`LiveView.tsx`); same-window callers (e.g. the operator's
+     * own preview) can omit this and read the always-live store directly.
+     */
+    enabled?: boolean
+}
+
+export function AudioReactiveBackground({ className, enabled: enabledProp }: AudioReactiveBackgroundProps) {
+    const storeEnabled = useAppStore((s) => s.visualizerEnabled)
+    const enabled = enabledProp ?? storeEnabled
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
     useEffect(() => {
@@ -53,6 +69,18 @@ export function AudioReactiveBackground({ className }: { className?: string }) {
         let last = performance.now()
         let raf = 0
 
+        // The glow's gradient depends on sBass/sRms, which the eased signal
+        // above changes on essentially every frame — recreating a
+        // CanvasGradient with new color stops 60x/sec never lets the
+        // renderer cache/reuse a gradient resource, which over a multi-hour
+        // service is a real source of sustained GPU-process growth (not a
+        // "leak" in the JS-heap sense, just relentless GPU churn). Quantize
+        // the inputs and only rebuild the gradient when the quantized key
+        // actually changes; the visual difference is imperceptible since
+        // the eased signal already moves smoothly.
+        let cachedGradKey = ''
+        let cachedGrad: CanvasGradient | null = null
+
         const frame = (t: number) => {
             const dt = Math.min((t - last) / 1000, 0.05)
             last = t
@@ -81,11 +109,20 @@ export function AudioReactiveBackground({ className }: { className?: string }) {
                 const cy = H * 0.55
                 const baseR = Math.min(W, H) * 0.28
                 const glowR = baseR * (1 + sBass * 0.8 + sRms * 0.3)
-                const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
-                grad.addColorStop(0, `rgba(45,212,191,${0.14 + 0.45 * sRms})`) // teal core
-                grad.addColorStop(0.5, `rgba(56,189,248,${0.06 + 0.18 * sBass})`) // sky mid
-                grad.addColorStop(1, 'rgba(0,0,0,0)')
-                ctx.fillStyle = grad
+
+                const bassQ = Math.round(sBass * 20) / 20 // nearest 0.05
+                const rmsQ = Math.round(sRms * 20) / 20
+                const glowRQ = Math.round(glowR / 3) * 3 // nearest 3px
+                const gradKey = `${cx}|${cy}|${glowRQ}|${bassQ}|${rmsQ}`
+                if (gradKey !== cachedGradKey || !cachedGrad) {
+                    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
+                    grad.addColorStop(0, `rgba(45,212,191,${0.14 + 0.45 * rmsQ})`) // teal core
+                    grad.addColorStop(0.5, `rgba(56,189,248,${0.06 + 0.18 * bassQ})`) // sky mid
+                    grad.addColorStop(1, 'rgba(0,0,0,0)')
+                    cachedGradKey = gradKey
+                    cachedGrad = grad
+                }
+                ctx.fillStyle = cachedGrad
                 ctx.beginPath()
                 ctx.arc(cx, cy, glowR, 0, Math.PI * 2)
                 ctx.fill()

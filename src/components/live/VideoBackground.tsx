@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useEffect, useRef } from 'react'
 
 interface VideoBackgroundProps {
     src: string
@@ -19,8 +19,27 @@ interface VideoBackgroundProps {
  * arbitrary parent re-renders.
  */
 function VideoBackgroundImpl({ src, className, style }: VideoBackgroundProps) {
+    const videoRef = useRef<HTMLVideoElement | null>(null)
+
+    // Explicitly release the decode session tied to the outgoing `src`
+    // right before it's replaced or the element unmounts, rather than
+    // relying on the browser to notice a changed `src` attribute and
+    // reclaim the old decoder/GPU surface on its own. Only fires on an
+    // actual src change or unmount — steady-state playback (src unchanged)
+    // is untouched.
+    useEffect(() => {
+        const video = videoRef.current
+        return () => {
+            if (!video) return
+            video.pause()
+            video.removeAttribute('src')
+            video.load()
+        }
+    }, [src])
+
     return (
         <video
+            ref={videoRef}
             src={src}
             className={className}
             style={style}

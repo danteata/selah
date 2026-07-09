@@ -13,6 +13,8 @@ import type { Slide, Scripture, Countdown } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { ScreenPicker } from './ScreenPicker'
 import { AutoFitText } from './AutoFitText'
+import { KineticText } from './KineticText'
+import { audioFeatures } from '../../services/visualizer/audioFeatures'
 import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
@@ -92,6 +94,16 @@ export function LiveOutput() {
     const animationsEnabled = useAppStore((state) => state.settings.animations ?? true)
     const transitionInterval = useAppStore((state) => state.settings.transitionInterval ?? 0.7)
     const defaultFont = useAppStore((state) => state.settings.defaultFont || 'Inter')
+    const visualizerEnabled = useAppStore((state) => state.visualizerEnabled)
+
+    // Read the beat pulse once, exactly when the live slide changes (not on
+    // every unrelated re-render) — a slide change landing right on a beat
+    // gets a punchier entrance instead of the plain fade.
+    const isBeatTransition = useMemo(
+        () => visualizerEnabled && audioFeatures.beatPulse > 0.5,
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [liveSlideId]
+    )
 
     // Shared live session — operator controls
     const {
@@ -727,9 +739,9 @@ export function LiveOutput() {
                                 {liveSlide ? (
                                     <div
                                         key={liveSlide.id}
-                                        className={`w-full h-full relative studio-slide-transition ${animationsEnabled ? '' : 'no-transition'}`}
+                                        className={`w-full h-full relative studio-slide-transition ${animationsEnabled ? '' : 'no-transition'} ${isBeatTransition ? 'beat-punch' : ''}`}
                                         style={{
-                                            '--studio-transition-duration': `${transitionInterval}s`,
+                                            '--studio-transition-duration': `${isBeatTransition ? Math.min(transitionInterval, 0.35) : transitionInterval}s`,
                                             backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
                                             backgroundSize: 'cover',
                                             backgroundPosition: 'center',
@@ -816,18 +828,20 @@ export function LiveOutput() {
                                                             }}
                                                         >
                                                             {captionOnTopLT && captionNodeLT}
-                                                            <AutoFitText
-                                                                html={liveBodyHtml}
-                                                                className="w-full flex-1 min-h-0 text-white drop-shadow-lg tiptap-preview"
-                                                                minPx={10}
-                                                                maxPx={120}
-                                                                style={{
-                                                                    fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                                    textAlign: textAlignLT,
-                                                                    fontWeight: 600,
-                                                                    lineHeight: 1.2,
-                                                                }}
-                                                            />
+                                                            <KineticText enabled={visualizerEnabled} className="w-full flex-1 min-h-0">
+                                                                <AutoFitText
+                                                                    html={liveBodyHtml}
+                                                                    className="w-full h-full text-white drop-shadow-lg tiptap-preview"
+                                                                    minPx={10}
+                                                                    maxPx={120}
+                                                                    style={{
+                                                                        fontFamily: liveSlide.slideStyle?.font || defaultFont,
+                                                                        textAlign: textAlignLT,
+                                                                        fontWeight: 600,
+                                                                        lineHeight: 1.2,
+                                                                    }}
+                                                                />
+                                                            </KineticText>
                                                             {!captionOnTopLT && captionNodeLT}
                                                         </div>
                                                     </div>
@@ -846,19 +860,21 @@ export function LiveOutput() {
                                                         dangerouslySetInnerHTML={{ __html: liveRefHtml }}
                                                     />
                                                 )}
-                                                <AutoFitText
-                                                    html={liveBodyHtml}
-                                                    className="flex-1 min-h-0 text-white text-center drop-shadow-2xl tiptap-preview"
-                                                    minPx={14}
-                                                    maxPx={240}
-                                                    style={{
-                                                        fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                        textAlign: (liveSlide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
-                                                        textTransform: (liveSlide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
-                                                        lineHeight: 1.0,
-                                                        textShadow: liveSlide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
-                                                    }}
-                                                />
+                                                <KineticText enabled={visualizerEnabled} className="flex-1 min-h-0">
+                                                    <AutoFitText
+                                                        html={liveBodyHtml}
+                                                        className="w-full h-full text-white text-center drop-shadow-2xl tiptap-preview"
+                                                        minPx={14}
+                                                        maxPx={240}
+                                                        style={{
+                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
+                                                            textAlign: (liveSlide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
+                                                            textTransform: (liveSlide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
+                                                            lineHeight: 1.0,
+                                                            textShadow: liveSlide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
+                                                        }}
+                                                    />
+                                                </KineticText>
                                                 {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
                                                     <div
                                                         className="shrink-0 text-center pt-2 drop-shadow-lg"

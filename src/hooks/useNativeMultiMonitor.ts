@@ -65,6 +65,35 @@ export interface UseNativeMultiMonitorReturn {
 
 const SELECTED_MONITOR_KEY = 'selah-selected-monitor'
 
+// `useNativeMultiMonitor()` is called from several independent components
+// (LiveOutput, useLiveSync, SettingsModal, ScreenPicker). Each call site gets
+// its own hook state, so without this, each one ran its own `setInterval`
+// polling the exact same backend state — N components meant N redundant
+// polling loops (confirmed in production: ~2x-4x the intended IPC traffic).
+// This module-level singleton runs the poll at most once, however many
+// components are mounted, and fans the result out to every subscriber.
+type PollListener = (state: LiveWindowState, monitorId: string | null) => void
+const pollSubscribers = new Set<PollListener>()
+let pollIntervalId: ReturnType<typeof setInterval> | null = null
+
+function subscribeToLiveWindowPoll(listener: PollListener): () => void {
+    pollSubscribers.add(listener)
+    if (pollIntervalId === null) {
+        pollIntervalId = setInterval(async () => {
+            const state = await nativeMultiMonitorService.getLiveWindowState()
+            const currentMonitor = await nativeMultiMonitorService.getCurrentLiveMonitor()
+            pollSubscribers.forEach((fn) => fn(state, currentMonitor))
+        }, 1000)
+    }
+    return () => {
+        pollSubscribers.delete(listener)
+        if (pollSubscribers.size === 0 && pollIntervalId !== null) {
+            clearInterval(pollIntervalId)
+            pollIntervalId = null
+        }
+    }
+}
+
 function loadPersistedMonitorId(): string | null {
     try {
         return localStorage.getItem(SELECTED_MONITOR_KEY)
@@ -165,19 +194,18 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         }
     }, [])
 
-    // Poll for live window state changes in desktop mode
+    // Poll for live window state changes in desktop mode. Shares a single
+    // underlying interval across every mounted instance of this hook (see
+    // subscribeToLiveWindowPoll above) instead of each one polling separately.
     useEffect(() => {
         if (!isDesktop) return
 
-        const interval = setInterval(async () => {
-            const state = await nativeMultiMonitorService.getLiveWindowState()
+        const unsubscribe = subscribeToLiveWindowPoll((state, currentMonitor) => {
             setLiveWindowState(state)
-
-            const currentMonitor = await nativeMultiMonitorService.getCurrentLiveMonitor()
             setSelectedMonitorId(currentMonitor)
-        }, 1000)
+        })
 
-        return () => clearInterval(interval)
+        return unsubscribe
     }, [isDesktop])
 
     // Detect monitors

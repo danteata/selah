@@ -85,14 +85,29 @@ function now(): number {
  * Intentionally not React state — updating at ~60fps through the store/context
  * would thrash re-renders. The visualizer reads `.current` in its rAF loop.
  */
+/** How fast a detected beat's pulse decays back to 0 (see `beatPulse` getter). */
+const BEAT_DECAY_TAU_MS = 130
+/** Minimum time between two detected beats, so one hit can't double-trigger. */
+const BEAT_REFRACTORY_MS = 200
+/** How far above the rolling bass average a sample must be to count as a beat. */
+const BEAT_THRESHOLD_RATIO = 1.35
+/** Noise floor — a "peak" quieter than this is ignored (silence/hiss). */
+const BEAT_MIN_BASS = 0.15
+
 class AudioFeatureBus {
     current: AudioFeatures = { ...ZERO_FEATURES }
     private lastPublishMs = 0
+
+    // Simple peak-picking onset/beat detector, layered on top of the
+    // existing continuous `bass` signal — no separate analysis pipeline.
+    private avgBass = 0
+    private lastBeatMs = 0
 
     /** Called by the analyser each frame with raw byte frequency data. */
     publish(freq: ArrayLike<number>, bands?: BandRanges): void {
         this.current = extractBands(freq, bands)
         this.lastPublishMs = now()
+        this.detectBeat(this.current.bass)
     }
 
     /**
@@ -108,12 +123,39 @@ class AudioFeatureBus {
             treble: clamp01(features.treble),
         }
         this.lastPublishMs = now()
+        this.detectBeat(this.current.bass)
+    }
+
+    /** Peak-picking: a beat is a bass sample well above its own recent average. */
+    private detectBeat(bass: number): void {
+        const t = now()
+        if (
+            bass > this.avgBass * BEAT_THRESHOLD_RATIO &&
+            bass > BEAT_MIN_BASS &&
+            t - this.lastBeatMs > BEAT_REFRACTORY_MS
+        ) {
+            this.lastBeatMs = t
+        }
+        this.avgBass = this.avgBass * 0.9 + bass * 0.1
+    }
+
+    /**
+     * 0..1, spikes to 1 the instant a beat is detected and exponentially
+     * decays back to 0. Computed on read (not stored/ticked) so every
+     * consumer's own rAF loop sees a smooth decay regardless of how often
+     * `publish`/`publishFeatures` actually arrive.
+     */
+    get beatPulse(): number {
+        if (this.lastBeatMs === 0) return 0
+        return Math.exp(-(now() - this.lastBeatMs) / BEAT_DECAY_TAU_MS)
     }
 
     /** Clear features (e.g. when the listener stops). */
     reset(): void {
         this.current = { ...ZERO_FEATURES }
         this.lastPublishMs = 0
+        this.avgBass = 0
+        this.lastBeatMs = 0
     }
 
     /** True when no fresh audio has arrived recently, so the visual can fade. */
