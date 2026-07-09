@@ -1,6 +1,6 @@
 import { Editor } from '@tiptap/react'
 import {
-    Bold, Italic, Strikethrough, Code, Heading1, Heading2, Heading3,
+    Bold, Italic, Underline, Strikethrough, Code, Heading1, Heading2, Heading3,
     List, ListOrdered, Quote, Undo, Redo, AlignLeft, AlignCenter,
     AlignRight, Highlighter, Type, Palette
 } from 'lucide-react'
@@ -147,6 +147,13 @@ export function TipTapToolbar({ editor }: TipTapToolbarProps) {
                 title="Italic"
             >
                 <Italic className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton
+                onClick={() => editor.chain().focus().toggleUnderline().run()}
+                isActive={editor.isActive('underline')}
+                title="Underline"
+            >
+                <Underline className="w-4 h-4" />
             </ToolbarButton>
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleStrike().run()}

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
@@ -37,6 +37,11 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
     const setLinesPerSlide = useAppStore((state) => state.setLinesPerSlide)
     const setTransitionInterval = useAppStore((state) => state.setTransitionInterval)
     const setVerseRefPosition = useAppStore((state) => state.setVerseRefPosition)
+    const setVerseRefColor = useAppStore((state) => state.setVerseRefColor)
+    const setVerseRefBold = useAppStore((state) => state.setVerseRefBold)
+    const setVerseRefItalic = useAppStore((state) => state.setVerseRefItalic)
+    const setVerseRefUnderline = useAppStore((state) => state.setVerseRefUnderline)
+    const setVerseRefSizePercent = useAppStore((state) => state.setVerseRefSizePercent)
 
     useEffect(() => {
         if (initialTab) {
@@ -188,7 +193,16 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                         {activeTab === 'bible' && (
                             <BibleSettings
                                 settings={settings}
-                                onUpdate={{ setDefaultBibleVersion, setFootnotes, setVerseRefPosition }}
+                                onUpdate={{
+                                    setDefaultBibleVersion,
+                                    setFootnotes,
+                                    setVerseRefPosition,
+                                    setVerseRefColor,
+                                    setVerseRefBold,
+                                    setVerseRefItalic,
+                                    setVerseRefUnderline,
+                                    setVerseRefSizePercent,
+                                }}
                             />
                         )}
                         {activeTab === 'migration' && <SongMigrationWizard onClose={onClose} />}
@@ -700,6 +714,13 @@ function TemplatesSettings() {
 }
 
 // Bible Settings Tab
+const REF_COLOR_PRESETS = [
+    '#f59e0b', // amber
+    '#0d9488', // teal
+    '#3b82f6', // blue
+    '#ef4444', // red
+]
+
 function BibleSettings({
     settings,
     onUpdate,
@@ -709,9 +730,19 @@ function BibleSettings({
         setDefaultBibleVersion: any
         setFootnotes: any
         setVerseRefPosition: (position: 'top' | 'bottom') => void
+        setVerseRefColor: (color: string | undefined) => void
+        setVerseRefBold: (bold: boolean) => void
+        setVerseRefItalic: (italic: boolean) => void
+        setVerseRefUnderline: (underline: boolean) => void
+        setVerseRefSizePercent: (percent: number) => void
     }
 }) {
     const currentRefPos: 'top' | 'bottom' = settings.slideStyles?.verseRefPosition ?? 'bottom'
+    const refColor: string | undefined = settings.slideStyles?.verseRefColor
+    const refBold: boolean = settings.slideStyles?.verseRefBold ?? false
+    const refItalic: boolean = settings.slideStyles?.verseRefItalic ?? false
+    const refUnderline: boolean = settings.slideStyles?.verseRefUnderline ?? false
+    const refSizePercent: number = settings.slideStyles?.verseRefSizePercent ?? 100
 
     return (
         <div className="space-y-6">
@@ -766,6 +797,96 @@ function BibleSettings({
                     >
                         Below the verse
                     </button>
+                </div>
+            </div>
+
+            {/* Verse reference style — color/weight/style/underline/size, applies to every
+                bible slide unless explicitly overridden in the slide editor. */}
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Verse Reference Style
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-3">
+                    Color, weight, and size of the verse reference caption for all bible slides.
+                    Individual slides can override this in the slide editor.
+                </p>
+                <div className="flex items-center gap-3 flex-wrap">
+                    {/* Color */}
+                    <div className="flex items-center gap-1.5">
+                        <button
+                            onClick={() => onUpdate.setVerseRefColor(undefined)}
+                            title="Default"
+                            className={`w-6 h-6 rounded-full bg-white/85 transition-all ${refColor === undefined ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900 ring-gray-400 scale-110' : 'hover:scale-105'
+                                }`}
+                        />
+                        {REF_COLOR_PRESETS.map((color) => (
+                            <button
+                                key={color}
+                                onClick={() => onUpdate.setVerseRefColor(color)}
+                                title={color}
+                                className={`w-6 h-6 rounded-full transition-all ${refColor === color ? 'ring-2 ring-offset-2 ring-offset-white dark:ring-offset-gray-900' : 'hover:scale-105'
+                                    }`}
+                                style={{ backgroundColor: color, ...(refColor === color ? { boxShadow: `0 0 0 2px ${color}` } : {}) }}
+                            />
+                        ))}
+                        <input
+                            type="color"
+                            value={refColor && refColor.startsWith('#') ? refColor : '#ffffff'}
+                            onChange={(e) => onUpdate.setVerseRefColor(e.target.value)}
+                            title="Custom color"
+                            className="w-6 h-6 rounded-full border-0 cursor-pointer"
+                        />
+                    </div>
+
+                    <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" />
+
+                    {/* Bold / Italic / Underline */}
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => onUpdate.setVerseRefBold(!refBold)}
+                            title="Bold"
+                            className={`p-1.5 rounded transition-colors ${refBold ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                        >
+                            <Bold className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => onUpdate.setVerseRefItalic(!refItalic)}
+                            title="Italic"
+                            className={`p-1.5 rounded transition-colors ${refItalic ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                        >
+                            <Italic className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={() => onUpdate.setVerseRefUnderline(!refUnderline)}
+                            title="Underline"
+                            className={`p-1.5 rounded transition-colors ${refUnderline ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                        >
+                            <Underline className="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" />
+
+                    {/* Size */}
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => onUpdate.setVerseRefSizePercent(Math.max(50, refSizePercent - 10))}
+                            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500"
+                            title="Smaller"
+                        >
+                            <ZoomOut className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-mono text-gray-600 dark:text-gray-400 w-10 text-center">
+                            {refSizePercent}%
+                        </span>
+                        <button
+                            onClick={() => onUpdate.setVerseRefSizePercent(Math.min(200, refSizePercent + 10))}
+                            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500"
+                            title="Larger"
+                        >
+                            <ZoomIn className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
             </div>
 

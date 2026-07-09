@@ -27,6 +27,11 @@ export function useLiveSync() {
         songAndHymnLabelsVisibility: settings.songAndHymnLabelsVisibility,
         defaultFont: settings.defaultFont,
         verseRefPosition: settings.slideStyles?.verseRefPosition,
+        verseRefColor: settings.slideStyles?.verseRefColor,
+        verseRefBold: settings.slideStyles?.verseRefBold,
+        verseRefItalic: settings.slideStyles?.verseRefItalic,
+        verseRefUnderline: settings.slideStyles?.verseRefUnderline,
+        verseRefSizePercent: settings.slideStyles?.verseRefSizePercent,
         animations: settings.animations ?? true,
         transitionInterval: settings.transitionInterval ?? 0.7,
     }), [settings])

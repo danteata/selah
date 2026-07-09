@@ -340,6 +340,12 @@ export interface SlideStyle {
     lowerThirdSubtitle?: string
     // Verse reference position
     verseRefPosition?: 'top' | 'bottom'
+    // Verse reference style
+    verseRefColor?: string
+    verseRefBold?: boolean
+    verseRefItalic?: boolean
+    verseRefUnderline?: boolean
+    verseRefSizePercent?: number
 }
 
 export interface Advert {

@@ -18,6 +18,7 @@ import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import { VideoBackground } from './VideoBackground'
 import { AudioReactiveBackground } from './AudioReactiveBackground'
+import { getVerseRefStyle } from '../../utils/verseRefStyle'
 
 // Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
 function parseTimeStringToSeconds(timeStr: string): number {
@@ -86,6 +87,8 @@ export function LiveOutput() {
     const openModal = useAppStore((state) => state.openModal)
     // Global default for verse reference position (per-slide setting overrides this at render time).
     const globalVerseRefPosition = useAppStore((state) => state.settings.slideStyles?.verseRefPosition)
+    // Global defaults for verse reference color/weight/style/underline/size (per-slide overrides at render time).
+    const globalSlideStyles = useAppStore((state) => state.settings.slideStyles)
     const animationsEnabled = useAppStore((state) => state.settings.animations ?? true)
     const transitionInterval = useAppStore((state) => state.settings.transitionInterval ?? 0.7)
     const defaultFont = useAppStore((state) => state.settings.defaultFont || 'Inter')
@@ -784,14 +787,13 @@ export function LiveOutput() {
 
                                                 const captionNodeLT = (captionLT || subtitleLT) && (
                                                     <div
-                                                        className="shrink-0 text-white/85 drop-shadow-lg"
+                                                        className="shrink-0 drop-shadow-lg"
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                            fontSize: 'clamp(14px, 3cqw, 36px)',
                                                             lineHeight: 1.25,
-                                                            fontWeight: 500,
                                                             width: '100%',
                                                             textAlign: textAlignLT,
+                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 14, coefficient: 3, unit: 'cqw', maxPx: 36 }),
                                                         }}
                                                         {...(captionLT
                                                             ? { dangerouslySetInnerHTML: { __html: captionLT } }
@@ -835,12 +837,11 @@ export function LiveOutput() {
                                             <div className="absolute inset-0 flex flex-col p-6">
                                                 {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
                                                     <div
-                                                        className="shrink-0 text-center text-white/85 pb-2 drop-shadow-lg"
+                                                        className="shrink-0 text-center pb-2 drop-shadow-lg"
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                            fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.05,
-                                                            fontWeight: 600,
+                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 20, coefficient: 4, unit: 'cqw', maxPx: 56 }),
                                                         }}
                                                         dangerouslySetInnerHTML={{ __html: liveRefHtml }}
                                                     />
@@ -860,12 +861,11 @@ export function LiveOutput() {
                                                 />
                                                 {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
                                                     <div
-                                                        className="shrink-0 text-center text-white/85 pt-2 drop-shadow-lg"
+                                                        className="shrink-0 text-center pt-2 drop-shadow-lg"
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                            fontSize: 'clamp(20px, 4cqw, 56px)',
                                                             lineHeight: 1.05,
-                                                            fontWeight: 600,
+                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 20, coefficient: 4, unit: 'cqw', maxPx: 56 }),
                                                         }}
                                                         dangerouslySetInnerHTML={{ __html: liveRefHtml }}
                                                     />

@@ -13,6 +13,7 @@ import { VideoBackground } from '../components/live/VideoBackground'
 import { AudioReactiveBackground } from '../components/live/AudioReactiveBackground'
 import { useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
+import { getVerseRefStyle } from '../utils/verseRefStyle'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -24,6 +25,11 @@ interface LiveState {
         songAndHymnLabelsVisibility: boolean
         defaultFont: string
         verseRefPosition?: 'top' | 'bottom'
+        verseRefColor?: string
+        verseRefBold?: boolean
+        verseRefItalic?: boolean
+        verseRefUnderline?: boolean
+        verseRefSizePercent?: number
         animations?: boolean
         transitionInterval?: number
     }
@@ -478,15 +484,14 @@ export default function LiveView() {
 
                     const captionNode = (captionHtml || subtitle) && (
                         <div
-                            className="shrink-0 text-white/85 drop-shadow-lg"
+                            className="shrink-0 drop-shadow-lg"
                             style={{
                                 fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                fontSize: 'clamp(20px, 2.4vw, 48px)',
                                 lineHeight: 1.25,
-                                fontWeight: 500,
                                 letterSpacing: '0.02em',
                                 width: '100%',
                                 textAlign,
+                                ...getVerseRefStyle(slide.slideStyle, settings, { minPx: 20, coefficient: 2.4, unit: 'vw', maxPx: 48 }),
                             }}
                             // Bible reference uses raw HTML so the `<b>` book title renders; subtitle is plain.
                             {...(captionHtml
@@ -603,14 +608,13 @@ export default function LiveView() {
                         >
                             {refOnTop && (
                                 <div
-                                    className="shrink-0 text-center pb-3 text-white/85 drop-shadow-lg"
+                                    className="shrink-0 text-center pb-3 drop-shadow-lg"
                                     style={{
                                         fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                        fontSize: 'clamp(28px, 3.2vw, 80px)',
                                         lineHeight: 1.05,
-                                        fontWeight: 600,
                                         letterSpacing: '0.01em',
                                         textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
+                                        ...getVerseRefStyle(slide.slideStyle, settings, { minPx: 28, coefficient: 3.2, unit: 'vw', maxPx: 80 }),
                                     }}
                                 >
                                     {slide.contents.slice(1).map((ref, i) => (
@@ -633,14 +637,13 @@ export default function LiveView() {
                             />
                             {refOnBottom && (
                                 <div
-                                    className="shrink-0 text-center pt-3 text-white/85 drop-shadow-lg"
+                                    className="shrink-0 text-center pt-3 drop-shadow-lg"
                                     style={{
                                         fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                        fontSize: 'clamp(28px, 3.2vw, 80px)',
                                         lineHeight: 1.05,
-                                        fontWeight: 600,
                                         letterSpacing: '0.01em',
                                         textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
+                                        ...getVerseRefStyle(slide.slideStyle, settings, { minPx: 28, coefficient: 3.2, unit: 'vw', maxPx: 80 }),
                                     }}
                                 >
                                     {slide.contents.slice(1).map((ref, i) => (

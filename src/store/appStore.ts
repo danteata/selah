@@ -306,6 +306,11 @@ interface AppStore extends AppState {
     setLiveOutputMonitorId: (monitorId: string | null) => void
     setLinesPerSlide: (lines: number) => void
     setVerseRefPosition: (position: 'top' | 'bottom') => void
+    setVerseRefColor: (color: string | undefined) => void
+    setVerseRefBold: (bold: boolean) => void
+    setVerseRefItalic: (italic: boolean) => void
+    setVerseRefUnderline: (underline: boolean) => void
+    setVerseRefSizePercent: (percent: number) => void
     setAnimations: (animations: boolean) => void
     setFootnotes: (footnotes: boolean) => void
     setSongAndHymnLabelsVisibility: (visibility: boolean) => void
@@ -795,6 +800,66 @@ export const useAppStore = create<AppStore>()(
                         slideStyles: {
                             ...state.settings.slideStyles,
                             verseRefPosition: position
+                        }
+                    }
+                }))
+            },
+
+            setVerseRefColor: (color) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        slideStyles: {
+                            ...state.settings.slideStyles,
+                            verseRefColor: color
+                        }
+                    }
+                }))
+            },
+
+            setVerseRefBold: (bold) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        slideStyles: {
+                            ...state.settings.slideStyles,
+                            verseRefBold: bold
+                        }
+                    }
+                }))
+            },
+
+            setVerseRefItalic: (italic) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        slideStyles: {
+                            ...state.settings.slideStyles,
+                            verseRefItalic: italic
+                        }
+                    }
+                }))
+            },
+
+            setVerseRefUnderline: (underline) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        slideStyles: {
+                            ...state.settings.slideStyles,
+                            verseRefUnderline: underline
+                        }
+                    }
+                }))
+            },
+
+            setVerseRefSizePercent: (percent) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        slideStyles: {
+                            ...state.settings.slideStyles,
+                            verseRefSizePercent: percent
                         }
                     }
                 }))

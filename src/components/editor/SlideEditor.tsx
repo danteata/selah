@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
     AlignLeft, AlignCenter, AlignRight,
-    Bold, Italic, Type, ImageIcon, Palette,
+    Bold, Italic, Underline, Type, ImageIcon, Palette,
     ZoomIn, ZoomOut, RotateCcw, Trash2, Save, X,
     ArrowUpToLine, ArrowDownToLine
 } from 'lucide-react'
@@ -10,6 +10,8 @@ import type { Slide, SlideStyle } from '../../types'
 import { TipTapEditor } from './TipTapEditor'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+
+const REF_STYLE_COLOR_PRESETS = ['#ffffff', '#f59e0b', '#0d9488', '#3b82f6', '#ef4444']
 
 interface SlideEditorProps {
     slide: Slide | null
@@ -254,6 +256,119 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                                 )
                             })()}
                         </div>
+
+                        {/* Verse reference style override — bible slides only. Each control sets an
+                            explicit per-slide value the moment it's touched; "Reset" clears all five
+                            back to inheriting the global Display Settings default. */}
+                        {editedSlide.type === 'bible' && (() => {
+                            const s = editedSlide.slideStyle
+                            const g = settings.slideStyles
+                            const resolvedColor = s?.verseRefColor ?? g?.verseRefColor
+                            const resolvedBold = s?.verseRefBold ?? g?.verseRefBold ?? false
+                            const resolvedItalic = s?.verseRefItalic ?? g?.verseRefItalic ?? false
+                            const resolvedUnderline = s?.verseRefUnderline ?? g?.verseRefUnderline ?? false
+                            const resolvedSizePercent = s?.verseRefSizePercent ?? g?.verseRefSizePercent ?? 100
+                            const hasOverride = s?.verseRefColor !== undefined || s?.verseRefBold !== undefined ||
+                                s?.verseRefItalic !== undefined || s?.verseRefUnderline !== undefined ||
+                                s?.verseRefSizePercent !== undefined
+
+                            return (
+                                <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex-wrap">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                        Ref Style
+                                    </span>
+
+                                    {/* Color */}
+                                    <div className="flex items-center gap-1">
+                                        {REF_STYLE_COLOR_PRESETS.map((color) => (
+                                            <button
+                                                key={color}
+                                                onClick={() => updateStyle({ verseRefColor: color })}
+                                                title={color}
+                                                className={`w-5 h-5 rounded-full transition-all ${resolvedColor === color ? 'ring-2 ring-offset-1 ring-offset-gray-50 dark:ring-offset-gray-800' : 'hover:scale-105'
+                                                    }`}
+                                                style={{ backgroundColor: color }}
+                                            />
+                                        ))}
+                                        <input
+                                            type="color"
+                                            value={resolvedColor && resolvedColor.startsWith('#') ? resolvedColor : '#ffffff'}
+                                            onChange={(e) => updateStyle({ verseRefColor: e.target.value })}
+                                            title="Custom color"
+                                            className="w-5 h-5 rounded-full border-0 cursor-pointer"
+                                        />
+                                    </div>
+
+                                    <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" />
+
+                                    {/* Bold / Italic / Underline */}
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={() => updateStyle({ verseRefBold: !resolvedBold })}
+                                            title="Bold"
+                                            className={`p-1.5 rounded ${resolvedBold ? 'bg-white dark:bg-gray-600 shadow-sm' : 'hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                                        >
+                                            <Bold className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                            onClick={() => updateStyle({ verseRefItalic: !resolvedItalic })}
+                                            title="Italic"
+                                            className={`p-1.5 rounded ${resolvedItalic ? 'bg-white dark:bg-gray-600 shadow-sm' : 'hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                                        >
+                                            <Italic className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                            onClick={() => updateStyle({ verseRefUnderline: !resolvedUnderline })}
+                                            title="Underline"
+                                            className={`p-1.5 rounded ${resolvedUnderline ? 'bg-white dark:bg-gray-600 shadow-sm' : 'hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                                        >
+                                            <Underline className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+
+                                    <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" />
+
+                                    {/* Size */}
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={() => updateStyle({ verseRefSizePercent: Math.max(50, resolvedSizePercent - 10) })}
+                                            className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+                                        >
+                                            <ZoomOut className="w-3.5 h-3.5" />
+                                        </button>
+                                        <span className="text-xs text-gray-600 dark:text-gray-400 w-9 text-center">
+                                            {resolvedSizePercent}%
+                                        </span>
+                                        <button
+                                            onClick={() => updateStyle({ verseRefSizePercent: Math.min(200, resolvedSizePercent + 10) })}
+                                            className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+                                        >
+                                            <ZoomIn className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+
+                                    {hasOverride && (
+                                        <>
+                                            <div className="w-px h-6 bg-gray-300 dark:bg-gray-600" />
+                                            <button
+                                                onClick={() => updateStyle({
+                                                    verseRefColor: undefined,
+                                                    verseRefBold: undefined,
+                                                    verseRefItalic: undefined,
+                                                    verseRefUnderline: undefined,
+                                                    verseRefSizePercent: undefined,
+                                                })}
+                                                title="Reset to global default"
+                                                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600"
+                                            >
+                                                <RotateCcw className="w-3 h-3" />
+                                                Reset
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            )
+                        })()}
 
                         {/* Content Blocks */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-3">
