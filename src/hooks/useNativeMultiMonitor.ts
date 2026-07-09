@@ -235,7 +235,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
             })
         } else {
             // Web fallback: start Presentation API or open popup window
-            const liveViewUrl = `${window.location.origin}/live`
+            const liveViewUrl = `${window.location.origin}/#/live`
             let method = 'popup'
             if (config?.monitor_id && config.monitor_id !== 'presentation-api') {
                 // Open on a specific screen
@@ -388,7 +388,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
             })
             return null // Native window, not a JS Window object
         } else {
-            const liveViewUrl = `${window.location.origin}/live`
+            const liveViewUrl = `${window.location.origin}/#/live`
             return multiMonitorService.openLiveViewOnScreen(screenId, liveViewUrl, currentSlideId)
         }
     }, [isDesktop, openLiveWindow])
@@ -398,7 +398,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
             await openLiveWindow({ fullscreen: true })
             return true
         } else {
-            const liveViewUrl = `${window.location.origin}/live`
+            const liveViewUrl = `${window.location.origin}/#/live`
             return multiMonitorService.startPresentation(liveViewUrl)
         }
     }, [isDesktop, openLiveWindow])
