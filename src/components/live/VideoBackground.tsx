@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo } from 'react'
 
 interface VideoBackgroundProps {
     src: string
@@ -17,29 +17,19 @@ interface VideoBackgroundProps {
  * intentionally does no fetching, no re-resolution, and no remount logic
  * of its own — the goal is to keep the video element on the DOM across
  * arbitrary parent re-renders.
+ *
+ * Deliberately no cleanup effect here: an imperative teardown (pause +
+ * removeAttribute('src') + load()) is unsafe under React 18 Strict Mode's
+ * double-invoked effects — the synthetic mount/cleanup/mount cycle doesn't
+ * actually remove this DOM node, and since `src` hasn't changed across that
+ * cycle, React's reconciler never reapplies the attribute the cleanup just
+ * stripped, permanently breaking playback. Let the browser reclaim the old
+ * decode session when the `src` attribute itself changes or the node is
+ * actually removed from the DOM.
  */
 function VideoBackgroundImpl({ src, className, style }: VideoBackgroundProps) {
-    const videoRef = useRef<HTMLVideoElement | null>(null)
-
-    // Explicitly release the decode session tied to the outgoing `src`
-    // right before it's replaced or the element unmounts, rather than
-    // relying on the browser to notice a changed `src` attribute and
-    // reclaim the old decoder/GPU surface on its own. Only fires on an
-    // actual src change or unmount — steady-state playback (src unchanged)
-    // is untouched.
-    useEffect(() => {
-        const video = videoRef.current
-        return () => {
-            if (!video) return
-            video.pause()
-            video.removeAttribute('src')
-            video.load()
-        }
-    }, [src])
-
     return (
         <video
-            ref={videoRef}
             src={src}
             className={className}
             style={style}
