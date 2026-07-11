@@ -362,10 +362,16 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // arbitrary) match timestamp go unrefreshed for 60+ real seconds.
     // Bounding the window here means old mentions genuinely scroll out of
     // what's scanned, so "silent" and "re-mentioned" become meaningful
-    // again. Sized well above the 60s silence threshold at typical
-    // speaking pace (~130-150 wpm, ~800-900 chars/min) so nothing currently
-    // relevant gets clipped mid-quote.
-    const RECENT_VERSE_DETECTION_WINDOW_CHARS = 2500
+    // again. Sized against REACTIVATE_AFTER_SILENCE_MS (60s) at typical
+    // speaking pace, NOT against verse/quote length — detection only needs
+    // the short reference-announcing phrase itself ("Ephesians chapter 6
+    // verse 10 through 17", ~40-50 chars), never the quoted verse content.
+    // 1500 chars keeps a sensible margin above 60s across the realistic
+    // pace range (~75s for a fast 200wpm speaker up to ~190s for a slow
+    // 80wpm one) without going so large that a reference stays "in the
+    // window" — and so still refreshing its silence timer — for minutes
+    // after it was actually said, which would defeat the point.
+    const RECENT_VERSE_DETECTION_WINDOW_CHARS = 1500
 
     // Per-verse score of the most recent match. Regex matches are recorded as
     // 1.0 (the preacher said the reference explicitly). Semantic matches are

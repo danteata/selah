@@ -666,9 +666,18 @@ reported.
 
 ### Fix
 Bound the text fed to `detectVerses()`/`resolveBareReferences()` to a
-recent window (last `RECENT_VERSE_DETECTION_WINDOW_CHARS` = 2500
-characters, sized comfortably above the 60-second silence threshold at
-typical speaking pace) instead of the full ever-growing transcript.
+recent window (last `RECENT_VERSE_DETECTION_WINDOW_CHARS` = 1500
+characters) instead of the full ever-growing transcript. Sized against
+the 60-second silence threshold at typical speaking pace, NOT against
+verse/quote length — detection only needs the short
+reference-announcing phrase itself, never the quoted verse content.
+1500 chars keeps a sensible margin above 60s across the realistic pace
+range (~75s for a fast 200wpm speaker up to ~190s for a slow 80wpm
+one) without going so large that a reference stays "in the window" —
+and so still refreshing its silence timer — for minutes after it was
+actually said, which would defeat the point (an initial pass used
+2500, which at typical pace is 165-190s — nearly 3x the threshold it
+was meant to complement).
 Old mentions now genuinely scroll out of what's scanned, so "silent"
 and "re-mentioned" become meaningful again — confirmed a verse
 correctly disappears once it scrolls out, and a genuine later
