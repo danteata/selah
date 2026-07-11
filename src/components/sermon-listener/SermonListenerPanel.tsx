@@ -23,6 +23,9 @@ import { classifyTranscriptionError, getUserAction, transcriptionErrorCodes, isR
 import { downloadTranscript, type ExportFormat } from '../../services/sermon-listener/transcriptExport'
 import { generateSermonNotes } from '../../services/sermon-listener/sermonNotes'
 import { SongTrackingControl } from './SongTrackingControl'
+import { sessionAudioRecorder } from '../../services/sermon-listener/sessionAudioRecorder'
+import { writeSessionSidecar } from '../../services/sermon-listener/devAccuracyReport'
+import { DevAccuracyPanel } from './DevAccuracyPanel'
 
 interface SermonListenerPanelProps {
     autoDisplay?: boolean
@@ -132,6 +135,43 @@ function SermonListenerPanelInner({
         stop,
         reset,
     } = sermonListener
+
+    // Dev-only: record this session's raw audio to disk so it can be
+    // re-transcribed offline afterward and compared against what was
+    // detected live (see devAccuracyReport.ts). No-op in production builds.
+    // `sessionRecordedSignal` bumps DevAccuracyPanel to refresh its list once
+    // the sidecar for a just-finished session actually lands — otherwise it
+    // only re-fetches when expanded/toggled and can look permanently empty.
+    const [sessionRecordedSignal, setSessionRecordedSignal] = useState(0)
+    const handleStart = () => {
+        if (import.meta.env.DEV) {
+            void sessionAudioRecorder.start()
+        }
+        start()
+    }
+    const handleStop = () => {
+        if (import.meta.env.DEV) {
+            const sessionId = sessionAudioRecorder.getSessionId()
+            // Read before stop() — stop() clears both once it resolves.
+            const startedAt = sessionAudioRecorder.getStartedAt()
+            void sessionAudioRecorder.stop().then(() => {
+                if (sessionId && startedAt) {
+                    void writeSessionSidecar({
+                        sessionId,
+                        startedAt,
+                        stoppedAt: Date.now(),
+                        liveDetectedVerses: detectedVerses,
+                        rawUtterances,
+                    }).then(() => {
+                        setSessionRecordedSignal((n) => n + 1)
+                    }).catch((err) => {
+                        console.warn('[SermonListenerPanel] Failed to write session sidecar:', err)
+                    })
+                }
+            })
+        }
+        stop()
+    }
 
     const uniqueDetectedVerses = detectedVerses.filter((verse, index, arr) => arr.findIndex(v => v.reference === verse.reference) === index)
 
@@ -437,7 +477,7 @@ function SermonListenerPanelInner({
                     capture first), so the button never falsely reads "Start"
                     while a session is launching. */}
                 <button
-                    onClick={isListening || isStarting ? stop : start}
+                    onClick={isListening || isStarting ? handleStop : handleStart}
                     disabled={!isListening && !isStarting && (isInitializingProvider || (provider !== 'web-speech' && !providerReady))}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-all shadow-sm flex-shrink-0 ${isListening
                         ? 'bg-red-500 hover:bg-red-600 text-white'
@@ -454,6 +494,9 @@ function SermonListenerPanelInner({
 
             {/* Predictive song-lyric auto-advance control (shown when a song is live) */}
             <SongTrackingControl />
+
+            {/* Dev-only: recorded-session accuracy review. Renders nothing in production builds. */}
+            {import.meta.env.DEV && <DevAccuracyPanel refreshSignal={sessionRecordedSignal} />}
 
             {/* Error message with structured actions */}
             {error && (() => {
