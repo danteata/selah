@@ -486,6 +486,39 @@ a bare-digit case, the embedded-text safety guard (must NOT fire
 inside a real sentence), the tightened TTL expiry, and a null-context
 guard.
 
+### Follow-up: resolved verse wasn't reflected in the live output (found via live testing)
+
+**Reproduction:** After the fix above, "Hebrews 13" → "Five." correctly
+resolved to "Hebrews 13:5" and appeared in the detected-verses list and
+as the current verse — but the live output stayed on "Hebrews 13:1"
+and never updated.
+
+**Root cause:** `"Hebrews 13"` is a bare chapter mention, which fires a
+`go_to_reference` **voice command** — and every voice-command
+navigation sets `navigationCooldownUntilRef` for 3 seconds, specifically
+to stop a stale, in-flight regex/semantic detection from immediately
+hijacking the navigation it just performed. `"Five."` (its own separate
+utterance) almost always arrives within that 3-second window, so when
+it resolved to "Hebrews 13:5" moments later, the cooldown check
+(`useSermonListener.ts`, the `hasRegexVerses` branch) blocked the
+auto-lookup/auto-display step — even though this verse was completing
+the exact same reference the command had just set, not competing with
+a different one.
+
+**Fix:** Before overwriting `activeReferenceContextRef.current`, check
+whether the newly-resolved verse's book+chapter matches what it
+already was. If so, the cooldown is bypassed for this verse (the
+detected-verses list and other state updates were never blocked —
+only the live-slide auto-display was). This one code path is shared by
+`detectVerses()`, `resolveBareReferences()`, and
+`resolveStandaloneNumberContinuation()`, so the fix applies uniformly
+to all three.
+
+**Test:** No automated test (no test harness exists for
+`useSermonListener.ts`); verified via `tsc --noEmit` and the full
+existing sermon-listener/hooks suite with no regressions, plus direct
+tracing of the exact interaction against a real transcript.
+
 ---
 
 ## Bug 19: ~~Audio-features heartbeat went silent during a real delivery gap~~ (FIXED)

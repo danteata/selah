@@ -1560,11 +1560,28 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 verse_count: versesWithTimestamp.length,
             })
 
+            // A voice command (e.g. bare "Hebrews 13") sets navigationCooldownUntilRef
+            // so a stale, in-flight regex/semantic detection can't immediately
+            // hijack the navigation it just performed. But a verse that CONTINUES
+            // that same book+chapter — resolveBareReferences("verse 5") or
+            // resolveStandaloneNumberContinuation("Five.") completing the exact
+            // reference the command just set — isn't a competing navigation, it's
+            // the rest of the same one. Without this check, "Hebrews 13" (voice
+            // command, sets the cooldown) followed moments later by "Five." (its
+            // own utterance, resolved against that context) got added to
+            // detectedVerses/currentVerse correctly, but the live slide silently
+            // stayed on the command's verse 1 because the cooldown blocked the
+            // auto-display step below.
+            const priorContext = activeReferenceContextRef.current
+            const continuesSameReference = !!priorContext &&
+                priorContext.book === latestVerse.book &&
+                priorContext.chapter === latestVerse.chapter
+
             // Refresh active reference context so later bare references resolve correctly
             activeReferenceContextRef.current = updateContextFromVerse(latestVerse)
 
             // Auto-lookup if enabled
-            if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
+            if (autoLookup && !inVersionSwitchCooldown && (!inNavigationCooldown || continuesSameReference)) {
                 lookupVerse(latestVerse).then(scripture => {
                     optionsRef.current.onVerseDetected?.(latestVerse, scripture)
 
