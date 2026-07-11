@@ -49,6 +49,30 @@
         "fs:allow-remove",
         "fs:allow-read-dir",
         "fs:allow-read-file",
+        {
+            "identifier": "fs:allow-read-text-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/dev-sermon-recordings/**"
+                }
+            ]
+        },
+        {
+            "identifier": "fs:allow-write-text-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/dev-sermon-recordings/**"
+                }
+            ]
+        },
+        {
+            "identifier": "fs:allow-read-dir",
+            "allow": [
+                {
+                    "path": "$APPDATA/dev-sermon-recordings/**"
+                }
+            ]
+        },
         "updater:default",
         "process:default"
     ]

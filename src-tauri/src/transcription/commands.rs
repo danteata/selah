@@ -196,6 +196,63 @@ pub async fn get_loaded_native_model(app: AppHandle) -> Result<Option<String>, S
     }
 }
 
+/// Dev-only: one-shot offline (batch) re-transcription of a saved recording,
+/// used to build a higher-accuracy "ground truth" transcript to diff against
+/// what the live detector flagged in realtime. Loads `model_id` (typically a
+/// bigger/slower model than realtime affords) and leaves it loaded afterward
+/// — the caller can restore whatever was previously loaded itself via
+/// `get_loaded_native_model`/`load_native_model` if it cares to.
+#[tauri::command]
+pub async fn transcribe_audio_file(
+    app: AppHandle,
+    file_path: String,
+    model_id: String,
+) -> Result<String, String> {
+    #[cfg(feature = "native-transcription")]
+    {
+        use crate::audio_capture::{decode_wav_to_f32, AudioCaptureState};
+        use crate::transcription::TranscriptionManager;
+        use std::sync::atomic::Ordering;
+
+        // Never swap the live engine's model out from under an active
+        // session — there is only one engine slot, shared between the live
+        // VAD-driven path and this one-off batch path.
+        if app.state::<AudioCaptureState>().is_capturing.load(Ordering::SeqCst) {
+            return Err("Cannot batch-transcribe while a live session is capturing".to_string());
+        }
+
+        let samples = decode_wav_to_f32(&file_path)?;
+
+        let models = app.state::<Arc<ModelManager>>();
+        let info = models
+            .get_model_info(&model_id)
+            .ok_or_else(|| format!("Unknown model: {}", model_id))?;
+        if !models.is_downloaded(&model_id) {
+            return Err(format!("Model {} is not downloaded", model_id));
+        }
+        let path = models
+            .model_path(&model_id)
+            .ok_or_else(|| "Could not resolve model path".to_string())?;
+        let engine_type = info.engine_type;
+        let manager = app.state::<TranscriptionManager>().inner().clone();
+
+        tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+            manager
+                .load_model(&model_id, path, engine_type)
+                .map_err(|e| e.to_string())?;
+            let out = manager.transcribe(samples).map_err(|e| e.to_string())?;
+            Ok(out.text)
+        })
+        .await
+        .map_err(|e| format!("Task failed: {}", e))?
+    }
+    #[cfg(not(feature = "native-transcription"))]
+    {
+        let _ = (&app, &file_path, &model_id);
+        Err("Native transcription is not enabled in this build".to_string())
+    }
+}
+
 /// Configure the engine (language / initial prompt / translate) for the session.
 #[tauri::command]
 pub async fn set_native_transcription_config(

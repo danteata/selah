@@ -71,6 +71,8 @@ use audio_capture::{
     get_capture_type,
     get_audio_chunk_as_wav,
     flush_buffer_as_wav,
+    start_session_recording,
+    stop_session_recording,
 };
 
 use multi_monitor::{
@@ -125,6 +127,7 @@ use transcription::commands::{
     unload_native_model,
     get_loaded_native_model,
     set_native_transcription_config,
+    transcribe_audio_file,
     llm_proxy,
 };
 use transcription::ModelManager;
@@ -243,6 +246,8 @@ pub fn run() {
             get_capture_type,
             get_audio_chunk_as_wav,
             flush_buffer_as_wav,
+            start_session_recording,
+            stop_session_recording,
             get_monitors,
             get_primary_monitor,
             get_best_live_monitor,
@@ -283,6 +288,7 @@ pub fn run() {
             unload_native_model,
             get_loaded_native_model,
             set_native_transcription_config,
+            transcribe_audio_file,
             llm_proxy,
             get_license_status,
             save_license,

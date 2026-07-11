@@ -11,6 +11,8 @@
 //! - Linux: PulseAudio monitor source (microphone only for now)
 
 mod microphone;
+#[cfg(debug_assertions)]
+mod session_recorder;
 mod types;
 mod vad;
 
@@ -18,6 +20,8 @@ pub use types::*;
 pub use vad::VadSegmenter;
 #[allow(unused_imports)]
 pub use vad::{SileroVad, VadConfig};
+#[cfg(debug_assertions)]
+pub use session_recorder::SessionRecorder;
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -48,6 +52,10 @@ pub struct AudioCaptureState {
     pub vad_segmenter: Arc<Mutex<Option<VadSegmenter>>>,
     pub vad_enabled: Arc<AtomicBool>,
     pub device_name: Arc<Mutex<Option<String>>>,
+    /// Dev-only: active session-audio recorder, if a dev has started one via
+    /// `start_session_recording`. Always `None` in release builds.
+    #[cfg(debug_assertions)]
+    pub session_recorder: Arc<Mutex<Option<Arc<SessionRecorder>>>>,
 }
 
 impl AudioCaptureState {
@@ -63,6 +71,8 @@ impl AudioCaptureState {
             vad_segmenter: Arc::new(Mutex::new(None)),
             vad_enabled: Arc::new(AtomicBool::new(false)),
             device_name: Arc::new(Mutex::new(None)),
+            #[cfg(debug_assertions)]
+            session_recorder: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -311,6 +321,60 @@ pub fn flush_buffer_as_wav(state: tauri::State<'_, AudioCaptureState>) -> String
     chunk.to_wav_base64()
 }
 
+/// Dev-only: start recording the raw (pre-VAD) session audio to disk, for
+/// later offline re-transcription and accuracy comparison against the live
+/// detector. Returns the path of the WAV file being written. No-op error in
+/// release builds.
+#[tauri::command]
+pub fn start_session_recording(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AudioCaptureState>,
+    session_id: String,
+) -> Result<String, String> {
+    #[cfg(debug_assertions)]
+    {
+        use tauri::Manager;
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Failed to get app data dir: {e}"))?
+            .join("dev-sermon-recordings");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create recordings dir: {e}"))?;
+
+        // Prune at start (not stop) so a crash mid-recording doesn't wedge
+        // future cleanup. Keep room for the recording we're about to start.
+        session_recorder::prune_to_last_n(&dir, 4)?;
+
+        let path = dir.join(format!("{session_id}.wav"));
+        let sample_rate = *state.sample_rate.lock();
+        let recorder = SessionRecorder::start(path.clone(), sample_rate)?;
+        *state.session_recorder.lock() = Some(Arc::new(recorder));
+        Ok(path.to_string_lossy().to_string())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (app, state, session_id);
+        Err("Session recording is a dev-only feature".to_string())
+    }
+}
+
+/// Dev-only: stop the active session recording (if any) and finalize the WAV.
+#[tauri::command]
+pub fn stop_session_recording(state: tauri::State<'_, AudioCaptureState>) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(rec) = state.session_recorder.lock().take() {
+            rec.finish()?;
+        }
+        Ok(())
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = state;
+        Ok(())
+    }
+}
+
 /// Event payload for VAD-processed audio chunk events
 #[derive(Clone, serde::Serialize)]
 struct VadAudioChunkEvent {
@@ -388,6 +452,16 @@ fn compute_audio_features(samples: &[f32]) -> AudioFeaturesEvent {
         mid: g(rms, 4.0),
         treble: g(treble, 8.0),
     }
+}
+
+/// One completed VAD speech segment queued for the transcription worker
+/// thread (see `start_capture_with_vad`) — kept off the VAD-processing
+/// thread so a slow `transcribe()` call never delays the `audio-features`
+/// heartbeat that thread also emits.
+struct TranscriptionJob {
+    samples: Vec<f32>,
+    start_offset_ms: u32,
+    is_speaking: bool,
 }
 
 /// Handle a complete VAD speech segment.
@@ -516,6 +590,8 @@ pub fn start_capture_with_vad(
     let buffer_size = state.buffer_size.clone();
     let vad_segmenter = state.vad_segmenter.clone();
     let vad_enabled = state.vad_enabled.clone();
+    #[cfg(debug_assertions)]
+    let session_recorder = state.session_recorder.clone();
 
     // Start the underlying capture with smaller chunks for VAD
     // VAD works best with 512, 768, or 1024 sample chunks (32-64ms at 16kHz)
@@ -530,6 +606,26 @@ pub fn start_capture_with_vad(
         *state.device_name.lock() = None;
     }
     start_audio_capture_internal(&state, ct, Some(32))?;
+
+    // Speech segments are transcribed on a dedicated worker thread, not the
+    // VAD-processing thread below. `handle_speech_segment` calls into
+    // whichever engine is loaded (whisper.cpp, Parakeet, ...) and blocks
+    // until it returns — for a slow segment or a slower model that can take
+    // several seconds. If that call happened inline on the VAD thread, it
+    // would also delay the `audio-features` heartbeat emitted every
+    // iteration of that same loop, and the frontend watchdog
+    // (`useSermonListener.ts`) restarts the whole capture session if that
+    // heartbeat goes stale for 9+ seconds — a false "capture died" restart
+    // that drops whatever was mid-transcription. Queuing jobs here and
+    // processing them on a separate thread keeps the heartbeat flowing
+    // regardless of how long transcription takes, for any engine.
+    let (job_tx, job_rx) = std::sync::mpsc::channel::<TranscriptionJob>();
+    let worker_app = app.clone();
+    let worker_handle = std::thread::spawn(move || {
+        for job in job_rx {
+            handle_speech_segment(&worker_app, job.samples, job.start_offset_ms, job.is_speaking);
+        }
+    });
 
     // Spawn a thread that processes audio through VAD
     std::thread::spawn(move || {
@@ -556,8 +652,31 @@ pub fn start_capture_with_vad(
             drop(buf); // Release lock before VAD processing
 
             if samples.is_empty() {
+                // Still fire the throttled heartbeat (with zeroed features)
+                // even when no new samples arrived this tick. Skipping it
+                // here used to mean a genuine upstream audio-delivery gap
+                // (device hiccup, system-loopback stall) silenced the
+                // heartbeat entirely, which the frontend watchdog
+                // (`useSermonListener.ts`, `isStale(9000)`) reads as "capture
+                // died" and restarts the whole session — even though this
+                // thread is alive and just waiting for more samples.
+                if last_features_emit.elapsed().as_millis() >= features_interval_ms {
+                    let _ = app.emit("audio-features", compute_audio_features(&[]));
+                    last_features_emit = std::time::Instant::now();
+                }
                 std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
                 continue;
+            }
+
+            // Dev-only: append the raw, continuous (pre-VAD) samples to the
+            // active session recording, if any. Recording the raw buffer
+            // (not just VAD-flagged speech segments) matters — a VAD false
+            // negative would otherwise be invisible to the offline ground
+            // truth pass too, defeating the point of an independent
+            // comparison.
+            #[cfg(debug_assertions)]
+            if let Some(rec) = session_recorder.lock().clone() {
+                rec.append(&samples);
             }
 
             // Compute sermon-relative offset (ms since capture started)
@@ -576,9 +695,14 @@ pub fn start_capture_with_vad(
             if let Some(ref mut vad) = *segmenter {
                 match vad.process(&samples) {
                     Ok(Some(speech_samples)) => {
-                        // Complete speech segment: transcribe in-process (native
-                        // engine) or emit a WAV chunk for the sidecar.
-                        handle_speech_segment(&app, speech_samples, start_offset_ms, true);
+                        // Complete speech segment: hand off to the transcription
+                        // worker thread (see above) so a slow transcribe() call
+                        // can never stall this loop's heartbeat.
+                        let _ = job_tx.send(TranscriptionJob {
+                            samples: speech_samples,
+                            start_offset_ms,
+                            is_speaking: true,
+                        });
                     }
                     Ok(None) => {
                         // No complete segment yet, emit speaking status
@@ -609,11 +733,23 @@ pub fn start_capture_with_vad(
         if let Some(ref mut vad) = *segmenter {
             if let Some(speech_samples) = vad.flush() {
                 let start_offset_ms = session_start.elapsed().as_millis() as u32;
-                handle_speech_segment(&app, speech_samples, start_offset_ms, false);
+                let _ = job_tx.send(TranscriptionJob {
+                    samples: speech_samples,
+                    start_offset_ms,
+                    is_speaking: false,
+                });
             }
             vad.reset();
         }
         drop(segmenter);
+
+        // Close the job channel and wait for the worker to finish transcribing
+        // everything already queued (including the flush above) before telling
+        // the frontend it's safe to tear down — otherwise the final utterance's
+        // `transcription-result` could arrive after (or never, if the listener
+        // was already removed) the `end_of_stream` marker below.
+        drop(job_tx);
+        let _ = worker_handle.join();
 
         // Terminal marker: tells the JS listener the flush is complete and it is
         // safe to tear down. Emitted last so any flushed segment above is

@@ -118,6 +118,39 @@ impl AudioChunk {
     }
 }
 
+/// Decode a mono/16-bit WAV file at [`TARGET_SAMPLE_RATE`] into `f32` samples
+/// in `[-1.0, 1.0]`, for one-shot offline (batch) re-transcription of a saved
+/// recording. Dev-only tooling — fails loudly on format mismatch rather than
+/// silently resampling, since our own recorder always writes this exact
+/// format and a mismatch means something else produced the file.
+pub fn decode_wav_to_f32(path: &str) -> Result<Vec<f32>, String> {
+    let mut reader = hound::WavReader::open(path)
+        .map_err(|e| format!("Failed to open WAV file {path}: {e}"))?;
+    let spec = reader.spec();
+
+    if spec.channels != 1 {
+        return Err(format!("Expected mono audio, got {} channels", spec.channels));
+    }
+    if spec.sample_rate != TARGET_SAMPLE_RATE {
+        return Err(format!(
+            "Expected {TARGET_SAMPLE_RATE}Hz audio, file is {}Hz",
+            spec.sample_rate
+        ));
+    }
+
+    match spec.sample_format {
+        hound::SampleFormat::Int => reader
+            .samples::<i16>()
+            .map(|s| s.map(|v| v as f32 / 32768.0))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to decode WAV samples: {e}")),
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to decode WAV samples: {e}")),
+    }
+}
+
 /// Simple linear resampling
 pub fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if from_rate == to_rate {
