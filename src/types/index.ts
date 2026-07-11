@@ -112,6 +112,11 @@ export interface Slide {
     verseIndex?: number
     totalVerses?: number
     verseLabel?: string
+    // Which verse numbers from a bible slide's `data.content` are actually
+    // rendered in `contents`. undefined = every verse in data.content is
+    // rendered (the historical behavior, unchanged for slides that never
+    // set this).
+    displayVerseNumbers?: number[]
 }
 
 export interface Template {

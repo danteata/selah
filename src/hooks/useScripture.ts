@@ -25,6 +25,78 @@ export interface BibleVersionStatus {
     availableOnCdn: boolean
 }
 
+const BOOK_NAMES = [
+    '', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
+    'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
+    '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra',
+    'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
+    'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations',
+    'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
+    'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk',
+    'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
+    'Matthew', 'Mark', 'Luke', 'John', 'Acts',
+    'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians',
+    'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy',
+    '2 Timothy', 'Titus', 'Philemon', 'Hebrews', 'James',
+    '1 Peter', '2 Peter', '1 John', '2 John', '3 John',
+    'Jude', 'Revelation',
+]
+
+// Some cached payloads use book name strings ("John") instead of book
+// numbers. Find the index of a specific verse, falling back to scanning by
+// name+number so the lookup resolves regardless of the cached data shape.
+function findBibleStartIndex(bibleData: BibleVerse[], book: number, chapter: number, verse: number): number {
+    let startIndex = bibleData.findIndex((s: BibleVerse) =>
+        Number(s.book) === book &&
+        Number(s.chapter) === chapter &&
+        Number(s.verse) === verse
+    )
+
+    if (startIndex === -1) {
+        const targetBookName = BOOK_NAMES[book] || ''
+        startIndex = bibleData.findIndex((s: any) => {
+            const sb = String(s.book ?? '')
+            const sc = Number(s.chapter)
+            const sv = Number(s.verse)
+            const nameMatch = sb === targetBookName || sb === String(book)
+            return nameMatch && sc === chapter && sv === verse
+        })
+    }
+
+    return startIndex
+}
+
+// A verse must never be attributed to the wrong book/chapter (bad ASR
+// digits, an unvalidated LLM/regex guess, etc.) — the flat, sequential
+// bible array has no natural stop at a chapter boundary.
+function belongsToChapter(s: BibleVerse, book: number, chapter: number, bookName: string): boolean {
+    const bookMatches = Number(s.book) === book || s.book === bookName || s.book === String(book)
+    return bookMatches && Number(s.chapter) === chapter
+}
+
+// "10-12, 14, 17" — groups consecutive verse numbers into ranges, joined
+// with commas, for a compact multi-verse reference label.
+export function formatVerseGroups(verseNumbers: number[]): string {
+    const sorted = Array.from(new Set(verseNumbers)).sort((a, b) => a - b)
+    if (sorted.length === 0) return ''
+
+    const runs: string[] = []
+    let runStart = sorted[0]
+    let runEnd = sorted[0]
+    for (let i = 1; i <= sorted.length; i++) {
+        if (i < sorted.length && sorted[i] === runEnd + 1) {
+            runEnd = sorted[i]
+        } else {
+            runs.push(runStart === runEnd ? `${runStart}` : `${runStart}-${runEnd}`)
+            if (i < sorted.length) {
+                runStart = sorted[i]
+                runEnd = sorted[i]
+            }
+        }
+    }
+    return runs.join(', ')
+}
+
 export function useScripture() {
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
@@ -199,42 +271,7 @@ export function useScripture() {
                 return null
             }
 
-            // Find start index
-            let startIndex = bibleData.findIndex((scripture: BibleVerse) =>
-                Number(scripture.book) === book &&
-                Number(scripture.chapter) === chapter &&
-                Number(scripture.verse) === verses[0]
-            )
-
-            // Some cached payloads use book name strings ("John") instead of
-            // book numbers. Fall back to scanning by name+number so the
-            // lookup still resolves regardless of the cached data shape.
-            if (startIndex === -1) {
-                const bookNames = [
-                    '', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
-                    'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
-                    '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra',
-                    'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
-                    'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations',
-                    'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
-                    'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk',
-                    'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
-                    'Matthew', 'Mark', 'Luke', 'John', 'Acts',
-                    'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians',
-                    'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy',
-                    '2 Timothy', 'Titus', 'Philemon', 'Hebrews', 'James',
-                    '1 Peter', '2 Peter', '1 John', '2 John', '3 John',
-                    'Jude', 'Revelation',
-                ]
-                const targetBookName = bookNames[book] || ''
-                startIndex = bibleData.findIndex((s: any) => {
-                    const sb = String(s.book ?? '')
-                    const sc = Number(s.chapter)
-                    const sv = Number(s.verse)
-                    const nameMatch = sb === targetBookName || sb === String(book)
-                    return nameMatch && sc === chapter && sv === verses[0]
-                })
-            }
+            const startIndex = findBibleStartIndex(bibleData, book, chapter, verses[0])
 
             if (startIndex === -1) {
                 console.error('Scripture not found. Cache size:', bibleData.length, 'sample:', JSON.stringify(bibleData[0]).slice(0, 200), 'looking for', `${book}:${chapter}:${verses[0]}`)
@@ -242,29 +279,34 @@ export function useScripture() {
             }
 
             // Get all verses in sequence
-            const selectedVerses = bibleData.slice(startIndex, startIndex + verses.length)
+            let selectedVerses = bibleData.slice(startIndex, startIndex + verses.length)
 
-            // Get book name
-            const bookNames = [
-                '', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
-                'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
-                '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra',
-                'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
-                'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations',
-                'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
-                'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk',
-                'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
-                'Matthew', 'Mark', 'Luke', 'John', 'Acts',
-                'Romans', '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians',
-                'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians', '1 Timothy',
-                '2 Timothy', 'Titus', 'Philemon', 'Hebrews', 'James',
-                '1 Peter', '2 Peter', '1 John', '2 John', '3 John',
-                'Jude', 'Revelation'
-            ]
+            const bookName = BOOK_NAMES[book] || ''
 
-            const bookName = bookNames[book] || ''
+            // A too-large verse range (bad ASR digits, an unvalidated LLM/regex
+            // guess, etc.) must never spill past the requested chapter — the
+            // flat, sequential bible array has no natural stop at a chapter
+            // boundary, so `slice` would otherwise silently return real verses
+            // from a completely different chapter/book under a label built
+            // from the (wrong) requested range. Clamp to what's actually in
+            // the requested book+chapter; we'd rather show fewer verses than
+            // requested than substitute wrong scripture under a correct-looking
+            // label.
+            const firstOutOfRangeIdx = selectedVerses.findIndex((s) => !belongsToChapter(s, book, chapter, bookName))
+            if (firstOutOfRangeIdx !== -1) {
+                console.warn(
+                    `Requested verse range spilled past ${bookName} ${chapter} — clamping`,
+                    { requestedCount: verses.length, availableCount: firstOutOfRangeIdx },
+                )
+                selectedVerses = selectedVerses.slice(0, firstOutOfRangeIdx)
+            }
+            if (selectedVerses.length === 0) {
+                console.error('Scripture range entirely out of bounds for the requested chapter', { book, chapter, verseStr })
+                return null
+            }
+
             const startVerse = verses[0]
-            const endVerse = verses[verses.length - 1]
+            const endVerse = Number(selectedVerses[selectedVerses.length - 1].verse)
 
             const labelText = startVerse === endVerse
                 ? `${bookName} ${chapter}:${startVerse}`
@@ -289,8 +331,65 @@ export function useScripture() {
         }
     }, [defaultBibleVersion, setDefaultBibleVersion, isVersionDownloaded, downloadBibleVersion])
 
+    // Fetch an explicit, possibly non-contiguous set of verse numbers (e.g.
+    // from shift-click/drag selection in the verse picker) and merge them
+    // into one Scripture. Unlike fetchScripture's label mini-language (which
+    // can only express a contiguous range), this filters by exact verse
+    // membership so a sparse selection like {10, 12, 14, 17} works.
+    const fetchScriptureByVerseNumbers = useCallback(async (
+        bookIndex: number,
+        chapter: number,
+        verseNumbers: number[],
+        version: string = ''
+    ): Promise<Scripture | null> => {
+        const selectedVersion = version || defaultBibleVersion
+        const sortedVerseNumbers = Array.from(new Set(verseNumbers)).sort((a, b) => a - b)
+
+        if (sortedVerseNumbers.length === 0) return null
+
+        try {
+            const bibleData = await downloadBibleVersion(selectedVersion)
+            if (!bibleData) {
+                console.error(`Bible data not found for version ${selectedVersion}`)
+                return null
+            }
+
+            const bookName = BOOK_NAMES[bookIndex] || ''
+            const selectedVerses = bibleData
+                .filter((s) => belongsToChapter(s, bookIndex, chapter, bookName) && sortedVerseNumbers.includes(Number(s.verse)))
+                .sort((a, b) => Number(a.verse) - Number(b.verse))
+
+            if (selectedVerses.length === 0) {
+                console.error('No matching verses found for selection', { bookIndex, chapter, verseNumbers: sortedVerseNumbers })
+                return null
+            }
+
+            const minVerse = sortedVerseNumbers[0]
+            const maxVerse = sortedVerseNumbers[sortedVerseNumbers.length - 1]
+
+            if (selectedVersion !== defaultBibleVersion) {
+                setDefaultBibleVersion(selectedVersion)
+            }
+
+            return {
+                label: `${bookName} ${chapter}:${formatVerseGroups(sortedVerseNumbers)}`,
+                // Kept as a plain bounding range (not the grouped/sparse form) —
+                // BibleList.tsx and BibleVerseNavigator.tsx both parse this as
+                // "book:chapter:start(-end)". The exact sparse set lives in
+                // `content` only.
+                labelShortFormat: `${bookIndex}:${chapter}:${minVerse}${minVerse !== maxVerse ? `-${maxVerse}` : ''}`,
+                version: selectedVersion,
+                content: selectedVerses,
+            }
+        } catch (error) {
+            console.error('Error fetching scripture by verse numbers:', error)
+            return null
+        }
+    }, [defaultBibleVersion, setDefaultBibleVersion, downloadBibleVersion])
+
     return {
         fetchScripture,
+        fetchScriptureByVerseNumbers,
         downloadBibleVersion,
         isVersionDownloaded,
         getVersionStatus,

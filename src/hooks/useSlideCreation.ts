@@ -67,6 +67,14 @@ export function generateObjectId(): string {
     return timestamp + machineId + processId + counter
 }
 
+// For an auto-detected multi-verse range, only the first verse should be
+// displayed by default (a full range crammed onto one slide is illegible) —
+// returns undefined for a single-verse scripture so callers render it in full.
+export function firstVerseOnly(scripture: Scripture): number[] | undefined {
+    if (!Array.isArray(scripture.content) || scripture.content.length <= 1) return undefined
+    return [Number(scripture.content[0].verse)]
+}
+
 // Calculate font size based on screen and content
 export function calculateScreenFontSize(content: string): number {
     const length = content?.length || 0
@@ -84,7 +92,8 @@ export function calculateScreenFontSize(content: string): number {
 export function generateSlideContent(
     slide: Slide,
     data?: Scripture | Hymn | Song | Countdown | ExtendedFileT,
-    currentVerse?: string
+    currentVerse?: string,
+    displayVerseNumbers?: number[]
 ): string[] {
     if (!data) return slide.contents || []
 
@@ -97,7 +106,10 @@ export function generateSlideContent(
             if (typeof scripture.content === 'string') {
                 contents.push(`<p class="scripture-content">${scripture.content}</p>`)
             } else if (Array.isArray(scripture.content)) {
-                const versesText = scripture.content
+                const versesToRender = displayVerseNumbers
+                    ? scripture.content.filter((verse) => displayVerseNumbers.includes(Number(verse.verse)))
+                    : scripture.content
+                const versesText = versesToRender
                     .map((verse: { verse: string; scripture: string }) => `<sup>${verse.verse}</sup>${verse.scripture}`)
                     .join(' ')
                 contents.push(`<p class="scripture-content">${versesText}</p>`)
@@ -246,7 +258,7 @@ export function useSlideCreation() {
 
     const createBibleSlide = useCallback((
         scripture: Scripture,
-        options?: { fromWholeBibleSearch?: boolean, template?: TemplateItem | null }
+        options?: { fromWholeBibleSearch?: boolean, template?: TemplateItem | null, displayVerseNumbers?: number[] }
     ): Slide => {
         const tempSlide = preSlideCreation()
         tempSlide.layout = slideLayoutTypes.bible
@@ -270,10 +282,14 @@ export function useSlideCreation() {
         tempSlide.title = scripture?.label
         tempSlide.name = generateSlideName(tempSlide)
 
-        const contentString = typeof scripture?.content === 'string'
-            ? scripture?.content
-            : Array.isArray(scripture?.content)
-                ? scripture?.content.map((v: { scripture: string }) => v.scripture).join(' ')
+        const displayVerseNumbers = options?.displayVerseNumbers
+        const versesForFontSize = Array.isArray(scripture?.content) && displayVerseNumbers
+            ? scripture.content.filter((v) => displayVerseNumbers.includes(Number(v.verse)))
+            : scripture?.content
+        const contentString = typeof versesForFontSize === 'string'
+            ? versesForFontSize
+            : Array.isArray(versesForFontSize)
+                ? versesForFontSize.map((v: { scripture: string }) => v.scripture).join(' ')
                 : ''
         const fontSize = calculateScreenFontSize(contentString)
 
@@ -283,7 +299,8 @@ export function useSlideCreation() {
             bibleVersion: scripture.version,
         }
         tempSlide.data = scripture
-        tempSlide.contents = generateSlideContent(tempSlide, scripture)
+        tempSlide.displayVerseNumbers = displayVerseNumbers
+        tempSlide.contents = generateSlideContent(tempSlide, scripture, undefined, displayVerseNumbers)
 
         // Scripture has no top-level `book` field — derive from the first
         // BibleVerse in `content` (when array) or parse the leading word off

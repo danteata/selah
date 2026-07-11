@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
-import { generateSlideContent } from '../../hooks/useSlideCreation'
+import { generateSlideContent, calculateScreenFontSize } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 import { useAnalytics } from '../../hooks/useAnalytics'
@@ -450,11 +450,30 @@ export function LiveOutput() {
     const handleVerseSelect = useCallback((scripture: Scripture) => {
         if (!liveSlide || liveSlide.type !== 'bible') return
 
+        // scripture.content already holds exactly the verses the navigator
+        // selected (single verse, shift-clicked set, or dragged span), so
+        // font size must be recomputed from it — otherwise a slide that
+        // previously held a whole illegible range would keep that tiny
+        // font size even after being narrowed down to one legible verse.
+        const contentString = typeof scripture.content === 'string'
+            ? scripture.content
+            : Array.isArray(scripture.content)
+                ? scripture.content.map((v) => v.scripture).join(' ')
+                : ''
+        const displayVerseNumbers = Array.isArray(scripture.content)
+            ? scripture.content.map((v) => Number(v.verse))
+            : undefined
+
         const updatedSlide = {
             ...liveSlide,
             name: scripture.label || liveSlide.name,
             data: scripture,
             contents: generateSlideContent(liveSlide, scripture),
+            displayVerseNumbers,
+            slideStyle: {
+                ...liveSlide.slideStyle,
+                fontSize: Number(calculateScreenFontSize(contentString)),
+            },
         }
 
         const updateActiveSlide = useAppStore.getState().updateActiveSlide

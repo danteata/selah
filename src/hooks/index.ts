@@ -6,9 +6,10 @@ export {
     generateObjectId,
     generateSlideName,
     generateSlideContent,
-    calculateScreenFontSize
+    calculateScreenFontSize,
+    firstVerseOnly
 } from './useSlideCreation'
-export { useScripture } from './useScripture'
+export { useScripture, formatVerseGroups } from './useScripture'
 export { useHymn } from './useHymn'
 export { useSong } from './useSong'
 export { useSongs } from './useSongs'

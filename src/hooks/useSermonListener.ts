@@ -14,7 +14,7 @@ import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { isDesktop } from '../platform'
 import { useScripture } from './useScripture'
-import { useSlideCreation } from './useSlideCreation'
+import { useSlideCreation, firstVerseOnly } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
@@ -60,6 +60,15 @@ import {
 
 const MAX_DETECTED_VERSES_PER_QUERY = 3 // Max verses per semantic search query
 const LLM_EXTRACTION_DEBOUNCE_MS = 3500 // Wait for speech to settle before an LLM pass
+
+// Voice-command types that change what's on the shared live screen — gated on
+// confidence before executing. stop/start_listening are excluded since they
+// don't touch the screen.
+const SCREEN_AFFECTING_COMMAND_TYPES = new Set<VoiceCommand['type']>([
+    'change_version', 'next_verse', 'previous_verse', 'next_chapter',
+    'previous_chapter', 'go_to_verse', 'go_to_reference', 'display',
+])
+const COMMAND_CONFIDENCE_ORDER = { high: 3, medium: 2, low: 1 } as const
 
 export interface SavedSermonTranscript {
     id: string
@@ -205,6 +214,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
+    // Auto-detected multi-verse ranges default to showing just the first
+    // verse — a full range crammed onto one slide is illegible. The full
+    // range is still preserved on the Scripture/slide data for the verse
+    // navigator, which lets the user add more verses via shift-click/drag.
+    const createAutoDetectBibleSlide = useCallback(
+        (scripture: Scripture) => createBibleSlide(scripture, { displayVerseNumbers: firstVerseOnly(scripture) }),
+        [createBibleSlide]
+    )
     const { trackEvent } = useAnalytics()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const bibleVersions = useAppStore((state) => state.bibleVersions)
@@ -359,8 +376,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (verses && verses.length > 0) {
                 const first = verses[0]
                 const last = verses[verses.length - 1]
+                // `first.book` is the raw numeric book id from the Bible JSON
+                // (e.g. "43"), not a canonical name — verseToLabel() and every
+                // other DetectedVerse consumer expect the name (e.g. "John").
+                const bookName = NUMBER_TO_BOOK[first.book]
+                if (!bookName) return null
                 return {
-                    book: first.book,
+                    book: bookName,
                     chapter: parseInt(first.chapter, 10),
                     verseStart: parseInt(first.verse, 10),
                     verseEnd: verses.length > 1 ? parseInt(last.verse, 10) : undefined,
@@ -879,12 +901,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
         // Create a slide from the scripture using the proper function
         // This applies the default bible verse template and includes the verse reference
-        const slide = createBibleSlide(currentScripture)
+        const slide = createAutoDetectBibleSlide(currentScripture)
 
         // Add slide to active slides and set as live
         appendActiveSlide(slide)
         setLiveSlide(slide.id)
-    }, [currentScripture, createBibleSlide, appendActiveSlide, setLiveSlide])
+    }, [currentScripture, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide])
 
     /**
      * Navigate to the next verse relative to the current verse
@@ -962,7 +984,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         const existingSlide = state.activeSlides.find(s => s.id === liveSlideId)
 
         if (existingSlide && existingSlide.type === 'bible') {
-            const newSlide = createBibleSlide(scripture)
+            const newSlide = createAutoDetectBibleSlide(scripture)
             const updatedSlide = {
                 ...existingSlide,
                 contents: newSlide.contents,
@@ -980,13 +1002,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }
         } else if (!skipQueueAppend) {
             // No existing bible slide — fall back to creating one (only for auto-detect, not voice nav)
-            const slide = createBibleSlide(scripture)
+            const slide = createAutoDetectBibleSlide(scripture)
             appendActiveSlide(slide)
             setLiveSlide(slide.id)
         }
         // When skipQueueAppend=true and no existing bible slide, do nothing.
         // The user explicitly wants voice navigation to never spam the queue.
-    }, [createBibleSlide, updateActiveSlide, appendActiveSlide, setLiveSlide])
+    }, [createAutoDetectBibleSlide, updateActiveSlide, appendActiveSlide, setLiveSlide])
 
     const applyBibleVersionChange = useCallback(async (requestedVersionId: string): Promise<boolean> => {
         const resolvedVersionId = resolveBibleVersionId(requestedVersionId) || requestedVersionId
@@ -1028,7 +1050,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         })
 
         // Force deterministic refresh by publishing a fresh Bible slide from the switched scripture.
-        const slide = createBibleSlide(scripture)
+        const slide = createAutoDetectBibleSlide(scripture)
         appendActiveSlide(slide)
         setLiveSlide(slide.id)
 
@@ -1039,16 +1061,31 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             scriptureVersion: scripture.version,
         })
         return true
-    }, [resolveBibleVersionId, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide])
+    }, [resolveBibleVersionId, lookupVerse, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide])
 
     /**
      * Activate verses surfaced by the optional LLM pass. Mirrors the regex
      * activation branch but is kept separate so the fast local path is never
      * affected by the LLM augmentation. Only ever ADDS verses.
      */
-    const activateLlmVerses = useCallback((newVerses: DetectedVerse[]) => {
-        const fresh = newVerses.filter((v) => !detectedRefsRef.current.has(v.reference))
+    const activateLlmVerses = useCallback((newVerses: DetectedVerse[], regexGenerationAtSchedule: number) => {
+        // The LLM path is the least corroborated of the three detectors (no
+        // lexical-overlap validation the way semantic matches get) — it must
+        // respect the same minConfidence bar the regex/semantic paths do,
+        // not bypass it.
+        const confidenceOrder = { high: 3, medium: 2, low: 1 } as const
+        const minConfidenceLevel = confidenceOrder[minConfidence]
+        const fresh = newVerses.filter((v) =>
+            !detectedRefsRef.current.has(v.reference) && confidenceOrder[v.confidence] >= minConfidenceLevel,
+        )
         if (fresh.length === 0) return
+
+        // Stale if a newer regex detection has landed since this LLM call was
+        // scheduled — the LLM's multi-second round-trip means it can resolve
+        // well after speech has moved on. Still record the verses (useful for
+        // operator review / later re-activation) but don't let a stale result
+        // knock a newer, correct verse off the live screen.
+        const isStale = regexGenerationAtSchedule !== regexVerseDetectionRef.current
 
         const now = Date.now()
         const stamped = fresh.map((v) => ({
@@ -1068,6 +1105,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
 
         setDetectedVerses((prev) => dedupeVerses([...prev, ...stamped]))
+
+        if (isStale) return
+
         const latest = stamped[stamped.length - 1]
         setCurrentVerse(latest)
         activeReferenceContextRef.current = updateContextFromVerse(latest)
@@ -1079,11 +1119,16 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             verse_count: stamped.length,
         })
 
-        if (autoLookup) {
+        // Respect the same in-progress-navigation/version-switch cooldowns the
+        // regex/semantic paths already respect before auto-projecting.
+        const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
+        const inNavigationCooldown = Date.now() < navigationCooldownUntilRef.current
+
+        if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
             lookupVerse(latest).then((scripture) => {
                 optionsRef.current.onVerseDetected?.(latest, scripture)
-                if (autoDisplay && scripture) {
-                    const slide = createBibleSlide(scripture)
+                if (autoDisplay && scripture && latest.confidence !== 'low') {
+                    const slide = createAutoDetectBibleSlide(scripture)
                     appendActiveSlide(slide)
                     setLiveSlide(slide.id)
                 }
@@ -1091,7 +1136,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } else {
             optionsRef.current.onVerseDetected?.(latest, null)
         }
-    }, [dedupeVerses, lookupVerse, autoLookup, autoDisplay, createBibleSlide, appendActiveSlide, setLiveSlide])
+    }, [dedupeVerses, lookupVerse, autoLookup, autoDisplay, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide, minConfidence])
 
     /**
      * Debounced, optional LLM extraction pass over the latest transcript text.
@@ -1109,8 +1154,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const controller = new AbortController()
             llmAbortRef.current = controller
             const alreadyDetected = Array.from(detectedRefsRef.current)
+            const regexGenerationAtSchedule = regexVerseDetectionRef.current
             extractVersesWithLLM(text, llm, alreadyDetected, controller.signal)
-                .then((result) => activateLlmVerses(result.newVerses))
+                .then((result) => activateLlmVerses(result.newVerses, regexGenerationAtSchedule))
                 .catch(() => { /* best-effort augmentation */ })
         }, LLM_EXTRACTION_DEBOUNCE_MS)
     }, [activateLlmVerses])
@@ -1150,6 +1196,24 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 const now = Date.now()
                 const lastRunAt = processedCommandTimesRef.current.get(commandKey) || 0
                 if (now - lastRunAt < 1800) continue
+
+                // Confidence gate. Verse detection has always respected
+                // minConfidence before touching the live screen; voice
+                // commands never did, so any command that cleared the regex
+                // (however loose) executed immediately regardless of how
+                // ambiguous the match was. Version switches are the most
+                // disruptive — they change the wording of everything
+                // currently displayed — so they require 'high'. Other
+                // screen-affecting commands require at least 'medium'.
+                // stop/start_listening don't touch the screen, so they're
+                // exempt.
+                if (SCREEN_AFFECTING_COMMAND_TYPES.has(cmd.type)) {
+                    const requiredConfidence = cmd.type === 'change_version' ? 'high' : 'medium'
+                    if (COMMAND_CONFIDENCE_ORDER[cmd.confidence] < COMMAND_CONFIDENCE_ORDER[requiredConfidence]) {
+                        continue
+                    }
+                }
+
                 processedCommandTimesRef.current.set(commandKey, now)
 
                 switch (cmd.type) {
@@ -1330,7 +1394,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     case 'display': {
                         const scripture = currentScriptureRef.current
                         if (scripture) {
-                            const slide = createBibleSlide(scripture)
+                            const slide = createAutoDetectBibleSlide(scripture)
                             appendActiveSlide(slide)
                             setLiveSlide(slide.id)
                         }
@@ -1492,7 +1556,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // Auto-display if enabled
                     if (autoDisplay && scripture) {
                         // Create a slide using the proper function to apply template
-                        const slide = createBibleSlide(scripture)
+                        const slide = createAutoDetectBibleSlide(scripture)
 
                         // Add slide to active slides and set as live
                         appendActiveSlide(slide)
@@ -1528,7 +1592,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         lookupVerse(existing).then(scripture => {
                             optionsRef.current.onVerseDetected?.(existing, scripture)
                             if (autoDisplay && scripture) {
-                                const slide = createBibleSlide(scripture)
+                                const slide = createAutoDetectBibleSlide(scripture)
                                 appendActiveSlide(slide)
                                 setLiveSlide(slide.id)
                             }
@@ -1592,7 +1656,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
                 // Convert semantic matches to DetectedVerse format
                 const semanticVerses: DetectedVerse[] = []
-                const semanticReActivatedRefs: string[] = []
+                const semanticReActivatedRefs: Array<{ reference: string; confidence: DetectedVerse['confidence'] }> = []
                 for (const match of semanticMatches) {
                     let bookName = match.book
                     const bookNum = parseInt(match.book, 10)
@@ -1616,9 +1680,29 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         continue
                     }
 
-                    // Re-activate if already detected, don't add duplicate to list
+                    // Scripture-marker check. If the matched query has no marker
+                    // word (verse, chapter, scripture, etc.) and the score is
+                    // below SCRIPTURE_MARKER_MIN_SCORE, it's likely an
+                    // incidental embedding match — the embedding model can hit
+                    // a verse that uses a similar idiom or topic without the
+                    // preacher actually quoting it. Reject unless the score is
+                    // convincingly high. This runs BEFORE the reactivation check
+                    // below so a weak, marker-free coincidental re-match can't
+                    // silently re-trigger an already-detected (and possibly
+                    // long-stale) verse — reactivation must clear the same bar a
+                    // brand-new match would.
+                    if (!SCRIPTURE_MARKER_RE.test(match.text) && match.score < SCRIPTURE_MARKER_MIN_SCORE) {
+                        continue
+                    }
+
+                    // Re-activate if already detected, don't add duplicate to list.
+                    // Carry the CURRENT match's confidence through — reactivation
+                    // display must be gated on how good this fresh match is, not
+                    // on whatever confidence the verse happened to have the first
+                    // time it was detected (possibly minutes ago, at a different
+                    // score).
                     if (detectedRefsRef.current.has(properReference)) {
-                        semanticReActivatedRefs.push(properReference)
+                        semanticReActivatedRefs.push({ reference: properReference, confidence })
                         continue
                     }
 
@@ -1642,17 +1726,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             lastScoreByReferenceRef.current.set(properReference, match.score)
                             continue
                         }
-                    }
-
-                    // Scripture-marker check. If the matched query has no marker
-                    // word (verse, chapter, scripture, etc.) and the score is
-                    // below SCRIPTURE_MARKER_MIN_SCORE, it's likely an
-                    // incidental embedding match — the embedding model can hit
-                    // a verse that uses a similar idiom or topic without the
-                    // preacher actually quoting it. Reject unless the score is
-                    // convincingly high.
-                    if (!SCRIPTURE_MARKER_RE.test(match.text) && match.score < SCRIPTURE_MARKER_MIN_SCORE) {
-                        continue
                     }
 
                     const detectedVerse: DetectedVerse = {
@@ -1736,7 +1809,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 // 0.55-0.65 with only theological-common overlap) stay
                                 // in the detected list for operator review.
                                 if (autoDisplay && scripture && bestSemanticVerse.confidence !== 'low') {
-                                    const slide = createBibleSlide(scripture)
+                                    const slide = createAutoDetectBibleSlide(scripture)
                                     appendActiveSlide(slide)
                                     setLiveSlide(slide.id)
                                 }
@@ -1754,7 +1827,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 // re-reference and re-show. Otherwise it's rolling-window noise —
                 // bump metadata only.
                 if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0 && !isStale) {
-                    const reActivatedRef = semanticReActivatedRefs[0]
+                    const { reference: reActivatedRef, confidence: freshConfidence } = semanticReActivatedRefs[0]
                     const existing = detectedVersesRef.current.find(v => v.reference === reActivatedRef)
                     if (existing) {
                         const now = Date.now()
@@ -1773,8 +1846,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                                 lookupVerse(existing).then(scripture => {
                                     optionsRef.current.onVerseDetected?.(existing, scripture)
-                                    if (autoDisplay && scripture && existing.confidence !== 'low') {
-                                        const slide = createBibleSlide(scripture)
+                                    // Gate on the fresh re-match's confidence, not
+                                    // the verse's original (possibly stale) one.
+                                    if (autoDisplay && scripture && freshConfidence !== 'low') {
+                                        const slide = createAutoDetectBibleSlide(scripture)
                                         appendActiveSlide(slide)
                                         setLiveSlide(slide.id)
                                     }
@@ -1805,7 +1880,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 setIsSemanticSearching(false)
             })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createBibleSlide, appendActiveSlide, setLiveSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange, scheduleLlmExtraction])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange, scheduleLlmExtraction])
 
     /**
      * Set transcription provider

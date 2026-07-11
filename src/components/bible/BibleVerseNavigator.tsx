@@ -24,8 +24,16 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
     const [loading, setLoading] = useState(false)
     const [selectedVersion, setSelectedVersion] = useState<string>('')
     const [downloadedVersionIds, setDownloadedVersionIds] = useState<string[]>([])
+    // Which verse numbers are currently selected for display — seeded from
+    // whatever the live slide actually shows (see the seeding effect below),
+    // then driven by click / shift+click / drag in the grid.
+    const [selectedVerses, setSelectedVerses] = useState<Set<number>>(new Set())
+    const dragAnchorRef = useRef<number | null>(null)
+    const isMouseDownRef = useRef(false)
+    const isDraggingRef = useRef(false)
+    const justDraggedRef = useRef(false)
 
-    const { fetchScripture, isVersionDownloaded } = useScripture()
+    const { fetchScripture, fetchScriptureByVerseNumbers, isVersionDownloaded } = useScripture()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
 
     // Check which versions are downloaded
@@ -96,6 +104,31 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
         }
     }, [currentSlide, selectedVersion])
 
+    // Seed the selection from whatever the live slide actually shows —
+    // "selected" always tracks "currently displayed" (e.g. just the first
+    // verse of an auto-detected range), not the full originally-detected
+    // range, so the grid's highlighting never contradicts the slide.
+    useEffect(() => {
+        if (!scriptureRef) {
+            setSelectedVerses(new Set())
+            return
+        }
+        const displayed = currentSlide?.displayVerseNumbers
+        if (displayed && displayed.length > 0) {
+            setSelectedVerses(new Set(displayed))
+            return
+        }
+        const wholeRange: number[] = []
+        for (let v = scriptureRef.startVerse; v <= scriptureRef.endVerse; v++) {
+            wholeRange.push(v)
+        }
+        setSelectedVerses(new Set(wholeRange))
+        // Only re-seed when the live slide identity changes (or the range it
+        // encodes changes) — not on every render, so a user's in-progress
+        // click/drag selection isn't clobbered mid-interaction.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentSlide?.id, scriptureRef?.startVerse, scriptureRef?.endVerse, currentSlide?.displayVerseNumbers])
+
     const fetchTokenRef = useRef(0)
 
     useEffect(() => {
@@ -108,6 +141,12 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
 
         const token = ++fetchTokenRef.current
         setLoading(true)
+        // Clear stale data immediately, synchronously with the range change —
+        // otherwise the previous range's prev/next verses stay on screen
+        // (just dimmed) while the new range's neighbors are fetched one at a
+        // time, briefly mixing an old range's numbers with the new one's.
+        setNeighboringVerses({ prev: [], next: [] })
+        setCurrentVerses([])
 
         const fetchNeighbors = async () => {
             const { bookIndex, chapter, startVerse, endVerse, version } = scriptureRef
@@ -153,16 +192,103 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
         fetchNeighbors()
     }, [scriptureRef, fetchScripture])
 
-    // Handle verse selection
-    const handleVerseSelect = useCallback(async (verseNum: number) => {
-        if (!scriptureRef) return
+    // Combine prev/current/next into one ascending, duplicate-free list for
+    // the grid. Deduplication is a safety net, not the primary fix — prev
+    // and next are fetched from strictly outside the current range so they
+    // shouldn't overlap it, but a defensive dedupe is cheap insurance
+    // against any residual timing edge case producing a repeated verse.
+    const gridVerses = useMemo(() => {
+        const combined = [...neighboringVerses.prev, ...currentVerses, ...neighboringVerses.next]
+        const seen = new Set<number>()
+        const deduped: BibleVerse[] = []
+        for (const v of combined) {
+            const num = Number(v.verse)
+            if (seen.has(num)) continue
+            seen.add(num)
+            deduped.push(v)
+        }
+        return deduped.sort((a, b) => Number(a.verse) - Number(b.verse))
+    }, [neighboringVerses, currentVerses])
 
-        const label = `${scriptureRef.bookIndex}:${scriptureRef.chapter}:${verseNum}`
-        const result = await fetchScripture(label, selectedVersion)
+    // Commit a (possibly non-contiguous) verse-number selection — used by
+    // plain click, shift+click, and drag-end. Fetches exactly those verses
+    // and merges them into one Scripture handed to the parent.
+    const commitSelection = useCallback(async (verseNums: number[]) => {
+        if (!scriptureRef || verseNums.length === 0) return
+
+        const result = await fetchScriptureByVerseNumbers(scriptureRef.bookIndex, scriptureRef.chapter, verseNums, selectedVersion)
         if (result) {
             onVerseSelect(result)
         }
-    }, [scriptureRef, selectedVersion, fetchScripture, onVerseSelect])
+    }, [scriptureRef, selectedVersion, fetchScriptureByVerseNumbers, onVerseSelect])
+
+    const handleVerseClick = useCallback((verseNum: number, event: { shiftKey: boolean }) => {
+        if (justDraggedRef.current) {
+            // The mouseup handler already committed a drag ending on this
+            // button — the browser's synthesized click for the same
+            // press-release should not also fire a plain-click selection.
+            justDraggedRef.current = false
+            return
+        }
+
+        if (event.shiftKey) {
+            setSelectedVerses(prev => {
+                const next = new Set(prev)
+                if (next.has(verseNum)) {
+                    next.delete(verseNum)
+                } else {
+                    next.add(verseNum)
+                }
+                void commitSelection(Array.from(next))
+                return next
+            })
+        } else {
+            setSelectedVerses(new Set([verseNum]))
+            void commitSelection([verseNum])
+        }
+    }, [commitSelection])
+
+    const handleVerseMouseDown = useCallback((verseNum: number) => {
+        dragAnchorRef.current = verseNum
+        isMouseDownRef.current = true
+        isDraggingRef.current = false
+    }, [])
+
+    const handleVerseMouseEnter = useCallback((verseNum: number) => {
+        if (!isMouseDownRef.current || dragAnchorRef.current === null) return
+        if (verseNum === dragAnchorRef.current && !isDraggingRef.current) return
+
+        isDraggingRef.current = true
+        const anchor = dragAnchorRef.current
+        const [lo, hi] = anchor <= verseNum ? [anchor, verseNum] : [verseNum, anchor]
+        const span: number[] = []
+        for (let v = lo; v <= hi; v++) span.push(v)
+        setSelectedVerses(new Set(span))
+    }, [])
+
+    // A drag can end anywhere on the page, not just on a verse button.
+    useEffect(() => {
+        const handleWindowMouseUp = () => {
+            if (isMouseDownRef.current && isDraggingRef.current) {
+                justDraggedRef.current = true
+                setSelectedVerses(prev => {
+                    void commitSelection(Array.from(prev))
+                    return prev
+                })
+                // A synthesized click only follows mouseup when the drag
+                // started and ended on the SAME button — if it ended on a
+                // different one, no click ever fires to consume this flag
+                // (see handleVerseClick), so clear it after the tick in
+                // which any such click would have already run.
+                setTimeout(() => { justDraggedRef.current = false }, 0)
+            }
+            isMouseDownRef.current = false
+            isDraggingRef.current = false
+            dragAnchorRef.current = null
+        }
+        window.addEventListener('mouseup', handleWindowMouseUp)
+        return () => window.removeEventListener('mouseup', handleWindowMouseUp)
+    }, [commitSelection])
 
     // Handle verse range selection
     const handleVerseRangeSelect = useCallback(async (startVerse: number, endVerse: number) => {
@@ -267,45 +393,33 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
                 </button>
             </div>
 
-            {/* Verse Grid */}
+            {/* Verse Grid — click to select a single verse, shift+click to add/remove
+                one, or click-drag across a span to select a contiguous range.
+                Selected verses merge into one slide. */}
             <div className="p-3 relative min-h-[3.25rem]">
                 <div
-                    className={`flex flex-wrap gap-1 transition-opacity ${loading ? 'opacity-50 pointer-events-none' : ''
+                    className={`flex flex-wrap gap-1 transition-opacity select-none ${loading ? 'opacity-50 pointer-events-none' : ''
                         }`}
                 >
-                    {/* Previous verses */}
-                    {neighboringVerses.prev.map((v) => (
-                        <button
-                            key={v.verse}
-                            onClick={() => handleVerseSelect(parseInt(v.verse))}
-                            className="w-8 h-8 flex items-center justify-center text-sm rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
-                            title={`${scriptureRef.bookName} ${scriptureRef.chapter}:${v.verse}`}
-                        >
-                            {v.verse}
-                        </button>
-                    ))}
-
-                    {/* Current verses (highlighted) */}
-                    {currentVerses.map((v) => (
-                        <span
-                            key={v.verse}
-                            className="w-8 h-8 flex items-center justify-center text-sm rounded bg-primary-500 text-white font-medium"
-                        >
-                            {v.verse}
-                        </span>
-                    ))}
-
-                    {/* Next verses */}
-                    {neighboringVerses.next.map((v) => (
-                        <button
-                            key={v.verse}
-                            onClick={() => handleVerseSelect(parseInt(v.verse))}
-                            className="w-8 h-8 flex items-center justify-center text-sm rounded bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
-                            title={`${scriptureRef.bookName} ${scriptureRef.chapter}:${v.verse}`}
-                        >
-                            {v.verse}
-                        </button>
-                    ))}
+                    {gridVerses.map((v) => {
+                        const verseNum = parseInt(v.verse)
+                        const isSelected = selectedVerses.has(verseNum)
+                        return (
+                            <button
+                                key={v.verse}
+                                onMouseDown={() => handleVerseMouseDown(verseNum)}
+                                onMouseEnter={() => handleVerseMouseEnter(verseNum)}
+                                onClick={(e) => handleVerseClick(verseNum, e)}
+                                className={`w-8 h-8 flex items-center justify-center text-sm rounded transition-colors ${isSelected
+                                    ? 'bg-primary-500 text-white font-medium'
+                                    : 'bg-gray-100 dark:bg-gray-800 hover:bg-primary-100 dark:hover:bg-primary-900/30'
+                                    }`}
+                                title={`${scriptureRef.bookName} ${scriptureRef.chapter}:${v.verse}${isSelected ? ' (selected — shift+click to remove)' : ' (click to show, shift+click to add, drag to select a range)'}`}
+                            >
+                                {v.verse}
+                            </button>
+                        )
+                    })}
                 </div>
                 {loading && (
                     <RefreshCw className="w-4 h-4 animate-spin text-gray-400 absolute top-3 right-3" />
