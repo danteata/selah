@@ -234,11 +234,22 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
                         const isFlashing = flashingMonitorId === monitor.id
 
                         return (
-                            <button
+                            // A <div> with role="button", not a <button> — this row contains
+                            // its own nested "Identify" button, and a <button> can't legally
+                            // contain another <button> (breaks hydration and click reliability).
+                            <div
                                 key={monitor.id}
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => handleSelectScreen(monitor.id)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault()
+                                        handleSelectScreen(monitor.id)
+                                    }
+                                }}
                                 className={`
-                                    w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-all text-left
+                                    w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-all text-left cursor-pointer
                                     ${isSelected
                                         ? 'shadow-sm'
                                         : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
@@ -317,7 +328,7 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
                                         <Check className="w-5 h-5" style={{ color }} />
                                     </div>
                                 )}
-                            </button>
+                            </div>
                         )
                     })
                 )}
