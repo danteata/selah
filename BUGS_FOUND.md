@@ -6,7 +6,7 @@
 > as `[KNOWN BUG]` so that fixing the bug in the future requires
 > intentionally updating the test.
 
-## Summary: 13 Confirmed Bugs (8 historical + 5 newly discovered)
+## Summary: 20 Confirmed Bugs (8 historical + 12 newly discovered)
 
 | # | Component | Bug | Severity | File |
 |---|-----------|-----|----------|------|
@@ -18,11 +18,18 @@
 | 6 | `voiceCommandDetection` | (HISTORICAL) Written-number parsing uses substring match | ~~Low~~ | `src/services/sermon-listener/voiceCommandDetection.ts:273` |
 | 7 | `verseDetection` | (HISTORICAL) Regex matches time expressions as verses | ~~Low~~ | `src/services/sermon-listener/verseDetection.ts:270-273` |
 | 8 | `verseDetection` | (HISTORICAL) No verse-number bounds checking | ~~Medium~~ | `src/services/sermon-listener/verseDetection.ts:549-551` |
-| 9 | `verseDetection` | **NEW** Regex path has no per-book verse-count data → impossible verses slip through (e.g. "Genesis 50:999" accepted) | **Medium** | `src/services/sermon-listener/verseDetection.ts:621-624` |
+| 9 | `verseDetection` | (FIXED) Regex path had no per-book verse-count data → impossible verses slipped through (e.g. "Genesis 50:999" accepted) | ~~Medium~~ | `src/services/sermon-listener/verseDetection.ts:272-337` |
 | 10 | `voiceCommandDetection` | **NEW** Intent filter (COMMAND_KEYWORDS) excludes "pause/resume/begin listening" even though the detection regexes match them | Medium | `src/services/sermon-listener/voiceCommandDetection.ts:407-418` |
 | 11 | `voiceCommandDetection` | **NEW** `AVAILABLE_VERSIONS` alias list is out of sync with `bibleVersionObjects` (e.g. ESV is in aliases but not in objects) | Low | `src/services/sermon-listener/voiceCommandDetection.ts:19-40` |
 | 12 | `useUserRole` | (HISTORICAL) `effectiveUser` derivation only handles `undefined` vs `null` correctly since the `=== undefined` check excludes `null` (this is the **fix** in place) | ~~Info~~ | `src/hooks/useUserRole.ts:80-86` |
 | 13 | `BibleVerseNavigator` / `useKeyboardShortcuts` | **NEW** Verse navigator has no keyboard shortcut; arrow keys collide with the global slide-queue navigation so the operator has to use the mouse for every verse step | **High** | `src/components/bible/BibleVerseNavigator.tsx:183-195`, `src/pages/Dashboard.tsx:230-231`, `src/components/live/LiveOutput.tsx:251-254` |
+| 14 | `voiceCommandDetection` / `verseDetection` / `referenceContext` | (FIXED) "verse" mis-transcribed as "versus" was not recognized by ANY of the three separate detectors that require the literal word "verse" | ~~**High**~~ | `voiceCommandDetection.ts`, `verseDetection.ts`, `referenceContext.ts` |
+| 15 | `voiceCommandDetection` | (FIXED) Compound spoken chapter/verse numbers ("twenty five", "hundred and forty seven") silently truncated to their first word instead of failing | ~~**High**~~ | `src/services/sermon-listener/voiceCommandDetection.ts` |
+| 16 | `voiceCommandDetection` | (FIXED) The loose "two adjacent numbers = chapter+verse" fallback misinterpreted a genuine compound chapter number as a separate chapter+verse pair | ~~Medium~~ | `src/services/sermon-listener/voiceCommandDetection.ts` |
+| 17 | `voiceCommandDetection` | (FIXED) Bare "verse N" word-number parsing only covered 1-20; "verse thirty"/"verse forty seven" produced no command at all | ~~**High**~~ | `src/services/sermon-listener/voiceCommandDetection.ts` |
+| 18 | `referenceContext` | (FIXED) A verse number said with NO "verse"/"versus" keyword at all, in its own separate ASR utterance right after a chapter announcement, was never resolved | ~~**High**~~ | `src/services/sermon-listener/referenceContext.ts` |
+| 19 | `audio_capture` | (FIXED) Audio-features heartbeat went silent during a genuine upstream audio-delivery gap, tricking the frontend watchdog into an unnecessary capture restart | ~~Medium~~ | `src-tauri/src/audio_capture/mod.rs` |
+| 20 | `ScreenPicker` | (FIXED) A `<button>` nested inside another `<button>` (invalid HTML) caused a hydration warning and unreliable clicks on the "Identify" control | ~~Low~~ | `src/components/live/ScreenPicker.tsx` |
 
 ---
 
@@ -141,38 +148,41 @@ asserts that "John 3:16 PM" does not match John 3:16.
 
 ---
 
-## Bug 8: ~~No verse-number bounds checking~~ (PARTIALLY FIXED)
+## Bug 8: ~~No verse-number bounds checking~~ (FIXED)
 
 ### Status
-**Was a bug, partially fixed.** The spoken path has a hard 176 cap.
-The regex path only checks `BOOK_MAX_VERSES[book]` which only has data
-for John and Psalm.
-
-### See Bug 9 below for the remaining gap.
+**Fixed.** See Bug 9 below.
 
 ---
 
-## Bug 9: NEW — Regex path has no per-book verse-count data
+## Bug 9: ~~Regex path has no per-book verse-count data~~ (FIXED)
 
-### Reproduction
+### Original reproduction
 ```ts
 detectVerses('Genesis 50:999')
-// Returns 1 — should reject because no chapter has 999 verses
+// Returned 1 — should reject because Genesis 50 only has 26 verses
 ```
 
-### Impact
-Impossible verse references are accepted for most books (anything
-outside John and Psalm). The spoken path correctly catches this via
-the 176 hard cap, but the typed/regex path does not.
+### Original impact
+Impossible verse references were accepted for most books (anything
+outside John and Psalm — and even the Psalm entry was dead due to a
+`'Psalm'` vs canonical `'Psalms'` key mismatch, so it never actually
+fired). The spoken path caught gross cases via a 176 hard cap, but the
+typed/regex path did not.
 
-### Fix (one of)
-1. Add per-book per-chapter verse counts to `BOOK_MAX_VERSES` for all 66 books, OR
-2. Add a generic `if (verseStart > 176) continue` cap in the regex path of `detectVerses`.
+### Fix applied
+`BOOK_MAX_VERSES` (`src/services/sermon-listener/verseDetection.ts`) is
+now generated from `public/bibles/kjv.json` (ground truth) and covers
+all 66 books, keyed by the canonical `'Psalms'` name. This also fixed
+several transcription errors in the old hand-typed John entries (e.g.
+John 14 was hardcoded as 21 verses; the real count is 31). The same
+table is used by `llmVerseExtraction.ts`'s hallucination check, which
+also had an off-by-one indexing bug (`[chapter]` instead of
+`[chapter - 1]`) fixed alongside it.
 
 ### Test
 `src/services/sermon-listener/__tests__/verseDetection.bugs.test.ts`
-explicitly documents this gap and pins the current (buggy) behavior.
-If this test starts failing, the bug has been fixed.
+now asserts `Genesis 50:999` is rejected.
 
 ---
 
@@ -296,6 +306,253 @@ that asserts ArrowUp / ArrowDown do **not** trigger the verse callbacks
 
 ---
 
+## Bug 14: ~~"verse" mis-transcribed as "versus" not recognized anywhere~~ (FIXED)
+
+### Reproduction
+Found by reviewing real sermon transcripts, where Whisper very
+frequently hears a bare spoken "verse" as "versus" (phonetically
+close) — dozens of times in a single session:
+```ts
+detectVoiceCommands('Versus 6')       // → [] (no command at all)
+detectVerses('John 3 versus 16')      // → [] (no match)
+```
+
+### Impact
+**High — this was likely the single biggest cause of "the live slide
+never advances past the bare chapter's verse 1"** in real usage. Every
+time a preacher's "verse N" got transcribed as "versus N" (extremely
+common), the reference silently failed to resolve via any of the three
+independent code paths that each require the literal word "verse":
+- `voiceCommandDetection.ts`'s `detectGoToVerseCommands` and the
+  `BOOK_CHAPTER_VERSE_REGEX` / `BOOK_CHAPTER_REGEX` separator group.
+- `verseDetection.ts`'s `CHAPTER_VERSE_PATTERN` and the
+  `detectSpokenVerses` token check (`tokens[pointer] === 'verse'`).
+- `referenceContext.ts`'s `BARE_VERSE_PATTERN` (bare "verse N"
+  resolution against a fresh book+chapter context).
+
+Also note `hasCommandIntent`'s `COMMAND_KEYWORDS` list included
+`'verse'` as a substring-matched keyword, but `"versus".includes("verse")`
+is `false` (they diverge at the 5th letter) — so "versus" utterances
+were rejected before even reaching the pattern-matching stage.
+
+### Fix
+Added `"versus"` as an accepted alternative everywhere `"verse"` is
+accepted as a separator/keyword, in all three files above, graded with
+the exact same confidence as `"verse"` (never trusted more than it).
+
+### Test
+`voiceCommandDetection.bugs.test.ts`, `verseDetection.bugs.test.ts`,
+and `referenceContext.bugs.test.ts` each assert a "versus" variant
+resolves identically to the "verse" form.
+
+---
+
+## Bug 15: ~~Compound spoken numbers truncated to their first word~~ (FIXED)
+
+### Reproduction
+```ts
+detectVoiceCommands('Psalm hundred and forty seven.')
+// chapter: 100 (should be 147 — "and forty seven" silently dropped)
+detectVoiceCommands('verse twenty five')
+// targetVerse: 20 (should be 25 — "five" silently dropped)
+detectVoiceCommands('verse thirty')
+// → [] (no command at all — "thirty" wasn't even in the word list)
+```
+
+### Impact
+**High.** Worse than a miss — it confidently produced the WRONG
+chapter/verse instead of failing, which is exactly the failure mode
+this app is designed to avoid ("better to miss than show wrong").
+`detectGoToVerseCommands`'s word-number map (`WRITTEN_NUMBERS`) only
+covered single words 1-20 (`too`/`to` mishearings aside), and
+`CHAPTER_NUM`'s regex only ever captured one word from `SPOKEN_NUMBERS`
+regardless of how many number-words followed it.
+
+### Fix
+- Replaced `parseVerseNumber`'s hand-rolled `WRITTEN_NUMBERS` map with
+  a call to `parseSpokenNumber` (`verseDetection.ts`), which already
+  supports full multi-word compounds ("twenty five", "hundred and
+  seventy six") and "and"-joining.
+- Widened `CHAPTER_NUM`/the verse-capture regex groups to a general
+  `SPOKEN_NUMBER_PHRASE` (up to 4 number-words, optionally "and"-joined)
+  instead of a single word, so the regex hands `parseSpokenNumber` the
+  whole phrase instead of truncating it.
+- Raised the verse sanity ceiling from 150 to 176 (Psalm 119, the
+  longest chapter in the Bible — the old 150 cap, copied from the
+  chapter cap, was itself too low for a legitimate verse number).
+
+### Test
+`voiceCommandDetection.bugs.test.ts` asserts the compound-number cases
+above resolve to the correct number.
+
+---
+
+## Bug 16: ~~Loose chapter+verse split misfired on a genuine compound number~~ (FIXED)
+
+### Reproduction
+```ts
+detectVoiceCommands('Psalm chapter twenty five')
+// chapter: 20, verse: 5   (should be: chapter 25, no verse)
+```
+
+### Impact
+**Medium — introduced while fixing Bug 15**, so documented here as its
+own case: `BOOK_CHAPTER_VERSE_LOOSE_REGEX` exists to split two adjacent
+bare numbers into chapter+verse ("John 3 16", "Romans 10, 17"). Once
+compound numbers were recognized (Bug 15), that same loose heuristic
+started misreading a genuine two-word compound chapter number
+("twenty five" = 25) as if the two words were separate chapter and
+verse numbers — and both interpretations are independently valid Bible
+references, so bounds-checking alone can't tell them apart.
+
+### Fix
+Before accepting a loose chapter+verse split, check whether the two
+captured words could ALSO combine into one valid number via
+`parseSpokenNumber(chapterWord + ' ' + verseWord)`. If they can, the
+split is ambiguous with a single compound number, so the loose match is
+rejected — leaving the (correct) chapter-only detector's result as the
+one that fires. Confirmed this doesn't regress the case the heuristic
+exists for: "three" and "sixteen" (in `"John chapter three sixteen"`)
+can't combine (two ones-scale words in a row is not a valid English
+compound), so that case still correctly splits into chapter 3 verse 16.
+
+### Test
+`voiceCommandDetection.bugs.test.ts` covers both the compound-number
+case ("Psalm chapter twenty five" → 25, no verse) and the
+still-must-split control case ("John chapter three sixteen" → 3:16).
+
+---
+
+## Bug 17: ~~Bare "verse N" word-number parsing only covered 1-20~~ (FIXED)
+
+### Reproduction
+See Bug 15 — `detectGoToVerseCommands('verse thirty')` and
+`'verse forty seven'` both produced no command at all before the fix,
+since `WRITTEN_NUMBERS` (the map `parseVerseNumber` used) never had
+entries for `thirty`, `forty`, `hundred`, etc.
+
+### Impact
+**High.** Any bare "verse N" spoken with N ≥ 21 as a word (not a digit)
+— an extremely common real verse number range — silently produced no
+command, leaving the live slide stuck wherever it was.
+
+### Fix
+Folded into the Bug 15 fix: `parseVerseNumber` now delegates to
+`parseSpokenNumber`, which has the full 1-176+ vocabulary.
+
+### Test
+See Bug 15's test coverage.
+
+---
+
+## Bug 18: ~~Bare verse number with no keyword at all was never resolved~~ (FIXED)
+
+### Reproduction
+Real transcript: the preacher said "Hebrews 13" as one utterance, then
+"Five." as its own, separate utterance moments later (meant as
+"verse 5"). No keyword ("verse"/"versus") was present at all:
+```ts
+// After context = { book: 'Hebrews', chapter: 13 }
+resolveBareReferences('Five.', context)   // → [] (needs a keyword)
+detectVoiceCommands('Five.')              // → [] (fails hasCommandIntent)
+```
+
+### Impact
+**High.** This is an extremely common real-time-ASR artifact — a
+preacher announces the chapter, pauses, then just says the verse
+number, and the streaming engine chunks it into its own utterance with
+the "verse" word clipped or simply not repeated. Every existing
+mechanism (voice commands, `referenceContext.ts`'s bare-reference
+resolver) required an explicit keyword to anchor on, so this class of
+utterance was silently and completely dropped — the live slide stayed
+on the bare chapter's default verse 1 indefinitely.
+
+### Fix
+Added `resolveStandaloneNumberContinuation` (`referenceContext.ts`):
+resolves an ASR utterance against a fresh reference context ONLY when
+the ENTIRE utterance is nothing but a number (never a number embedded
+in ordinary sentence text, to avoid misattributing an unrelated
+count/date/quantity), and only within a much tighter 15-second
+freshness window than the general 120-second context TTL — a bare
+unqualified number is a much weaker signal than an explicit "verse N",
+so it shouldn't stay eligible to attach to the chapter for as long.
+Wired into `useSermonListener.ts` against `latestChunkForCommands`
+specifically (the single latest utterance), not the full accumulated
+transcript, so the "whole utterance" check is meaningful.
+
+### Test
+`referenceContext.bugs.test.ts` covers the Hebrews 13 → "Five." case,
+a bare-digit case, the embedded-text safety guard (must NOT fire
+inside a real sentence), the tightened TTL expiry, and a null-context
+guard.
+
+---
+
+## Bug 19: ~~Audio-features heartbeat went silent during a real delivery gap~~ (FIXED)
+
+### Reproduction
+In `src-tauri/src/audio_capture/mod.rs`'s VAD-processing loop:
+```rust
+if samples.is_empty() {
+    std::thread::sleep(...);
+    continue;   // <-- heartbeat emit below is skipped entirely
+}
+// ... emits "audio-features" here, throttled to ~30fps
+```
+If the OS audio pipeline has a genuine delivery gap (device hiccup,
+system-loopback stall) longer than the frontend's 9-second staleness
+threshold, this loop never emits a heartbeat during that gap — even
+though the capture thread itself is alive and fine.
+
+### Impact
+**Medium.** `useSermonListener.ts`'s watchdog (`audioFeatures.isStale(9000)`)
+reads a silent heartbeat as "capture died" and force-restarts the whole
+session, dropping whatever was mid-transcription — a false positive
+caused by the frontend's OWN recovery mechanism reacting to a
+mis-instrumented backend signal, not an actual capture failure.
+Confirmed via a real session log showing `"Audio signal lost mid-session
+— restarting capture"` firing during otherwise-normal operation.
+
+### Fix
+Emit the same throttled heartbeat (with zeroed/silent features via
+`compute_audio_features(&[])`) even when `samples.is_empty()`, so a
+genuine upstream delivery gap no longer silences the "I'm alive" signal
+the frontend watchdog depends on.
+
+### Test
+No automated test (Rust hardware-capture code, no existing test
+harness for this module) — verified by code inspection: the throttled
+emit call is identical to the one already used on the non-empty path,
+just fed an empty slice, and `compute_audio_features` already has an
+explicit `n == 0` branch returning all-zero features.
+
+---
+
+## Bug 20: ~~Nested `<button>` in ScreenPicker~~ (FIXED)
+
+### Reproduction
+`src/components/live/ScreenPicker.tsx`: each monitor row was a
+`<button>` (line ~237) containing its own "Identify" `<button>`
+(line ~299) for the flash-to-identify control. Confirmed via a real
+React hydration warning: `"<button> cannot be a descendant of
+<button>"`.
+
+### Impact
+**Low but real** — invalid HTML that produces a console warning on
+every render and can cause unreliable clicks in some browsers/DOM
+parsers (nested interactive elements aren't consistently clickable).
+
+### Fix
+Converted the outer monitor-row element from `<button>` to a `<div
+role="button" tabIndex={0}>` with manual `onKeyDown` handling for
+Enter/Space, keeping the inner "Identify" control as a real `<button>`.
+
+### Test
+No automated test (no existing test file for this component);
+verified by code inspection and a clean `tsc --noEmit`.
+
+---
+
 ## Test Files That Expose These Bugs
 
 | Bug | Test File | Test Name |
@@ -308,10 +565,15 @@ that asserts ArrowUp / ArrowDown do **not** trigger the verse callbacks
 | 6 | `src/services/sermon-listener/__tests__/voiceCommandDetection.bugs.test.ts` | `[BUG 7] "verse tool" should NOT parse as verse 2` |
 | 7 | `src/services/sermon-listener/__tests__/verseDetection.bugs.test.ts` | `[BUG 11] "John 3:16 PM" should NOT match John 3:16 (time, not verse)` |
 | 8 | `src/services/sermon-listener/__tests__/verseDetection.bugs.test.ts` | `[BUG 14] "John 21:1000" should be rejected` |
-| 9 | `src/services/sermon-listener/__tests__/verseDetection.bugs.test.ts` | `"Genesis 50:999" — documents a real implementation gap` |
+| 9 | `src/services/sermon-listener/__tests__/verseDetection.bugs.test.ts` | `"Genesis 50:999" should be rejected (Genesis 50 only has 26 verses)` |
 | 10 | `src/services/sermon-listener/__tests__/voiceCommandDetection.test.ts` | `"pause listening" is blocked by the intent filter (known bug)` |
 | 11 | `src/services/sermon-listener/__tests__/voiceCommandDetection.test.ts` | `rejects versions not in bibleVersionObjects (e.g. ESV)` |
 | 13 | `src/hooks/__tests__/useKeyboardShortcuts.test.ts` | `useVerseNavigationShortcuts` block (8 tests covering N/P, ←/→, modifiers, focus guard, enabled flag, preventDefault) |
+| 14 | `voiceCommandDetection.bugs.test.ts` / `verseDetection.bugs.test.ts` / `referenceContext.bugs.test.ts` | "versus" resolves identically to "verse" (per-file tests) |
+| 15 | `src/services/sermon-listener/__tests__/voiceCommandDetection.bugs.test.ts` | `"Psalm hundred and forty seven"` / `"verse twenty five"` compound-number tests |
+| 16 | `src/services/sermon-listener/__tests__/voiceCommandDetection.bugs.test.ts` | `"Psalm chapter twenty five"` does not split into chapter 20 verse 5; `"John chapter three sixteen"` still splits |
+| 17 | `src/services/sermon-listener/__tests__/voiceCommandDetection.bugs.test.ts` | `"verse thirty"` / `"verse forty seven"` resolve correctly (previously unsupported above 20) |
+| 18 | `src/services/sermon-listener/__tests__/referenceContext.bugs.test.ts` | `resolveStandaloneNumberContinuation` block (bare-number resolution, embedded-text guard, tightened TTL, null-context guard) |
 
 All tests that assert fixed behavior **pass** (regression guards).
 All tests that document current bugs **pass** (pin the buggy behavior
@@ -322,3 +584,4 @@ so a future fix requires intentional test updates).
 ## Also Noted (Non-Critical, Historical)
 
 - **False command intent** (`voiceCommandDetection.ts`): `COMMAND_KEYWORDS` includes generic phrases like `"use the"` that appear in normal speech. This triggers unnecessary command parsing but the downstream pattern matching correctly rejects them, so no wrong commands are returned. Impact: minor performance overhead and console noise. This is documented as a real behavior but no fix is required.
+- **Bare chapter mention briefly flashes verse 1** (`useSermonListener.ts` / `voiceCommandDetection.ts`): when a book+chapter is announced with the verse number arriving in a separate later utterance (the common case with real-time ASR), the live slide displays the bare chapter's default verse 1 immediately, then self-corrects once the verse-specific utterance is detected. A fix was scoped (hold the display briefly to let a same-book/chapter verse-specific command preempt it) but explicitly **not implemented** — the user chose to keep instant display over adding a delay to every bare chapter-only reference (including deliberate ones, e.g. "Psalm 23" with no verse intended), accepting the occasional wrong-verse flash as the cost. Do not re-propose this fix without re-confirming that trade-off.

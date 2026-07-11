@@ -5,6 +5,7 @@ import {
     normalizeQuery,
     getContentWords,
     removeStopWords,
+    isAmbiguousMatch,
 } from '../semanticRetrievalPolicy'
 
 describe('semanticRetrievalPolicy', () => {
@@ -252,6 +253,41 @@ describe('semanticRetrievalPolicy', () => {
             const verse = 'For the Lord is great and greatly to be praised he is to be feared above all gods'
             // "lord"/"god" matches are theological-common synonyms only.
             expect(validateSemanticMatch(query, verse, 14)).toBe(false)
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // isAmbiguousMatch — reject when the top hit doesn't clearly beat a
+    // different-verse runner-up
+    // -----------------------------------------------------------------------
+    describe('isAmbiguousMatch', () => {
+        it('is not ambiguous when there is no runner-up', () => {
+            const best = { score: 0.75, book: 'John', chapter: 3 }
+            expect(isAmbiguousMatch(best, [best])).toBe(false)
+        })
+
+        it('is not ambiguous when the runner-up is far behind (different verse)', () => {
+            const best = { score: 0.80, book: 'John', chapter: 3 }
+            const runnerUp = { score: 0.60, book: 'Romans', chapter: 8 }
+            expect(isAmbiguousMatch(best, [best, runnerUp])).toBe(false)
+        })
+
+        it('is ambiguous when a different-verse runner-up is within the margin', () => {
+            const best = { score: 0.70, book: 'John', chapter: 3 }
+            const runnerUp = { score: 0.68, book: 'Romans', chapter: 8 }
+            expect(isAmbiguousMatch(best, [best, runnerUp])).toBe(true)
+        })
+
+        it('ignores a close runner-up from the same book+chapter (neighboring verse)', () => {
+            const best = { score: 0.70, book: 'Psalms', chapter: 23 }
+            const neighbor = { score: 0.695, book: 'Psalms', chapter: 23 }
+            expect(isAmbiguousMatch(best, [best, neighbor])).toBe(false)
+        })
+
+        it('is not ambiguous once the gap clears the margin', () => {
+            const best = { score: 0.80, book: 'John', chapter: 3 }
+            const runnerUp = { score: 0.75, book: 'Romans', chapter: 8 }
+            expect(isAmbiguousMatch(best, [best, runnerUp])).toBe(false)
         })
     })
 })

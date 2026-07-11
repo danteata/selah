@@ -60,6 +60,7 @@ export type { HallucinationFilterResult } from './hallucinationFilter'
 // Active reference context (resolves bare "verse 6" from prior book+chapter)
 export {
     resolveBareReferences,
+    resolveStandaloneNumberContinuation,
     updateContextFromVerse,
     isContextValid,
     createContext,

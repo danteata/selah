@@ -41,6 +41,9 @@ describe('referenceContext', () => {
         const verses = resolveBareReferences('and now verse 6', ctx)
         expect(verses).toHaveLength(1)
         expect(verses[0].reference).toBe('Ephesians 6:6')
+        // Medium confidence: unlike bare "chapter 3", `context` is only ever
+        // set from an explicit book+chapter reference, so "verse 6" while
+        // that's still fresh is normal continued quoting, not ambiguous.
         expect(verses[0].confidence).toBe('medium')
     })
 
@@ -96,5 +99,16 @@ describe('referenceContext', () => {
         const ctx = createContext('John', 3)
         const verses = resolveBareReferences('The universe is vast and adverse conditions exist.', ctx)
         expect(verses).toHaveLength(0)
+    })
+
+    it('bare "verse one" resolves at medium confidence once a book is already in context', () => {
+        // With a book+chapter already explicitly mentioned, "verse one/two/
+        // three" overwhelmingly means the same passage's next verse — this
+        // is normal continued quoting, not the same ambiguity as a cold bare
+        // chapter number.
+        const ctx = createContext('Ephesians', 6)
+        const verses = resolveBareReferences('and verse one says this', ctx)
+        expect(verses).toHaveLength(1)
+        expect(verses[0].confidence).toBe('medium')
     })
 })

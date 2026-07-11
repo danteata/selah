@@ -297,3 +297,24 @@ export function validateSemanticMatch(
 
     return false
 }
+
+// A candidate that only barely out-scores a runner-up from a *different*
+// verse means the embedding isn't confidently distinguishing between two
+// distinct meanings — the top hit could easily be the wrong one. In that
+// case we'd rather show nothing than guess. Runner-ups from the same
+// book+chapter as the top match don't count: neighboring verses are
+// expected to score similarly, and chapter-level dedup downstream already
+// picks the single strongest verse per chapter.
+const AMBIGUITY_MARGIN = 0.05
+
+export interface ScoredVerseCandidate {
+    score: number
+    book: string
+    chapter: number
+}
+
+export function isAmbiguousMatch(best: ScoredVerseCandidate, candidates: ScoredVerseCandidate[]): boolean {
+    const runnerUp = candidates.find(c => c !== best && (c.book !== best.book || c.chapter !== best.chapter))
+    if (!runnerUp) return false
+    return best.score - runnerUp.score < AMBIGUITY_MARGIN
+}

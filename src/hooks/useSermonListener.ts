@@ -27,6 +27,7 @@ import { detectVerses,
     resetSemanticDetector,
     NUMBER_TO_BOOK,
     resolveBareReferences,
+    resolveStandaloneNumberContinuation,
     updateContextFromVerse,
 } from '../services/sermon-listener'
 import {
@@ -1472,6 +1473,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const bareRefs = resolveBareReferences(cleanText, activeReferenceContextRef.current, CONTEXT_TTL_MS)
             if (bareRefs.length > 0) {
                 verses = [...verses, ...bareRefs]
+            }
+        }
+
+        // A preacher often announces "Book chapter N" and gives just the
+        // verse number in its OWN separate utterance moments later, with no
+        // "verse"/"versus" keyword at all ("Hebrews 13" ... "Five.") — the
+        // keyword gets clipped by the ASR's pause-based chunking. Checked
+        // against latestChunkForCommands specifically (not cleanText, which
+        // can be the full accumulated transcript) so this only ever fires
+        // when the ENTIRE latest utterance is nothing but a bare number.
+        if (verses.length === 0 && latestChunkForCommands) {
+            const standaloneRefs = resolveStandaloneNumberContinuation(latestChunkForCommands, activeReferenceContextRef.current)
+            if (standaloneRefs.length > 0) {
+                verses = [...verses, ...standaloneRefs]
             }
         }
 

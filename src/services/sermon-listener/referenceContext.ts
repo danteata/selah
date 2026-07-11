@@ -44,9 +44,24 @@ export function updateContextFromVerse(
 // Bare-reference resolution
 // ---------------------------------------------------------------------------
 
-const BARE_VERSE_PATTERN = /\b(?:verse|verses)\s+(\d{1,3}|[a-z]+)\b/gi
-const BARE_VERSE_RANGE_PATTERN = /\b(?:verse|verses)\s+(\d{1,3}|[a-z]+)\s+(?:to|through|-|\u2013|\u2014)\s+(\d{1,3}|[a-z]+)\b/gi
+// "versus" is accepted alongside "verse"/"verses" \u2014 Whisper very commonly
+// mishears a bare spoken "verse" as "versus" (phonetically close), confirmed
+// repeatedly across real sermon transcripts.
+const BARE_VERSE_PATTERN = /\b(?:verse|verses|versus)\s+(\d{1,3}|[a-z]+)\b/gi
+const BARE_VERSE_RANGE_PATTERN = /\b(?:verse|verses|versus)\s+(\d{1,3}|[a-z]+)\s+(?:to|through|-|\u2013|\u2014)\s+(\d{1,3}|[a-z]+)\b/gi
 const BARE_CHAPTER_PATTERN = /\bchapter\s+(\d{1,3}|[a-z]+)\b/gi
+
+// A preacher very often announces "Book chapter N" and then, in its OWN
+// separate ASR utterance a moment later, gives just the verse number with
+// NO "verse"/"versus" keyword at all ("Hebrews 13" ... "Five.") \u2014 the word
+// gets clipped by the speech engine's pause-based chunking, or simply isn't
+// said as clearly the second time. Unlike BARE_VERSE_PATTERN (which needs an
+// explicit keyword and can safely scan a whole paragraph), this has no
+// keyword to anchor on, so it only fires when the ENTIRE utterance is
+// nothing but a number \u2014 never against a number embedded in ordinary
+// sentence text, where it would be far too easy to misfire on an unrelated
+// count, date, or quantity.
+const STANDALONE_NUMBER_PATTERN = /^\s*(\d{1,3}|[a-z]+)\s*\.?\s*$/i
 
 interface BareMatch {
     raw: string
@@ -146,6 +161,13 @@ export function resolveBareReferences(
     const detected: DetectedVerse[] = []
     const seen = new Set<string>()
 
+    // Bare verse numbers are medium-confidence — unlike a bare chapter
+    // number, `context` here is only ever populated by an EXPLICIT book+
+    // chapter reference detected earlier (see `updateContextFromVerse`), so
+    // "verse four" arriving while that context is still fresh overwhelmingly
+    // means the same passage's verse 4, not an unrelated "verse one/two" said
+    // about a song or repeated point. Once a book is already in play, this is
+    // the normal, expected way a preacher continues quoting it.
     const verseMatches = findBareVerseMatches(text)
     for (const match of verseMatches) {
         const reference = match.verseEnd
@@ -194,6 +216,51 @@ export function resolveBareReferences(
     }
 
     return detected
+}
+
+const STANDALONE_NUMBER_TTL_MS = 15_000
+
+/**
+ * Resolve a single ASR utterance that is NOTHING BUT a bare number ("Five.",
+ * "22") against a very recently set reference context, treating it as the
+ * missing verse number for a "Book chapter N" ... "<verse>" reference split
+ * across two separate utterances — a very common real-time-ASR artifact
+ * where the word "verse"/"versus" gets clipped or simply isn't repeated.
+ *
+ * Deliberately much stricter than resolveBareReferences: there's no keyword
+ * to anchor on, so this only fires when the WHOLE utterance is a number
+ * (never a number embedded in ordinary sentence text, where misfiring on an
+ * unrelated count/date/quantity would be far too easy), and only within a
+ * short freshness window (default 15s, not the full 120s context TTL) — a
+ * bare number is a much weaker signal than an explicit "verse N", so it
+ * shouldn't stay eligible to attach to the chapter for as long.
+ */
+export function resolveStandaloneNumberContinuation(
+    chunkText: string,
+    context: ActiveReferenceContext | null,
+    ttlMs: number = STANDALONE_NUMBER_TTL_MS,
+): DetectedVerse[] {
+    if (!isContextValid(context, ttlMs)) return []
+
+    const trimmed = chunkText.trim()
+    const match = trimmed.match(STANDALONE_NUMBER_PATTERN)
+    if (!match) return []
+
+    const numStr = match[1]
+    const num = parseSpokenNumber(numStr) ?? parseInt(numStr, 10)
+    if (!num || num < 1 || num > 176) return []
+
+    return [{
+        raw: trimmed,
+        reference: `${context.book} ${context.chapter}:${num}`,
+        book: context.book,
+        chapter: context.chapter,
+        verseStart: num,
+        startIndex: 0,
+        endIndex: trimmed.length,
+        confidence: 'medium',
+        detectionType: 'regex',
+    }]
 }
 
 /**

@@ -8,6 +8,7 @@ import {
     isContextValid,
     updateContextFromVerse,
     resolveBareReferences,
+    resolveStandaloneNumberContinuation,
     type ActiveReferenceContext,
 } from '../referenceContext'
 
@@ -105,5 +106,61 @@ describe('referenceContext — BUG HUNTING', () => {
         expect(context.book).toBe('John')
         expect(context.chapter).toBe(3)
         expect(context.setAt).toBeGreaterThan(0)
+    })
+
+    // -----------------------------------------------------------------------
+    // "verse" mis-transcribed as "versus" — Whisper very commonly mishears a
+    // bare spoken "verse" as "versus" (phonetically close), confirmed
+    // repeatedly across real sermon transcripts.
+    // -----------------------------------------------------------------------
+    it('"versus 5" resolves against context the same as "verse 5"', () => {
+        const context = createContext('Hebrews', 13)
+        const result = resolveBareReferences('versus 5', context)
+        expect(result.length).toBeGreaterThan(0)
+        expect(result[0].reference).toBe('Hebrews 13:5')
+    })
+
+    // -----------------------------------------------------------------------
+    // Real-transcript regression: "Hebrews 13" ... "Five." (said as its own,
+    // separate ASR utterance) used to leave the live slide stuck on
+    // "Hebrews 13:1" — nothing resolved the bare "Five." into Hebrews 13:5,
+    // because every existing bare-reference mechanism requires an explicit
+    // "verse"/"versus" keyword, and this utterance has none at all.
+    // -----------------------------------------------------------------------
+    it('resolveStandaloneNumberContinuation resolves a bare number utterance against fresh context', () => {
+        const context = createContext('Hebrews', 13)
+        const result = resolveStandaloneNumberContinuation('Five.', context)
+        expect(result.length).toBe(1)
+        expect(result[0].reference).toBe('Hebrews 13:5')
+        expect(result[0].confidence).toBe('medium')
+    })
+
+    it('resolveStandaloneNumberContinuation accepts a bare digit utterance', () => {
+        const context = createContext('Matthew', 6)
+        const result = resolveStandaloneNumberContinuation('22', context)
+        expect(result.length).toBe(1)
+        expect(result[0].reference).toBe('Matthew 6:22')
+    })
+
+    it('resolveStandaloneNumberContinuation does NOT fire on a number embedded in a real sentence', () => {
+        // Safety guard: this has no keyword to anchor on, so it must only
+        // ever fire when the entire utterance is a bare number — never
+        // against an unrelated count/date/quantity inside ordinary speech.
+        const context = createContext('Hebrews', 13)
+        const result = resolveStandaloneNumberContinuation('He said five things to them.', context)
+        expect(result).toEqual([])
+    })
+
+    it('resolveStandaloneNumberContinuation does NOT fire once context is older than its (tighter) freshness window', () => {
+        vi.useFakeTimers()
+        const context = createContext('Hebrews', 13)
+        vi.advanceTimersByTime(16_000)
+        const result = resolveStandaloneNumberContinuation('Five.', context)
+        expect(result).toEqual([])
+        vi.useRealTimers()
+    })
+
+    it('resolveStandaloneNumberContinuation returns empty for null context', () => {
+        expect(resolveStandaloneNumberContinuation('Five.', null)).toEqual([])
     })
 })

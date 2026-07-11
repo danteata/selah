@@ -27,8 +27,7 @@ import {
     getLoadedIndex,
     pingWorker,
 } from './verseEmbeddingStore'
-import { BOOK_PATTERN } from './verseDetection'
-import { getDynamicThreshold, validateSemanticMatch } from '../../lib/semanticRetrievalPolicy'
+import { getDynamicThreshold, validateSemanticMatch, isAmbiguousMatch } from '../../lib/semanticRetrievalPolicy'
 
 // ---------------------------------------------------------------------------
 // Text Preparation Web Worker
@@ -103,7 +102,7 @@ function postToTextWorker(text: string, excludedRanges: ExcludedRange[]): Promis
 const SEMANTIC_DETECTION_LIMIT = 5 // Max results per search (per query)
 const MIN_TEXT_LENGTH = 20 // Minimum characters before attempting detection
 const MAX_TEXT_LENGTH = 500 // Maximum characters to embed (truncated)
-const THROTTLE_MS = 3000 // Throttle semantic searches to 3 seconds
+const THROTTLE_MS = 1500 // Throttle semantic searches to 1.5 seconds
 
 export interface SemanticVerseMatch {
     reference: string
@@ -136,16 +135,6 @@ const DEFAULT_CONFIG: SemanticDetectionConfig = {
 }
 
 /**
- * Check if text contains an explicit verse reference pattern.
- */
-function containsExplicitVerseReference(text: string): boolean {
-    const bookVersePattern = new RegExp(`\\b(${BOOK_PATTERN})\\s+\\d{1,3}[:\\s]\\d{1,3}`, 'i')
-    const chapterVersePattern = /\bchapter\s+\d{1,3}\s+(?:verse\s+)?\d{1,3}/i
-    const bookChapterPattern = new RegExp(`\\b(${BOOK_PATTERN})\\s+(?:chapter\\s+)?\\d{1,3}`, 'i')
-    return bookVersePattern.test(text) || chapterVersePattern.test(text) || bookChapterPattern.test(text)
-}
-
-/**
  * Semantic Verse Detector Class
  *
  * Manages the semantic detection lifecycle:
@@ -165,7 +154,6 @@ export class SemanticVerseDetector {
     private textBuffer = ''
     private initialized = false
     private useLocalFallback = false
-    private emptyVersions = new Map<string, number>()
     private lastProcessedLength = 0
     private initializingPromise: Promise<unknown> | null = null
 
@@ -446,6 +434,14 @@ export class SemanticVerseDetector {
                         m.score >= dynamicThreshold && validateSemanticMatch(item.text, m.text, wordCount),
                     )
 
+                    // A validated match that only barely beats a different-verse
+                    // runner-up is ambiguous — the embedding isn't confidently
+                    // distinguishing between two distinct meanings, so we'd
+                    // rather miss than risk showing the wrong one.
+                    if (validatedMatch && isAmbiguousMatch(validatedMatch, matches)) {
+                        continue
+                    }
+
                     if (validatedMatch) {
                         if (!bestPerSentence.has(sentenceIdx) || bestPerSentence.get(sentenceIdx) === null) {
                             bestPerSentence.set(sentenceIdx, validatedMatch)
@@ -623,7 +619,6 @@ export class SemanticVerseDetector {
 
                 if (cached.length === 0) {
                     console.warn('[SemanticDetector] No cached embeddings found in IndexedDB at all')
-                    this.emptyVersions.set(version, Date.now())
                     return []
                 }
             }
@@ -657,16 +652,6 @@ export class SemanticVerseDetector {
 
     updateConfig(config: Partial<SemanticDetectionConfig>): void {
         this.config = { ...this.config, ...config }
-    }
-
-    private isVersionEmpty(version: string): boolean {
-        const timestamp = this.emptyVersions.get(version)
-        if (timestamp === undefined) return false
-        if (Date.now() - timestamp > 30_000) {
-            this.emptyVersions.delete(version)
-            return false
-        }
-        return true
     }
 
     isReady(): boolean {

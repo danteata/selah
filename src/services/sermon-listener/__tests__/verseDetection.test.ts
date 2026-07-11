@@ -67,12 +67,18 @@ describe('verseDetection', () => {
         expect(eph!.confidence).toBe('medium')
     })
 
-    it('does NOT emit chapter-only reference without "chapter" keyword', () => {
+    it('resolves bare "book N M" as chapter:verse by design (e.g. "Genesis 7 1")', () => {
+        // Product decision: "Book N M" (bare numbers, no separator) is
+        // recognized as chapter N, verse M — the same as "Book N-M" or a
+        // spoken "Book <number> <number>". This is NOT the chapter-only
+        // fallback (which defaults verse to 1 and requires the word
+        // "chapter"); the spoken-number parser now correctly treats two
+        // adjacent bare numbers as two separate values instead of summing
+        // them, so "7" and "1" resolve as an explicit chapter/verse pair.
         const verses = detectVerses('Genesis 7 1 was destroyed in the flood.')
         const gen = verses.find(v => v.reference === 'Genesis 7:1')
-        // Without the "chapter" keyword we should not guess verse=1;
-        // the existing "chapter only" path requires explicit "chapter".
-        expect(gen).toBeUndefined()
+        expect(gen).toBeDefined()
+        expect(gen?.confidence).toBe('medium')
     })
 
     // -----------------------------------------------------------------------

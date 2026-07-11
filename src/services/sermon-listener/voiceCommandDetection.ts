@@ -39,6 +39,13 @@ const AVAILABLE_VERSIONS: Array<{ id: string; names: string[] }> = (() => {
     })
 })()
 
+// "WEB" (World English Bible) and "AMP" (Amplified) are ordinary English
+// words too ("the web", "turn up the amp") — matching them bare is a
+// version-switch false-positive risk that the other codes (KJV, NIV, ESV...)
+// don't have.
+const AMBIGUOUS_VERSION_CODES = new Set(['WEB', 'AMP'])
+const BIBLE_CONTEXT_RE = /\b(bible|version|translation|scripture)\b/i
+
 function findVersionMatch(text: string): { id: string; name: string } | null {
     const lower = text.toLowerCase()
 
@@ -107,7 +114,21 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
             if (match) {
                 const id = match[1] || match[2]
                 if (id) {
-                    const version = (bibleVersionObjects as BibleVersion[]).find(v => v.id.toUpperCase() === id.toUpperCase())
+                    const upperId = id.toUpperCase()
+                    // "WEB" and "AMP" are also ordinary English words ("the web",
+                    // "turn up the amp"). "switch to"/"change to"/"use" are
+                    // unambiguous — nobody says "switch to the web" meaning
+                    // "browse the internet" — so those stay trusted bare. But
+                    // generic verbs ("go to", "turn to", "read from", "pull up",
+                    // "bring up", "open") combine naturally with the ordinary
+                    // meaning too ("go to the web", "open the web page"), so for
+                    // those, require an explicit bible/version/translation
+                    // mention elsewhere in the utterance.
+                    const hasStrongVersionVerb = /\b(?:switch to|change to|use)\b/i.test(match[0])
+                    if (AMBIGUOUS_VERSION_CODES.has(upperId) && !hasStrongVersionVerb && !BIBLE_CONTEXT_RE.test(text)) {
+                        continue
+                    }
+                    const version = (bibleVersionObjects as BibleVersion[]).find(v => v.id.toUpperCase() === upperId)
                     if (version) {
                         commands.push({
                             type: 'change_version',
@@ -124,28 +145,38 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
     }
 
     if (commands.length === 0) {
-        for (const v of AVAILABLE_VERSIONS) {
-            for (const name of v.names) {
-                if (name.length >= 3 && lower.includes(name)) {
-                    const beforeText = lower.substring(0, lower.indexOf(name))
-                    const actionWords = ['switch', 'change', 'use', 'go', 'turn', 'read', 'show', 'display', 'look', 'give me', 'get me', 'pull up', 'bring up', 'open', 'see', 'try', 'need', 'want', 'like', 'make it', 'set to', 'please']
-                    const hasActionContext = actionWords.some(w => beforeText.includes(w))
-                    if (hasActionContext) {
-                        const version = (bibleVersionObjects as BibleVersion[]).find(bv => bv.id === v.id)
-                        if (version) {
-                            commands.push({
-                                type: 'change_version',
-                                raw: text.substring(lower.indexOf(name), lower.indexOf(name) + name.length),
-                                confidence: 'medium',
-                                versionId: version.id,
-                                versionName: version.name,
-                            })
-                            break
+        // Loosest tier: no adjacency required between the action word and the
+        // version alias — the action word can appear anywhere earlier and the
+        // alias anywhere later in the utterance. Several aliases are ordinary
+        // English words ("message", "amplified"), so this tier additionally
+        // requires an explicit bible/version/translation mention to avoid
+        // firing on sentences that just happen to contain both an action verb
+        // and one of these words (e.g. "he wants to read the message on the
+        // wall", "we should use the amplified version of grace").
+        if (BIBLE_CONTEXT_RE.test(lower)) {
+            for (const v of AVAILABLE_VERSIONS) {
+                for (const name of v.names) {
+                    if (name.length >= 3 && lower.includes(name)) {
+                        const beforeText = lower.substring(0, lower.indexOf(name))
+                        const actionWords = ['switch', 'change', 'use', 'go', 'turn', 'read', 'show', 'display', 'look', 'give me', 'get me', 'pull up', 'bring up', 'open', 'see', 'try', 'need', 'want', 'like', 'make it', 'set to', 'please']
+                        const hasActionContext = actionWords.some(w => beforeText.includes(w))
+                        if (hasActionContext) {
+                            const version = (bibleVersionObjects as BibleVersion[]).find(bv => bv.id === v.id)
+                            if (version) {
+                                commands.push({
+                                    type: 'change_version',
+                                    raw: text.substring(lower.indexOf(name), lower.indexOf(name) + name.length),
+                                    confidence: 'medium',
+                                    versionId: version.id,
+                                    versionName: version.name,
+                                })
+                                break
+                            }
                         }
                     }
                 }
+                if (commands.length > 0) break
             }
-            if (commands.length > 0) break
         }
     }
 
@@ -164,6 +195,21 @@ function scanAllMatches(text: string, patterns: RegExp[]): { match: RegExpExecAr
     return lastMatch
 }
 
+// "next verse"/"previous chapter" etc. said as a bare directive (or right
+// after an imperative verb like "go"/"move"/"turn") is a genuine navigation
+// request. The identical phrase used narratively — "in the next verse, Paul
+// explains...", "as we saw in the previous chapter..." — is extremely common
+// in verse-by-verse preaching and must not step the live screen. Distinguish
+// by what immediately precedes the match: a narrating preposition/verb ("in",
+// "at", "for", "as", "see", "saw", "read", "reading", "looking at", "note(d)")
+// right before an optional "the" means narration, not a command.
+const NARRATIVE_PRECEDER_RE = /\b(?:in|at|for|as|see|saw|read|reading|looking at|note|noted)\s+(?:the\s+)?$/i
+
+function isNarrativelyFramed(text: string, matchIndex: number): boolean {
+    const before = text.slice(Math.max(0, matchIndex - 30), matchIndex)
+    return NARRATIVE_PRECEDER_RE.test(before)
+}
+
 function detectNavigationCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
     const lower = text.toLowerCase()
@@ -174,7 +220,7 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
         /(?:next|go to next|move to next|advance|forward) chapter/i,
     ]
     const nextChapterResult = scanAllMatches(lower, nextChapterPatterns)
-    if (nextChapterResult) {
+    if (nextChapterResult && !isNarrativelyFramed(lower, nextChapterResult.match.index)) {
         commands.push({
             type: 'next_chapter',
             raw: nextChapterResult.match[0],
@@ -188,7 +234,7 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
             /(?:previous|prev|go back|back|prior|last) chapter/i,
         ]
         const prevChapterResult = scanAllMatches(lower, prevChapterPatterns)
-        if (prevChapterResult) {
+        if (prevChapterResult && !isNarrativelyFramed(lower, prevChapterResult.match.index)) {
             commands.push({
                 type: 'previous_chapter',
                 raw: prevChapterResult.match[0],
@@ -206,7 +252,7 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
         ]
 
         const nextResult = scanAllMatches(lower, nextPatterns)
-        if (nextResult) {
+        if (nextResult && !isNarrativelyFramed(lower, nextResult.match.index)) {
             commands.push({
                 type: 'next_verse',
                 raw: nextResult.match[0],
@@ -223,7 +269,7 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
         ]
 
         const prevResult = scanAllMatches(lower, prevPatterns)
-        if (prevResult) {
+        if (prevResult && !isNarrativelyFramed(lower, prevResult.match.index)) {
             commands.push({
                 type: 'previous_verse',
                 raw: prevResult.match[0],
@@ -236,7 +282,11 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
     if (commands.length === 0) {
         const displayPatterns = [
             /(?:display|show|put|send|put up|bring up|go live|go live with|present|project) (?:this |that |the )?(?:verse|scripture|passage|text)/i,
-            /(?:display|show|put|send|put up|bring up|go live|present|project) (?:it|that|this)/i,
+            // Bare pronoun object — "that" is deliberately excluded: it's the
+            // start of an ordinary subordinate clause in preaching ("I want to
+            // show THAT God is faithful"), not a command, far more often than
+            // "it"/"this" are.
+            /(?:display|show|put|send|put up|bring up|go live|present|project) (?:it|this)/i,
         ]
 
         const displayResult = scanAllMatches(lower, displayPatterns)
@@ -252,25 +302,32 @@ function detectNavigationCommands(text: string): VoiceCommand[] {
     return commands
 }
 
-const WRITTEN_NUMBERS: Record<string, number> = {
-    one: 1, two: 2, three: 3, four: 4, five: 5,
-    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
-    sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
-    // Common mishearings
-    too: 2, to: 2,
-}
+// Common single-word mishearings that aren't in the standard SPOKEN_NUMBERS
+// vocabulary (used below only as a last-resort fallback for parseVerseNumber).
+const NUMBER_WORD_MISHEARINGS: Record<string, number> = { too: 2, to: 2 }
+
+// Psalm 119 has 176 verses — the longest chapter in the Bible — so that's
+// the real sanity ceiling for a verse number (as opposed to a chapter
+// number, which caps out around 150 for Psalms).
+const MAX_PLAUSIBLE_VERSE = 176
 
 function parseVerseNumber(text: string): number | null {
     // Try digit first (e.g. "verse 15")
     const digitMatch = text.match(/\b(\d{1,3})\b/)
     if (digitMatch) {
         const n = parseInt(digitMatch[1], 10)
-        if (n >= 1 && n <= 150) return n
+        if (n >= 1 && n <= MAX_PLAUSIBLE_VERSE) return n
     }
-    // Try written number (e.g. "verse three") - use word boundary to prevent substring matches
+    // Written/compound number (e.g. "verse three", "verse twenty five",
+    // "verse hundred and seventy six"). parseSpokenNumber (verseDetection.ts)
+    // already handles multi-word compounds and "and" — this used to be a
+    // tiny hand-rolled map covering only single words 1-20, so anything
+    // higher ("verse thirty", "verse forty seven" — extremely common real
+    // verse numbers) silently produced no command at all.
+    const spoken = parseSpokenNumber(text)
+    if (spoken !== null && spoken >= 1 && spoken <= MAX_PLAUSIBLE_VERSE) return spoken
     const lower = text.toLowerCase()
-    for (const [word, num] of Object.entries(WRITTEN_NUMBERS)) {
+    for (const [word, num] of Object.entries(NUMBER_WORD_MISHEARINGS)) {
         if (new RegExp(`\\b${word}\\b`).test(lower)) return num
     }
     return null
@@ -280,11 +337,19 @@ function detectGoToVerseCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
     const lower = text.toLowerCase()
 
-    // "verse 15", "verse three", "go to verse 15", "jump to verse 15",
-    // "show verse 15", "read verse 15", "take me to verse 15"
+    // "verse 15", "verse three", "verse twenty five", "go to verse 15",
+    // "jump to verse 15", "show verse 15", "read verse 15", "take me to
+    // verse 15".
+    // "versus" is accepted alongside "verse" — Whisper very commonly
+    // mishears a bare spoken "verse" as "versus" (phonetically close),
+    // confirmed repeatedly across real sermon transcripts. Without this,
+    // essentially every bare "verse N" follow-up said in its own utterance
+    // (the common case with real-time ASR) silently produced no command at
+    // all, leaving the live slide stuck on whatever the earlier bare
+    // chapter mention displayed.
     const patterns = [
-        /\b(?:go to|jump to|take me to|show|read|display|present)\s+(?:verse\s+)?(\d{1,3}|[a-z]+)\b/i,
-        /\bverse\s+(\d{1,3}|[a-z]+)\b/i,
+        new RegExp(`\\b(?:go to|jump to|take me to|show|read|display|present)\\s+(?:(?:verse|versus)\\s+)?(\\d{1,3}|${SPOKEN_NUMBER_PHRASE})\\b`, 'i'),
+        new RegExp(`\\b(?:verse|versus)\\s+(\\d{1,3}|${SPOKEN_NUMBER_PHRASE})\\b`, 'i'),
     ]
 
     let lastMatch: { raw: string; numStr: string } | null = null
@@ -322,21 +387,61 @@ const SPOKEN_NUMBERS = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|
 // search normalization path (which mangles them into nonsense like "John 31:6").
 // Order in the alternation matters — colon/dot/dash/verse/×/x before space,
 // so "John 3:16" wins over "John 3 16" when both could match.
+// The "chapter" keyword can appear either before the number ("chapter 6")
+// or after it ("6 chapter" / "the 6th chapter") — both are common spoken
+// forms, and missing the latter causes this whole detector to fall through
+// to a bare go_to_verse, which then gets stripped from the transcript and
+// corrupts the surrounding text for the main regex verse detector.
+// Chapter numbers may carry a digit-ordinal suffix from spoken "the 6th
+// chapter" phrasing ("6th", "21st"). parseChapter()/parseInt() already
+// ignore the trailing letters, so it's safe to accept them here — without
+// this, "Ephesians the 6th chapter..." fails to match at all and falls
+// back to a bare go_to_verse, which then corrupts the transcript when
+// stripped (see comment above).
+// Chapter/verse numbers above 20 are routinely spoken as a compound phrase
+// — "twenty five", "forty seven", "Psalm hundred and forty seven" — not a
+// single word. A single-word-only capture only ever grabs the first word
+// ("twenty", "hundred") and silently drops the rest, producing the WRONG
+// number instead of failing to match at all — worse than a miss, because
+// it's confidently wrong. parseSpokenNumber() (verseDetection.ts) already
+// supports the full compound, including "and", once given the whole
+// phrase — this just widens what the regex hands it. Capped at 4 words,
+// which comfortably covers anything up to "one hundred and seventy six"
+// (Psalm 119's verse count, the longest chapter in the Bible).
+const SPOKEN_NUMBER_WORD = `(?:${SPOKEN_NUMBERS})`
+const SPOKEN_NUMBER_PHRASE = `${SPOKEN_NUMBER_WORD}(?:\\s+(?:and\\s+)?${SPOKEN_NUMBER_WORD}){0,3}`
+const CHAPTER_NUM = `\\d{1,3}(?:st|nd|rd|th)?|${SPOKEN_NUMBER_PHRASE}`
+
+// The loose fallback below has no explicit separator keyword — it treats
+// any bare number after whitespace as the verse. A compound chapter phrase
+// like "hundred and forty seven" (or even just "twenty five") ends in a
+// plain number word, so the regex engine happily backtracks CHAPTER_NUM to
+// swallow only "hundred and forty" and hands "seven" off as the verse,
+// turning "Psalm hundred and forty seven" into 140:7 instead of chapter
+// 147. The strict/chapter-only regexes below don't have this ambiguity
+// (they require an explicit separator or no verse at all), so only the
+// loose regex needs the single-word-only variant.
+const CHAPTER_NUM_LOOSE = `\\d{1,3}(?:st|nd|rd|th)?|${SPOKEN_NUMBERS}`
+
+// "versus" is accepted as a separator alongside "verse" — Whisper very
+// commonly mishears a bare spoken "verse" as "versus" (they're
+// phonetically close), confirmed repeatedly across real sermon transcripts.
 const BOOK_CHAPTER_VERSE_REGEX = new RegExp(
-    `\\b(${BOOK_PATTERN})(?:[,\\s]+(?:chapter\\s+)?)?(\\d{1,3}|${SPOKEN_NUMBERS})\\s*(?:[:\\.\\-x×]|vs\\.?|verse)\\s*(\\d{1,3}|${SPOKEN_NUMBERS})(?:\\s*(?:to|through|-|–|—)\\s*(\\d{1,3}))?\\b`,
+    `\\b(${BOOK_PATTERN})(?:[,\\s]+(?:the\\s+)?(?:chapter\\s+)?)?(${CHAPTER_NUM})(?:\\s+chapter)?\\s*(?:[:\\.\\-x×]|vs\\.?|versus|verse)\\s*(\\d{1,3}|${SPOKEN_NUMBERS})(?:\\s*(?:to|through|-|–|—)\\s*(\\d{1,3}))?\\b`,
     'gi',
 )
 
-// Looser fallback: "John 3 16" / "John three sixteen" (no separator). Only used
-// if the strict regex above produced nothing, and we validate the numbers
-// against BOOK_MAX_CHAPTER / BOOK_MAX_VERSES to reject "John 31 6" / "Psalms 200 5".
+// Looser fallback: "John 3 16" / "John three sixteen" / "Romans 10, 17"
+// (comma instead of a keyword separator). Only used if the strict regex
+// above produced nothing, and we validate the numbers against
+// BOOK_MAX_CHAPTER / BOOK_MAX_VERSES to reject "John 31 6" / "Psalms 200 5".
 const BOOK_CHAPTER_VERSE_LOOSE_REGEX = new RegExp(
-    `\\b(${BOOK_PATTERN})[,\\s]+(?:chapter\\s+)?(\\d{1,3}|${SPOKEN_NUMBERS})\\s+(\\d{1,3}|${SPOKEN_NUMBERS})\\b`,
+    `\\b(${BOOK_PATTERN})[,\\s]+(?:the\\s+)?(?:chapter\\s+)?(${CHAPTER_NUM_LOOSE})(?:\\s+chapter)?[,\\s]+(\\d{1,3}|${SPOKEN_NUMBERS})\\b`,
     'gi',
 )
 
 const BOOK_CHAPTER_REGEX = new RegExp(
-    `\\b(${BOOK_PATTERN})[,]?\\s*(?:chapter\\s+)?(\\d{1,3}|${SPOKEN_NUMBERS})\\b(?!\\s*(?:[:\\.\\-x×]|vs\\.?|verse)\\s*\\d)`,
+    `\\b(${BOOK_PATTERN})[,]?\\s*(?:the\\s+)?(?:chapter\\s+)?(${CHAPTER_NUM})(?:\\s+chapter)?\\b(?!\\s*(?:[:\\.\\-x×]|vs\\.?|versus|verse)\\s*\\d)`,
     'gi',
 )
 
@@ -456,6 +561,18 @@ function detectBookChapterVerseCommands(text: string): VoiceCommand[] {
             const verse = parseSpokenNumber(lm[3])
             const maxChapter = book ? BOOK_MAX_CHAPTER[book] : undefined
             const maxVerse = book && chapter !== null ? BOOK_MAX_VERSES[book]?.[chapter - 1] : undefined
+            // This regex exists to split two adjacent numbers into
+            // chapter+verse ("John 3 16", "Romans 10, 17") when nothing else
+            // separates them. But "twenty five" is ALSO two adjacent number
+            // words, and is a legitimate single compound chapter number
+            // ("Psalm chapter twenty five" = Psalm 25, no verse). If the two
+            // captured words also parse as one combined compound number,
+            // this split is ambiguous with that — and BOOK_MAX_VERSES alone
+            // can't tell them apart, since "chapter 20 verse 5" and
+            // "chapter 25" are both independently plausible references.
+            // Defer to the chapter-only detector in that case instead of
+            // guessing, rather than confidently showing the wrong verse.
+            const combinesIntoOneNumber = parseSpokenNumber(`${lm[2]} ${lm[3]}`) !== null
             if (
                 book &&
                 chapter !== null &&
@@ -464,7 +581,8 @@ function detectBookChapterVerseCommands(text: string): VoiceCommand[] {
                 maxVerse !== undefined &&
                 chapter <= maxChapter &&
                 verse <= maxVerse &&
-                verse >= 1
+                verse >= 1 &&
+                !combinesIntoOneNumber
             ) {
                 commands.push({
                     type: 'go_to_reference',
@@ -508,6 +626,13 @@ const COMMAND_KEYWORDS = [
     'version', 'switch', 'change', 'use the', 'next verse', 'previous verse',
     'next chapter', 'previous chapter', 'go to', 'go to next', 'go back', 'display',
     'show that', 'put up', 'go live', 'stop listening', 'start listening', 'verse',
+    // "versus" is not a substring of "verse" ("versus".includes("verse") is
+    // false — they diverge at the 5th letter), so it needs its own entry.
+    // Whisper very commonly mishears a bare spoken "verse" as "versus";
+    // without this, "Versus 6" never clears the intent gate below, so even
+    // after detectGoToVerseCommands() learns to parse it, this function
+    // still short-circuits to [] before ever calling it.
+    'versus',
     'chapter', 'open', 'read', 'turn to', 'return to',
 ]
 
@@ -531,6 +656,7 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
     // — runs BEFORE the chapter-only detector and BEFORE falling through to search,
     // so the verse is captured instead of being mangled by the search normalizer.
     const bookChapterVerseCommands = detectBookChapterVerseCommands(recentText)
+    const goToVerseCommands = detectGoToVerseCommands(recentText)
 
     const hasIntent = hasCommandIntent(recentText)
     if (
@@ -542,12 +668,25 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
         return []
     }
 
+    // A bare "book + chapter" mention (detectGoToReferenceCommands) always
+    // defaults to verse 1 — it never even tries to parse a verse number. If
+    // this same utterance ALSO produced a command with an actual verse
+    // number (a spoken "verse N", or a full "book chapter verse"), that's
+    // strictly more specific and describes what was really said. Without
+    // this, both fire and execute in the order collected below, so the
+    // specific one ("go to verse 4") gets immediately overwritten by the
+    // less-specific one jumping back to verse 1 — e.g. "2 Corinthians
+    // chapter 4 verse 4" briefly displayed verse 1 before the semantic layer
+    // corrected it moments later.
+    const hasMoreSpecificVerseCommand = goToVerseCommands.length > 0 || bookChapterVerseCommands.length > 0
+    const effectiveReferenceCommands = hasMoreSpecificVerseCommand ? [] : referenceCommands
+
     const allCommands: VoiceCommand[] = [
         ...detectVersionChangeCommands(recentText),
         ...detectNavigationCommands(recentText),
-        ...detectGoToVerseCommands(recentText),
+        ...goToVerseCommands,
         ...bookChapterVerseCommands,
-        ...referenceCommands,
+        ...effectiveReferenceCommands,
         ...detectControlCommands(recentText),
     ]
 
@@ -570,7 +709,14 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
 
 export function stripCommandsFromTranscript(text: string, commands: VoiceCommand[]): string {
     let cleaned = text
-    for (const cmd of commands) {
+    // Strip longest raw text first. Commands can overlap (e.g. a bare
+    // "verse 4" go_to_verse match is a substring of a fuller "Corinthians
+    // chapter 4 verse 4" go_to_reference match) — stripping the shorter one
+    // first would eat only the tail of the longer one, leaving a truncated
+    // "Corinthians chapter 4" behind for the regex verse detector to
+    // misread as a bare chapter reference (defaulting to verse 1).
+    const byRawLengthDesc = [...commands].sort((a, b) => (b.raw?.length || 0) - (a.raw?.length || 0))
+    for (const cmd of byRawLengthDesc) {
         if (cmd.raw && cmd.raw.length > 2) {
             const escaped = cmd.raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
             cleaned = cleaned.replace(new RegExp(escaped, 'gi'), '')

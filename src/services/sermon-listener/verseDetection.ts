@@ -54,7 +54,7 @@ const BOOK_MAPPINGS: Record<string, string> = {
     'ps': 'Psalms', 'psalm': 'Psalms', 'psalms': 'Psalms', 'pslm': 'Psalms',
     'prov': 'Proverbs', 'proverbs': 'Proverbs',
     'eccl': 'Ecclesiastes', 'eccles': 'Ecclesiastes', 'ecclesiastes': 'Ecclesiastes',
-    'song': 'Song of Solomon', 'songs': 'Song of Solomon', 'song of solomon': 'Song of Solomon', 'song of songs': 'Song of Solomon',
+    'song of solomon': 'Song of Solomon', 'song of songs': 'Song of Solomon',
     'isa': 'Isaiah', 'isaiah': 'Isaiah',
     'jer': 'Jeremiah', 'jeremiah': 'Jeremiah',
     'lam': 'Lamentations', 'lamentations': 'Lamentations',
@@ -77,7 +77,7 @@ const BOOK_MAPPINGS: Record<string, string> = {
     'mk': 'Mark', 'mar': 'Mark', 'mark': 'Mark',
     'lk': 'Luke', 'luk': 'Luke', 'luke': 'Luke',
     'jn': 'John', 'joh': 'John', 'john': 'John',
-    'acts': 'Acts', 'act': 'Acts',
+    'acts': 'Acts',
     'rom': 'Romans', 'romans': 'Romans',
     '1 cor': '1 Corinthians', '1 corinthians': '1 Corinthians', 'first corinthians': '1 Corinthians',
     '2 cor': '2 Corinthians', '2 corinthians': '2 Corinthians', 'second corinthians': '2 Corinthians',
@@ -105,9 +105,13 @@ const BOOK_MAPPINGS: Record<string, string> = {
     // --- REMOVED dangerous standalone-word aliases (join, joan, jean, june, channel,
     //     some, sum, sanct, sans, saint, current, courant, ramon, look, izzy,
     //     jeremy, danny, genes is, jenny is, exo dus, ex doubt, easy kill, easy keel,
-    //     fish in, fill up, core in, cor in, gal ation, he bread).
+    //     fish in, fill up, core in, cor in, gal ation, he bread, song, songs, act).
     // These were causing false positives in everyday speech ("channel 5", "some people",
-    // "look at", "current events", "ramon", "jeremy", "danny", "izzy", etc).
+    // "look at", "current events", "ramon", "jeremy", "danny", "izzy", etc). "song"/"songs"
+    // and "act" are especially dangerous in THIS app specifically: it manages a worship
+    // song queue/lyrics feature as a first-class concept, so "song 2 verse 1" (about the
+    // worship set) is completely ordinary operator speech, not a Song of Solomon
+    // reference — and "act 3:16" (drama/script line) collides with "Acts".
     // Context-guarded corrections for these are still applied upstream by
     // correctAccentMishearings() in hallucinationFilter.ts (only when followed by a
     // chapter/verse pattern).
@@ -129,6 +133,23 @@ const BOOK_MAPPINGS: Record<string, string> = {
     'peters': 'Peter', 'pedro': 'Peter', 'peet': 'Peter',
     'jams': 'James', 'jame': 'James',
     'hebrew': 'Hebrews',
+}
+
+// Derive "1st"/"2nd"/"3rd" ordinal-digit variants for every numbered-book
+// alias already present ("1 samuel" -> "1st samuel", "2 corinthians" -> "2nd
+// corinthians", etc.). ASR very commonly outputs the digit+suffix form for
+// a spoken "First"/"Second"/"Third" — without this, only the fully
+// spelled-out ordinal word ("Second Corinthians") or the bare digit ("2
+// Corinthians") was recognized, silently missing "2nd Corinthians".
+const ORDINAL_DIGIT_SUFFIXES: Record<string, string> = { '1': '1st', '2': '2nd', '3': '3rd' }
+for (const [alias, canonicalBook] of Object.entries({ ...BOOK_MAPPINGS })) {
+    const match = alias.match(/^([123])\s+(.+)$/)
+    if (!match) continue
+    const [, digit, rest] = match
+    const ordinalAlias = `${ORDINAL_DIGIT_SUFFIXES[digit]} ${rest}`
+    if (!(ordinalAlias in BOOK_MAPPINGS)) {
+        BOOK_MAPPINGS[ordinalAlias] = canonicalBook
+    }
 }
 
 // Book names with their corresponding book numbers (for internal use)
@@ -203,6 +224,23 @@ const ORDINAL_WORDS: Record<string, number> = {
     first: 1,
     second: 2,
     third: 3,
+    fourth: 4,
+    fifth: 5,
+    sixth: 6,
+    seventh: 7,
+    eighth: 8,
+    ninth: 9,
+    tenth: 10,
+    eleventh: 11,
+    twelfth: 12,
+    thirteenth: 13,
+    fourteenth: 14,
+    fifteenth: 15,
+    sixteenth: 16,
+    seventeenth: 17,
+    eighteenth: 18,
+    nineteenth: 19,
+    twentieth: 20,
 }
 
 interface BookAlias {
@@ -240,12 +278,18 @@ function buildBookPattern(): string {
 
 export const BOOK_PATTERN = buildBookPattern()
 
-// Pattern for chapter and verse (supports : . - x × vs verse and spaces as separator)
+// Pattern for chapter and verse (supports : . - x × vs verse as separator)
 // U+00D7 = multiplication sign (×) — Whisper sometimes outputs it for "verse"
 // Spaces are intentionally NOT in the main separator list because they create
 // too many false positives ("Genesis 7 1 was destroyed").  A dedicated
 // fallback in detectSpokenVerses handles the "book chapter verse" case.
-const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*(?:[:\\.\\-]|x|×|vs\\.?|verse)\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
+// Hyphen IS a chapter:verse separator by design in this app — "Genesis 1-3"
+// means Genesis 1:3, not a chapter range — but it's still the most ambiguous
+// separator (see hasAmbiguousSeparator below), so it's graded medium rather
+// than high confidence.
+// The separator is named ("sep") so confidence can be graded by how
+// ambiguous it is — see the match loop below.
+const CHAPTER_VERSE_PATTERN = '(\\d+)\\s*(?<sep>[:.-]|x|×|vs\\.?|versus|verse)\\s*(\\d+)(?:\\s*[-\u2013\u2014]\\s*(\\d+))?'
 
 // Sanity-check map: canonical book → max chapter count.
 // Used to reject hallucinated references like "Ephesians 600 verse 1".
@@ -267,11 +311,77 @@ export const BOOK_MAX_CHAPTER: Record<string, number> = {
 }
 
 // Verse count map: canonical book → array of max verses per chapter (1-indexed)
-// Used to reject impossible verse references like "John 21:1000"
-// Array index = chapter number - 1, value = max verse number in that chapter
+// Used to reject impossible verse references like "John 21:1000".
+// Array index = chapter number - 1, value = max verse number in that chapter.
+// Generated from public/bibles/kjv.json (ground truth) so counts stay accurate
+// for every book, not just hand-transcribed ones.
 export const BOOK_MAX_VERSES: Record<string, number[]> = {
-    'John': [51, 25, 36, 54, 47, 71, 53, 59, 41, 42, 57, 50, 38, 21, 27, 33, 26, 26, 40, 31, 25],
-    'Psalm': [6, 12, 8, 8, 12, 10, 17, 9, 20, 18, 7, 8, 6, 5, 5, 11, 15, 50, 14, 9, 13, 31, 6, 10, 22, 12, 14, 9, 11, 12, 12, 11, 22, 22, 28, 12, 40, 22, 39, 43, 13, 17, 26, 12, 11, 17, 13, 14, 11, 20, 23, 19, 9, 7, 23, 13, 6, 11, 8, 12, 7, 9, 13, 19, 11, 20, 24, 17, 20, 28, 8, 14, 10, 9, 24, 13, 16, 5, 18, 8, 12, 11, 10, 9, 18, 19, 15, 13, 17, 11, 16, 17, 15, 20, 21, 10, 16, 8, 18, 12, 13, 15, 12, 9, 9, 5, 8, 13, 12, 10, 10, 9, 8, 18, 14, 10, 11, 14, 16, 19, 8, 11, 7, 10, 10, 12, 9, 6, 11, 8, 8, 10, 10, 12, 11, 7, 7, 13, 17, 13, 16, 10, 12, 15, 7, 7, 10, 8, 18, 10, 11, 9, 11, 13, 10, 10, 12, 11, 10, 10, 12, 15, 13, 11, 16, 18, 12, 12, 14, 13, 11, 12, 15, 14, 9, 9, 7, 9, 10, 6, 7, 9, 9, 9, 5, 8, 12, 12, 10, 10, 8, 12, 11, 11, 9, 13, 13, 9, 14, 13, 10, 11, 11, 12, 15, 10, 11, 11, 11, 14, 14, 12, 13, 13, 11, 15, 13, 12, 13, 13, 14, 14, 13, 11, 12, 17, 12, 12, 14, 9, 13, 11, 13, 12, 10, 15, 13, 11, 16, 15, 11, 11, 13, 12, 11, 8, 8, 8, 12, 13, 7, 13, 12, 12, 13, 16, 13, 13, 12, 11, 11, 12, 11, 9, 14, 11, 11, 11, 12, 11, 13, 13, 10, 10, 11, 11, 10, 11, 9, 10, 11, 11, 11, 10, 12, 12, 10, 9, 10, 11, 11, 11, 11, 12, 11, 9, 10, 11, 11, 11, 10, 10, 10, 11, 11, 11, 10, 11, 11, 11, 10, 12, 11, 10, 10, 176],
+    'Genesis': [31, 25, 24, 26, 32, 22, 24, 22, 29, 32, 32, 20, 18, 24, 21, 16, 27, 33, 38, 18, 34, 24, 20, 67, 34, 35, 46, 22, 35, 43, 55, 32, 20, 31, 29, 43, 36, 30, 23, 23, 57, 38, 34, 34, 28, 34, 31, 22, 33, 26],
+    'Exodus': [22, 25, 22, 31, 23, 30, 25, 32, 35, 29, 10, 51, 22, 31, 27, 36, 16, 27, 25, 26, 36, 31, 33, 18, 40, 37, 21, 43, 46, 38, 18, 35, 23, 35, 35, 38, 29, 31, 43, 38],
+    'Leviticus': [17, 16, 17, 35, 19, 30, 38, 36, 24, 20, 47, 8, 59, 57, 33, 34, 16, 30, 37, 27, 24, 33, 44, 23, 55, 46, 34],
+    'Numbers': [54, 34, 51, 49, 31, 27, 89, 26, 23, 36, 35, 16, 33, 45, 41, 50, 13, 32, 22, 29, 35, 41, 30, 25, 18, 65, 23, 31, 40, 16, 54, 42, 56, 29, 34, 13],
+    'Deuteronomy': [46, 37, 29, 49, 33, 25, 26, 20, 29, 22, 32, 32, 18, 29, 23, 22, 20, 22, 21, 20, 23, 30, 25, 22, 19, 19, 26, 68, 29, 20, 30, 52, 29, 12],
+    'Joshua': [18, 24, 17, 24, 15, 27, 26, 35, 27, 43, 23, 24, 33, 15, 63, 10, 18, 28, 51, 9, 45, 34, 16, 33],
+    'Judges': [36, 23, 31, 24, 31, 40, 25, 35, 57, 18, 40, 15, 25, 20, 20, 31, 13, 31, 30, 48, 25],
+    'Ruth': [22, 23, 18, 22],
+    '1 Samuel': [28, 36, 21, 22, 12, 21, 17, 22, 27, 27, 15, 25, 23, 52, 35, 23, 58, 30, 24, 42, 15, 23, 29, 22, 44, 25, 12, 25, 11, 31, 13],
+    '2 Samuel': [27, 32, 39, 12, 25, 23, 29, 18, 13, 19, 27, 31, 39, 33, 37, 23, 29, 33, 43, 26, 22, 51, 39, 25],
+    '1 Kings': [53, 46, 28, 34, 18, 38, 51, 66, 28, 29, 43, 33, 34, 31, 34, 34, 24, 46, 21, 43, 29, 53],
+    '2 Kings': [18, 25, 27, 44, 27, 33, 20, 29, 37, 36, 21, 21, 25, 29, 38, 20, 41, 37, 37, 21, 26, 20, 37, 20, 30],
+    '1 Chronicles': [54, 55, 24, 43, 26, 81, 40, 40, 44, 14, 47, 40, 14, 17, 29, 43, 27, 17, 19, 8, 30, 19, 32, 31, 31, 32, 34, 21, 30],
+    '2 Chronicles': [17, 18, 17, 22, 14, 42, 22, 18, 31, 19, 23, 16, 22, 15, 19, 14, 19, 34, 11, 37, 20, 12, 21, 27, 28, 23, 9, 27, 36, 27, 21, 33, 25, 33, 27, 23],
+    'Ezra': [11, 70, 13, 24, 17, 22, 28, 36, 15, 44],
+    'Nehemiah': [11, 20, 32, 23, 19, 19, 73, 18, 38, 39, 36, 47, 31],
+    'Esther': [22, 23, 15, 17, 14, 14, 10, 17, 32, 3],
+    'Job': [22, 13, 26, 21, 27, 30, 21, 22, 35, 22, 20, 25, 28, 22, 35, 22, 16, 21, 29, 29, 34, 30, 17, 25, 6, 14, 23, 28, 25, 31, 40, 22, 33, 37, 16, 33, 24, 41, 30, 24, 34, 17],
+    'Psalms': [6, 12, 8, 8, 12, 10, 17, 9, 20, 18, 7, 8, 6, 7, 5, 11, 15, 50, 14, 9, 13, 31, 6, 10, 22, 12, 14, 9, 11, 12, 24, 11, 22, 22, 28, 12, 40, 22, 13, 17, 13, 11, 5, 26, 17, 11, 9, 14, 20, 23, 19, 9, 6, 7, 23, 13, 11, 11, 17, 12, 8, 12, 11, 10, 13, 20, 7, 35, 36, 5, 24, 20, 28, 23, 10, 12, 20, 72, 13, 19, 16, 8, 18, 12, 13, 17, 7, 18, 52, 17, 16, 15, 5, 23, 11, 13, 12, 9, 9, 5, 8, 28, 22, 35, 45, 48, 43, 13, 31, 7, 10, 10, 9, 8, 18, 19, 2, 29, 176, 7, 8, 9, 4, 8, 5, 6, 5, 6, 8, 8, 3, 18, 3, 3, 21, 26, 9, 8, 24, 13, 10, 7, 12, 15, 21, 10, 20, 14, 9, 6],
+    'Proverbs': [33, 22, 35, 27, 23, 35, 27, 36, 18, 32, 31, 28, 25, 35, 33, 33, 28, 24, 29, 30, 31, 29, 35, 34, 28, 28, 27, 28, 27, 33, 31],
+    'Ecclesiastes': [18, 26, 22, 16, 20, 12, 29, 17, 18, 20, 10, 14],
+    'Song of Solomon': [17, 17, 11, 16, 16, 13, 13, 14],
+    'Isaiah': [31, 22, 26, 6, 30, 13, 25, 22, 21, 34, 16, 6, 22, 32, 9, 14, 14, 7, 25, 6, 17, 25, 18, 23, 12, 21, 13, 29, 24, 33, 9, 20, 24, 17, 10, 22, 38, 22, 8, 31, 29, 25, 28, 28, 25, 13, 15, 22, 26, 11, 23, 15, 12, 17, 13, 12, 21, 14, 21, 22, 11, 12, 19, 12, 25, 24],
+    'Jeremiah': [19, 37, 25, 31, 31, 30, 34, 22, 26, 25, 23, 17, 27, 22, 21, 21, 27, 23, 15, 18, 14, 30, 40, 10, 38, 24, 22, 17, 32, 24, 40, 44, 26, 22, 19, 32, 21, 28, 18, 16, 18, 22, 13, 30, 5, 28, 7, 47, 39, 46, 64, 34],
+    'Lamentations': [22, 22, 66, 22, 22],
+    'Ezekiel': [28, 10, 27, 17, 17, 14, 27, 18, 11, 22, 25, 28, 23, 23, 8, 63, 24, 32, 14, 49, 32, 31, 49, 27, 17, 21, 36, 26, 21, 26, 18, 32, 33, 31, 15, 38, 28, 23, 29, 49, 26, 20, 27, 31, 25, 24, 23, 35],
+    'Daniel': [21, 49, 30, 37, 31, 28, 28, 27, 27, 21, 45, 13],
+    'Hosea': [11, 23, 5, 19, 15, 11, 16, 14, 17, 15, 12, 14, 16, 9],
+    'Joel': [20, 32, 21],
+    'Amos': [15, 16, 15, 13, 27, 14, 17, 14, 15],
+    'Obadiah': [21],
+    'Jonah': [17, 10, 10, 11],
+    'Micah': [16, 13, 12, 13, 15, 16, 20],
+    'Nahum': [15, 13, 19],
+    'Habakkuk': [17, 20, 19],
+    'Zephaniah': [18, 15, 20],
+    'Haggai': [15, 23],
+    'Zechariah': [21, 13, 10, 14, 11, 15, 14, 23, 17, 12, 17, 14, 9, 21],
+    'Malachi': [14, 17, 18, 6],
+    'Matthew': [25, 23, 17, 25, 48, 34, 29, 34, 38, 42, 30, 50, 58, 36, 39, 28, 27, 35, 30, 34, 46, 46, 39, 51, 46, 75, 66, 20],
+    'Mark': [45, 28, 35, 41, 43, 56, 37, 38, 50, 52, 33, 44, 37, 72, 47, 20],
+    'Luke': [80, 52, 38, 44, 39, 49, 50, 56, 62, 42, 54, 59, 35, 35, 32, 31, 37, 43, 48, 47, 38, 71, 56, 53],
+    'John': [51, 25, 36, 54, 47, 71, 53, 59, 41, 42, 57, 50, 38, 31, 27, 33, 26, 40, 42, 31, 25],
+    'Acts': [26, 47, 26, 37, 42, 15, 60, 40, 43, 48, 30, 25, 52, 28, 41, 40, 34, 28, 41, 38, 40, 30, 35, 27, 27, 32, 44, 31],
+    'Romans': [32, 29, 31, 25, 21, 23, 25, 39, 33, 21, 36, 21, 14, 23, 33, 27],
+    '1 Corinthians': [31, 16, 23, 21, 13, 20, 40, 13, 27, 33, 34, 31, 13, 40, 58, 24],
+    '2 Corinthians': [24, 17, 18, 18, 21, 18, 16, 24, 15, 18, 33, 21, 14],
+    'Galatians': [24, 21, 29, 31, 26, 18],
+    'Ephesians': [23, 22, 21, 32, 33, 24],
+    'Philippians': [30, 30, 21, 23],
+    'Colossians': [29, 23, 25, 18],
+    '1 Thessalonians': [10, 20, 13, 18, 28],
+    '2 Thessalonians': [12, 17, 18],
+    '1 Timothy': [20, 15, 16, 16, 25, 21],
+    '2 Timothy': [18, 26, 17, 22],
+    'Titus': [16, 15, 15],
+    'Philemon': [25],
+    'Hebrews': [14, 18, 19, 16, 14, 20, 28, 13, 28, 39, 40, 29, 25],
+    'James': [27, 26, 18, 17, 20],
+    '1 Peter': [25, 25, 22, 19, 14],
+    '2 Peter': [21, 22, 18],
+    '1 John': [10, 29, 24, 21, 21],
+    '2 John': [13],
+    '3 John': [14],
+    'Jude': [25],
+    'Revelation': [20, 29, 22, 11, 14, 17, 17, 13, 21, 11, 19, 17, 18, 20, 8, 21, 18, 24, 21, 15, 27, 21],
 }
 
 // Full verse detection pattern
@@ -281,8 +391,8 @@ const VERSE_PATTERN = new RegExp(
 )
 
 const ALTERNATIVE_PATTERNS = [
-    /chapter\s+(\d+)[,\s]+(?:verse[s]?\s+)?(\d+)(?:\s+(?:to|through|-|\u2013|\u2014)\s*(\d+))?/gi,
-    /(?:verse[s]?\s+)?(\d+)\s+of\s+chapter\s+(\d+)/gi,
+    /chapter\s+(\d+)[,\s]+(?:(?:verse[s]?|versus)\s+)?(\d+)(?:\s+(?:to|through|-|\u2013|\u2014)\s*(\d+))?/gi,
+    /(?:(?:verse[s]?|versus)\s+)?(\d+)\s+of\s+chapter\s+(\d+)/gi,
 ]
 
 export function normalizeBookName(bookText: string): string | null {
@@ -346,6 +456,40 @@ function getBookAliases(): BookAlias[] {
     return cachedBookAliases
 }
 
+/**
+ * True if `tokens` starting at `idx` spell out a *multi-token* book alias
+ * (e.g. "1 john", "2 corinthians"). Used to stop a bare digit from being
+ * consumed as the current book's chapter/verse when it's actually the
+ * numbered prefix of the NEXT book mention.
+ */
+function tokenStartsAnotherBook(tokens: string[], idx: number): boolean {
+    return getBookAliases().some(
+        (candidate) =>
+            candidate.aliasTokens.length > 1 &&
+            candidate.aliasTokens.every((token, i) => tokens[idx + i] === token),
+    )
+}
+
+type NumberScale = 'ones' | 'tens' | 'hundred'
+
+// Only these previous->current scale transitions form a legitimate compound
+// English number: "two HUNDRED" (ones->hundred, multiply), "hundred THIRTY"
+// / "hundred THREE" (hundred->tens/ones, add), "twenty THREE" (tens->ones,
+// add). Anything else — most importantly two bare ones-scale numbers in a
+// row ("one three", digit tokens "1 3") — is NOT a compound number. It's two
+// SEPARATE numbers (e.g. a spoken "chapter, verse" pair) and must not be
+// summed together, or "Genesis one three" silently becomes chapter 4 instead
+// of chapter 1 verse 3.
+const ALLOWED_SCALE_TRANSITIONS: Record<NumberScale, Set<NumberScale>> = {
+    ones: new Set<NumberScale>(['hundred']),
+    tens: new Set<NumberScale>(['ones']),
+    hundred: new Set<NumberScale>(['tens', 'ones']),
+}
+
+function isAllowedScaleTransition(prev: NumberScale, next: NumberScale): boolean {
+    return ALLOWED_SCALE_TRANSITIONS[prev].has(next)
+}
+
 export function parseSpokenNumber(input: string): number | null {
     const normalized = input
         .toLowerCase()
@@ -363,31 +507,42 @@ export function parseSpokenNumber(input: string): number | null {
 
     let value = 0
     let hasNumberToken = false
+    let prevScale: NumberScale | null = null
 
     for (const token of tokens) {
         if (token === 'and') continue
 
+        let tokenValue: number
+        let isWordToken = false
+
         if (/^\d+$/.test(token)) {
-            value += parseInt(token, 10)
-            hasNumberToken = true
-            continue
+            tokenValue = parseInt(token, 10)
+        } else if (ORDINAL_WORDS[token] !== undefined) {
+            tokenValue = ORDINAL_WORDS[token]
+            isWordToken = true
+        } else {
+            const base = NUMBER_WORDS[token]
+            if (base === undefined) return null
+            tokenValue = base
+            isWordToken = true
         }
 
-        if (ORDINAL_WORDS[token] !== undefined) {
-            value += ORDINAL_WORDS[token]
-            hasNumberToken = true
-            continue
+        const scale: NumberScale =
+            tokenValue === 100 ? 'hundred' :
+            (isWordToken && tokenValue >= 20 && tokenValue % 10 === 0) ? 'tens' :
+            'ones'
+
+        if (prevScale !== null && !isAllowedScaleTransition(prevScale, scale)) {
+            return null
         }
 
-        const base = NUMBER_WORDS[token]
-        if (base === undefined) return null
-
-        hasNumberToken = true
-        if (base === 100) {
+        if (tokenValue === 100) {
             value = value === 0 ? 100 : value * 100
         } else {
-            value += base
+            value += tokenValue
         }
+        hasNumberToken = true
+        prevScale = scale
     }
 
     if (!hasNumberToken || value <= 0) return null
@@ -420,14 +575,22 @@ const NAME_PREFIXES = new Set([
 function detectSpokenVerses(text: string): DetectedVerse[] {
     const normalizedText = text
         .toLowerCase()
-        .replace(/[.,;!?()[\]{}]/g, ' ')
+        // Hyphen is split into its own token boundary (not stripped outright)
+        // so "Genesis 1-3" tokenizes as ["genesis","1","3"], letting the
+        // normal chapter/verse parsing below treat them as two separate
+        // numbers rather than one glued-together "1-3" token.
+        .replace(/[.,;!?()[\]{}-]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
 
     if (!normalizedText) return []
 
     const bookAliases = getBookAliases()
-    const tokens = normalizedText.split(' ')
+    // Strip digit-ordinal suffixes ("6th" -> "6", "21st" -> "21") so
+    // "the 6th chapter" parses as a plain number. Safe for book-name
+    // matching too: e.g. "2nd corinthians" becomes "2 corinthians", which
+    // is already a valid alias in its own right.
+    const tokens = normalizedText.split(' ').map((token) => token.replace(/^(\d+)(?:st|nd|rd|th)$/, '$1'))
     const seen = new Set<string>()
     const detected: DetectedVerse[] = []
     let searchFrom = 0
@@ -447,25 +610,49 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
         let hasChapterKeyword = false
         let hasVerseKeyword = false
 
-        // Check for "chapter" keyword
+        // Skip a filler "the" before the chapter number/keyword, e.g.
+        // "Ephesians the 6th chapter" / "Ephesians the sixth chapter".
+        if (tokens[pointer] === 'the') {
+            pointer += 1
+        }
+
+        // Check for "chapter" keyword before the number ("chapter 6")
         if (tokens[pointer] === 'chapter') {
             hasChapterKeyword = true
             pointer += 1
         }
 
+        // Don't let a bare digit that's actually the numbered prefix of the
+        // NEXT book mention (e.g. "1 John", "2 Corinthians") get swallowed as
+        // THIS book's chapter/verse number. Without this guard, "James 1, 1
+        // John 1 7" mis-parses as "James 1:1" + "John 1:7" — the second "1"
+        // gets consumed as James's verse, which then causes the outer loop to
+        // skip past it (see the `tokenIndex = Math.max(...)` fast-forward
+        // below) and only find bare "John" instead of "1 John" afterward.
+        if (tokenStartsAnotherBook(tokens, pointer)) continue
+
         // Parse chapter - spoken forms like "John three sixteen" are supported
-        const chapterStartPointer = pointer
+        const chapterTokenStart = pointer
         const chapter = hasChapterKeyword
             ? parseNumberFromTokens(tokens, pointer, 4)  // Allow multi-word like "twenty three"
             : parseNumberFromTokens(tokens, pointer, 2)
         if (!chapter) continue
         pointer = chapter.nextIndex
 
+        // "chapter" keyword can also follow the number, e.g. "the 6th
+        // chapter" / "the sixth chapter" — as opposed to "chapter 6" above.
+        if (!hasChapterKeyword && tokens[pointer] === 'chapter') {
+            hasChapterKeyword = true
+            pointer += 1
+        }
+
         // Check for "verse" or "verses" keyword
-        if (tokens[pointer] === 'verse' || tokens[pointer] === 'verses') {
+        if (tokens[pointer] === 'verse' || tokens[pointer] === 'verses' || tokens[pointer] === 'versus') {
             hasVerseKeyword = true
             pointer += 1
         }
+
+        if (tokenStartsAnotherBook(tokens, pointer)) continue
 
         // Parse verse - allow spoken style "John three sixteen" or "John 3 vs 16"
         let verseStart = hasVerseKeyword
@@ -475,32 +662,55 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
         // Sanity-check: reject wildly out-of-bounds chapter numbers (Whisper hallucinations)
         const maxChapter = BOOK_MAX_CHAPTER[alias.book]
         if (maxChapter !== undefined && chapter.value > maxChapter) {
+            // A bare 3-digit chapter/verse pair collapsed into one number by
+            // fast speech or ASR (e.g. "Matthew 542" meaning "Matthew 5:42")
+            // is invalid as a standalone chapter. Try splitting it into
+            // chapter+verse — but ONLY here, after treating the whole number
+            // as a chapter has ALREADY failed bounds. This is the key fix
+            // versus an earlier version of this heuristic: it never touches a
+            // number that's already a VALID standalone chapter (e.g. "Psalm
+            // 119", chapter 119 <= 150), so it can't mis-split that case into
+            // "Psalms 1:19" the way the old heuristic did.
+            const isSingleCompactToken =
+                !verseStart &&
+                chapter.nextIndex - chapterTokenStart === 1 &&
+                /^\d{3}$/.test(tokens[chapterTokenStart])
+            if (isSingleCompactToken) {
+                const compact = parseInt(tokens[chapterTokenStart], 10)
+                const splitChapter = Math.floor(compact / 100)
+                const splitVerse = compact % 100
+                const splitMaxVerses = BOOK_MAX_VERSES[alias.book]?.[splitChapter - 1]
+                const splitValid =
+                    splitChapter > 0 && splitChapter <= maxChapter &&
+                    splitVerse > 0 && (!splitMaxVerses || splitVerse <= splitMaxVerses)
+                if (splitValid) {
+                    const reference = `${alias.book} ${splitChapter}:${splitVerse}`
+                    if (!seen.has(reference)) {
+                        seen.add(reference)
+                        const raw = tokens.slice(tokenIndex, pointer).join(' ')
+                        const startIndex = normalizedText.indexOf(raw, searchFrom)
+                        const endIndex = startIndex === -1 ? -1 : startIndex + raw.length
+                        if (startIndex !== -1) {
+                            searchFrom = endIndex
+                        }
+                        detected.push({
+                            raw,
+                            reference,
+                            book: alias.book,
+                            chapter: splitChapter,
+                            verseStart: splitVerse,
+                            startIndex: startIndex === -1 ? 0 : startIndex,
+                            endIndex: endIndex === -1 ? raw.length : endIndex,
+                            confidence: 'medium',
+                        })
+                    }
+                    tokenIndex = Math.max(tokenIndex, pointer - 1)
+                }
+            }
             continue
         }
 
-        // Handle compact spoken refs like "John 316" => John 3:16
-        // but only when verse token is missing and the chapter token was a single compact number.
         if (!verseStart) {
-            const rawChapterToken = tokens[chapterStartPointer] || ''
-            if (/^\d{3}$/.test(rawChapterToken)) {
-                const compact = parseInt(rawChapterToken, 10)
-                const inferredChapter = Math.floor(compact / 100)
-                const inferredVerse = compact % 100
-                if (inferredChapter > 0 && inferredVerse > 0) {
-                    detected.push({
-                        raw: tokens.slice(tokenIndex, pointer).join(' '),
-                        reference: `${alias.book} ${inferredChapter}:${inferredVerse}`,
-                        book: alias.book,
-                        chapter: inferredChapter,
-                        verseStart: inferredVerse,
-                        startIndex: 0,
-                        endIndex: 0,
-                        confidence: hasChapterKeyword ? 'high' : 'medium',
-                    })
-                    continue
-                }
-            }
-
             // CHAPTER-ONLY FALLBACK: e.g. "Ephesians chapter 6" → Eph 6:1
             // Only emit when "chapter" keyword was explicitly spoken.
             // Medium confidence so it respects the user's min-confidence threshold.
@@ -596,7 +806,16 @@ export function detectVerses(text: string): DetectedVerse[] {
 
     let match: RegExpExecArray | null
     while ((match = VERSE_PATTERN.exec(text)) !== null) {
-        const [fullMatch, bookText, chapterStr, verseStartStr, verseEndStr] = match
+        // The named "sep" group still consumes a positional slot, so
+        // verseStartStr/verseEndStr shift one index later than before.
+        const [fullMatch, bookText, chapterStr, , verseStartStr, verseEndStr] = match
+        const separator = match.groups?.sep ?? ''
+        // Colon/period are unambiguous chapter:verse notation. "-"/"x"/"×"/
+        // "vs"/the bare word "verse" are more easily produced by ordinary
+        // non-scripture speech (e.g. "song 2 verse 1" about a worship song,
+        // or a hyphen that could in principle mean a chapter range elsewhere)
+        // — trust them less.
+        const hasAmbiguousSeparator = /^(-|x|×|vs\.?|versus|verse)$/i.test(separator)
 
         const normalizedBook = normalizeBookName(bookText)
         if (!normalizedBook) continue
@@ -642,7 +861,7 @@ export function detectVerses(text: string): DetectedVerse[] {
             verseEnd: verseEndStr ? parseInt(verseEndStr, 10) : undefined,
             startIndex: match.index,
             endIndex: match.index + fullMatch.length,
-            confidence: 'high',
+            confidence: hasAmbiguousSeparator ? 'medium' : 'high',
         })
     }
 
