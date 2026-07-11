@@ -6,7 +6,7 @@
 > as `[KNOWN BUG]` so that fixing the bug in the future requires
 > intentionally updating the test.
 
-## Summary: 20 Confirmed Bugs (8 historical + 12 newly discovered)
+## Summary: 22 Confirmed Bugs (8 historical + 14 newly discovered)
 
 | # | Component | Bug | Severity | File |
 |---|-----------|-----|----------|------|
@@ -30,6 +30,8 @@
 | 18 | `referenceContext` | (FIXED) A verse number said with NO "verse"/"versus" keyword at all, in its own separate ASR utterance right after a chapter announcement, was never resolved | ~~**High**~~ | `src/services/sermon-listener/referenceContext.ts` |
 | 19 | `audio_capture` | (FIXED) Audio-features heartbeat went silent during a genuine upstream audio-delivery gap, tricking the frontend watchdog into an unnecessary capture restart | ~~Medium~~ | `src-tauri/src/audio_capture/mod.rs` |
 | 20 | `ScreenPicker` | (FIXED) A `<button>` nested inside another `<button>` (invalid HTML) caused a hydration warning and unreliable clicks on the "Identify" control | ~~Low~~ | `src/components/live/ScreenPicker.tsx` |
+| 21 | `useSermonListener` | (FIXED) Navigation cooldown blocked auto-display of a verse continuing the SAME reference a voice command had just set | ~~Medium~~ | `src/hooks/useSermonListener.ts` |
+| 22 | `useSermonListener` / `verseDetection` | (FIXED) Regex verse detection scanned the entire ever-growing session transcript on every utterance, so an old verse could never genuinely go silent — and its own reference-based dedup made a real re-mention invisible — letting an old, already-shown verse randomly hijack whatever chapter was currently live | ~~**High**~~ | `src/hooks/useSermonListener.ts` |
 
 ---
 
@@ -583,6 +585,106 @@ Enter/Space, keeping the inner "Identify" control as a real `<button>`.
 ### Test
 No automated test (no existing test file for this component);
 verified by code inspection and a clean `tsc --noEmit`.
+
+---
+
+## Bug 21: ~~Navigation cooldown blocked a same-reference verse continuation~~ (FIXED)
+
+### Reproduction
+Found via live testing of Bug 18's fix: "Hebrews 13" → "Five." resolved
+correctly to "Hebrews 13:5" (appeared in the detected-verses list and
+as the current verse) but the live output silently stayed on
+"Hebrews 13:1" and never updated.
+
+### Impact
+**Medium.** A bare chapter mention like "Hebrews 13" fires a
+`go_to_reference` voice command, which sets a 3-second
+`navigationCooldownUntilRef` specifically to stop a stale, in-flight
+regex/semantic detection from hijacking the navigation it just
+performed. The follow-up "Five." utterance almost always arrives
+within that window, so when it resolved to "Hebrews 13:5" moments
+later, the same cooldown check blocked the auto-lookup/auto-display
+step — even though it was completing the exact reference the command
+had just set, not competing with a different one.
+
+### Fix
+Bypass the cooldown specifically when the newly-resolved verse's
+book+chapter matches the reference context that was already active — a
+continuation, not a competing navigation. This is one shared code path
+(`useSermonListener.ts`'s `hasRegexVerses` branch), so the fix applies
+uniformly whether the verse came from `detectVerses()`,
+`resolveBareReferences()`, or `resolveStandaloneNumberContinuation()`.
+
+### Test
+No automated test (no test harness exists for `useSermonListener.ts`);
+verified via `tsc --noEmit`, the full existing sermon-listener/hooks
+suite with no regressions, and direct tracing of the interaction
+against a real transcript.
+
+---
+
+## Bug 22: ~~Old, already-shown verses could randomly hijack the live display~~ (FIXED)
+
+### Reproduction
+Reported by the user as a recurring real-usage annoyance: "a few [old
+verses] hijack after they've already been displayed and new chapters
+are currently being displayed." Confirmed directly:
+```ts
+// detectVerses() re-run on the ever-growing transcript re-matches
+// EVERY reference ever mentioned, forever:
+detectVerses('In John 3:16 we see the love of God for the world.')
+// → ['John 3:16']
+detectVerses('John 3:16 ... ' + '(2500+ chars of unrelated later content)')
+// → ['John 3:16']   -- still matches, even though it's ancient history
+
+// And even a GENUINE re-mention later is invisible, because
+// detectVerses dedupes by reference within a single call:
+detectVerses('John 3:16 says ... (lots of filler) ... remember John 3:16 again')
+// → only ONE 'John 3:16' entry, at the FIRST (original) position
+```
+
+### Impact
+**High.** `useSermonListener.ts` calls `detectVerses()`/
+`resolveBareReferences()` against `transcriptBufferRef`, which is the
+ENTIRE accumulated session transcript and never shrinks mid-session.
+A verse mentioned once stays textually present forever, so it
+re-matches on every subsequent utterance indefinitely — "silence"
+(the 60-second threshold `REACTIVATE_AFTER_SILENCE_MS` uses to decide
+whether a re-match is a genuine re-reference worth re-displaying) could
+never be legitimately detected this way, since the substring never
+actually disappears from what's scanned. Whenever a brand-new verse
+was detected in the same tick, the reactivation branch that would
+normally refresh an old reference's "last seen" timestamp was skipped
+entirely (the two branches are mutually exclusive) — so during any
+stretch of the sermon with frequent new quotes, an old reference's
+timestamp could go unrefreshed long enough to look "silent," and once
+a lull arrived, it would resurface and take over the live display.
+Made worse by `detectVerses`' own reference-based dedup: even a truly
+fresh, genuine re-mention of that verse couldn't be distinguished from
+this stale artifact, since only the original position was ever
+reported.
+
+### Fix
+Bound the text fed to `detectVerses()`/`resolveBareReferences()` to a
+recent window (last `RECENT_VERSE_DETECTION_WINDOW_CHARS` = 2500
+characters, sized comfortably above the 60-second silence threshold at
+typical speaking pace) instead of the full ever-growing transcript.
+Old mentions now genuinely scroll out of what's scanned, so "silent"
+and "re-mentioned" become meaningful again — confirmed a verse
+correctly disappears once it scrolls out, and a genuine later
+re-mention is freshly detected instead of being swallowed by the
+dedup. Since the detected verses' `startIndex`/`endIndex` are also fed
+to the semantic detector's `excludedRanges` (computed against the
+un-windowed `cleanText`), the window's offset is added back onto those
+positions immediately after detection so downstream consumers still
+see correct absolute positions.
+
+### Test
+No automated test (no test harness exists for `useSermonListener.ts`);
+verified via `tsc --noEmit`, the full existing suite with no
+regressions, and a direct probe against the real `detectVerses()`
+confirming both halves of the fix (old references fall silent; genuine
+re-mentions are detected).
 
 ---
 

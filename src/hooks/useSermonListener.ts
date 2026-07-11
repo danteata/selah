@@ -347,6 +347,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const lastMatchTimeRef = useRef<Map<string, number>>(new Map())
     const REACTIVATE_AFTER_SILENCE_MS = 60_000 // 60 seconds of silence before a re-match is treated as a re-reference
 
+    // detectVerses()/resolveBareReferences() used to be run against the
+    // ENTIRE accumulated session transcript (transcriptBufferRef never
+    // shrinks mid-session). A verse mentioned once stays textually present
+    // forever, so it re-matched on every subsequent chunk indefinitely —
+    // "silence" (REACTIVATE_AFTER_SILENCE_MS above) could never be
+    // genuinely detected this way, since the substring never actually
+    // disappears. Worse, detectVerses() dedupes by reference across a
+    // single call, so even a REAL re-mention of that verse later in the
+    // transcript was invisible — only the original (increasingly stale)
+    // position was ever reported. Combined, this let an old, already-shown
+    // verse randomly resurface and hijack whatever chapter was currently
+    // live, whenever a lull in brand-new detections let its (essentially
+    // arbitrary) match timestamp go unrefreshed for 60+ real seconds.
+    // Bounding the window here means old mentions genuinely scroll out of
+    // what's scanned, so "silent" and "re-mentioned" become meaningful
+    // again. Sized well above the 60s silence threshold at typical
+    // speaking pace (~130-150 wpm, ~800-900 chars/min) so nothing currently
+    // relevant gets clipped mid-quote.
+    const RECENT_VERSE_DETECTION_WINDOW_CHARS = 2500
+
     // Per-verse score of the most recent match. Regex matches are recorded as
     // 1.0 (the preacher said the reference explicitly). Semantic matches are
     // recorded as the cosine score. Used by the chapter-level dedup to
@@ -1464,16 +1484,39 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
         const inNavigationCooldown = Date.now() < navigationCooldownUntilRef.current
 
-        let verses = detectVerses(cleanText)
+        // See RECENT_VERSE_DETECTION_WINDOW_CHARS above — bound what the regex
+        // detectors scan to a recent window of the ever-growing transcript so
+        // an old mention can genuinely fall silent instead of matching forever.
+        // windowOffset is added back onto startIndex/endIndex wherever they're
+        // later used against the UN-windowed cleanText (see excludedRanges below).
+        const windowOffset = Math.max(0, cleanText.length - RECENT_VERSE_DETECTION_WINDOW_CHARS)
+        const recentTextForVerseDetection = cleanText.slice(windowOffset)
+
+        let verses = detectVerses(recentTextForVerseDetection)
 
         // Resolve bare references (e.g. "verse 6") from active sermon context.
         // Only runs when no full book+chapter reference was found in this chunk,
         // and the context has not expired (default 120 s TTL).
         if (verses.length === 0) {
-            const bareRefs = resolveBareReferences(cleanText, activeReferenceContextRef.current, CONTEXT_TTL_MS)
+            const bareRefs = resolveBareReferences(recentTextForVerseDetection, activeReferenceContextRef.current, CONTEXT_TTL_MS)
             if (bareRefs.length > 0) {
                 verses = [...verses, ...bareRefs]
             }
+        }
+
+        // Both detectors above ran against the windowed slice, so their
+        // startIndex/endIndex are relative to it, not cleanText. Shift them
+        // back to cleanText's coordinate space now, before anything downstream
+        // (excludedRanges below) uses them against the un-windowed text.
+        // resolveStandaloneNumberContinuation (added next) is deliberately
+        // excluded — it resolves against latestChunkForCommands, an unrelated
+        // short string, not this windowed slice.
+        if (windowOffset > 0) {
+            verses = verses.map(v => ({
+                ...v,
+                startIndex: v.startIndex + windowOffset,
+                endIndex: v.endIndex + windowOffset,
+            }))
         }
 
         // A preacher often announces "Book chapter N" and gives just the
