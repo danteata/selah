@@ -6,7 +6,7 @@
 > as `[KNOWN BUG]` so that fixing the bug in the future requires
 > intentionally updating the test.
 
-## Summary: 22 Confirmed Bugs (8 historical + 14 newly discovered)
+## Summary: 23 Confirmed Bugs (8 historical + 15 newly discovered)
 
 | # | Component | Bug | Severity | File |
 |---|-----------|-----|----------|------|
@@ -32,6 +32,7 @@
 | 20 | `ScreenPicker` | (FIXED) A `<button>` nested inside another `<button>` (invalid HTML) caused a hydration warning and unreliable clicks on the "Identify" control | ~~Low~~ | `src/components/live/ScreenPicker.tsx` |
 | 21 | `useSermonListener` | (FIXED) Navigation cooldown blocked auto-display of a verse continuing the SAME reference a voice command had just set | ~~Medium~~ | `src/hooks/useSermonListener.ts` |
 | 22 | `useSermonListener` / `verseDetection` | (FIXED) Regex verse detection scanned the entire ever-growing session transcript on every utterance, so an old verse could never genuinely go silent — and its own reference-based dedup made a real re-mention invisible — letting an old, already-shown verse randomly hijack whatever chapter was currently live | ~~**High**~~ | `src/hooks/useSermonListener.ts` |
+| 23 | `useSermonListener` | (FIXED) Reactivation logic only ever refreshed the "last seen" timestamp of ONE still-matching reference per tick (`reActivatedRefs[0]`/`semanticReActivatedRefs[0]`), letting every other one go falsely "silent" and later hijack the live display even though it was still being matched the whole time | ~~**High**~~ | `src/hooks/useSermonListener.ts` |
 
 ---
 
@@ -694,6 +695,71 @@ verified via `tsc --noEmit`, the full existing suite with no
 regressions, and a direct probe against the real `detectVerses()`
 confirming both halves of the fix (old references fall silent; genuine
 re-mentions are detected).
+
+---
+
+## Bug 23: ~~Reactivation only refreshed ONE still-matching verse's timestamp per tick~~ (FIXED)
+
+### Reproduction
+Reported directly by observation of the live app, after Bug 22's fix
+was already in place: "it looks like it still switches to some of the
+earlier detected verses away from the current verse from time to
+time — you can literally see the current verse which is highlighted
+changing to other confirmed verses in the list of detected verses
+pills in the bible verse panel even." Since this persisted after the
+transcript-windowing fix, it has a distinct root cause.
+
+### Impact
+**High.** A verse that is still being actively mentioned every tick
+can nonetheless be misjudged as "silent for 60+ seconds" and get
+force-resurfaced, hijacking both the live display and the highlighted
+"current verse" pill away from whatever is actually being preached at
+that moment. Affects both the regex reactivation path and the
+semantic reactivation path identically.
+
+### Root cause
+`processTranscript` has two structurally-identical reactivation
+branches — one for regex matches (`reActivatedRefs`) and one for
+semantic matches (`semanticReActivatedRefs`) — that run whenever a
+previously-detected verse re-matches the transcript. Each branch only
+ever inspected and refreshed `lastMatchTimeRef`/`reactivationCooldownRef`
+for a single entry, `[0]`, since only `[0]` is ever chosen for actual
+re-display (to avoid multiple simultaneous reactivations in one tick).
+
+But every entry in `reActivatedRefs`/`semanticReActivatedRefs` — not
+just `[0]` — is a reference that matched the transcript *this tick*,
+meaning it's still being actively mentioned. And critically, both
+reactivation branches are skipped entirely whenever `hasRegexVerses`
+fires in the same tick (a brand-new verse takes priority). So a
+reference that never happens to land in the `[0]` slot — e.g. because
+an earlier reference in the transcript keeps winning that position —
+could go many real ticks without its timestamp ever being touched,
+even though it kept matching every single time. Eventually its
+`lastMatchTimeRef` entry looks old enough to exceed
+`REACTIVATE_AFTER_SILENCE_MS` (60s), and the next time it happens to
+land in `[0]`, the code concludes it was "genuinely silent and has now
+returned" and force-resurfaces it — even though it was never actually
+silent.
+
+### Fix
+In both branches, loop over *every* entry in
+`reActivatedRefs`/`semanticReActivatedRefs` to refresh
+`reactivationCooldownRef` and `lastMatchTimeRef`, not just `[0]`.
+Ordering matters: the `hasBeenSilent` check for `[0]` is computed
+first (reading the *old* `lastMatchTimeRef` value), and only after
+that is the bulk refresh applied across all entries — otherwise the
+bulk refresh would corrupt `[0]`'s own silence check by writing `now`
+before it's read. The redundant single-entry `.set()` calls that
+previously lived inside the `if (hasBeenSilent)`/`else` sub-branches
+were removed since the bulk loop now covers them.
+
+### Test
+No automated test (no test harness exists for `useSermonListener.ts`);
+verified via `tsc --noEmit` (clean) and the full existing suite
+(615 tests, no regressions). The underlying pure functions this hook
+composes (`detectVerses`, `resolveBareReferences`,
+`resolveStandaloneNumberContinuation`) are unchanged, so no new probes
+were needed — the bug was purely in the hook's own bookkeeping.
 
 ---
 

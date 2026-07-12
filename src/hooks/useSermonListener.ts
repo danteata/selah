@@ -1652,13 +1652,31 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // genuine re-reference (verse was silent for >= REACTIVATE_AFTER_SILENCE_MS)
             // or rolling-window noise (verse is still matching every chunk because
             // its keywords are in the sliding transcript).
+            //
+            // Only reActivatedRefs[0] is ever considered for re-display below (to
+            // avoid multiple simultaneous reactivations), but EVERY entry here is
+            // still being actively matched this tick and must have its timestamp
+            // refreshed — not just the one we happen to act on. Otherwise a
+            // reference that's still-present-but-never-picked-as-[0] (e.g. because
+            // an earlier reference in the transcript keeps winning that slot)
+            // silently accumulates real elapsed time without ever being
+            // re-evaluated, until this same block finally does pick it up and
+            // finds a false "60+ seconds of silence" — resurfacing and hijacking
+            // the live display even though it was still being matched the whole
+            // time.
+            const now = Date.now()
+            for (const ref of reActivatedRefs) {
+                reactivationCooldownRef.current.set(ref, now)
+            }
+
             const reActivatedRef = reActivatedRefs[0]
             const existing = detectedVersesRef.current.find(v => v.reference === reActivatedRef)
             if (existing) {
-                const now = Date.now()
                 const lastMatch = lastMatchTimeRef.current.get(reActivatedRef) || 0
                 const hasBeenSilent = lastMatch > 0 && (now - lastMatch) >= REACTIVATE_AFTER_SILENCE_MS
-                lastMatchTimeRef.current.set(reActivatedRef, now)
+                for (const ref of reActivatedRefs) {
+                    lastMatchTimeRef.current.set(ref, now)
+                }
 
                 if (hasBeenSilent) {
                     // Genuine re-reference — the speaker has moved on and come back.
@@ -1668,7 +1686,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         retriggerCount: (existing.retriggerCount || 0) + 1,
                         lastActivatedAt: now,
                     })
-                    reactivationCooldownRef.current.set(reActivatedRef, now)
                     if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                         lookupVerse(existing).then(scripture => {
                             optionsRef.current.onVerseDetected?.(existing, scripture)
@@ -1693,7 +1710,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                               }
                             : v,
                     )
-                    reactivationCooldownRef.current.set(reActivatedRef, now)
 
                     if (autoLookup && !inVersionSwitchCooldown && !inNavigationCooldown) {
                         // Fire the lookup callback for analytics / external integrations.
@@ -1908,14 +1924,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 // re-reference and re-show. Otherwise it's rolling-window noise —
                 // bump metadata only.
                 if (semanticReActivatedRefs.length > 0 && !hasRegexVerses && !hasReActivated && limitedSemanticVerses.length === 0 && !isStale) {
+                    // Same reasoning as the regex reactivation branch above: only
+                    // semanticReActivatedRefs[0] is ever considered for re-display,
+                    // but EVERY entry here is still being actively matched this
+                    // tick and needs its timestamp refreshed, or a reference that's
+                    // never picked as [0] can silently look falsely "silent" later
+                    // and hijack the live display even though it kept matching the
+                    // whole time.
+                    const now = Date.now()
+                    for (const r of semanticReActivatedRefs) {
+                        reactivationCooldownRef.current.set(r.reference, now)
+                    }
+
                     const { reference: reActivatedRef, confidence: freshConfidence } = semanticReActivatedRefs[0]
                     const existing = detectedVersesRef.current.find(v => v.reference === reActivatedRef)
                     if (existing) {
-                        const now = Date.now()
                         const lastMatch = lastMatchTimeRef.current.get(reActivatedRef) || 0
                         const hasBeenSilent = lastMatch > 0 && (now - lastMatch) >= REACTIVATE_AFTER_SILENCE_MS
-                        lastMatchTimeRef.current.set(reActivatedRef, now)
-                        reactivationCooldownRef.current.set(reActivatedRef, now)
+                        for (const r of semanticReActivatedRefs) {
+                            lastMatchTimeRef.current.set(r.reference, now)
+                        }
 
                         if (hasBeenSilent) {
                             // Genuine re-reference. Re-show LIVE, re-fetch, re-append.
