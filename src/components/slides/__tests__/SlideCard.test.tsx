@@ -11,6 +11,10 @@ vi.mock('../../../hooks/useLocalBackground', () => ({
     useLocalBackground: vi.fn().mockImplementation((bg: string) => bg || ''),
 }))
 
+vi.mock('../../../hooks/useLocalMediaBlobUrl', () => ({
+    useLocalMediaBlobUrl: vi.fn().mockReturnValue(null),
+}))
+
 const baseSlide: Slide = {
     id: 'slide-1',
     index: 0,
@@ -279,5 +283,72 @@ describe('SlideCard', () => {
 
     it('has displayName set', () => {
         expect(SlideCard.displayName).toBe('SlideCard')
+    })
+
+    it('applies contain (fit) background-size for a media slide with backgroundFillType fit', () => {
+        const mediaSlide: Slide = {
+            ...baseSlide,
+            type: 'media',
+            background: 'https://example.com/flier.jpg',
+            backgroundType: 'image',
+            slideStyle: { backgroundFillType: 'fit' },
+        }
+        const { container } = renderSlideCard({ slide: mediaSlide })
+        const preview = container.querySelector('.aspect-video') as HTMLElement
+        expect(preview.style.backgroundSize).toBe('contain')
+    })
+
+    it('applies cover background-size for a media slide with no explicit fill type', () => {
+        const mediaSlide: Slide = {
+            ...baseSlide,
+            type: 'media',
+            background: 'https://example.com/flier.jpg',
+            backgroundType: 'image',
+        }
+        const { container } = renderSlideCard({ slide: mediaSlide })
+        const preview = container.querySelector('.aspect-video') as HTMLElement
+        expect(preview.style.backgroundSize).toBe('cover')
+    })
+
+    it('always uses cover for non-media slide backgrounds, even with a fit style set', () => {
+        // Non-media slides use their background as a decorative backdrop
+        // behind text — always fill the frame, unlike media-as-content.
+        const textSlide: Slide = {
+            ...baseSlide,
+            background: 'https://example.com/backdrop.jpg',
+            backgroundType: 'image',
+            slideStyle: { backgroundFillType: 'fit' },
+        }
+        const { container } = renderSlideCard({ slide: textSlide })
+        const preview = container.querySelector('.aspect-video') as HTMLElement
+        expect(preview.style.backgroundSize).toBe('cover')
+    })
+
+    it('never tiles the background image (contain leaves empty space CSS would repeat into by default)', () => {
+        const mediaSlide: Slide = {
+            ...baseSlide,
+            type: 'media',
+            background: 'https://example.com/flier.jpg',
+            backgroundType: 'image',
+            slideStyle: { backgroundFillType: 'fit' },
+        }
+        const { container } = renderSlideCard({ slide: mediaSlide })
+        const preview = container.querySelector('.aspect-video') as HTMLElement
+        expect(preview.style.backgroundRepeat).toBe('no-repeat')
+    })
+
+    it('shows a static video thumbnail in the queue instead of autoplaying', () => {
+        const videoSlide: Slide = {
+            ...baseSlide,
+            type: 'media',
+            background: 'https://example.com/clip.mp4',
+            backgroundType: 'video',
+        }
+        const { container } = renderSlideCard({ slide: videoSlide })
+        const video = container.querySelector('video') as HTMLVideoElement | null
+        expect(video).toBeTruthy()
+        expect(video).not.toHaveAttribute('autoplay')
+        expect(video).not.toHaveAttribute('loop')
+        expect(video?.muted).toBe(true)
     })
 })

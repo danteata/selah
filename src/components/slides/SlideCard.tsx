@@ -2,8 +2,12 @@ import { forwardRef } from 'react'
 import { Trash2, Copy, Bookmark, Pencil, Zap, Lightbulb } from 'lucide-react'
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
+import { LocalMediaPlaceholder } from './LocalMediaPlaceholder'
+import { VideoThumbnail } from '../media/VideoThumbnail'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
+import { getObjectFit, getBackgroundSize } from '../../utils/mediaFit'
 import { useAppStore } from '../../store/appStore'
 
 interface SlideCardProps {
@@ -47,8 +51,18 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     // Resolve local file paths on desktop
     const localBg = useLocalBackground(slide.background, slide.localFilePath)
 
+    // Resolve a local IndexedDB-backed media library item on web
+    const localMediaBlobUrl = useLocalMediaBlobUrl(slide.localMediaId)
+
     // Determine the background to use
-    const backgroundUrl = fileUrl || localBg
+    const backgroundUrl = fileUrl || localBg || localMediaBlobUrl
+    const isUnresolvedLocalMedia = slide.type === 'media' && !backgroundUrl
+
+    // Media slides (the actual picture/video, not a decorative backdrop
+    // behind text) respect the operator's fit/crop/stretch choice; every
+    // other slide type keeps the deliberate "always cover" backdrop fill.
+    const isMediaSlide = slide.type === 'media'
+    const fillType = slide.slideStyle?.backgroundFillType
 
     // Per-slide font, falling back to the user's global default so the
     // queue preview actually reflects the font they'll see on stage.
@@ -131,20 +145,23 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                 className="aspect-video relative overflow-hidden"
                 style={{
                     backgroundImage: !isVideoBackground && backgroundUrl ? `url(${backgroundUrl})` : undefined,
-                    backgroundSize: 'cover',
+                    backgroundSize: isMediaSlide ? getBackgroundSize(fillType) : 'cover',
                     backgroundPosition: 'center',
+                    backgroundRepeat: 'no-repeat',
                     backgroundColor: !backgroundUrl ? '#1f2937' : undefined,
                 }}
             >
-                {/* Video background */}
+                {isUnresolvedLocalMedia && (
+                    <LocalMediaPlaceholder backgroundType={slide.backgroundType} />
+                )}
+
+                {/* Video thumbnail — a static first frame, not a playing video (dozens of
+                    autoplaying loops in a long queue is both distracting and wasteful) */}
                 {isVideoBackground && (
-                    <video
+                    <VideoThumbnail
                         src={backgroundUrl}
-                        className="absolute inset-0 w-full h-full object-cover"
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
+                        className="absolute inset-0 w-full h-full"
+                        style={{ objectFit: isMediaSlide ? getObjectFit(fillType) : 'cover' }}
                     />
                 )}
                 {slide.contents[0] && slide.contents[0] !== '<p></p>' && slide.contents[0] !== '' && (
