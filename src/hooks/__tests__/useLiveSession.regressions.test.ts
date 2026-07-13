@@ -16,6 +16,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useAppStore } from '../../store/appStore'
+import type { Slide } from '../../types'
 
 // ---------------------------------------------------------------------------
 // Helpers — re-implement the small slice of effect logic we want to lock
@@ -210,5 +211,101 @@ describe('useLiveSession — nav-panel revert guard (regression)', () => {
         expect(r.applied).toBeNull()
         expect(r.store).toBe('verseB')
         expect(ref.current).toBe('verseB')
+    })
+})
+
+// ---------------------------------------------------------------------------
+// useLiveSession — toSyncableSlide (regression)
+// ---------------------------------------------------------------------------
+// A slide with `localFilePath`/`localMediaId` set (device-local media —
+// never meant to leave the device) used to be sent verbatim to Convex's
+// `syncScheduleSlides`/`upsertScheduleSlide` mutations. Their argument
+// validators are exact/closed and don't declare those fields, so the
+// mutation threw and — because schedule slides sync as one batch — took
+// down sync for every slide in the schedule, not just the media one.
+// Mirrors toSyncableSlide's body line-for-line so a regression here is caught.
+
+function toSyncableSlide(slide: Slide, index: number) {
+    const isLocalOnlyMedia = !slide.backgroundStorageId && !!(slide.localFilePath || slide.localMediaId)
+    return {
+        id: slide.id,
+        index: typeof slide.index === 'number' ? slide.index : index,
+        name: slide.name || 'Untitled',
+        type: slide.type,
+        layout: slide.layout,
+        contents: slide.contents || [],
+        backgroundType: slide.backgroundType,
+        background: isLocalOnlyMedia ? undefined : slide.background,
+        backgroundVideoKey: slide.backgroundVideoKey ?? undefined,
+        backgroundStorageId: slide.backgroundStorageId ?? undefined,
+        title: slide.title,
+        songId: slide.songId,
+        hasChorus: slide.hasChorus,
+        data: slide.data,
+        slideStyle: slide.slideStyle,
+        saved: slide.saved,
+        verseIndex: slide.verseIndex,
+        totalVerses: slide.totalVerses,
+        verseLabel: slide.verseLabel,
+    }
+}
+
+function baseSlide(overrides: Partial<Slide>): Slide {
+    return {
+        id: 's1',
+        index: 0,
+        name: 'Test',
+        type: 'media',
+        layout: 'empty',
+        userId: '',
+        churchId: '',
+        scheduleId: 'sched1',
+        contents: [],
+        ...overrides,
+    }
+}
+
+describe('useLiveSession — toSyncableSlide (regression)', () => {
+    it('never includes localFilePath or localMediaId in the payload', () => {
+        const slide = baseSlide({
+            backgroundType: 'video',
+            localFilePath: '/Users/me/Library/Application Support/Selah/media-library/abc.mp4',
+        })
+        const payload = toSyncableSlide(slide, 0) as Record<string, unknown>
+        expect(payload).not.toHaveProperty('localFilePath')
+        expect(payload).not.toHaveProperty('localMediaId')
+    })
+
+    it('blanks out background for local-only media (no backgroundStorageId)', () => {
+        const slide = baseSlide({
+            backgroundType: 'video',
+            background: 'asset://localhost/some/local/path.mp4',
+            localFilePath: '/some/local/path.mp4',
+        })
+        const payload = toSyncableSlide(slide, 0)
+        expect(payload.background).toBeUndefined()
+        expect(payload.backgroundType).toBe('video') // kept, so a placeholder can show the right icon
+    })
+
+    it('keeps background when the item is cloud-synced (has backgroundStorageId)', () => {
+        const slide = baseSlide({
+            backgroundType: 'video',
+            background: 'https://example.convex.cloud/api/storage/abc',
+            backgroundStorageId: 'storage123',
+            localFilePath: '/some/local/path.mp4', // still local-first, but also synced
+        })
+        const payload = toSyncableSlide(slide, 0)
+        expect(payload.background).toBe('https://example.convex.cloud/api/storage/abc')
+        expect(payload.backgroundStorageId).toBe('storage123')
+    })
+
+    it('keeps background for non-media slides with no local fields', () => {
+        const slide = baseSlide({
+            type: 'text',
+            backgroundType: 'image',
+            background: 'https://images.example.com/bg.jpg',
+        })
+        const payload = toSyncableSlide(slide, 0)
+        expect(payload.background).toBe('https://images.example.com/bg.jpg')
     })
 })

@@ -7,10 +7,13 @@ import { useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import { generateSlideContent, calculateScreenFontSize } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
-import type { Slide, Scripture, Countdown } from '../../types'
+import type { Slide, Scripture, Countdown, SlideStyle } from '../../types'
+import { slideTypes, backgroundTypes } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
+import { LocalMediaPlaceholder } from '../slides/LocalMediaPlaceholder'
 import { ScreenPicker } from './ScreenPicker'
 import { AutoFitText } from './AutoFitText'
 import { KineticText } from './KineticText'
@@ -19,7 +22,9 @@ import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/Bi
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import { VideoBackground } from './VideoBackground'
+import { MediaContent, type MediaProgress } from './MediaContent'
 import { AudioReactiveBackground } from './AudioReactiveBackground'
+import { Play, Pause, Volume2, VolumeX, RotateCcw, Repeat } from 'lucide-react'
 import { getVerseRefStyle } from '../../utils/verseRefStyle'
 
 // Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
@@ -54,6 +59,11 @@ export function LiveOutput() {
     // Countdown preview state
     const [previewCountdownSeconds, setPreviewCountdownSeconds] = useState(0)
     const previewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+    // Live media transport state — self-reported by the operator's own muted
+    // preview player (see MediaContent's onProgress), used to drive the seek
+    // bar. Not synced across windows; only explicit operator actions are.
+    const [liveMediaProgress, setLiveMediaProgress] = useState<MediaProgress | null>(null)
 
     // Ref to the live bible verse navigator — lets the global
     // useVerseNavigationShortcuts hook trigger the navigator's `navigateVerse`
@@ -104,6 +114,12 @@ export function LiveOutput() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [liveSlideId]
     )
+
+    // Clear stale transport-bar progress from whatever media slide was
+    // previously live.
+    useEffect(() => {
+        setLiveMediaProgress(null)
+    }, [liveSlideId])
 
     // Shared live session — operator controls
     const {
@@ -198,14 +214,18 @@ export function LiveOutput() {
     const liveSlideLocalBg = useLocalBackground(liveSlide?.background, liveSlide?.localFilePath)
     const nextSlideLocalBg = useLocalBackground(nextSlide?.background, nextSlide?.localFilePath)
 
+    // Resolve local IndexedDB-backed media library items on web
+    const liveSlideLocalMediaBlobUrl = useLocalMediaBlobUrl(liveSlide?.localMediaId)
+    const nextSlideLocalMediaBlobUrl = useLocalMediaBlobUrl(nextSlide?.localMediaId)
+
     // Determine the background URL for live slide
-    const liveSlideBackground = liveSlideFileUrl || liveSlideLocalBg
+    const liveSlideBackground = liveSlideFileUrl || liveSlideLocalBg || liveSlideLocalMediaBlobUrl
     const isLiveSlideVideo = liveSlide?.backgroundType === 'video' && liveSlideBackground
 
     const prevSlide = liveOutputSlides[currentIndex - 1]
 
     // Determine the background URL for next slide preview
-    const nextSlideBackground = nextSlideFileUrl || nextSlideLocalBg
+    const nextSlideBackground = nextSlideFileUrl || nextSlideLocalBg || nextSlideLocalMediaBlobUrl
     const isNextSlideVideo = nextSlide?.backgroundType === 'video' && nextSlideBackground
 
     // Split slide HTML into body + reference for two-zone layout (matches LiveView).
@@ -488,6 +508,30 @@ export function LiveOutput() {
         void syncSlideContent(updatedSlide)
     }, [liveSlide, generateSlideContent, isDesktop, sendSlideToLive, syncSlideContent])
 
+    // Push a media transport-control change (play/pause/seek/mute/loop) to
+    // the live output window, through the same mutate-and-push channel used
+    // for every other live slide edit.
+    const handleMediaTransportChange = useCallback((patch: Partial<SlideStyle>) => {
+        if (!liveSlide) return
+
+        const updatedSlide = {
+            ...liveSlide,
+            slideStyle: {
+                ...liveSlide.slideStyle,
+                ...patch,
+            },
+        }
+
+        const updateActiveSlide = useAppStore.getState().updateActiveSlide
+        updateActiveSlide(updatedSlide)
+
+        window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
+
+        if (isDesktop) {
+            sendSlideToLive(liveSlide.id, updatedSlide as unknown as Record<string, unknown>)
+        }
+    }, [liveSlide, isDesktop, sendSlideToLive])
+
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
             {/* Header - Broadcast Controls */}
@@ -560,19 +604,30 @@ export function LiveOutput() {
                                     <div
                                         className="w-full h-full relative"
                                         style={{
-                                            backgroundImage: !isNextSlideVideo && nextSlideBackground ? `url(${nextSlideBackground})` : undefined,
+                                            backgroundImage: nextSlide.type !== slideTypes.media && !isNextSlideVideo && nextSlideBackground ? `url(${nextSlideBackground})` : undefined,
                                             backgroundSize: 'cover',
                                             backgroundPosition: 'center',
                                             backgroundColor: !nextSlideBackground ? '#0a0a0a' : undefined,
                                         }}
                                     >
-                                        {isNextSlideVideo && (
+                                        {nextSlide.type === slideTypes.media ? (
+                                            nextSlide.backgroundType !== backgroundTypes.external && !nextSlideBackground ? (
+                                                <LocalMediaPlaceholder backgroundType={nextSlide.backgroundType} />
+                                            ) : (
+                                                <MediaContent
+                                                    slide={nextSlide}
+                                                    src={nextSlideBackground || undefined}
+                                                    muted
+                                                    className="absolute inset-0 w-full h-full"
+                                                />
+                                            )
+                                        ) : isNextSlideVideo && (
                                             <VideoBackground
                                                 src={nextSlideBackground}
                                                 className="absolute inset-0 w-full h-full object-cover"
                                             />
                                         )}
-                                        {nextSlide.layout === 'lower-third' ? (
+                                        {nextSlide.type === slideTypes.media ? null : nextSlide.layout === 'lower-third' ? (
                                             /* Lower-third Next Up — body in a bottom strip, reference/subtitle as caption */
                                             (() => {
                                                 const isBibleNU = nextSlide.type === 'bible'
@@ -761,19 +816,31 @@ export function LiveOutput() {
                                         className={`w-full h-full relative studio-slide-transition ${animationsEnabled ? '' : 'no-transition'} ${isBeatTransition ? 'beat-punch' : ''}`}
                                         style={{
                                             '--studio-transition-duration': `${isBeatTransition ? Math.min(transitionInterval, 0.35) : transitionInterval}s`,
-                                            backgroundImage: !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
+                                            backgroundImage: liveSlide.type !== slideTypes.media && !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
                                             backgroundSize: 'cover',
                                             backgroundPosition: 'center',
                                         } as React.CSSProperties}
                                     >
-                                        {isLiveSlideVideo && (
+                                        {liveSlide.type === slideTypes.media ? (
+                                            liveSlide.backgroundType !== backgroundTypes.external && !liveSlideBackground ? (
+                                                <LocalMediaPlaceholder backgroundType={liveSlide.backgroundType} />
+                                            ) : (
+                                                <MediaContent
+                                                    slide={liveSlide}
+                                                    src={liveSlideBackground || undefined}
+                                                    muted
+                                                    className="absolute inset-0 w-full h-full"
+                                                    onProgress={setLiveMediaProgress}
+                                                />
+                                            )
+                                        ) : isLiveSlideVideo && (
                                             <VideoBackground
                                                 src={liveSlideBackground}
                                                 className="absolute inset-0 w-full h-full object-cover"
                                             />
                                         )}
                                         <AudioReactiveBackground />
-                                        {liveSlide.type === 'countdown' ? (
+                                        {liveSlide.type === slideTypes.media ? null : liveSlide.type === 'countdown' ? (
                                             <div className="absolute inset-0 flex items-center justify-center p-6">
                                                 <AutoFitText
                                                     html={formatSecondsToTime(previewCountdownSeconds)}
@@ -921,6 +988,66 @@ export function LiveOutput() {
                                 )}
                             </div>
                         </div>
+
+                        {/* Media transport controls — only when a media video (local or embedded) is live */}
+                        {liveSlide?.type === slideTypes.media &&
+                            (liveSlide.backgroundType === backgroundTypes.video || liveSlide.backgroundType === backgroundTypes.external) && (
+                                <div className="flex-shrink-0">
+                                <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Media Controls</div>
+                                <div className="rounded-xl p-2.5 border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/45 flex items-center gap-2">
+                                    <button
+                                        onClick={() => handleMediaTransportChange({ isMediaPlaying: liveSlide.slideStyle?.isMediaPlaying === false })}
+                                        className="p-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] text-[var(--text-primary)] flex-shrink-0"
+                                        title={liveSlide.slideStyle?.isMediaPlaying === false ? 'Play' : 'Pause'}
+                                    >
+                                        {liveSlide.slideStyle?.isMediaPlaying === false
+                                            ? <Play className="w-4 h-4" />
+                                            : <Pause className="w-4 h-4" />}
+                                    </button>
+
+                                    {liveSlide.backgroundType === backgroundTypes.video && (
+                                        <>
+                                            <button
+                                                onClick={() => handleMediaTransportChange({ mediaSeekPosition: 0, isMediaPlaying: true })}
+                                                className="p-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] text-[var(--text-primary)] flex-shrink-0"
+                                                title="Restart"
+                                            >
+                                                <RotateCcw className="w-4 h-4" />
+                                            </button>
+                                            <input
+                                                type="range"
+                                                min={0}
+                                                max={liveMediaProgress?.duration || 0}
+                                                step={0.1}
+                                                value={liveMediaProgress?.currentTime || 0}
+                                                onChange={(e) => handleMediaTransportChange({ mediaSeekPosition: Number(e.target.value) })}
+                                                className="flex-1 accent-[var(--accent-teal)] min-w-0"
+                                            />
+                                            <span className="text-[10px] font-mono text-[var(--text-muted)] tabular-nums flex-shrink-0 w-20 text-right">
+                                                {formatSecondsToTime(Math.floor(liveMediaProgress?.currentTime || 0))} / {formatSecondsToTime(Math.floor(liveMediaProgress?.duration || 0))}
+                                            </span>
+                                            <button
+                                                onClick={() => handleMediaTransportChange({ repeatMedia: !(liveSlide.slideStyle?.repeatMedia ?? false) })}
+                                                className={`p-2 rounded-lg flex-shrink-0 hover:brightness-110 ${liveSlide.slideStyle?.repeatMedia ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--bg-elevated)] text-[var(--text-primary)]'}`}
+                                                title="Loop"
+                                            >
+                                                <Repeat className="w-4 h-4" />
+                                            </button>
+                                        </>
+                                    )}
+
+                                    <button
+                                        onClick={() => handleMediaTransportChange({ isMediaMuted: !(liveSlide.slideStyle?.isMediaMuted ?? false) })}
+                                        className="p-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] text-[var(--text-primary)] flex-shrink-0"
+                                        title={liveSlide.slideStyle?.isMediaMuted ? 'Unmute' : 'Mute'}
+                                    >
+                                        {liveSlide.slideStyle?.isMediaMuted
+                                            ? <VolumeX className="w-4 h-4" />
+                                            : <Volume2 className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                                </div>
+                            )}
 
                         {/* Bible verse navigation — only when a bible slide is live */}
                         {liveSlide?.type === 'bible' && (

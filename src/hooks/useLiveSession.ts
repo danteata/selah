@@ -44,6 +44,41 @@ function mergePendingQueue(serverQueue: string[], pendingQueue: string[]) {
 }
 
 /**
+ * Builds the exact shape Convex's `syncScheduleSlides`/`upsertScheduleSlide`
+ * mutations accept. Their `v.object({...})` argument validators are
+ * exact/closed — any extra key (e.g. the client-only `localFilePath`/
+ * `localMediaId`, never declared there or in the schema) throws an
+ * `ArgumentValidationError` and fails the whole call. A `blob:`/`asset://`
+ * `background` value is also meaningless on another device, so for
+ * local-only media (no `backgroundStorageId`) it's omitted too —
+ * `backgroundType` still travels so a placeholder can show the right icon.
+ */
+function toSyncableSlide(slide: Slide, index: number) {
+    const isLocalOnlyMedia = !slide.backgroundStorageId && !!(slide.localFilePath || slide.localMediaId)
+    return {
+        id: slide.id,
+        index: typeof slide.index === 'number' ? slide.index : index,
+        name: slide.name || 'Untitled',
+        type: slide.type,
+        layout: slide.layout,
+        contents: slide.contents || [],
+        backgroundType: slide.backgroundType,
+        background: isLocalOnlyMedia ? undefined : slide.background,
+        backgroundVideoKey: slide.backgroundVideoKey ?? undefined,
+        backgroundStorageId: slide.backgroundStorageId ?? undefined,
+        title: slide.title,
+        songId: slide.songId,
+        hasChorus: slide.hasChorus,
+        data: slide.data,
+        slideStyle: slide.slideStyle,
+        saved: slide.saved,
+        verseIndex: slide.verseIndex,
+        totalVerses: slide.totalVerses,
+        verseLabel: slide.verseLabel,
+    }
+}
+
+/**
  * Unified queue sync used by both the activeSession and liveSession
  * effects. Reads the server queue (either the new `queue` entries or
  * the legacy `queuedSlideIds` flat array), merges with the local
@@ -456,27 +491,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
                 if (localSlide && sessionScheduleId) {
                     await upsertScheduleSlideMutation({
                         scheduleId: sessionScheduleId,
-                        slide: {
-                            id: localSlide.id,
-                            index: typeof localSlide.index === 'number' ? localSlide.index : 0,
-                            name: localSlide.name || 'Untitled',
-                            type: localSlide.type,
-                            layout: localSlide.layout,
-                            contents: localSlide.contents || [],
-                            backgroundType: localSlide.backgroundType,
-                            background: localSlide.background,
-                            backgroundVideoKey: localSlide.backgroundVideoKey ?? undefined,
-                            backgroundStorageId: localSlide.backgroundStorageId ?? undefined,
-                            title: localSlide.title,
-                            songId: localSlide.songId,
-                            hasChorus: localSlide.hasChorus,
-                            data: localSlide.data,
-                            slideStyle: localSlide.slideStyle,
-                            saved: localSlide.saved,
-                            verseIndex: localSlide.verseIndex,
-                            totalVerses: localSlide.totalVerses,
-                            verseLabel: localSlide.verseLabel,
-                        },
+                        slide: toSyncableSlide(localSlide, 0),
                     })
                 }
                 await setLiveSlideMutation({ sessionId: resolvedSessionId, slideId: slideId || undefined })
@@ -536,27 +551,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
                     try {
                         await upsertScheduleSlideMutation({
                             scheduleId: sessionScheduleId,
-                            slide: {
-                                id: slide.id,
-                                index: typeof slide.index === 'number' ? slide.index : 0,
-                                name: slide.name || 'Untitled',
-                                type: slide.type,
-                                layout: slide.layout,
-                                contents: slide.contents || [],
-                                backgroundType: slide.backgroundType,
-                                background: slide.background,
-                                backgroundVideoKey: slide.backgroundVideoKey ?? undefined,
-                                backgroundStorageId: slide.backgroundStorageId ?? undefined,
-                                title: slide.title,
-                                songId: slide.songId,
-                                hasChorus: slide.hasChorus,
-                                data: slide.data,
-                                slideStyle: slide.slideStyle,
-                                saved: slide.saved,
-                                verseIndex: slide.verseIndex,
-                                totalVerses: slide.totalVerses,
-                                verseLabel: slide.verseLabel,
-                            },
+                            slide: toSyncableSlide(slide, 0),
                         })
                     } catch (err) {
                         console.error('[useLiveSession] Failed to upsert slide content:', err)
@@ -646,27 +641,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         try {
             await upsertScheduleSlideMutation({
                 scheduleId: sessionScheduleId,
-                slide: {
-                    id: slide.id,
-                    index: typeof slide.index === 'number' ? slide.index : 0,
-                    name: slide.name || 'Untitled',
-                    type: slide.type,
-                    layout: slide.layout,
-                    contents: slide.contents || [],
-                    backgroundType: slide.backgroundType,
-                    background: slide.background,
-                    backgroundVideoKey: slide.backgroundVideoKey ?? undefined,
-                    backgroundStorageId: slide.backgroundStorageId ?? undefined,
-                    title: slide.title,
-                    songId: slide.songId,
-                    hasChorus: slide.hasChorus,
-                    data: slide.data,
-                    slideStyle: slide.slideStyle,
-                    saved: slide.saved,
-                    verseIndex: slide.verseIndex,
-                    totalVerses: slide.totalVerses,
-                    verseLabel: slide.verseLabel,
-                },
+                slide: toSyncableSlide(slide, 0),
             })
         } catch (err) {
             console.error('[useLiveSession] Failed to sync slide content:', err)
@@ -769,28 +744,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
         const scheduleActiveSlides = activeSlides
             .filter((slide) => slide.scheduleId === sessionScheduleId || !slide.scheduleId || slide.scheduleId === '')
-            .map((slide, index) => ({
-                id: slide.id,
-                index: typeof slide.index === 'number' ? slide.index : index,
-                name: slide.name || 'Untitled',
-                type: slide.type,
-                layout: slide.layout,
-                contents: slide.contents || [],
-                backgroundType: slide.backgroundType,
-                background: slide.background,
-                backgroundVideoKey: slide.backgroundVideoKey,
-                backgroundStorageId: slide.backgroundStorageId,
-                localFilePath: slide.localFilePath,
-                title: slide.title,
-                songId: slide.songId,
-                hasChorus: slide.hasChorus,
-                data: slide.data,
-                slideStyle: slide.slideStyle,
-                saved: slide.saved,
-                verseIndex: slide.verseIndex,
-                totalVerses: slide.totalVerses,
-                verseLabel: slide.verseLabel,
-            }))
+            .map((slide, index) => toSyncableSlide(slide, index))
 
         if (scheduleActiveSlides.length === 0) return
 
