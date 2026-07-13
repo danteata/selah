@@ -243,6 +243,12 @@ export default defineSchema({
             v.object({
                 blob: v.optional(v.any()),
                 url: v.string(),
+            }),
+            v.object({
+                url: v.string(),
+                type: v.string(),
+                name: v.optional(v.string()),
+                thumbnail: v.optional(v.string()),
             })
         )),
         slideStyle: v.optional(v.object({

@@ -10,6 +10,7 @@ import type {
     Song,
     Countdown,
     ExtendedFileT,
+    ExternalVideo,
     SlideStyle
 } from '../types'
 import {
@@ -489,22 +490,31 @@ export function useSlideCreation() {
         tempSlide.type = slideTypes.media
         tempSlide.slideStyle = {
             ...tempSlide.slideStyle,
-            backgroundFillType: backgroundFillTypes.crop,
+            // 'fit' (contain) by default so nothing — a flier's title, a
+            // speaker's face — gets cropped off; the operator can switch to
+            // 'crop' (cover, no letterboxing) per-slide if they prefer that.
+            backgroundFillType: backgroundFillTypes.fit,
         }
 
-        // Handle external videos (YouTube/Vimeo)
+        // Handle external videos (YouTube/Vimeo) — these embed live via an
+        // iframe, so there is no local background URL to resolve.
         if (file.isExternal) {
-            const externalVideo = {
+            const externalVideo: ExternalVideo = {
                 url: file.url,
                 type: file.type,
                 thumbnail: file.thumbnail,
                 name: file.name,
             }
-            tempSlide.backgroundType = backgroundTypes.video
-            tempSlide.background = randomImage
+            tempSlide.backgroundType = backgroundTypes.external
+            tempSlide.background = undefined
             tempSlide.backgroundVideoKey = null
-            tempSlide.data = externalVideo as ExtendedFileT
+            tempSlide.data = externalVideo
             tempSlide.name = file.name || `${file.type} Video`
+            tempSlide.slideStyle = {
+                ...tempSlide.slideStyle,
+                isMediaPlaying: true,
+                isMediaMuted: false,
+            }
 
             await saveMedia({
                 id: tempSlide.id,
@@ -522,6 +532,18 @@ export function useSlideCreation() {
                 : null
             tempSlide.data = file
             tempSlide.name = generateSlideName(tempSlide)
+
+            // Local video content plays with sound, once, unlike ambient
+            // looping background videos — the operator can still toggle
+            // loop/mute via the live transport controls.
+            if (file.type === backgroundTypes.video) {
+                tempSlide.slideStyle = {
+                    ...tempSlide.slideStyle,
+                    isMediaPlaying: true,
+                    isMediaMuted: false,
+                    repeatMedia: false,
+                }
+            }
 
             if (file.blob) {
                 const arrayBuffer = await file.blob.arrayBuffer()

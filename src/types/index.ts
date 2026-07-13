@@ -98,10 +98,12 @@ export interface Slide {
     backgroundVideoKey?: string | null
     backgroundStorageId?: string | null
     localFilePath?: string
+    /** Web-only counterpart to `localFilePath` — an IndexedDB-backed local media library entry with no Convex copy. */
+    localMediaId?: string
     title?: string
     songId?: string
     hasChorus?: boolean
-    data?: Song | Scripture | Hymn | Countdown | ExtendedFileT
+    data?: Song | Scripture | Hymn | Countdown | ExtendedFileT | ExternalVideo
     slideStyle?: SlideStyle
     saved?: boolean
     lockedBy?: string
@@ -507,6 +509,7 @@ export const backgroundTypes = {
     video: 'video',
     color: 'color',
     gradient: 'gradient',
+    external: 'external',
 } as const
 
 export const backgroundFillTypes = {

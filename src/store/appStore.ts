@@ -32,6 +32,7 @@ export interface ModalState {
     libraryPanel: boolean
     scheduleModal: boolean
     lowerThirdEditor: boolean
+    externalVideo: boolean
 }
 
 /** One step of the live arrangement, for the operator's position chips. */
@@ -193,6 +194,7 @@ const initialModalState: ModalState = {
     libraryPanel: false,
     scheduleModal: false,
     lowerThirdEditor: false,
+    externalVideo: false,
 }
 
 const initialState: AppState = {

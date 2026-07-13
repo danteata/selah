@@ -88,6 +88,20 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
             }
         }))
 
+        // Open YouTube/Vimeo Video Modal — reuses `quickActionsPage` purely as
+        // a "which platform" flag for the modal, distinct from its sidebar
+        // sub-page meaning elsewhere.
+        unsubs.push(on(appWideActions.newYouTubeVideo, () => {
+            trackEvent(AnalyticsEventType.QUICK_ACTION_USED, { action: 'newYouTubeVideo' })
+            setQuickActionsPage('youtube')
+            openModal('externalVideo')
+        }))
+        unsubs.push(on(appWideActions.newVimeoVideo, () => {
+            trackEvent(AnalyticsEventType.QUICK_ACTION_USED, { action: 'newVimeoVideo' })
+            setQuickActionsPage('vimeo')
+            openModal('externalVideo')
+        }))
+
         // Open Alert Modal
         unsubs.push(on(appWideActions.newAlert, () => {
             trackEvent(AnalyticsEventType.QUICK_ACTION_USED, { action: 'newAlert' })
