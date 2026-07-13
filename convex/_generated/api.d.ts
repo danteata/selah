@@ -17,6 +17,7 @@ import type * as http from "../http.js";
 import type * as invitations from "../invitations.js";
 import type * as licensing from "../licensing.js";
 import type * as liveSessions from "../liveSessions.js";
+import type * as media from "../media.js";
 import type * as migration from "../migration.js";
 import type * as paystack from "../paystack.js";
 import type * as presence from "../presence.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   invitations: typeof invitations;
   licensing: typeof licensing;
   liveSessions: typeof liveSessions;
+  media: typeof media;
   migration: typeof migration;
   paystack: typeof paystack;
   presence: typeof presence;

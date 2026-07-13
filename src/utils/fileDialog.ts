@@ -97,6 +97,30 @@ function guessMimeType(filename: string): string {
 }
 
 /**
+ * Reads native file paths (e.g. from a Tauri drag-drop event or dialog
+ * result) off disk via the Tauri fs plugin and returns them as standard JS
+ * File objects, so downstream code (blob URLs, upload previews) can treat
+ * desktop-sourced files identically to browser-sourced ones.
+ */
+export async function filePathsToFiles(paths: string[]): Promise<File[]> {
+    const files: File[] = [];
+
+    for (const filePath of paths) {
+        if (!filePath) continue; // Skip if somehow empty
+
+        // Read file bytes via Tauri fs (returns Uint8Array)
+        const bytes = await readFile(filePath);
+
+        const filename = getFilenameFromPath(filePath);
+        const mimeType = guessMimeType(filename);
+
+        files.push(new File([bytes], filename, { type: mimeType }));
+    }
+
+    return files;
+}
+
+/**
  * Opens a native file dialog on desktop or a browser file picker on the web,
  * and returns the selected files as JavaScript File objects.
  */
@@ -128,22 +152,7 @@ export async function openFileDialog(options: FileDialogOptions = {}): Promise<F
             }
 
             const paths = Array.isArray(result) ? result : [result];
-            const files: File[] = [];
-
-            for (const filePath of paths) {
-                if (!filePath) continue; // Skip if somehow empty
-
-                // Read file bytes via Tauri fs
-                // Note: fs.readFile returns Uint8Array
-                const bytes = await readFile(filePath);
-
-                const filename = getFilenameFromPath(filePath);
-                const mimeType = guessMimeType(filename);
-
-                // Construct standard JS File object
-                const file = new File([bytes], filename, { type: mimeType });
-                files.push(file);
-            }
+            const files = await filePathsToFiles(paths);
 
             return files.length > 0 ? files : null;
         } catch (error) {

@@ -49,6 +49,7 @@
         "fs:allow-remove",
         "fs:allow-read-dir",
         "fs:allow-read-file",
+        "fs:allow-write-file",
         {
             "identifier": "fs:allow-read-text-file",
             "allow": [
@@ -70,6 +71,41 @@
             "allow": [
                 {
                     "path": "$APPDATA/dev-sermon-recordings/**"
+                }
+            ]
+        },
+        {
+            "identifier": "fs:allow-mkdir",
+            "allow": [
+                {
+                    "path": "$APPDATA/media-library"
+                },
+                {
+                    "path": "$APPDATA/media-library/**"
+                }
+            ]
+        },
+        {
+            "identifier": "fs:allow-write-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/media-library/**"
+                }
+            ]
+        },
+        {
+            "identifier": "fs:allow-read-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/media-library/**"
+                }
+            ]
+        },
+        {
+            "identifier": "fs:allow-remove",
+            "allow": [
+                {
+                    "path": "$APPDATA/media-library/**"
                 }
             ]
         },

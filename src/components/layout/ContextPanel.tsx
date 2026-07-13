@@ -6,15 +6,16 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { NavSection } from '../../types/studio'
-import type { Slide } from '../../types'
+import type { Slide, ExternalVideo } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { resolveLocalUrl } from '../../hooks/useLocalBackground'
+import { generateObjectId } from '../../hooks/useSlideCreation'
 
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
 import { SongList } from '../songs/SongList'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
-import { MediaPicker } from '../media/MediaPicker'
+import { MediaPicker, type MediaItem } from '../media/MediaPicker'
 import { TemplateBrowser } from '../templates/TemplateBrowser'
 import { AddCountdownModal } from '../countdown/AddCountdownModal'
 import { AddAlertModal } from '../alerts/AddAlertModal'
@@ -196,9 +197,29 @@ export function ContextPanel() {
         }
     }
 
-    const handleMediaSelect = (media: { id: string; url: string; name: string }) => {
+    const handleMediaSelect = (media: MediaItem) => {
+        if (media.isExternal && media.externalType) {
+            const externalVideo: ExternalVideo = { url: media.url, type: media.externalType, name: media.name }
+            const slide: Slide = {
+                id: generateObjectId(),
+                index: 0,
+                name: media.name,
+                type: 'media',
+                layout: 'empty',
+                contents: [],
+                userId: '',
+                churchId: '',
+                scheduleId: activeSchedule?._id || '',
+                backgroundType: 'external',
+                data: externalVideo,
+                slideStyle: { isMediaPlaying: true, isMediaMuted: false, backgroundFillType: 'fit' },
+            }
+            appendActiveSlide(slide)
+            return
+        }
+
         const slide: Slide = {
-            id: `slide_${Date.now()}`,
+            id: generateObjectId(),
             index: 0,
             name: media.name,
             type: 'media',
@@ -208,7 +229,13 @@ export function ContextPanel() {
             churchId: '',
             scheduleId: activeSchedule?._id || '',
             background: media.url,
-            backgroundType: 'image',
+            backgroundType: media.type,
+            backgroundStorageId: media.storageId || null,
+            localFilePath: media.localFilePath,
+            localMediaId: media.localMediaId,
+            slideStyle: media.type === 'video'
+                ? { isMediaPlaying: true, isMediaMuted: false, repeatMedia: false, backgroundFillType: 'fit' }
+                : { backgroundFillType: 'fit' },
         }
         appendActiveSlide(slide)
     }

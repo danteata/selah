@@ -387,6 +387,25 @@ export default defineSchema({
         updatedAt: v.string(),
     }),
 
+    // Media library — reusable images/videos (uploaded or linked YouTube/Vimeo)
+    // that persist across sessions, independent of any one slide.
+    mediaLibrary: defineTable({
+        name: v.string(),
+        type: v.union(v.literal("image"), v.literal("video")),
+        // Uploaded file, stored in Convex file storage.
+        storageId: v.optional(v.string()),
+        // YouTube/Vimeo link — no storageId, just the source URL.
+        isExternal: v.optional(v.boolean()),
+        externalType: v.optional(v.union(v.literal("youtube"), v.literal("vimeo"))),
+        url: v.optional(v.string()),
+        createdBy: v.optional(v.string()),
+        churchId: v.optional(v.string()),
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    })
+        .index("by_church", ["churchId"])
+        .index("by_creator", ["createdBy"]),
+
     // Bible Versions table - metadata only (actual Bible text stored in Convex file storage)
     bibleVersions: defineTable({
         id: v.string(), // KJV, NIV, etc.

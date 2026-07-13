@@ -5,11 +5,14 @@ import { useQuery } from 'convex/react'
 import { useAuth } from '@clerk/clerk-react'
 import { api } from '../../convex/_generated/api'
 import type { Slide, Countdown } from '../types'
+import { slideTypes } from '../types'
 import { useFileUrl } from '../hooks/useTemplates'
 import { useLocalBackground } from '../hooks/useLocalBackground'
+import { useLocalMediaBlobUrl } from '../hooks/useLocalMediaBlobUrl'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import { AutoFitText } from '../components/live/AutoFitText'
 import { VideoBackground } from '../components/live/VideoBackground'
+import { MediaContent } from '../components/live/MediaContent'
 import { AudioReactiveBackground } from '../components/live/AudioReactiveBackground'
 import { KineticText } from '../components/live/KineticText'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
@@ -255,8 +258,11 @@ export default function LiveView() {
     // Resolve local file paths on desktop
     const localBg = useLocalBackground(slide?.background, slide?.localFilePath)
 
+    // Resolve a local IndexedDB-backed media library item on web
+    const localMediaBlobUrl = useLocalMediaBlobUrl(slide?.localMediaId)
+
     // Determine the background to use
-    const backgroundUrl = fileUrl || localBg
+    const backgroundUrl = fileUrl || localBg || localMediaBlobUrl
     const isVideoBackground = slide?.backgroundType === 'video' && backgroundUrl
 
     const settings = liveState?.settings || {
@@ -447,7 +453,12 @@ export default function LiveView() {
             onDoubleClick={toggleFullscreen}
         >
             {/* Background */}
-            {isVideoBackground && backgroundUrl ? (
+            {slide.type === slideTypes.media ? (
+                /* Media slides render their own full-bleed content below —
+                   no dimming filter, since the media IS the content, not a
+                   backdrop for text. */
+                <div className="absolute inset-0 bg-black" />
+            ) : isVideoBackground && backgroundUrl ? (
                 <VideoBackground
                     src={backgroundUrl}
                     className="absolute inset-0 w-full h-full object-cover"
@@ -474,7 +485,13 @@ export default function LiveView() {
             <AudioReactiveBackground enabled={settings.visualizerEnabled ?? false} />
 
             {/* Content */}
-            {slide.layout === 'lower-third' ? (
+            {slide.type === slideTypes.media ? (
+                <MediaContent
+                    slide={slide}
+                    src={backgroundUrl || undefined}
+                    className="absolute inset-0 w-full h-full"
+                />
+            ) : slide.layout === 'lower-third' ? (
                 /* Lower Third Layout — strip anchored to the bottom; body auto-fits, caption stays small */
                 (() => {
                     const isBible = slide.type === 'bible'

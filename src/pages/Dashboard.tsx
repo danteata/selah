@@ -2,14 +2,15 @@ import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Shield, Database, Book, X, Mic, Ticket } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
-import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics } from '../hooks'
+import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from '../hooks/useLocalBackground'
 import { SettingsModal } from '../components/settings/SettingsModal'
 import { ShortcutsModal } from '../components/modals/ShortcutsModal'
 import { SlideEditor } from '../components/editor/SlideEditor'
 import { LowerThirdEditor } from '../components/editor/LowerThirdEditor'
-import { MediaPicker } from '../components/media/MediaPicker'
+import { MediaPicker, type MediaItem } from '../components/media/MediaPicker'
+import { ExternalVideoModal } from '../components/media/ExternalVideoModal'
 import { TemplateBrowser } from '../components/templates/TemplateBrowser'
 import { AddAlertModal } from '../components/alerts/AddAlertModal'
 import { AddCountdownModal, type CountdownData } from '../components/countdown/AddCountdownModal'
@@ -23,7 +24,7 @@ import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSetti
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import { EmbeddingSyncIndicator } from '../components/settings/EmbeddingSyncIndicator'
-import type { Slide } from '../types'
+import type { Slide, ExtendedFileT } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
 
 // Custom event to focus quick actions search
@@ -54,6 +55,9 @@ export default function Dashboard() {
     const editingSlide = useAppStore((state) => state.editingSlide)
     const closeModal = useAppStore((state) => state.closeModal)
     const openModal = useAppStore((state) => state.openModal)
+    const quickActionsPage = useAppStore((state) => state.quickActionsPage)
+
+    const { createMediaSlide } = useSlideCreation()
 
     // Get user role for admin access
     const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
@@ -259,12 +263,17 @@ export default function Dashboard() {
         { key: 'w', callback: toggleWhiteScreen },
     ])
 
-    // Handle media selection
-    const handleMediaSelect = (media: { id: string; url: string; name: string }) => {
-        trackEvent(AnalyticsEventType.MEDIA_SELECTED, { media_id: media.id, media_type: 'image' })
-        // Create a media slide from selected media
+    // Handle media selection (from the "Add Media" modal — library, upload, or pasted link)
+    const handleMediaSelect = async (media: MediaItem) => {
+        if (media.isExternal && media.externalType) {
+            await addExternalVideoSlide(media.externalType, media.url, media.name)
+            closeModal('mediaPicker')
+            return
+        }
+
+        trackEvent(AnalyticsEventType.MEDIA_SELECTED, { media_id: media.id, media_type: media.type })
         const slide: Slide = {
-            id: `slide_${Date.now()}`,
+            id: generateObjectId(),
             index: 0,
             name: media.name,
             type: 'media',
@@ -274,10 +283,38 @@ export default function Dashboard() {
             churchId: '',
             scheduleId: activeSchedule?._id || '',
             background: media.url,
-            backgroundType: 'image',
+            backgroundType: media.type,
+            backgroundStorageId: media.storageId || null,
+            localFilePath: media.localFilePath,
+            localMediaId: media.localMediaId,
+            slideStyle: media.type === 'video'
+                ? { isMediaPlaying: true, isMediaMuted: false, repeatMedia: false, backgroundFillType: 'fit' }
+                : { backgroundFillType: 'fit' },
         }
         appendActiveSlide(slide)
         closeModal('mediaPicker')
+    }
+
+    // Shared by the "Add Media" link tab and the standalone YouTube/Vimeo quick actions.
+    const addExternalVideoSlide = async (platform: 'youtube' | 'vimeo', url: string, name?: string) => {
+        trackEvent(AnalyticsEventType.MEDIA_SELECTED, { media_type: platform })
+
+        const externalFile = {
+            url,
+            type: platform,
+            name,
+            isExternal: true,
+        } as unknown as ExtendedFileT & { isExternal: true }
+
+        const slide = await createMediaSlide(externalFile)
+        appendActiveSlide(slide)
+    }
+
+    // Handle YouTube/Vimeo link submission from ExternalVideoModal
+    const handleExternalVideoAdd = async (video: { url: string; name?: string }) => {
+        const platform = quickActionsPage === 'vimeo' ? 'vimeo' : 'youtube'
+        await addExternalVideoSlide(platform, video.url, video.name)
+        closeModal('externalVideo')
     }
 
     // Handle template selection
@@ -443,6 +480,15 @@ export default function Dashboard() {
                     isOpen={modals.mediaPicker}
                     onClose={() => closeModal('mediaPicker')}
                     onSelect={handleMediaSelect}
+                />
+            )}
+
+            {modals.externalVideo && (
+                <ExternalVideoModal
+                    isOpen={modals.externalVideo}
+                    platform={quickActionsPage === 'vimeo' ? 'vimeo' : 'youtube'}
+                    onClose={() => closeModal('externalVideo')}
+                    onAdd={handleExternalVideoAdd}
                 />
             )}
 

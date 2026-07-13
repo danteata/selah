@@ -48,6 +48,28 @@ export interface CachedTemplateBlob {
     cachedAt: number
 }
 
+export interface LocalMediaItem {
+    id: string
+    name: string
+    type: 'image' | 'video'
+    /** Desktop: absolute path under appDataDir()/media-library/, resolved via resolveLocalUrl. */
+    localFilePath?: string
+    /** Web: true when the bytes live in the localMediaBlobs table under this same id. */
+    hasBlob?: boolean
+    size: number
+    contentType: string
+    /** Set once this item has also been uploaded to Convex (pro cloud sync). */
+    syncedMediaId?: string
+    syncedStorageId?: string
+    createdAt: string
+    updatedAt: string
+}
+
+export interface LocalMediaBlob {
+    id: string
+    blob: Blob
+}
+
 export interface CachedSetting {
     id: string
     data: any
@@ -130,6 +152,8 @@ class SelahDatabase extends Dexie {
     sermonSavedTranscripts!: Table<SavedSermonTranscriptRecord, string>
     sermonOfflineTranscripts!: Table<OfflineTranscriptRecord, string>
     templateBlobs!: Table<CachedTemplateBlob, string>
+    localMedia!: Table<LocalMediaItem, string>
+    localMediaBlobs!: Table<LocalMediaBlob, string>
 
     constructor() {
         super('SelahDatabase')
@@ -178,6 +202,10 @@ class SelahDatabase extends Dexie {
             sermonSavedTranscripts: 'id,createdAt',
             sermonOfflineTranscripts: 'id,scheduleId,createdAt',
             templateBlobs: 'storageId,cachedAt'
+        })
+        this.version(8).stores({
+            localMedia: 'id,type,createdAt,syncedMediaId',
+            localMediaBlobs: 'id'
         })
     }
 }
@@ -543,6 +571,56 @@ export async function cacheTemplateBlob(
 export async function deleteCachedTemplateBlob(storageId: string): Promise<void> {
     const db = getIndexedDB()
     await db.templateBlobs.delete(storageId)
+}
+
+// Local media library ---------------------------------------------
+// Media the operator uploads is saved here by default (free, no cloud
+// storage cost) — on desktop as a path to a copied-in file, on web as a
+// Blob in localMediaBlobs. `syncedMediaId`/`syncedStorageId` are set once
+// the item has also been pushed to Convex (pro cloud sync).
+
+export async function saveLocalMediaItem(item: LocalMediaItem): Promise<void> {
+    const db = getIndexedDB()
+    await db.localMedia.put(item)
+}
+
+export async function getLocalMediaItems(): Promise<LocalMediaItem[]> {
+    const db = getIndexedDB()
+    return await db.localMedia.orderBy('createdAt').reverse().toArray()
+}
+
+export async function getLocalMediaItem(id: string): Promise<LocalMediaItem | undefined> {
+    const db = getIndexedDB()
+    return await db.localMedia.get(id)
+}
+
+export async function updateLocalMediaItem(id: string, updates: Partial<LocalMediaItem>): Promise<void> {
+    const db = getIndexedDB()
+    await db.localMedia.update(id, {
+        ...updates,
+        updatedAt: new Date().toISOString(),
+    })
+}
+
+export async function deleteLocalMediaItem(id: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.localMedia.delete(id)
+}
+
+export async function saveLocalMediaBlob(id: string, blob: Blob): Promise<void> {
+    const db = getIndexedDB()
+    await db.localMediaBlobs.put({ id, blob })
+}
+
+export async function getLocalMediaBlob(id: string): Promise<Blob | null> {
+    const db = getIndexedDB()
+    const entry = await db.localMediaBlobs.get(id)
+    return entry?.blob ?? null
+}
+
+export async function deleteLocalMediaBlob(id: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.localMediaBlobs.delete(id)
 }
 
 // One-shot migration from old localStorage keys to IDB ----------

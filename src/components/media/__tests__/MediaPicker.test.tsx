@@ -5,12 +5,40 @@ import { MediaPicker } from '../MediaPicker'
 vi.mock('../MediaUpload', () => ({
     MediaUpload: ({ onUpload, onCancel }: any) => (
         <div data-testid="media-upload">
-            <button onClick={() => onUpload([{ id: 'u1', name: 'Uploaded', type: 'image', url: 'blob:test' }])}>
+            <button onClick={() => onUpload([{ id: 'u1', name: 'Uploaded', type: 'image', url: 'blob:test', file: new File([], 'u1.png') }])}>
                 Simulate Upload
             </button>
             <button onClick={onCancel}>Cancel Upload</button>
         </div>
     ),
+}))
+
+const { mockUseMediaLibrary } = vi.hoisted(() => ({
+    mockUseMediaLibrary: vi.fn(),
+}))
+
+vi.mock('../../../hooks/useMediaLibrary', () => ({
+    useMediaLibrary: mockUseMediaLibrary,
+}))
+
+vi.mock('../../../hooks/useTemplates', () => ({
+    useFileUrl: () => null,
+}))
+
+vi.mock('../../../hooks/useLocalMediaBlobUrl', () => ({
+    useLocalMediaBlobUrl: () => null,
+}))
+
+vi.mock('../../../hooks/useLocalBackground', () => ({
+    resolveLocalUrl: (url: string) => url,
+}))
+
+vi.mock('../../../providers/LicenseProvider', () => ({
+    useEntitlements: () => ({ isPro: false, loading: false }),
+}))
+
+vi.mock('../../licensing/ProGate', () => ({
+    ProUpsell: ({ feature }: { feature?: string }) => <div data-testid="pro-upsell">{feature}</div>,
 }))
 
 describe('MediaPicker', () => {
@@ -22,6 +50,14 @@ describe('MediaPicker', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
+        mockUseMediaLibrary.mockReturnValue({
+            items: [],
+            isLoading: false,
+            uploadFile: vi.fn().mockResolvedValue(undefined),
+            syncToCloud: vi.fn().mockResolvedValue(undefined),
+            addExternalVideo: vi.fn().mockResolvedValue(undefined),
+            deleteItem: vi.fn().mockResolvedValue(undefined),
+        })
     })
 
     it('renders nothing when closed', () => {
@@ -51,7 +87,15 @@ describe('MediaPicker', () => {
         expect(screen.getByPlaceholderText('Search media...')).toBeInTheDocument()
     })
 
-    it('shows loading spinner initially', () => {
+    it('shows loading spinner while the library is loading', () => {
+        mockUseMediaLibrary.mockReturnValue({
+            items: undefined,
+            isLoading: true,
+            uploadFile: vi.fn(),
+            syncToCloud: vi.fn(),
+            addExternalVideo: vi.fn(),
+            deleteItem: vi.fn(),
+        })
         const { container } = render(<MediaPicker {...baseProps} />)
         const spinner = container.querySelector('.animate-spin')
         expect(spinner).toBeTruthy()
@@ -136,4 +180,52 @@ describe('MediaPicker', () => {
             expect(screen.getByText('No media found')).toBeInTheDocument()
         }, { timeout: 10000 })
     }, 15000)
+
+    it('shows the pro upsell when clicking sync on a local item while not entitled', () => {
+        mockUseMediaLibrary.mockReturnValue({
+            items: [{ id: 'local1', name: 'My Video', type: 'video', localFilePath: '/path/to/file.mp4', createdAt: '2024-01-01T00:00:00.000Z' }],
+            isLoading: false,
+            uploadFile: vi.fn(),
+            syncToCloud: vi.fn(),
+            addExternalVideo: vi.fn(),
+            deleteItem: vi.fn(),
+        })
+        render(<MediaPicker {...baseProps} />)
+        fireEvent.click(screen.getByTitle('Sync to cloud (Pro)'))
+        expect(screen.getByTestId('pro-upsell')).toBeInTheDocument()
+    })
+
+    it('selects a local item and reports its localFilePath', () => {
+        mockUseMediaLibrary.mockReturnValue({
+            items: [{ id: 'local1', name: 'My Video', type: 'video', localFilePath: '/path/to/file.mp4', createdAt: '2024-01-01T00:00:00.000Z' }],
+            isLoading: false,
+            uploadFile: vi.fn(),
+            syncToCloud: vi.fn(),
+            addExternalVideo: vi.fn(),
+            deleteItem: vi.fn(),
+        })
+        const { container } = render(<MediaPicker {...baseProps} />)
+        // Switch to list view — the name is only rendered as text there.
+        fireEvent.click(container.querySelector('button:has(.lucide-list)')!)
+        fireEvent.click(screen.getByText('My Video'))
+        fireEvent.click(screen.getByText('Use Selected'))
+        expect(baseProps.onSelect).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'local1', localFilePath: '/path/to/file.mp4' })
+        )
+    })
+
+    it('shows a video frame thumbnail for a local video item, not just a placeholder icon', () => {
+        mockUseMediaLibrary.mockReturnValue({
+            items: [{ id: 'local1', name: 'My Video', type: 'video', localFilePath: '/path/to/file.mp4', createdAt: '2024-01-01T00:00:00.000Z' }],
+            isLoading: false,
+            uploadFile: vi.fn(),
+            syncToCloud: vi.fn(),
+            addExternalVideo: vi.fn(),
+            deleteItem: vi.fn(),
+        })
+        const { container } = render(<MediaPicker {...baseProps} />)
+        const video = container.querySelector('video')
+        expect(video).toBeTruthy()
+        expect(video).toHaveAttribute('src', '/path/to/file.mp4')
+    })
 })

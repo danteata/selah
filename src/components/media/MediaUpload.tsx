@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Upload, X, Image, Film, Music, FileText, Check, AlertCircle, Loader2 } from 'lucide-react'
-import { openFileDialog } from '../../utils/fileDialog'
+import { openFileDialog, filePathsToFiles } from '../../utils/fileDialog'
+import { isDesktop } from '../../platform'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
 
@@ -100,18 +101,60 @@ export function MediaUpload({
         setFiles((prev) => [...prev, ...newFiles])
     }, [files.length, maxFiles, maxSize])
 
+    // On desktop, Tauri intercepts OS-level file drags before the browser's
+    // own dragover/drop events see populated `dataTransfer.files` — the HTML5
+    // handlers below are a no-op there. Instead, listen for Tauri's own
+    // webview drag-drop event, which hands back real file paths that get
+    // read off disk the same way the native file-picker dialog does.
+    const processFilesRef = useRef(processFiles)
+    processFilesRef.current = processFiles
+
+    useEffect(() => {
+        if (!isDesktop()) return
+
+        let unlisten: (() => void) | undefined
+        let cancelled = false
+
+        import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => {
+            if (cancelled) return
+            getCurrentWebview().onDragDropEvent((event) => {
+                if (event.payload.type === 'enter' || event.payload.type === 'over') {
+                    setIsDragging(true)
+                } else if (event.payload.type === 'drop') {
+                    setIsDragging(false)
+                    filePathsToFiles(event.payload.paths)
+                        .then((droppedFiles) => processFilesRef.current(droppedFiles))
+                        .catch((error) => console.error('Failed to read dropped files:', error))
+                } else {
+                    setIsDragging(false)
+                }
+            }).then((fn) => {
+                if (cancelled) fn()
+                else unlisten = fn
+            })
+        })
+
+        return () => {
+            cancelled = true
+            unlisten?.()
+        }
+    }, [])
+
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault()
+        if (isDesktop()) return
         setIsDragging(true)
     }
 
     const handleDragLeave = (e: React.DragEvent) => {
         e.preventDefault()
+        if (isDesktop()) return
         setIsDragging(false)
     }
 
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault()
+        if (isDesktop()) return
         setIsDragging(false)
         processFiles(e.dataTransfer.files)
     }
