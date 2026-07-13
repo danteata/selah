@@ -99,7 +99,9 @@ export default defineSchema({
         // How this subscription was granted. "promo" rows are comped Pro (no
         // Paystack billing); "paystack" rows are billed normally (possibly on a
         // discounted intro plan that later rolls over — see the fields below).
-        source: v.optional(v.union(v.literal("paystack"), v.literal("promo"))),
+        // "trial" covers pre-existing manually-granted trial rows (no current
+        // code path creates new ones, but existing data must stay valid).
+        source: v.optional(v.union(v.literal("paystack"), v.literal("promo"), v.literal("trial"))),
         // The promo code applied, if any (for audit / UI).
         promoCode: v.optional(v.string()),
         // --- intro-discount rollover (kind: "discount" promos) ---------------
