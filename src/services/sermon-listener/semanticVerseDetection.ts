@@ -102,7 +102,13 @@ function postToTextWorker(text: string, excludedRanges: ExcludedRange[]): Promis
 const SEMANTIC_DETECTION_LIMIT = 5 // Max results per search (per query)
 const MIN_TEXT_LENGTH = 20 // Minimum characters before attempting detection
 const MAX_TEXT_LENGTH = 500 // Maximum characters to embed (truncated)
-const THROTTLE_MS = 1500 // Throttle semantic searches to 1.5 seconds
+// Throttle semantic searches. This is a fixed floor added on top of however
+// long the search cycle itself takes (embedding + similarity), so it directly
+// shows up as perceived lag between speech and a semantic verse appearing on
+// screen. `pendingSearch` (below) already prevents overlapping search cycles,
+// so this doesn't need to be large to avoid runaway concurrent searches --
+// it just paces back-to-back cycles once one finishes.
+const THROTTLE_MS = 500
 
 export interface SemanticVerseMatch {
     reference: string
@@ -156,6 +162,11 @@ export class SemanticVerseDetector {
     private useLocalFallback = false
     private lastProcessedLength = 0
     private initializingPromise: Promise<unknown> | null = null
+    // The sliding-window fallback (slow, only runs when the fast sentence
+    // pass found nothing confident) is deferred in the background rather
+    // than blocking the caller — see `performSegmentedSearch`. This tracks
+    // that background work so at most one fallback runs at a time.
+    private deferredFallback: Promise<void> | null = null
 
     constructor(config: Partial<SemanticDetectionConfig> = {}) {
         this.config = { ...DEFAULT_CONFIG, ...config }
@@ -270,9 +281,16 @@ export class SemanticVerseDetector {
     }
 
     /**
-     * Add text to the buffer for semantic analysis.
+     * Add text to the buffer for semantic analysis. `onUpgrade`, if given, is
+     * called at most once with a better result set if the (slower, deferred)
+     * sliding-window fallback finds something after the returned promise
+     * already resolved — see `performSegmentedSearch`.
      */
-    async addText(text: string, excludedRanges: ExcludedRange[] = []): Promise<SemanticVerseMatch[] | null> {
+    async addText(
+        text: string,
+        excludedRanges: ExcludedRange[] = [],
+        onUpgrade?: (matches: SemanticVerseMatch[]) => void,
+    ): Promise<SemanticVerseMatch[] | null> {
         if (!this.initialized || !this.config.enabled) {
             return null
         }
@@ -301,17 +319,20 @@ export class SemanticVerseDetector {
             return null
         }
 
-        return this.triggerSearch(excludedRanges)
+        return this.triggerSearch(excludedRanges, onUpgrade)
     }
 
-    async searchNow(): Promise<SemanticVerseMatch[]> {
+    async searchNow(onUpgrade?: (matches: SemanticVerseMatch[]) => void): Promise<SemanticVerseMatch[]> {
         if (!this.initialized) {
             return []
         }
-        return this.triggerSearch([])
+        return this.triggerSearch([], onUpgrade)
     }
 
-    private async triggerSearch(excludedRanges: ExcludedRange[] = []): Promise<SemanticVerseMatch[]> {
+    private async triggerSearch(
+        excludedRanges: ExcludedRange[] = [],
+        onUpgrade?: (matches: SemanticVerseMatch[]) => void,
+    ): Promise<SemanticVerseMatch[]> {
         if (!this.initialized || this.pendingSearch) {
             return []
         }
@@ -319,7 +340,7 @@ export class SemanticVerseDetector {
         this.lastSearchTime = Date.now()
         const searchText = this.textBuffer.slice(-MAX_TEXT_LENGTH)
 
-        this.pendingSearch = this.performSegmentedSearch(searchText, excludedRanges)
+        this.pendingSearch = this.performSegmentedSearch(searchText, excludedRanges, onUpgrade)
         const results = await this.pendingSearch
         this.pendingSearch = null
 
@@ -331,12 +352,19 @@ export class SemanticVerseDetector {
     }
 
     /**
-     * Perform segmented search using sentence splitting and sliding windows.
-     * All heavy text preparation is offloaded to a Web Worker.
+     * Perform segmented search using sentence splitting, offloaded to a Web
+     * Worker for text preparation. Returns as soon as the (fast) sentence
+     * pass completes; if it found nothing confident, the (slower) sliding
+     * window fallback is kicked off in the background instead of being
+     * awaited here — see `runWindowFallback`. This means a caller sees a
+     * result several embedding round-trips sooner in the common case where
+     * the fast pass already succeeds, and never waits on the fallback even
+     * when it does run.
      */
     private async performSegmentedSearch(
         text: string,
         excludedRanges: ExcludedRange[] = [],
+        onUpgrade?: (matches: SemanticVerseMatch[]) => void,
     ): Promise<SemanticVerseMatch[]> {
         const allMatches: SemanticVerseMatch[] = []
         const matchedReferences = new Set<string>()
@@ -460,50 +488,6 @@ export class SemanticVerseDetector {
             }
         }
 
-        // Fallback: sliding window if no good matches
-        // Threshold 0.62: fallback only runs when sentence-level search found
-        // nothing, so we demand a stronger signal. This prevents accidental
-        // short-phrase matches (e.g. voice-command residue) from leaking through.
-        const hasGoodMatch = allMatches.some((m) => m.score >= 0.62)
-        if (!hasGoodMatch && windows.length > 0) {
-            console.log('[SemanticDetector] Trying sliding window fallback...')
-            try {
-                const windowEmbeddings = await embedBatch(windows)
-                const windowThresholds = windows.map((w) => getDynamicThreshold(w.split(/\s+/).length, 'window'))
-                const searchMethod = this.useLocalFallback
-                    ? (emb: number[], t: number) => this.searchLocally(emb, t)
-                    : this.convexClient
-                      ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
-                      : () => Promise.resolve([])
-
-                const windowSearchPromises = windowEmbeddings.map((res, idx) =>
-                    searchMethod(res.embedding, windowThresholds[idx]),
-                )
-                const windowSearchResults = await Promise.allSettled(windowSearchPromises)
-
-                for (let idx = 0; idx < windowSearchResults.length; idx++) {
-                    const result = windowSearchResults[idx]
-                    if (result.status !== 'fulfilled') continue
-                    const windowThreshold = windowThresholds[idx]
-                    const windowText = windows[idx]
-                    const windowWordCount = windowText.split(/\s+/).length
-                    const matches = result.value as SemanticVerseMatch[]
-                    for (const match of matches) {
-                        if (
-                            !matchedReferences.has(match.reference) &&
-                            match.score >= windowThreshold &&
-                            validateSemanticMatch(windowText, match.text, windowWordCount)
-                        ) {
-                            matchedReferences.add(match.reference)
-                            allMatches.push(match)
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('[SemanticDetector] Sliding window batch search failed:', error)
-            }
-        }
-
         const results = allMatches
             .sort((a, b) => b.score - a.score)
             .slice(0, this.config.limit)
@@ -517,7 +501,95 @@ export class SemanticVerseDetector {
             )
         }
 
+        // Sliding-window fallback: only worth trying when the sentence pass
+        // found nothing confident (score >= 0.62 — a stronger bar than
+        // normal, since this prevents accidental short-phrase matches like
+        // voice-command residue from leaking through). Rather than making the
+        // caller wait for this second, more expensive embedding pass, it runs
+        // in the background; `onUpgrade` delivers a better result set a
+        // moment later if it finds one. At most one fallback runs at a time.
+        const hasGoodMatch = allMatches.some((m) => m.score >= 0.62)
+        if (!hasGoodMatch && windows.length > 0 && !this.deferredFallback) {
+            this.deferredFallback = this.runWindowFallback(windows, matchedReferences, allMatches, onUpgrade)
+                .finally(() => {
+                    this.deferredFallback = null
+                })
+        }
+
         return results
+    }
+
+    /**
+     * The sliding-window fallback pass, run in the background (not awaited by
+     * `performSegmentedSearch`). If it finds anything, merges it with the
+     * matches the fast pass already found and reports the combined,
+     * re-sorted result via `onUpgrade`.
+     */
+    private async runWindowFallback(
+        windows: string[],
+        matchedReferences: Set<string>,
+        priorMatches: SemanticVerseMatch[],
+        onUpgrade?: (matches: SemanticVerseMatch[]) => void,
+    ): Promise<void> {
+        console.log('[SemanticDetector] Trying sliding window fallback (background)...')
+        const newMatches: SemanticVerseMatch[] = []
+        try {
+            const windowEmbeddings = await embedBatch(windows)
+            const windowThresholds = windows.map((w) => getDynamicThreshold(w.split(/\s+/).length, 'window'))
+            const searchMethod = this.useLocalFallback
+                ? (emb: number[], t: number) => this.searchLocally(emb, t)
+                : this.convexClient
+                  ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
+                  : () => Promise.resolve([])
+
+            const windowSearchPromises = windowEmbeddings.map((res, idx) =>
+                searchMethod(res.embedding, windowThresholds[idx]),
+            )
+            const windowSearchResults = await Promise.allSettled(windowSearchPromises)
+
+            for (let idx = 0; idx < windowSearchResults.length; idx++) {
+                const result = windowSearchResults[idx]
+                if (result.status !== 'fulfilled') continue
+                const windowThreshold = windowThresholds[idx]
+                const windowText = windows[idx]
+                const windowWordCount = windowText.split(/\s+/).length
+                const matches = result.value as SemanticVerseMatch[]
+                for (const match of matches) {
+                    if (
+                        !matchedReferences.has(match.reference) &&
+                        match.score >= windowThreshold &&
+                        validateSemanticMatch(windowText, match.text, windowWordCount)
+                    ) {
+                        matchedReferences.add(match.reference)
+                        newMatches.push(match)
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[SemanticDetector] Sliding window batch search failed:', error)
+            return
+        }
+
+        if (newMatches.length === 0) {
+            return
+        }
+
+        // Mirror triggerSearch's clear-on-match behavior: when the fast pass
+        // found nothing, it couldn't have cleared the buffer itself (it had
+        // no results yet to base that decision on). Without this, buffered
+        // text that already produced a match here would linger and get
+        // redundantly re-embedded on the next cycle.
+        this.textBuffer = ''
+
+        const merged = [...priorMatches, ...newMatches]
+            .sort((a, b) => b.score - a.score)
+            .slice(0, this.config.limit)
+
+        console.log(
+            '[SemanticDetector] Background fallback upgrade:',
+            merged.map((m) => `${m.reference} (${m.score.toFixed(3)})`).join(', '),
+        )
+        onUpgrade?.(merged)
     }
 
     /**

@@ -484,11 +484,20 @@ function detectGoToReferenceCommands(text: string): VoiceCommand[] {
         }
     }
 
-    // 2. Standalone book+chapter (no action verb) — lower confidence
+    // 2. Standalone book+chapter (no action verb) — lower confidence.
+    // Unlike branch 1, there's no imperative verb here to establish command
+    // intent, so a narrating mention ("in Isaiah 43, for I have redeemed
+    // you...", "back in Deuteronomy 6...") is otherwise indistinguishable
+    // from a real "go to Isaiah 43" directive — exactly the same ambiguity
+    // detectNavigationCommands() guards against for "next verse"/"previous
+    // chapter" via isNarrativelyFramed(). Apply the same guard here: a
+    // narrating preposition/verb right before the match means this chunk is
+    // quoting/discussing that chapter, not requesting navigation to it.
     if (commands.length === 0) {
         BOOK_CHAPTER_REGEX.lastIndex = 0
         let bcMatch: RegExpExecArray | null
         while ((bcMatch = BOOK_CHAPTER_REGEX.exec(text)) !== null) {
+            if (isNarrativelyFramed(text, bcMatch.index)) continue
             const book = normalizeBookName(bcMatch[1])
             const chapter = parseChapter(bcMatch[2])
             const maxChapter = book ? BOOK_MAX_CHAPTER[book] : undefined

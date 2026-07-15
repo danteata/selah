@@ -257,6 +257,37 @@ describe('voiceCommandDetection', () => {
                 c.chapter === 1
             )).toBe(true)
         })
+
+        // Regression tests for the standalone book+chapter branch misfiring on
+        // narrative mentions bundled with an ordinary quotation in the same
+        // ASR utterance (e.g. Whisper's VAD-chunked finals commonly merge a
+        // "in Book N" narration with the sentence that follows it) — these
+        // used to fire go_to_reference(medium) and, worse, cause
+        // useSermonListener to skip regex/semantic verse detection for the
+        // rest of that chunk entirely.
+        it('does not misfire on "As it says in Isaiah 43, for I have redeemed you"', () => {
+            const cmds = detectVoiceCommands('As it says in Isaiah 43, for I have redeemed you')
+            expect(cmds.filter(c => c.type === 'go_to_reference')).toHaveLength(0)
+        })
+
+        it('does not misfire on "Back in Deuteronomy 6, as the Lord has forgiven you"', () => {
+            const cmds = detectVoiceCommands('Back in Deuteronomy 6, as the Lord has forgiven you')
+            expect(cmds.filter(c => c.type === 'go_to_reference')).toHaveLength(0)
+        })
+
+        it('does not misfire on "In Galatians 5 we read of kindness and patience"', () => {
+            const cmds = detectVoiceCommands('In Galatians 5 we read of kindness and patience')
+            expect(cmds.filter(c => c.type === 'go_to_reference')).toHaveLength(0)
+        })
+
+        it('still detects a bare sentence-initial "Deuteronomy 6" with no narrative framing', () => {
+            const cmds = detectVoiceCommands('Deuteronomy 6')
+            expect(cmds.some(c =>
+                c.type === 'go_to_reference' &&
+                c.book === 'Deuteronomy' &&
+                c.chapter === 6
+            )).toBe(true)
+        })
     })
 
     // -----------------------------------------------------------------------

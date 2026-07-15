@@ -25,11 +25,15 @@ import { detectVerses,
     verseToLabel,
     getSemanticDetector,
     resetSemanticDetector,
+    initializeEmbedder,
+    isContextValid,
     NUMBER_TO_BOOK,
     resolveBareReferences,
     resolveStandaloneNumberContinuation,
     updateContextFromVerse,
 } from '../services/sermon-listener'
+import type { SemanticVerseMatch } from '../services/sermon-listener'
+import { BOOK_PATTERN } from '../services/sermon-listener/verseDetection'
 import {
     detectVoiceCommands,
     stripCommandsFromTranscript,
@@ -70,6 +74,53 @@ const SCREEN_AFFECTING_COMMAND_TYPES = new Set<VoiceCommand['type']>([
     'previous_chapter', 'go_to_verse', 'go_to_reference', 'display',
 ])
 const COMMAND_CONFIDENCE_ORDER = { high: 3, medium: 2, low: 1 } as const
+
+// Pre-filter gate checked before running semantic search at all (not a strict
+// acceptance check — deliberately broader than the in-hook SCRIPTURE_MARKER_RE,
+// which stays a strict post-hoc filter on weak matches). This only decides "is
+// it worth paying for an embedding pass on this chunk", so it favors recall:
+// any explicit Bible book name always passes (BOOK_PATTERN, the same list used
+// for hard reference parsing), plus a wider set of speech patterns than the
+// strict post-filter accepts. A pure paraphrase with zero book name and zero
+// marker word still won't pass — that's the inherent recall/speed tradeoff of
+// gating at all. Module-level (not per-render) since it depends on no hook state.
+const SEMANTIC_PREFILTER_RE = /\b(verse|verses|chapter|chapters|scripture|scriptures|the bible|the word|it is written|the lord said|god said|jesus said|christ said|paul said|peter said|moses said|david said|according to|in the book of|turn to|let'?s read|reading from|it says|says here|written)\b/i
+const BOOK_NAME_RE = new RegExp(`\\b(${BOOK_PATTERN})\\b`, 'i')
+function hasScriptureSignal(t: string): boolean {
+    return SEMANTIC_PREFILTER_RE.test(t) || BOOK_NAME_RE.test(t)
+}
+
+// Guards against a same-book+chapter candidate silently overwriting a more
+// specific verse already live, when the candidate itself isn't confident
+// enough to be a deliberate restatement. Two known live-reproduced failure
+// modes, both from the same root cause (a rolling-window regex re-match or a
+// debounced semantic pass landing on a less-specific reading of text that's
+// already been resolved more precisely):
+//   1. Chapter-default regression — "Joshua 24:15" already live, a stale
+//      "Joshua chapter 24" fragment still sitting in the rolling window
+//      re-matches and defaults to verse 1, reverting the display.
+//   2. Range collapse — "Psalms 34:7-8" already live (from an explicit
+//      range), a semantic match (which can only ever score single verses,
+//      never ranges) lands on just verse 7 and collapses the range down.
+// A high-confidence candidate always wins — that's a genuine, deliberate
+// restatement, not a stale rematch.
+function isSpecificityDowngrade(live: DetectedVerse | null, candidate: DetectedVerse): boolean {
+    if (!live) return false
+    if (live.book !== candidate.book || live.chapter !== candidate.chapter) return false
+    if (candidate.confidence === 'high') return false
+
+    const liveIsRange = live.verseEnd != null && live.verseEnd > live.verseStart
+    const candidateCollapsesRange =
+        liveIsRange &&
+        (candidate.verseEnd == null || candidate.verseEnd === candidate.verseStart) &&
+        candidate.verseStart >= live.verseStart &&
+        candidate.verseStart <= (live.verseEnd as number)
+
+    const candidateIsChapterDefault = candidate.verseStart === 1 && candidate.verseEnd == null
+    const liveIsSpecific = live.verseStart !== 1 || liveIsRange
+
+    return candidateCollapsesRange || (liveIsSpecific && candidateIsChapterDefault)
+}
 
 export interface SavedSermonTranscript {
     id: string
@@ -1136,6 +1187,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         if (isStale) return
 
         const latest = stamped[stamped.length - 1]
+
+        // The LLM pass has a multi-second round trip, and its own staleness
+        // check above only catches a NEWER regex detection landing since
+        // scheduling — not a same-book+chapter verse that was already made
+        // MORE SPECIFIC by a fresh regex/standalone-continuation hit that
+        // happened to re-match as a reactivation (which doesn't bump the
+        // regex generation counter). Without this, a slow, weaker LLM guess
+        // (often just the chapter default) can silently clobber an
+        // already-correct, more specific verse or range still on screen.
+        if (isSpecificityDowngrade(currentVerseRef.current, latest)) return
+
         setCurrentVerse(latest)
         activeReferenceContextRef.current = updateContextFromVerse(latest)
 
@@ -1600,52 +1662,71 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }
             setDetectedVerses(prev => dedupeVerses([...prev, ...versesWithTimestamp]))
             const latestVerse = versesWithTimestamp[0]
-            setCurrentVerse(latestVerse)
 
-            trackEvent(AnalyticsEventType.SERMON_LISTENER_VERSE_DETECTED, {
-                reference: latestVerse.reference,
-                confidence: latestVerse.confidence,
-                detection_type: 'regex',
-                verse_count: versesWithTimestamp.length,
-            })
+            // detectVerses() scans a 1500-char ROLLING transcript window, so a
+            // bare "Book Chapter" fragment (no verse keyword) can still be
+            // sitting in that window seconds after a voice command, or an
+            // earlier regex match, already resolved a MORE SPECIFIC verse for
+            // that same book+chapter — e.g. a command resolves "Joshua 24:15",
+            // then a later chunk's rolling-window re-match of "Joshua chapter
+            // 24" (the chapter-only fallback, which always defaults to verse 1
+            // at medium confidence) would otherwise silently revert the
+            // display back to "Joshua 24:1". Reproduced live. A genuinely
+            // deliberate restatement of verse 1 is virtually always high
+            // confidence (both "chapter" and "verse" keywords present), so
+            // this only suppresses the weak chapter-only default, not an
+            // intentional "verse 1".
+            const liveVerse = currentVerseRef.current
+            const isSpecificityRegression = isSpecificityDowngrade(liveVerse, latestVerse)
 
-            // A voice command (e.g. bare "Hebrews 13") sets navigationCooldownUntilRef
-            // so a stale, in-flight regex/semantic detection can't immediately
-            // hijack the navigation it just performed. But a verse that CONTINUES
-            // that same book+chapter — resolveBareReferences("verse 5") or
-            // resolveStandaloneNumberContinuation("Five.") completing the exact
-            // reference the command just set — isn't a competing navigation, it's
-            // the rest of the same one. Without this check, "Hebrews 13" (voice
-            // command, sets the cooldown) followed moments later by "Five." (its
-            // own utterance, resolved against that context) got added to
-            // detectedVerses/currentVerse correctly, but the live slide silently
-            // stayed on the command's verse 1 because the cooldown blocked the
-            // auto-display step below.
-            const priorContext = activeReferenceContextRef.current
-            const continuesSameReference = !!priorContext &&
-                priorContext.book === latestVerse.book &&
-                priorContext.chapter === latestVerse.chapter
+            if (!isSpecificityRegression) {
+                setCurrentVerse(latestVerse)
 
-            // Refresh active reference context so later bare references resolve correctly
-            activeReferenceContextRef.current = updateContextFromVerse(latestVerse)
-
-            // Auto-lookup if enabled
-            if (autoLookup && !inVersionSwitchCooldown && (!inNavigationCooldown || continuesSameReference)) {
-                lookupVerse(latestVerse).then(scripture => {
-                    optionsRef.current.onVerseDetected?.(latestVerse, scripture)
-
-                    // Auto-display if enabled
-                    if (autoDisplay && scripture) {
-                        // Create a slide using the proper function to apply template
-                        const slide = createAutoDetectBibleSlide(scripture)
-
-                        // Add slide to active slides and set as live
-                        appendActiveSlide(slide)
-                        setLiveSlide(slide.id)
-                    }
+                trackEvent(AnalyticsEventType.SERMON_LISTENER_VERSE_DETECTED, {
+                    reference: latestVerse.reference,
+                    confidence: latestVerse.confidence,
+                    detection_type: 'regex',
+                    verse_count: versesWithTimestamp.length,
                 })
-            } else {
-                optionsRef.current.onVerseDetected?.(latestVerse, null)
+
+                // A voice command (e.g. bare "Hebrews 13") sets navigationCooldownUntilRef
+                // so a stale, in-flight regex/semantic detection can't immediately
+                // hijack the navigation it just performed. But a verse that CONTINUES
+                // that same book+chapter — resolveBareReferences("verse 5") or
+                // resolveStandaloneNumberContinuation("Five.") completing the exact
+                // reference the command just set — isn't a competing navigation, it's
+                // the rest of the same one. Without this check, "Hebrews 13" (voice
+                // command, sets the cooldown) followed moments later by "Five." (its
+                // own utterance, resolved against that context) got added to
+                // detectedVerses/currentVerse correctly, but the live slide silently
+                // stayed on the command's verse 1 because the cooldown blocked the
+                // auto-display step below.
+                const priorContext = activeReferenceContextRef.current
+                const continuesSameReference = !!priorContext &&
+                    priorContext.book === latestVerse.book &&
+                    priorContext.chapter === latestVerse.chapter
+
+                // Refresh active reference context so later bare references resolve correctly
+                activeReferenceContextRef.current = updateContextFromVerse(latestVerse)
+
+                // Auto-lookup if enabled
+                if (autoLookup && !inVersionSwitchCooldown && (!inNavigationCooldown || continuesSameReference)) {
+                    lookupVerse(latestVerse).then(scripture => {
+                        optionsRef.current.onVerseDetected?.(latestVerse, scripture)
+
+                        // Auto-display if enabled
+                        if (autoDisplay && scripture) {
+                            // Create a slide using the proper function to apply template
+                            const slide = createAutoDetectBibleSlide(scripture)
+
+                            // Add slide to active slides and set as live
+                            appendActiveSlide(slide)
+                            setLiveSlide(slide.id)
+                        }
+                    })
+                } else {
+                    optionsRef.current.onVerseDetected?.(latestVerse, null)
+                }
             }
         } else if (hasReActivated) {
             // The previously-detected verse re-matched. Decide whether this is a
@@ -1729,7 +1810,22 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // filtered) — NOT raw text. Raw voice commands like "next verse" or
         // "previous verse" accumulate in the semantic buffer and cause false
         // positives (e.g. "previous this" matching Judges 18:6).
-        const semanticReady = semanticDetectorRef.current && cleanText.length >= 30
+        //
+        // Two speed gates beyond the detector's own throttling:
+        // - !hasRegexVerses: a semantic match never overrides a regex hit in
+        //   the same chunk anyway (see the `!hasRegexVerses` check below), so
+        //   running the embedding pass on text the fast regex path already
+        //   resolved is pure waste.
+        // - hasScriptureSignal: skip the (comparatively expensive) embedding
+        //   pass entirely for stretches of speech with no scripture-ish
+        //   signal at all (no book name, no marker phrase) — most sermon
+        //   audio (announcements, banter, worship) is exactly this. The
+        //   buffer isn't lost when skipped; it just accumulates for the next
+        //   check (see `addText`'s internal `lastProcessedLength` tracking).
+        const semanticReady = semanticDetectorRef.current
+            && cleanText.length >= 30
+            && !hasRegexVerses
+            && hasScriptureSignal(latestChunkForCommands || cleanText)
         if (semanticReady) {
             setIsSemanticSearching(true)
 
@@ -1740,8 +1836,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 endIndex: v.endIndex,
             }))
 
-            // Use addText which handles throttling internally
-            semanticDetectorRef.current!.addText(cleanText, excludedRanges).then((semanticMatches) => {
+            // Shared handler for both the fast (immediate) result and a
+            // possible later "upgrade" from the deferred sliding-window
+            // fallback (see semanticVerseDetection.ts) — both are results for
+            // this same processTranscript call, so the same staleness/regex
+            // checks apply correctly either way (regexVerseDetectionRef is
+            // read live, not frozen, so a regex hit that lands between the
+            // two still correctly marks a late upgrade as stale).
+            const handleSemanticMatches = (semanticMatches: SemanticVerseMatch[] | null) => {
                 // Stale means a regex verse was found AFTER this semantic search started.
                 // In that case, skip updating currentVerse (regex takes priority) but still
                 // add new verses to the detected list.
@@ -1839,10 +1941,27 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     semanticVerses.push(detectedVerse)
                 }
 
-                // Sort by score (highest first) and limit to max per query
+                // Sort by score (highest first) and limit to max per query.
+                // Within the same confidence tier, prefer a candidate in the
+                // sermon's current book/chapter context — this only re-orders
+                // among matches that already independently cleared the
+                // confidence/marker/dedup checks above, it never lets a
+                // weaker match through, so it targets exactly the "two
+                // similarly-scored verses, pick the contextually plausible
+                // one" case without loosening any acceptance threshold.
+                const activeContext = isContextValid(activeReferenceContextRef.current, CONTEXT_TTL_MS)
+                    ? activeReferenceContextRef.current
+                    : null
                 semanticVerses.sort((a, b) => {
                     const confOrder = { high: 3, medium: 2, low: 1 }
-                    return confOrder[b.confidence] - confOrder[a.confidence]
+                    const confDiff = confOrder[b.confidence] - confOrder[a.confidence]
+                    if (confDiff !== 0) return confDiff
+                    if (activeContext) {
+                        const aInContext = a.book === activeContext.book && a.chapter === activeContext.chapter ? 1 : 0
+                        const bInContext = b.book === activeContext.book && b.chapter === activeContext.chapter ? 1 : 0
+                        if (aInContext !== bInContext) return bInContext - aInContext
+                    }
+                    return 0
                 })
                 const limitedSemanticVerses = semanticVerses.slice(0, MAX_DETECTED_VERSES_PER_QUERY)
 
@@ -1886,8 +2005,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     setDetectedVerses(prev => dedupeVerses([...prev, ...versesWithTimestamp]))
 
                     // Only update current verse if no regex verses were found AND
-                    // no newer regex detection has happened since this search started
-                    if (!hasRegexVerses && !isStale) {
+                    // no newer regex detection has happened since this search started.
+                    // Also guard against a same-book+chapter semantic match downgrading
+                    // an already-live, more specific verse or range — semantic search
+                    // can only ever score single verses (never a range), so a range
+                    // already established by regex ("Psalms 34:7-8") must not collapse
+                    // down to just its first verse the moment a debounced semantic pass
+                    // resolves against partial text.
+                    if (!hasRegexVerses && !isStale && !isSpecificityDowngrade(currentVerseRef.current, versesWithTimestamp[0])) {
                         const bestSemanticVerse = versesWithTimestamp[0]
                         setCurrentVerse(bestSemanticVerse)
 
@@ -1983,11 +2108,19 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         }
                     }
                 }
-            }).catch((error: Error) => {
-                console.error('[SemanticDetector] Search error:', error)
-            }).finally(() => {
-                setIsSemanticSearching(false)
-            })
+            }
+
+            // Use addText which handles throttling internally. handleSemanticMatches
+            // also doubles as the onUpgrade callback for a later, better result
+            // from the deferred sliding-window fallback (see its doc comment above).
+            semanticDetectorRef.current!.addText(cleanText, excludedRanges, handleSemanticMatches)
+                .then(handleSemanticMatches)
+                .catch((error: Error) => {
+                    console.error('[SemanticDetector] Search error:', error)
+                })
+                .finally(() => {
+                    setIsSemanticSearching(false)
+                })
         }
     }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange, scheduleLlmExtraction])
 
@@ -2078,10 +2211,23 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // demand. The current desktop-whisper sidecar auto-loads its bundled
         // base.en, so no per-start model switch is needed here during migration.
 
-        // Initialize semantic detector on first use if not already ready
+        // Initialize semantic detector on first use if not already ready.
+        // Once `semanticDetectorReady` is true, the detector singleton's own
+        // `initialize()` short-circuits on every future call — so without the
+        // else branch below, a worker torn down by embeddingSyncManager's
+        // 5-minute idle-unload timer (or from a much earlier session) would
+        // otherwise only get reloaded lazily on the first live semantic query
+        // mid-sermon, which is exactly the multi-second "sometimes" delay.
+        // `initializeEmbedder()` is a cheap idempotent no-op when the worker
+        // is already warm, so eagerly re-warming here on every start costs
+        // nothing when nothing was disposed.
         if (!semanticDetectorReady) {
             initSemanticDetector().catch(err => {
                 console.warn('[useSermonListener] Semantic detector init failed:', err)
+            })
+        } else if (enableSemanticDetection) {
+            initializeEmbedder().catch(err => {
+                console.warn('[useSermonListener] Embedder re-warm failed:', err)
             })
         }
 

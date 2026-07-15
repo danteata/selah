@@ -63,6 +63,15 @@ const BARE_CHAPTER_PATTERN = /\bchapter\s+(\d{1,3}|[a-z]+)\b/gi
 // count, date, or quantity.
 const STANDALONE_NUMBER_PATTERN = /^\s*(\d{1,3}|[a-z]+)\s*\.?\s*$/i
 
+// Same ASR-utterance-splitting artifact as STANDALONE_NUMBER_PATTERN, but for
+// a verse RANGE spoken with no "verse"/"verses" keyword at all ("Deuteronomy
+// 6" ... "6 to 9.", "2 Chronicles 7" ... "15 through 16") — the keyword gets
+// clipped, or the preacher never says it the second time. Matched separately
+// from STANDALONE_NUMBER_PATTERN (rather than folded into one pattern) so a
+// plain single number is still tried on its own, and this only engages when
+// the whole utterance is nothing but a two-number range.
+const STANDALONE_NUMBER_RANGE_PATTERN = /^\s*(\d{1,3}|[a-z]+)\s*(?:-|–|—|to|through)\s*(\d{1,3}|[a-z]+)\s*\.?\s*$/i
+
 interface BareMatch {
     raw: string
     verseStart: number
@@ -243,6 +252,33 @@ export function resolveStandaloneNumberContinuation(
     if (!isContextValid(context, ttlMs)) return []
 
     const trimmed = chunkText.trim()
+
+    const rangeMatch = trimmed.match(STANDALONE_NUMBER_RANGE_PATTERN)
+    if (rangeMatch) {
+        const verseStart = parseSpokenNumber(rangeMatch[1]) ?? parseInt(rangeMatch[1], 10)
+        const verseEnd = parseSpokenNumber(rangeMatch[2]) ?? parseInt(rangeMatch[2], 10)
+        if (
+            verseStart && verseStart >= 1 && verseStart <= 176 &&
+            verseEnd && verseEnd >= 1 && verseEnd <= 176 &&
+            verseEnd >= verseStart
+        ) {
+            return [{
+                raw: trimmed,
+                reference: `${context.book} ${context.chapter}:${verseStart}-${verseEnd}`,
+                book: context.book,
+                chapter: context.chapter,
+                verseStart,
+                verseEnd,
+                startIndex: 0,
+                endIndex: trimmed.length,
+                confidence: 'medium',
+                detectionType: 'regex',
+            }]
+        }
+        // Range shape matched but numbers didn't sanity-check (e.g. end < start)
+        // — fall through and try the single-number pattern below.
+    }
+
     const match = trimmed.match(STANDALONE_NUMBER_PATTERN)
     if (!match) return []
 

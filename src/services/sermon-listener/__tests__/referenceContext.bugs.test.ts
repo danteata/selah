@@ -163,4 +163,36 @@ describe('referenceContext — BUG HUNTING', () => {
     it('resolveStandaloneNumberContinuation returns empty for null context', () => {
         expect(resolveStandaloneNumberContinuation('Five.', null)).toEqual([])
     })
+
+    // -----------------------------------------------------------------------
+    // Same real-world artifact as above, but for a verse RANGE with no
+    // "verse"/"verses" keyword ("Deuteronomy 6" ... "6 to 9.", "2 Chronicles
+    // 7" ... "15 through 16") — the single-number continuation above didn't
+    // cover this, so these used to fall through to the several-seconds-later
+    // LLM extraction pass instead of resolving instantly.
+    // -----------------------------------------------------------------------
+    it('resolveStandaloneNumberContinuation resolves a bare "N to M" range against fresh context', () => {
+        const context = createContext('2 Chronicles', 7)
+        const result = resolveStandaloneNumberContinuation('15 through 16', context)
+        expect(result.length).toBe(1)
+        expect(result[0].reference).toBe('2 Chronicles 7:15-16')
+        expect(result[0].verseStart).toBe(15)
+        expect(result[0].verseEnd).toBe(16)
+        expect(result[0].confidence).toBe('medium')
+    })
+
+    it('resolveStandaloneNumberContinuation resolves a bare "N-M" dash range against fresh context', () => {
+        const context = createContext('Deuteronomy', 6)
+        const result = resolveStandaloneNumberContinuation('6-9', context)
+        expect(result.length).toBe(1)
+        expect(result[0].reference).toBe('Deuteronomy 6:6-9')
+        expect(result[0].verseStart).toBe(6)
+        expect(result[0].verseEnd).toBe(9)
+    })
+
+    it('resolveStandaloneNumberContinuation does NOT fire a range when the end is before the start', () => {
+        const context = createContext('Deuteronomy', 6)
+        const result = resolveStandaloneNumberContinuation('9-6', context)
+        expect(result).toEqual([])
+    })
 })
