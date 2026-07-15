@@ -406,7 +406,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 // `first.book` is the raw numeric book id from the Bible JSON
                 // (e.g. "43"), not a canonical name — verseToLabel() and every
                 // other DetectedVerse consumer expect the name (e.g. "John").
-                const bookName = NUMBER_TO_BOOK[first.book]
+                const bookName = NUMBER_TO_BOOK[parseInt(first.book, 10)]
                 if (!bookName) return null
                 return {
                     book: bookName,
@@ -2134,14 +2134,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // auto-detect is on (worship mode), use a neutral prompt so lyrics
             // transcribe cleanly; keep the scripture bias for sermon mode.
             initialPrompt: useAppStore.getState().songTracking.autoDetect ? '' : buildBibleInitialPrompt(),
-            enableStreaming: true,
-            onPartialSegment: (segment) => {
-                console.log('[useSermonListener] Partial segment:', segment.text.substring(0, 50))
-                setInterimTranscript(prev => {
-                    const prefix = prev ? prev + ' ' : ''
-                    return prefix + segment.text.trim()
-                })
-            },
             onStart: () => {
                 setIsListening(true)
                 setIsStarting(false)

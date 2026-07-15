@@ -48,15 +48,32 @@ describe('nativeTranscriptionService', () => {
             translate: false,
         })
         expect(listenMock).toHaveBeenCalledWith('transcription-result', expect.any(Function))
+        expect(listenMock).toHaveBeenCalledWith('native-stream-text', expect.any(Function))
         expect(invokeMock).toHaveBeenCalledWith('start_capture_with_vad', {
             captureType: 'microphone',
             deviceName: undefined,
         })
 
-        // Simulate a transcription-result event reaching the listener.
-        const handler = listenMock.mock.calls[0][1] as (e: { payload: { text: string } }) => void
-        handler({ payload: { text: 'For God so loved the world' } })
-        expect(onResult).toHaveBeenCalledWith('For God so loved the world')
+        // Simulate a transcription-result (final) event reaching the listener.
+        const finalHandler = listenMock.mock.calls[0][1] as (e: { payload: { text: string } }) => void
+        finalHandler({ payload: { text: 'For God so loved the world' } })
+        expect(onResult).toHaveBeenCalledWith('For God so loved the world', true)
+    })
+
+    it('forwards native-stream-text events as interim (isFinal=false) results', async () => {
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
+            return Promise.resolve(undefined)
+        })
+
+        const onResult = vi.fn()
+        await nativeTranscriptionService.start({ onResult, onError: vi.fn() })
+
+        const streamHandler = listenMock.mock.calls[1][1] as (e: {
+            payload: { committed: string; tentative: string }
+        }) => void
+        streamHandler({ payload: { committed: 'For God so ', tentative: 'loved' } })
+        expect(onResult).toHaveBeenCalledWith('For God so loved', false)
     })
 
     it('skips reload when the model is already loaded', async () => {

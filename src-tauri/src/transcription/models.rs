@@ -25,8 +25,8 @@ use tracing::{info, warn};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EngineType {
-    /// Whisper via whisper.cpp (GGUF `.bin` file).
-    Whisper,
+    /// Whisper-family and other GGUF models via transcribe-cpp (GGUF file).
+    TranscribeCpp,
     /// Parakeet via ONNX (directory).
     Parakeet,
     /// Moonshine (non-streaming) via ONNX (directory).
@@ -83,6 +83,9 @@ pub struct ModelInfo {
     pub recommended: bool,
     /// Bundled with the app (offline default, no download).
     pub bundled: bool,
+    /// Whether this model can stream live (partial) results as audio arrives,
+    /// instead of only returning text after the full segment is transcribed.
+    pub supports_streaming: bool,
 }
 
 impl Default for ModelInfo {
@@ -91,7 +94,7 @@ impl Default for ModelInfo {
             id: String::new(),
             name: String::new(),
             description: String::new(),
-            engine_type: EngineType::Whisper,
+            engine_type: EngineType::TranscribeCpp,
             format: ModelFormat::File,
             filename: String::new(),
             url: None,
@@ -104,6 +107,7 @@ impl Default for ModelInfo {
             supports_language_selection: false,
             recommended: false,
             bundled: false,
+            supports_streaming: false,
         }
     }
 }
@@ -130,12 +134,16 @@ struct DownloadProgress {
 /// The built-in catalog.
 ///
 /// The bundled `whisper-base.en` GGUF (public whisper.cpp HF repo) is the
-/// offline default. Every other model downloads on demand from Handy's public
-/// CDN — the exact GGUF / int8-ONNX artifacts `transcribe-rs` expects, with
-/// pinned SHA-256 hashes.
+/// offline default. Most other models download on demand from Handy's own
+/// CDN (`blob.handy.computer`) — the exact GGUF / int8-ONNX artifacts
+/// `transcribe-rs`/`transcribe-cpp` expect, with pinned SHA-256 hashes.
 ///
-/// NOTE: these URLs point at `blob.handy.computer`. Before production, mirror
-/// the artifacts to Selah-controlled storage; the hashes are host-independent.
+/// NOTE: those `blob.handy.computer` URLs are a pre-existing TODO — mirror
+/// the artifacts to Selah-controlled storage before production; the hashes
+/// are host-independent. The streaming GGUF entries (Parakeet Unified,
+/// Nemotron Streaming) are the exception: they're genuinely hosted on the
+/// public `handy-computer` Hugging Face org, so those download straight from
+/// HF and have no CDN migration to do.
 pub fn catalog() -> Vec<ModelInfo> {
     const MB: u64 = 1024 * 1024;
     let blob = |f: &str| Some(format!("https://blob.handy.computer/{}", f));
@@ -152,7 +160,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             id: "whisper-base.en".into(),
             name: "Whisper Base (English)".into(),
             description: "Bundled offline default. Solid speed/accuracy for English.".into(),
-            engine_type: EngineType::Whisper,
+            engine_type: EngineType::TranscribeCpp,
             format: ModelFormat::File,
             filename: "ggml-base.en.bin".into(),
             url: Some("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin".into()),
@@ -167,7 +175,7 @@ pub fn catalog() -> Vec<ModelInfo> {
         ModelInfo {
             id: "small".into(), name: "Whisper Small".into(),
             description: "Fast and fairly accurate.".into(),
-            engine_type: EngineType::Whisper, format: ModelFormat::File,
+            engine_type: EngineType::TranscribeCpp, format: ModelFormat::File,
             filename: "ggml-small.bin".into(), url: blob("ggml-small.bin"),
             sha256: Some("1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b".into()),
             size_bytes: 465 * MB, languages: whisper_langs.clone(),
@@ -177,7 +185,7 @@ pub fn catalog() -> Vec<ModelInfo> {
         ModelInfo {
             id: "medium".into(), name: "Whisper Medium".into(),
             description: "Good accuracy, medium speed.".into(),
-            engine_type: EngineType::Whisper, format: ModelFormat::File,
+            engine_type: EngineType::TranscribeCpp, format: ModelFormat::File,
             filename: "whisper-medium-q4_1.bin".into(), url: blob("whisper-medium-q4_1.bin"),
             sha256: Some("79283fc1f9fe12ca3248543fbd54b73292164d8df5a16e095e2bceeaaabddf57".into()),
             size_bytes: 469 * MB, languages: whisper_langs.clone(),
@@ -187,7 +195,7 @@ pub fn catalog() -> Vec<ModelInfo> {
         ModelInfo {
             id: "turbo".into(), name: "Whisper Turbo".into(),
             description: "Balanced accuracy and speed.".into(),
-            engine_type: EngineType::Whisper, format: ModelFormat::File,
+            engine_type: EngineType::TranscribeCpp, format: ModelFormat::File,
             filename: "ggml-large-v3-turbo.bin".into(), url: blob("ggml-large-v3-turbo.bin"),
             sha256: Some("1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69".into()),
             size_bytes: 1549 * MB, languages: whisper_langs.clone(),
@@ -197,7 +205,7 @@ pub fn catalog() -> Vec<ModelInfo> {
         ModelInfo {
             id: "large".into(), name: "Whisper Large".into(),
             description: "Good accuracy, but slow.".into(),
-            engine_type: EngineType::Whisper, format: ModelFormat::File,
+            engine_type: EngineType::TranscribeCpp, format: ModelFormat::File,
             filename: "ggml-large-v3-q5_0.bin".into(), url: blob("ggml-large-v3-q5_0.bin"),
             sha256: Some("d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1".into()),
             size_bytes: 1031 * MB, languages: whisper_langs.clone(),
@@ -207,11 +215,41 @@ pub fn catalog() -> Vec<ModelInfo> {
         ModelInfo {
             id: "breeze-asr".into(), name: "Breeze ASR".into(),
             description: "Optimized for Taiwanese Mandarin. Code-switching support.".into(),
-            engine_type: EngineType::Whisper, format: ModelFormat::File,
+            engine_type: EngineType::TranscribeCpp, format: ModelFormat::File,
             filename: "breeze-asr-q5_k.bin".into(), url: blob("breeze-asr-q5_k.bin"),
             sha256: Some("8efbf0ce8a3f50fe332b7617da787fb81354b358c288b008d3bdef8359df64c6".into()),
             size_bytes: 1030 * MB, languages: whisper_langs.clone(),
             accuracy: 0.85, speed: 0.35, supports_language_selection: true,
+            ..Default::default()
+        },
+        // --- Streaming GGUF (transcribe-cpp), sourced from Hugging Face ---
+        // Unlike the rest of the catalog, these download directly from the
+        // public `handy-computer` HF org rather than blob.handy.computer —
+        // that's genuinely where these new models are hosted, not a mirroring
+        // choice. See models.rs module docs for the rest of the catalog's
+        // CDN situation.
+        ModelInfo {
+            id: "parakeet-unified-en-0.6b".into(), name: "Parakeet Unified (English, streaming)".into(),
+            description: "Fast, accurate live English transcription. See text as you speak.".into(),
+            engine_type: EngineType::TranscribeCpp, format: ModelFormat::File,
+            filename: "parakeet-unified-en-0.6b-Q8_0.gguf".into(),
+            url: Some("https://huggingface.co/handy-computer/parakeet-unified-en-0.6b-gguf/resolve/main/parakeet-unified-en-0.6b-Q8_0.gguf".into()),
+            size_bytes: 731_357_568, languages: langs(&["en"]),
+            accuracy: 0.90, speed: 0.79, supports_streaming: true, recommended: true,
+            ..Default::default()
+        },
+        ModelInfo {
+            id: "nemotron-3.5-asr-streaming-0.6b".into(), name: "Nemotron Streaming 3.5 (multilingual, streaming)".into(),
+            description: "Live multilingual transcription across 28 languages.".into(),
+            engine_type: EngineType::TranscribeCpp, format: ModelFormat::File,
+            filename: "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf".into(),
+            url: Some("https://huggingface.co/handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf/resolve/main/nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf".into()),
+            size_bytes: 751_094_240,
+            languages: langs(&[
+                "en", "es", "fr", "it", "pt", "nl", "de", "tr", "ru", "ar", "hi", "ja", "ko", "vi",
+                "uk", "pl", "sv", "cs", "nb", "da", "bg", "fi", "hr", "sk", "zh", "hu", "ro", "et",
+            ]),
+            accuracy: 0.82, speed: 0.84, supports_streaming: true,
             ..Default::default()
         },
         // --- Parakeet (ONNX) ---

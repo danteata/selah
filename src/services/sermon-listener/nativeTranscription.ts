@@ -3,8 +3,17 @@
  *
  * Unlike the sidecar path, transcription happens entirely in Rust: we load a
  * model into the engine, start the Rust VAD capture, and listen for
- * `transcription-result` events the engine emits per speech segment. No WAV is
- * shipped over HTTP — the VAD `Vec<f32>` goes straight to `transcribe()`.
+ * `transcription-result` events the engine emits per finished speech segment.
+ * No WAV is shipped over HTTP — the VAD `Vec<f32>` goes straight to
+ * `transcribe()` (or a live stream, for streaming-capable models — see below).
+ *
+ * Streaming-capable models (e.g. Parakeet Unified) additionally emit
+ * `native-stream-text` events while a segment is still being spoken —
+ * `committed`/`tentative` text from the in-progress utterance. Non-streaming
+ * models never emit this event, so `onResult` simply never sees `isFinal:
+ * false` for them; the rest of the pipeline (interim transcript state,
+ * dimmed-italic rendering) already handles both cases identically to the
+ * web-speech provider.
  */
 
 import { invoke } from '@tauri-apps/api/core'
@@ -19,17 +28,24 @@ interface TranscriptionResultEvent {
     start_offset_ms: number
 }
 
+/** Mirrors Rust `StreamTextEvent` (the `native-stream-text` payload). */
+interface StreamTextEvent {
+    committed: string
+    tentative: string
+}
+
 export interface NativeTranscriptionStartOptions {
     language?: string
     initialPrompt?: string
     captureSource?: 'microphone' | 'system'
     microphoneDeviceId?: string
-    onResult: (text: string) => void
+    onResult: (text: string, isFinal: boolean) => void
     onError: (error: string) => void
 }
 
 class NativeTranscriptionService {
     private unlisten: UnlistenFn | null = null
+    private unlistenStream: UnlistenFn | null = null
     private isRunning = false
 
     isConfigured(): boolean {
@@ -67,7 +83,16 @@ class NativeTranscriptionService {
 
             this.unlisten = await listen<TranscriptionResultEvent>('transcription-result', (event) => {
                 if (this.isRunning && event.payload.text) {
-                    options.onResult(event.payload.text)
+                    options.onResult(event.payload.text, true)
+                }
+            })
+
+            this.unlistenStream = await listen<StreamTextEvent>('native-stream-text', (event) => {
+                if (!this.isRunning) return
+                const { committed, tentative } = event.payload
+                const display = `${committed}${tentative}`.trim()
+                if (display) {
+                    options.onResult(display, false)
                 }
             })
 
@@ -81,6 +106,8 @@ class NativeTranscriptionService {
         } catch (err) {
             this.unlisten?.()
             this.unlisten = null
+            this.unlistenStream?.()
+            this.unlistenStream = null
             options.onError(err instanceof Error ? err.message : String(err))
             return false
         }
@@ -96,6 +123,10 @@ class NativeTranscriptionService {
         if (this.unlisten) {
             this.unlisten()
             this.unlisten = null
+        }
+        if (this.unlistenStream) {
+            this.unlistenStream()
+            this.unlistenStream = null
         }
     }
 

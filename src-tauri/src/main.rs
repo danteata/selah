@@ -339,9 +339,11 @@ pub fn run() {
                 app.manage(model_manager);
             }
 
-            // In-process transcription engine (Whisper/Parakeet via transcribe-rs).
+            // In-process transcription engine (Whisper/Parakeet via transcribe-rs,
+            // Whisper-family + streaming GGUF models via transcribe-cpp).
             #[cfg(feature = "native-transcription")]
             {
+                transcription::engine::init_transcribe_cpp_backend();
                 transcription::engine::apply_default_accelerators();
                 app.manage(transcription::TranscriptionManager::new(app.handle()));
             }

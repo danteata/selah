@@ -48,10 +48,6 @@ export interface UnifiedTranscriptionOptions {
   /** Initial prompt to bias transcription vocabulary (prevents offensive word hallucination) */
   initialPrompt?: string
   onProgress?: (progress: number) => void
-  /** Enable ndjson streaming from whisper server for progressive segment display */
-  enableStreaming?: boolean
-  /** Called with each partial segment as it's decoded by the streaming transcription */
-  onPartialSegment?: (segment: { start: number; end: number; text: string }) => void
 }
 
 export interface TranscriptionStatus {
@@ -201,7 +197,12 @@ class UnifiedTranscriptionService {
 
     /**
      * Start native (in-process) Whisper/Parakeet transcription. Audio capture
-     * and inference both run in Rust; results arrive via transcription-result.
+     * and inference both run in Rust; final segment text arrives via
+     * `transcription-result` (isFinal=true), and streaming-capable models
+     * (e.g. Parakeet Unified) additionally emit live in-progress text via
+     * `native-stream-text` (isFinal=false) while a segment is still being
+     * spoken — see `nativeTranscriptionService` for the event-to-callback
+     * mapping.
      */
     private async startNative(): Promise<boolean> {
         const started = await nativeTranscriptionService.start({
@@ -209,8 +210,8 @@ class UnifiedTranscriptionService {
             initialPrompt: this.options.initialPrompt,
             captureSource: this.options.captureSource,
             microphoneDeviceId: this.options.microphoneDeviceId,
-            onResult: (text) => {
-                this.options.onResult?.(text, true, undefined, undefined)
+            onResult: (text, isFinal) => {
+                this.options.onResult?.(text, isFinal, undefined, undefined)
             },
             onError: (error) => {
                 this.error = error

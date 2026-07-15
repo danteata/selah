@@ -483,7 +483,21 @@ fn handle_speech_segment(
         use tauri::Manager;
         if let Some(tm) = app.try_state::<crate::transcription::TranscriptionManager>() {
             if tm.is_model_loaded() {
-                match tm.transcribe(samples) {
+                // This segment's audio may already have been fed live to a
+                // stream (see `start_capture_with_vad`'s VAD loop), in which
+                // case finalizing it is cheaper and gives the exact text the
+                // user already saw appear live. `Ok(None)` means no stream was
+                // active (the loaded model doesn't support streaming) — fall
+                // back to a normal batch transcribe of the buffered samples.
+                let result = match tm.finalize_stream() {
+                    Ok(Some(text)) => Ok(crate::transcription::TranscriptionOutput {
+                        text,
+                        segments: Vec::new(),
+                    }),
+                    Ok(None) => tm.transcribe(samples),
+                    Err(e) => Err(e),
+                };
+                match result {
                     Ok(out) => {
                         let text = out.text.trim().to_string();
                         if !text.is_empty() {
@@ -627,6 +641,19 @@ pub fn start_capture_with_vad(
         }
     });
 
+    // Snapshot of the transcription manager + its stream router for the VAD
+    // thread to open/feed a live stream (see the loop below). `None` off the
+    // native-transcription feature, or before the model manager state exists.
+    // `TranscriptionManager` is a cheap Arc-backed clone.
+    #[cfg(feature = "native-transcription")]
+    let native_transcription_manager: Option<crate::transcription::TranscriptionManager> = {
+        use tauri::Manager;
+        app.try_state::<crate::transcription::TranscriptionManager>()
+            .map(|tm| (*tm).clone())
+    };
+    #[cfg(feature = "native-transcription")]
+    let native_stream_router = native_transcription_manager.as_ref().map(|tm| tm.stream_router());
+
     // Spawn a thread that processes audio through VAD
     std::thread::spawn(move || {
         use tauri::Emitter;
@@ -637,6 +664,10 @@ pub fn start_capture_with_vad(
         // Throttle continuous audio-feature emission to ~30fps for the visualizer.
         let mut last_features_emit = std::time::Instant::now();
         let features_interval_ms = 33u128;
+        // Edge-triggers `start_stream()` on the false->true transition below;
+        // see the streaming block inside the VAD match.
+        #[cfg(feature = "native-transcription")]
+        let mut was_speaking = false;
 
         while is_capturing.load(Ordering::SeqCst) {
             if !vad_enabled.load(Ordering::SeqCst) {
@@ -693,7 +724,34 @@ pub fn start_capture_with_vad(
             // Process through VAD
             let mut segmenter = vad_segmenter.lock();
             if let Some(ref mut vad) = *segmenter {
-                match vad.process(&samples) {
+                let segment_result = vad.process(&samples);
+
+                // Live-stream this tick's raw audio, gated on VAD speaking
+                // state rather than the segment result: a stream should open
+                // the moment speech starts (not wait for the segment to
+                // complete) and keep receiving audio through the tick that
+                // closes the segment. Scoped per VAD segment (not per
+                // session) so it composes with selah's existing
+                // segment/timestamp/verse-detection pipeline — each stream
+                // covers exactly one utterance, finalized in
+                // `handle_speech_segment` when the segment completes.
+                #[cfg(feature = "native-transcription")]
+                {
+                    let now_speaking = vad.is_speaking();
+                    if !was_speaking && now_speaking {
+                        if let Some(tm) = native_transcription_manager.as_ref() {
+                            tm.start_stream();
+                        }
+                    }
+                    if was_speaking || now_speaking {
+                        if let Some(router) = native_stream_router.as_ref() {
+                            router.feed(&samples);
+                        }
+                    }
+                    was_speaking = now_speaking;
+                }
+
+                match segment_result {
                     Ok(Some(speech_samples)) => {
                         // Complete speech segment: hand off to the transcription
                         // worker thread (see above) so a slow transcribe() call

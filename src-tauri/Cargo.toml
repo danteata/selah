@@ -39,11 +39,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 chrono = "0.4"  # For date-based log rotation
 grafton-ndi = { version = "0.11", features = ["tokio"], optional = true }
-# In-process transcription engine (Whisper via whisper.cpp + Parakeet via ONNX).
-# Optional + behind the `native-transcription` feature so the default build and
-# the existing Python sidecar path are completely unaffected until cutover.
-# Per-platform GPU backends are added in the target tables below.
-transcribe-rs = { version = "0.3.8", features = ["whisper-cpp", "onnx"], optional = true }
+# In-process transcription engine. Whisper-family (GGUF) models run through
+# transcribe-cpp; transcribe-rs is ONNX-only (Parakeet, Moonshine, SenseVoice,
+# GigaAM, Canary, Cohere). Optional + behind the `native-transcription` feature
+# so the default build and the existing Python sidecar path are completely
+# unaffected until cutover. Per-platform GPU backends are added in the target
+# tables below.
+transcribe-rs = { version = "0.3.8", features = ["onnx"], optional = true }
+transcribe-cpp = { version = "0.1", optional = true }
 
 # Platform-specific dependencies for system audio capture
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -51,7 +54,7 @@ screencapturekit = "0.3"  # macOS 12.3+ system audio capture
 core-foundation = "0.10"  # CFError type from screencapturekit
 core-media-rs = "0.3"    # RetainedAudioBufferList from screencapturekit
 core-audio-types-rs = "0.3"  # AudioBuffer type
-transcribe-rs = { version = "0.3", features = ["whisper-metal"], optional = true }  # Metal GPU on macOS
+transcribe-cpp = { version = "0.1", features = ["metal"], optional = true }  # Metal GPU on macOS
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.22"  # WASAPI loopback for system audio capture
@@ -59,10 +62,11 @@ windows = { version = "0.58", features = [
     "Win32_System_Com",
     "Win32_Foundation",
 ] }
-transcribe-rs = { version = "0.3", features = ["whisper-vulkan", "ort-directml"], optional = true }  # Vulkan + DirectML on Windows
+transcribe-rs = { version = "0.3", features = ["ort-directml"], optional = true }  # DirectML on Windows (ONNX)
+transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Windows
 
 [target.'cfg(target_os = "linux")'.dependencies]
-transcribe-rs = { version = "0.3", features = ["whisper-vulkan"], optional = true }  # Vulkan on Linux
+transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Linux
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2.0"
@@ -73,4 +77,4 @@ tauri-plugin-process = "2.0"
 default = ["custom-protocol", "native-transcription"]
 custom-protocol = ["tauri/custom-protocol"]
 ndi = ["dep:grafton-ndi"]
-native-transcription = ["dep:transcribe-rs"]
+native-transcription = ["dep:transcribe-rs", "dep:transcribe-cpp"]

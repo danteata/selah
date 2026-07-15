@@ -15,7 +15,7 @@ import { listen } from '@tauri-apps/api/event'
 import { isDesktop } from '@/platform'
 
 export type NativeEngineType =
-    | 'whisper'
+    | 'transcribecpp'
     | 'parakeet'
     | 'moonshine'
     | 'moonshinestreaming'
@@ -43,6 +43,7 @@ export interface NativeModelStatus {
     supports_language_selection: boolean
     recommended: boolean
     bundled: boolean
+    supports_streaming: boolean
     is_downloaded: boolean
     is_downloading: boolean
 }

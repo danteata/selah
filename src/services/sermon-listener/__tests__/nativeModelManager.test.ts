@@ -19,7 +19,7 @@ const sampleModel: NativeModelStatus = {
     id: 'whisper-base.en',
     name: 'Whisper Base (English)',
     description: 'Bundled offline default.',
-    engine_type: 'whisper',
+    engine_type: 'transcribecpp',
     format: 'file',
     filename: 'ggml-base.en.bin',
     url: 'https://example/ggml-base.en.bin',
@@ -32,6 +32,7 @@ const sampleModel: NativeModelStatus = {
     supports_language_selection: false,
     recommended: false,
     bundled: true,
+    supports_streaming: false,
     is_downloaded: true,
     is_downloading: false,
 }

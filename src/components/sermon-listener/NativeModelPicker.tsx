@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Check, Download, Loader2, X, Cpu, Globe, Languages, Trash2, Star } from 'lucide-react'
+import { Check, Download, Loader2, X, Cpu, Globe, Languages, Trash2, Star, Zap } from 'lucide-react'
 import {
     listNativeModels,
     downloadNativeModel,
@@ -150,6 +150,11 @@ export function NativeModelPicker({ selectedId, onSelect }: NativeModelPickerPro
                                     {m.supports_translation && (
                                         <span className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-0.5">
                                             <Languages className="w-3 h-3" /> translate
+                                        </span>
+                                    )}
+                                    {m.supports_streaming && (
+                                        <span className="text-[10px] text-[var(--accent-teal)] flex items-center gap-0.5" title="See text as you speak">
+                                            <Zap className="w-3 h-3" /> live
                                         </span>
                                     )}
                                     <span className="text-[10px] text-gray-400 dark:text-gray-500">{formatModelSize(m.size_bytes)}</span>
