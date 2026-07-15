@@ -15,7 +15,7 @@ import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
-import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, Copy, MoreHorizontal } from 'lucide-react'
+import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, Copy, MoreHorizontal, Music, Sparkles } from 'lucide-react'
 import type { Scripture } from '../../types'
 import type { Transcript } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
@@ -368,7 +368,7 @@ function SermonListenerPanelInner({
                 <SermonListenerWizard onComplete={() => setShowWizard(false)} />
             )}
             {/* Header with controls - compact inline layout */}
-            <div className={`flex items-center gap-2 ${compact ? 'p-1.5' : 'p-2'} rounded-lg bg-gray-100 dark:bg-gray-800 ${isSpeechDetected ? 'ring-2 ring-green-500/50 animate-[speech-glow_1s_ease-in-out_infinite]' : ''}`}>
+            <div className={`flex items-center flex-wrap gap-x-2 gap-y-1 ${compact ? 'p-1.5' : 'p-2'} rounded-lg bg-gray-100 dark:bg-gray-800 ${isSpeechDetected ? 'ring-2 ring-green-500/50 animate-[speech-glow_1s_ease-in-out_infinite]' : ''}`}>
                 <div className={`relative flex-shrink-0 ${isListening ? 'animate-pulse' : ''}`}>
                     {isListening ? (
                         <Square className="w-5 h-5 text-red-500" />
@@ -421,54 +421,41 @@ function SermonListenerPanelInner({
                     )}
                 </div>
 
-                {/* Auto-display detected verses - compact */}
-                <label className="flex items-center gap-1 cursor-pointer flex-shrink-0" title="Auto-display detected Bible verses on the live output">
-                    <input
-                        type="checkbox"
-                        checked={autoDisplayEnabled}
-                        onChange={(e) => setAutoDisplayEnabled(e.target.checked)}
-                        className="w-3 h-3 rounded"
-                    />
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                        Verses
-                    </span>
-                </label>
+                {/* Auto-display detected verses - icon toggle (compact, keeps Stop button on-screen at narrow panel widths) */}
+                <button
+                    onClick={() => setAutoDisplayEnabled(!autoDisplayEnabled)}
+                    className={`flex items-center justify-center w-6 h-6 rounded-md flex-shrink-0 transition-all ${autoDisplayEnabled ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                    title={`Auto-display detected Bible verses on the live output (${autoDisplayEnabled ? 'on' : 'off'})`}
+                >
+                    <Book className="w-3.5 h-3.5" />
+                </button>
 
-                {/* Auto-detect songs from the library - compact */}
-                <label className="flex items-center gap-1 cursor-pointer flex-shrink-0" title="Detect the song being sung and pull it up from the library automatically">
-                    <input
-                        type="checkbox"
-                        checked={songAutoDetect}
-                        onChange={(e) => setSongAutoDetect(e.target.checked)}
-                        className="w-3 h-3 rounded"
-                    />
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                        Songs
-                    </span>
-                </label>
+                {/* Auto-detect songs from the library - icon toggle */}
+                <button
+                    onClick={() => setSongAutoDetect(!songAutoDetect)}
+                    className={`flex items-center justify-center w-6 h-6 rounded-md flex-shrink-0 transition-all ${songAutoDetect ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                    title={`Detect the song being sung and pull it up from the library automatically (${songAutoDetect ? 'on' : 'off'})`}
+                >
+                    <Music className="w-3.5 h-3.5" />
+                </button>
 
-                {/* Audio-reactive visuals toggle - compact */}
-                <label className="flex items-center gap-1 cursor-pointer flex-shrink-0" title="Audio-reactive motion background on the live output">
-                    <input
-                        type="checkbox"
-                        checked={visualizerEnabled}
-                        onChange={(e) => setVisualizerEnabled(e.target.checked)}
-                        className="w-3 h-3 rounded"
-                    />
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                        Visuals
-                    </span>
-                </label>
+                {/* Audio-reactive visuals toggle - icon toggle */}
+                <button
+                    onClick={() => setVisualizerEnabled(!visualizerEnabled)}
+                    className={`flex items-center justify-center w-6 h-6 rounded-md flex-shrink-0 transition-all ${visualizerEnabled ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
+                    title={`Audio-reactive motion background on the live output (${visualizerEnabled ? 'on' : 'off'})`}
+                >
+                    <Sparkles className="w-3.5 h-3.5" />
+                </button>
 
                 {/* Hide to background button (only shown when listening and onHide available) */}
                 {isListening && onHide && (
                     <button
                         onClick={onHide}
-                        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all flex-shrink-0"
+                        className="flex items-center justify-center w-6 h-6 rounded-md text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-all flex-shrink-0"
                         title="Minimize panel — keep listening in background"
                     >
-                        <Minimize2 className="w-3 h-3" />
-                        <span className="hidden sm:inline">Minimize</span>
+                        <Minimize2 className="w-3.5 h-3.5" />
                     </button>
                 )}
 
