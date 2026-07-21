@@ -24,6 +24,7 @@ import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSetti
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import { EmbeddingSyncIndicator } from '../components/settings/EmbeddingSyncIndicator'
+import { SubscriptionBanner } from '../components/licensing/SubscriptionBanner'
 import type { Slide, ExtendedFileT } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
 
@@ -440,6 +441,8 @@ export default function Dashboard() {
             showAdminPanel={showAdminPanel}
             onToggleAdminPanel={() => setShowAdminPanel(prev => !prev)}
         >
+            <SubscriptionBanner />
+
             {workspaceMode === 'dashboard' ? (
                 <DashboardLayout
                     showSermonListener={showSermonListener}

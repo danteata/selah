@@ -23,7 +23,7 @@ import {
     type ReactNode,
 } from 'react'
 import { useAuth } from '@clerk/clerk-react'
-import { useAction, useQuery, useConvex } from 'convex/react'
+import { useAction, useMutation, useQuery, useConvex } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { isDesktop } from '../platform'
 
@@ -57,6 +57,10 @@ export interface Entitlements {
     plan: Plan
     /** Currently entitled to Pro features (active, or expired-but-in-grace). */
     isPro: boolean
+    /** Pro is being conferred by the free trial (status "trialing", still valid). */
+    isTrial: boolean
+    /** Whole days left in the trial (rounded up), or null when not trialing. */
+    trialDaysLeft: number | null
     /** Past `expiresAt` but still inside the offline grace window. */
     inGrace: boolean
     /** End of the paid period (ISO), or null on free. */
@@ -90,6 +94,8 @@ export interface PromoValidation {
 const DEFAULT: Entitlements = {
     plan: 'free',
     isPro: false,
+    isTrial: false,
+    trialDaysLeft: null,
     inGrace: false,
     expiresAt: null,
     status: 'none',
@@ -108,12 +114,24 @@ export function useEntitlements(): Entitlements {
     return useContext(LicenseContext)
 }
 
+/** Whole days from now until `iso` (rounded up, clamped at 0), or null. */
+function daysUntil(iso: string | null | undefined): number | null {
+    if (!iso) return null
+    const ms = new Date(iso).getTime() - Date.now()
+    return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)))
+}
+
 async function openUrl(url: string): Promise<void> {
     if (isDesktop()) {
+        // Desktop: hand off to the system browser (keeps the webview/session put).
         const { open } = await import('@tauri-apps/plugin-shell')
         await open(url)
     } else {
-        window.open(url, '_blank', 'noopener')
+        // Web: navigate the current tab. A popup opened via window.open() here
+        // would be blocked — it runs after an await (the Convex action), outside
+        // the click's user-gesture window. Paystack redirects back to
+        // /billing/return when done; the app reloads with the synced plan.
+        window.location.assign(url)
     }
 }
 
@@ -123,6 +141,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     const initializeProCheckout = useAction(api.paystack.initializeProCheckout)
     const getManageLink = useAction(api.paystack.getSubscriptionManageLink)
     const redeemCompAction = useAction(api.promos.redeemComp)
+    const ensureTrial = useMutation(api.licensing.ensureTrial)
 
     // Web path: read the subscription row directly. Skipped on desktop (and
     // when signed out, the query returns null).
@@ -173,10 +192,48 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
         }
     }, [isLoaded, refreshDesktop])
 
+    // Re-check the license whenever the window regains focus. Checkout opens in
+    // the *system browser*, so when the user finishes paying and switches back
+    // to the desktop app this picks up the new subscription within seconds
+    // (once the Paystack webhook has synced it) — no restart, no 6h wait.
+    useEffect(() => {
+        if (!isDesktop()) return
+        const onFocus = () => void refreshDesktop()
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') void refreshDesktop()
+        }
+        window.addEventListener('focus', onFocus)
+        document.addEventListener('visibilitychange', onVisible)
+        return () => {
+            window.removeEventListener('focus', onFocus)
+            document.removeEventListener('visibilitychange', onVisible)
+        }
+    }, [refreshDesktop])
+
     // Web loading flips off once the query resolves (undefined → settled).
     useEffect(() => {
         if (!isDesktop()) setLoading(webSub === undefined && !!isSignedIn)
     }, [webSub, isSignedIn])
+
+    // Start (or confirm) the free trial on sign-in. Idempotent server-side, so
+    // it's safe to fire on every mount; on desktop we re-fetch the license after
+    // so a freshly-granted trial shows up without waiting for the 6h refresh.
+    useEffect(() => {
+        if (!isLoaded || !isSignedIn) return
+        let cancelled = false
+        void (async () => {
+            try {
+                await ensureTrial({})
+            } catch {
+                // Non-fatal: an existing subscriber or a transient error just
+                // means no trial row is created; entitlements resolve as normal.
+            }
+            if (!cancelled && isDesktop()) await refreshDesktop()
+        })()
+        return () => {
+            cancelled = true
+        }
+    }, [isLoaded, isSignedIn, ensureTrial, refreshDesktop])
 
     const refresh = useCallback(async () => {
         if (isDesktop()) await refreshDesktop()
@@ -185,9 +242,17 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
 
     const startProCheckout = useCallback(
         async (promoCode?: string) => {
-            const { authorizationUrl } = await initializeProCheckout(
-                promoCode ? { promoCode } : {}
-            )
+            // On web, return the user to the origin they started from (prod,
+            // a custom domain, or localhost in dev) rather than the fixed
+            // PAYSTACK_CALLBACK_URL. On desktop we leave it unset so checkout
+            // (in the system browser) falls back to that public return page.
+            const callbackUrl = isDesktop()
+                ? undefined
+                : `${window.location.origin}/#/billing/return?src=web`
+            const { authorizationUrl } = await initializeProCheckout({
+                ...(promoCode ? { promoCode } : {}),
+                ...(callbackUrl ? { callbackUrl } : {}),
+            })
             await openUrl(authorizationUrl)
         },
         [initializeProCheckout]
@@ -217,9 +282,12 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     if (isDesktop()) {
         const s = desktopStatus
         const isPro = !!s && s.plan === 'pro' && s.entitled
+        const isTrial = isPro && s?.status === 'trialing'
         value = {
             plan: isPro ? 'pro' : 'free',
             isPro,
+            isTrial,
+            trialDaysLeft: isTrial ? daysUntil(s?.expires_at) : null,
             inGrace: !!s?.in_grace,
             expiresAt: s?.expires_at ?? null,
             status: s?.status ?? 'none',
@@ -241,9 +309,12 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
             webSub.plan === 'pro' &&
             webSub.status !== 'cancelled' &&
             (withinPeriod || webSub.status === 'active')
+        const isTrial = isPro && webSub?.status === 'trialing'
         value = {
             plan: isPro ? 'pro' : 'free',
             isPro,
+            isTrial,
+            trialDaysLeft: isTrial ? daysUntil(webSub?.currentPeriodEnd) : null,
             inGrace: false,
             expiresAt: webSub?.currentPeriodEnd ?? null,
             status: webSub?.status ?? 'none',

@@ -22,7 +22,7 @@
  *   - Rotate by bumping LICENSE_KEY_ID and shipping an app that trusts both keys.
  */
 
-import { internalQuery, internalMutation } from './_generated/server'
+import { internalQuery, internalMutation, mutation, type MutationCtx } from './_generated/server'
 import { v } from 'convex/values'
 import * as ed from '@noble/ed25519'
 import { sha512 } from '@noble/hashes/sha2.js'
@@ -36,6 +36,8 @@ export const LICENSE_VERSION = 1
 export const LICENSE_KEY_ID = 'k1'
 /** Default offline grace window applied when a subscription has none set. */
 export const DEFAULT_GRACE_PERIOD_DAYS = 14
+/** Length of the card-free Pro trial granted on first sign-in. */
+export const TRIAL_DAYS = 14
 
 export type Plan = 'free' | 'pro'
 
@@ -159,7 +161,7 @@ export interface SubscriptionRow {
     email: string
     userId?: string
     plan: Plan
-    status: 'active' | 'non-renewing' | 'attention' | 'past_due' | 'cancelled'
+    status: 'trialing' | 'active' | 'non-renewing' | 'attention' | 'past_due' | 'cancelled'
     paystackCustomerCode?: string
     paystackSubscriptionCode?: string
     paystackPlanCode?: string
@@ -451,5 +453,71 @@ export const finalizeRollover = internalMutation({
             promoCode: undefined,
             updatedAt: new Date().toISOString(),
         })
+    },
+})
+
+// --- free trial -------------------------------------------------------------
+
+/**
+ * Grant the card-free 14-day Pro trial, but ONLY to an email that has never had
+ * a subscription row. Because trial rows are never deleted (an expired trial
+ * lingers with `status: 'trialing'` and a past `currentPeriodEnd`), the mere
+ * existence of a row means the user has already trialed, is paying, or was
+ * comped — so this is safe to call idempotently on every sign-in.
+ *
+ * A plain helper (not a Convex function) so it can run inside any mutation's
+ * transaction — `upsertUser` calls it at signup, and `ensureTrial` calls it for
+ * every subsequent sign-in.
+ */
+export async function maybeStartTrial(
+    ctx: MutationCtx,
+    args: { email: string; userId?: string | null }
+): Promise<void> {
+    const email = args.email.toLowerCase()
+
+    const existing = await ctx.db
+        .query('subscriptions')
+        .withIndex('by_email', (q) => q.eq('email', email))
+        .unique()
+    if (existing) return
+
+    const now = new Date()
+    const nowIso = now.toISOString()
+    const end = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString()
+
+    // Link to a Selah user if one already exists for this email.
+    const userId =
+        args.userId ??
+        (
+            await ctx.db
+                .query('users')
+                .withIndex('by_email', (q) => q.eq('email', email))
+                .unique()
+        )?._id
+
+    await ctx.db.insert('subscriptions', {
+        email,
+        userId: userId ?? undefined,
+        plan: 'pro',
+        status: 'trialing',
+        source: 'trial',
+        currentPeriodEnd: end,
+        gracePeriodDays: DEFAULT_GRACE_PERIOD_DAYS,
+        lastEventAt: nowIso,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+    })
+}
+
+/**
+ * Public entry point the client calls once per sign-in to make sure the trial
+ * clock has been started for the current user. Idempotent (see maybeStartTrial).
+ */
+export const ensureTrial = mutation({
+    args: {},
+    handler: async (ctx) => {
+        const identity = await ctx.auth.getUserIdentity()
+        if (!identity?.email) return
+        await maybeStartTrial(ctx, { email: identity.email })
     },
 })

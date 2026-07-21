@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
+import { useEntitlements, type PromoValidation } from '../../providers/LicenseProvider'
+import { toast } from 'sonner'
 import { BibleVersionSettings } from './BibleVersionSettings'
 import { SermonListenerSettings } from '../sermon-listener'
 import { TeamManagementPanel } from '../team/TeamManagementPanel'
@@ -14,7 +16,7 @@ import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
 
-type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
+type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'billing' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -91,6 +93,8 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         { id: 'sermon-listener' as const, label: 'Sermon Listener', icon: Mic },
         ...(isAdmin && currentUser?.churchId ? [{ id: 'team' as const, label: 'Team', icon: Users }] : []),
         { id: 'profile' as const, label: 'Profile', icon: User },
+        // Billing is managed by the account admin / church creator only.
+        ...(isAdmin ? [{ id: 'billing' as const, label: 'Plan & Billing', icon: CreditCard }] : []),
         { id: 'storage' as const, label: 'Storage', icon: HardDrive },
         { id: 'updates' as const, label: 'Updates', icon: RefreshCw },
         { id: 'shortcuts' as const, label: 'Shortcuts', icon: Keyboard },
@@ -211,6 +215,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                             <TeamManagementPanel churchId={currentUser.churchId} isAdmin={isAdmin} />
                         )}
                         {activeTab === 'profile' && <ProfileSettings />}
+                        {activeTab === 'billing' && isAdmin && <BillingSettings />}
                         {activeTab === 'storage' && <StorageSettings />}
                         {activeTab === 'updates' && <UpdatesSettings />}
                         {activeTab === 'shortcuts' && <ShortcutsSettings />}
@@ -255,10 +260,25 @@ function DisplaySettings({
         stopOutput: ndiStop,
         state: ndiState,
     } = useNdiOutput()
+    const { isPro, startProCheckout } = useEntitlements()
     const [localMonitorId, setLocalMonitorId] = useState<string | null>(null)
     const [flashingId, setFlashingId] = useState<string | null>(null)
 
     const selectedMonitorId = localMonitorId ?? savedMonitorId
+
+    // NDI network streaming is a Pro feature. Free/expired-trial users see an
+    // upsell instead of starting the output.
+    const handleNdiStart = useCallback(() => {
+        if (!isPro) {
+            toast.warning('NDI output is a Selah Pro feature', {
+                description: 'Upgrade to stream your live output over the network via NDI.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        void ndiStart()
+    }, [isPro, startProCheckout, ndiStart])
 
     const handleIdentify = useCallback(async (monitorId: string) => {
         if (flashingId) return
@@ -484,12 +504,17 @@ function DisplaySettings({
                             </button>
                         ) : (
                             <button
-                                onClick={() => ndiStart()}
+                                onClick={handleNdiStart}
                                 disabled={ndiLoading}
                                 className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50"
                             >
                                 <Radio className="w-3.5 h-3.5" />
                                 Start NDI
+                                {!isPro && (
+                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
+                                        Pro
+                                    </span>
+                                )}
                             </button>
                         )
                     )}
@@ -899,6 +924,220 @@ function BibleSettings({
 }
 
 // Profile Settings Tab
+// Plan & Billing Tab — shows the user's current plan/trial/subscription and the
+// actions to upgrade, manage (Paystack-hosted), or redeem a code. All data comes
+// from useEntitlements(); there's no billing state local to this component.
+function BillingSettings() {
+    const {
+        isPro,
+        isTrial,
+        trialDaysLeft,
+        inGrace,
+        expiresAt,
+        status,
+        startProCheckout,
+        manageSubscription,
+        redeemComp,
+        validatePromo,
+    } = useEntitlements()
+
+    const [busy, setBusy] = useState<null | 'checkout' | 'manage'>(null)
+    const [error, setError] = useState<string | null>(null)
+
+    const [showPromo, setShowPromo] = useState(false)
+    const [code, setCode] = useState('')
+    const [checking, setChecking] = useState(false)
+    const [promo, setPromo] = useState<PromoValidation | null>(null)
+
+    const planLabel = isTrial ? 'Pro — Free trial' : isPro ? 'Pro' : 'Free'
+    const badgeTone = isTrial
+        ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
+        : isPro
+          ? 'bg-teal-500/15 text-teal-600 dark:text-teal-400'
+          : 'bg-gray-400/15 text-gray-600 dark:text-gray-300'
+
+    const fmtDate = (iso: string | null) =>
+        iso
+            ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+            : '—'
+
+    // What the "when does it end" row means depends on the plan.
+    const periodRow = isTrial
+        ? { label: 'Trial ends', value: `${fmtDate(expiresAt)}${trialDaysLeft !== null ? ` (${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left)` : ''}` }
+        : isPro
+          ? { label: status === 'non-renewing' ? 'Access until' : 'Renews on', value: fmtDate(expiresAt) }
+          : null
+
+    async function checkout() {
+        setBusy('checkout')
+        setError(null)
+        try {
+            await startProCheckout(promo?.valid && promo.kind === 'discount' ? code.trim() : undefined)
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Could not open checkout')
+        } finally {
+            setBusy(null)
+        }
+    }
+
+    async function manage() {
+        setBusy('manage')
+        setError(null)
+        try {
+            await manageSubscription()
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Could not open the manage page')
+        } finally {
+            setBusy(null)
+        }
+    }
+
+    async function applyPromo() {
+        const trimmed = code.trim()
+        if (!trimmed) return
+        setChecking(true)
+        setError(null)
+        try {
+            setPromo(await validatePromo(trimmed))
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Could not check that code')
+        } finally {
+            setChecking(false)
+        }
+    }
+
+    async function redeem() {
+        setBusy('checkout')
+        setError(null)
+        try {
+            await redeemComp(code.trim())
+            setPromo(null)
+            setCode('')
+            setShowPromo(false)
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Could not redeem that code')
+        } finally {
+            setBusy(null)
+        }
+    }
+
+    const isComp = promo?.valid && promo.kind === 'comp'
+
+    return (
+        <div className="space-y-5">
+            {/* Current plan */}
+            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800 space-y-3">
+                <div className="flex items-center justify-between">
+                    <span className="text-sm text-[var(--text-muted)]">Current plan</span>
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${badgeTone}`}>
+                        {planLabel}
+                    </span>
+                </div>
+                <dl className="text-sm space-y-2">
+                    {periodRow && (
+                        <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-2">
+                            <dt className="text-[var(--text-muted)]">{periodRow.label}</dt>
+                            <dd className="font-medium">{periodRow.value}</dd>
+                        </div>
+                    )}
+                    {isPro && !isTrial && (
+                        <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-2">
+                            <dt className="text-[var(--text-muted)]">Status</dt>
+                            <dd className="font-medium capitalize">{status.replace('_', ' ')}</dd>
+                        </div>
+                    )}
+                </dl>
+                {inGrace && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                        Your subscription has expired but Pro is still active during the offline grace window. Reconnect to renew.
+                    </p>
+                )}
+                {!isPro && (
+                    <p className="text-xs text-[var(--text-muted)]">
+                        You’re on the Free plan. Sermon sessions are capped at 40 minutes, teams at 2 members, and NDI output is off.
+                    </p>
+                )}
+            </div>
+
+            {/* Primary actions */}
+            <div className="flex flex-wrap gap-2">
+                {!isPro || isTrial ? (
+                    <button
+                        onClick={checkout}
+                        disabled={busy !== null}
+                        className="flex items-center gap-2 rounded-lg bg-[var(--accent-teal)] px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
+                    >
+                        <Zap className="w-4 h-4" />
+                        {busy === 'checkout' ? 'Opening…' : 'Upgrade to Pro'}
+                    </button>
+                ) : null}
+                {isPro && !isTrial && (
+                    <button
+                        onClick={manage}
+                        disabled={busy !== null}
+                        className="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                    >
+                        {busy === 'manage' ? 'Opening…' : 'Manage subscription'}
+                    </button>
+                )}
+            </div>
+
+            {/* Promo / comp code */}
+            {showPromo ? (
+                <div className="space-y-2">
+                    <div className="flex gap-2">
+                        <input
+                            value={code}
+                            onChange={(e) => {
+                                setCode(e.target.value)
+                                setPromo(null)
+                            }}
+                            onKeyDown={(e) => e.key === 'Enter' && applyPromo()}
+                            placeholder="Promo code"
+                            className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm uppercase tracking-wide text-gray-800 placeholder:normal-case placeholder:tracking-normal dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        />
+                        <button
+                            onClick={applyPromo}
+                            disabled={checking || !code.trim()}
+                            className="rounded-md bg-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-60 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                        >
+                            {checking ? '…' : 'Apply'}
+                        </button>
+                    </div>
+                    {promo &&
+                        (promo.valid ? (
+                            <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs text-green-600 dark:text-green-400">
+                                    {promo.kind === 'comp'
+                                        ? `Free Pro for ${promo.compDays} days${promo.description ? ` — ${promo.description}` : ''}`
+                                        : `Discount applied${promo.introCycles ? ` for ${promo.introCycles} billing cycles` : ''}${promo.description ? ` — ${promo.description}` : ''}`}
+                                </p>
+                                <button
+                                    onClick={isComp ? redeem : checkout}
+                                    disabled={busy !== null}
+                                    className="whitespace-nowrap rounded-md bg-[var(--accent-teal)] px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-60"
+                                >
+                                    {busy ? 'Working…' : isComp ? `Activate ${promo.compDays ?? ''} days` : 'Upgrade with discount'}
+                                </button>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-red-600 dark:text-red-400">{promo.reason}</p>
+                        ))}
+                </div>
+            ) : (
+                <button
+                    onClick={() => setShowPromo(true)}
+                    className="text-xs font-medium text-[var(--accent-teal)] underline-offset-2 hover:underline"
+                >
+                    Have a promo code?
+                </button>
+            )}
+
+            {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+        </div>
+    )
+}
+
 function ProfileSettings() {
     const { currentUser } = useUserRole()
     return (

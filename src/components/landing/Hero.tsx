@@ -110,7 +110,7 @@ export function Hero({ started }: { started: boolean }) {
 
         <div className="mt-7 flex flex-wrap justify-center items-center gap-x-6 gap-y-2 text-[13px] text-zinc-500">
           {[
-            { label: 'Free during beta', check: true },
+            { label: '14-day free trial', check: true },
             { label: 'No credit card', check: true },
             { label: 'Works fully offline', check: true },
             { label: 'Under 30-min setup', check: true },

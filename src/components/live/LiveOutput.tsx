@@ -3,6 +3,8 @@ import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Li
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
+import { useEntitlements } from '../../providers/LicenseProvider'
+import { toast } from 'sonner'
 import { useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import { generateSlideContent, calculateScreenFontSize } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
@@ -86,6 +88,24 @@ export function LiveOutput() {
         startOutput: ndiStart,
         stopOutput: ndiStop,
     } = useNdiOutput()
+    const { isPro, startProCheckout } = useEntitlements()
+
+    // NDI network streaming is Pro-only; free users get an upsell.
+    const handleNdiToggle = useCallback(() => {
+        if (ndiRunning) {
+            void ndiStop()
+            return
+        }
+        if (!isPro) {
+            toast.warning('NDI output is a Selah Pro feature', {
+                description: 'Upgrade to stream your live output over the network via NDI.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        void ndiStart()
+    }, [ndiRunning, isPro, startProCheckout, ndiStart, ndiStop])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -565,9 +585,9 @@ export function LiveOutput() {
                 <div className="flex items-center gap-2">
                     {ndiAvailable && (
                         <button
-                            onClick={ndiRunning ? () => ndiStop() : () => ndiStart()}
+                            onClick={handleNdiToggle}
                             className={`p-1.5 rounded-lg transition-colors ${ndiRunning ? 'text-[var(--accent-teal)] bg-[var(--accent-teal)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
-                            title="NDI Output"
+                            title={isPro ? 'NDI Output' : 'NDI Output (Pro)'}
                         >
                             <Radio className="w-4 h-4" />
                         </button>

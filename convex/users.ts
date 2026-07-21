@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { maybeStartTrial } from "./licensing";
 
 // Role type
 export type UserRole = "superadmin" | "admin" | "member";
@@ -100,6 +101,9 @@ export const upsertUser = mutation({
                 churchId: args.churchId || existingUser.churchId,
                 updatedAt: now,
             });
+            // Start the free trial on first sign-in (no-op if they already have
+            // a subscription row — trial, comp, or paid).
+            await maybeStartTrial(ctx, { email: args.email, userId: existingUser._id });
             return existingUser._id;
         } else {
             // Check if this is the first user (make them superadmin)
@@ -119,6 +123,8 @@ export const upsertUser = mutation({
                 createdAt: now,
                 updatedAt: now,
             });
+            // Every brand-new account starts a 14-day Pro trial.
+            await maybeStartTrial(ctx, { email: args.email, userId });
             return userId;
         }
     },

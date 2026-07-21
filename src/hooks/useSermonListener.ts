@@ -10,6 +10,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { toast } from 'sonner'
+import { useEntitlements } from '../providers/LicenseProvider'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { isDesktop } from '../platform'
@@ -244,9 +246,14 @@ export interface SermonListenerActions {
     changeBibleVersion: (versionId: string) => void
     /** Manually set one detected verse as current */
     setCurrentDetectedVerse: (verse: DetectedVerse) => Promise<void>
+    /** Open the OS Screen & System Audio Recording settings page (macOS desktop) */
+    openScreenCaptureSettings: () => Promise<void>
 }
 
 export type UseSermonListenerReturn = SermonListenerState & SermonListenerActions
+
+/** Free-plan cap on a single sermon session. Pro/trial is unlimited. */
+const FREE_SERMON_LIMIT_MS = 40 * 60 * 1000
 
 /**
  * Hook for listening to sermons and detecting Bible verse references
@@ -275,6 +282,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         [createBibleSlide]
     )
     const { trackEvent } = useAnalytics()
+    const { isPro, startProCheckout } = useEntitlements()
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const bibleVersions = useAppStore((state) => state.bibleVersions)
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
@@ -2177,6 +2185,34 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             return false
         }
 
+        // System-audio capture on desktop runs through the OS screen-recording
+        // permission (macOS: "Screen & System Audio Recording"). That system
+        // prompt is shown only ONCE — if the user previously declined or
+        // dismissed it, macOS never prompts again and ScreenCaptureKit fails
+        // silently. Detect the grant up front: request it (a no-op after a prior
+        // decline) and, if still not granted, route the user to Settings instead
+        // of spinning up a capture that will die with no signal.
+        if (isDesktop() && sermonSettings?.captureSource === 'system') {
+            try {
+                const { invoke } = await import('@tauri-apps/api/core')
+                let granted = await invoke<boolean>('check_screen_capture_permission')
+                if (!granted) {
+                    granted = await invoke<boolean>('request_screen_capture_permission')
+                }
+                if (!granted) {
+                    const msg = 'Selah needs Screen & System Audio Recording permission to capture system audio. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable Selah, then restart the app.'
+                    setError(msg)
+                    onError?.(msg)
+                    trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, { reason: 'screen_capture_denied' })
+                    return false
+                }
+            } catch (err) {
+                // Non-fatal (e.g. web build or IPC hiccup): fall through and let
+                // the capture attempt surface any real error downstream.
+                console.warn('[useSermonListener] Screen capture permission check failed:', err)
+            }
+        }
+
         // Lazily initialize the provider when the user starts listening.
         // This avoids blocking the UI for 60s on app startup.
         if (!providerReady && provider !== 'web-speech') {
@@ -2529,6 +2565,34 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         return () => clearInterval(timer)
     }, [isListening])
 
+    // Free-tier limit: end a session automatically once it hits 40 minutes, and
+    // nudge toward Pro. Pro/trial users are unlimited. We arm the timer off the
+    // real session start time so it's correct even if entitlements resolve late.
+    useEffect(() => {
+        if (!isListening || isPro) return
+        const started = sessionStartTimeRef.current || Date.now()
+        const remaining = FREE_SERMON_LIMIT_MS - (Date.now() - started)
+        const enforce = () => {
+            stopRef.current()
+            toast.warning('Free plan sessions are capped at 40 minutes', {
+                description: 'Upgrade to Selah Pro for unlimited sermon recording.',
+                duration: 10000,
+                action: {
+                    label: 'Upgrade',
+                    onClick: () => {
+                        void startProCheckout()
+                    },
+                },
+            })
+        }
+        if (remaining <= 0) {
+            enforce()
+            return
+        }
+        const timer = setTimeout(enforce, remaining)
+        return () => clearTimeout(timer)
+    }, [isListening, isPro, startProCheckout])
+
     /**
      * Reset state
      */
@@ -2644,6 +2708,18 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
     }, [transcript])
 
+    // Deep-link to the OS Screen & System Audio Recording settings page. This is
+    // the only recovery once the one-shot macOS permission prompt was declined —
+    // the user enables Selah there and restarts.
+    const openScreenCaptureSettings = useCallback(async () => {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core')
+            await invoke('open_screen_capture_settings')
+        } catch (err) {
+            console.warn('[useSermonListener] Failed to open screen capture settings:', err)
+        }
+    }, [])
+
     // No auto-stop on unmount: panel hide/show should not reset active listener session.
 
     return {
@@ -2691,6 +2767,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         previousVerse,
         changeBibleVersion,
         setCurrentDetectedVerse,
+        openScreenCaptureSettings,
     }
 }
 

@@ -111,6 +111,62 @@ pub fn is_system_audio_supported() -> bool {
     }
 }
 
+/// Machine-parseable error the frontend detects to show the "grant permission"
+/// recovery flow. Do not change the string without updating classifyTranscriptionError.
+pub const SCREEN_CAPTURE_PERMISSION_DENIED: &str = "SCREEN_CAPTURE_PERMISSION_DENIED";
+
+/// Tauri command: Check whether Screen & System Audio Recording permission is
+/// granted. On macOS this reflects the TCC grant WITHOUT triggering a prompt.
+/// Other platforms don't gate system-audio loopback behind this, so they return true.
+#[tauri::command]
+pub fn check_screen_capture_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::screen_capture_access_granted()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Tauri command: Request Screen & System Audio Recording permission.
+///
+/// On macOS the system prompt appears only the FIRST time. Once the user has
+/// declined (or dismissed) it, macOS never prompts again and this returns false
+/// immediately — the user must enable it manually via `open_screen_capture_settings`.
+/// Returns whether access is granted afterwards.
+#[tauri::command]
+pub fn request_screen_capture_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::request_screen_capture_access()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Tauri command: Open the OS settings page where the user grants Screen &
+/// System Audio Recording permission. This is the only recovery path once the
+/// one-shot system prompt has been declined.
+#[tauri::command]
+pub fn open_screen_capture_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .spawn()
+            .map_err(|e| format!("Failed to open System Settings: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
 /// Tauri command: Start audio capture with specified type
 #[tauri::command]
 pub fn start_capture(
@@ -145,6 +201,18 @@ fn start_audio_capture_internal(
 ) -> Result<(), String> {
     if state.is_capturing.load(Ordering::SeqCst) {
         return Err("Already capturing".to_string());
+    }
+
+    // Fail fast on macOS when system-audio capture is requested without the
+    // Screen & System Audio Recording grant. Otherwise the ScreenCaptureKit
+    // thread would spawn, hit "user declined TCCs", and die silently — leaving
+    // the UI stuck with no signal. Returning here lets the frontend surface the
+    // grant-permission recovery flow.
+    #[cfg(target_os = "macos")]
+    if matches!(capture_type, CaptureType::System)
+        && !macos::screen_capture_access_granted()
+    {
+        return Err(SCREEN_CAPTURE_PERMISSION_DENIED.to_string());
     }
 
     // Set chunk duration if provided

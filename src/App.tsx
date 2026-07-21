@@ -30,6 +30,7 @@ const LoginPage = lazy(() => import('./pages/auth/Login'))
 const SignupPage = lazy(() => import('./pages/auth/Signup'))
 const TestPage = lazy(() => import('./pages/TestPage'))
 const Downloads = lazy(() => import('./pages/Downloads'))
+const BillingReturn = lazy(() => import('./pages/BillingReturn'))
 // Desktop OAuth handoff routes. Both render only on the web build —
 // on Tauri they fall through to the regular dashboard (see the
 // `isDesktop()` guard inside each page). These are mounted at the
@@ -211,6 +212,7 @@ function AppRoutes() {
                         <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
                         <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
                         <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
+                        <Route path="/billing/return" element={<RouteErrorBoundary name="billing-return"><BillingReturn /></RouteErrorBoundary>} />
                         <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
                         <Route path="/desktop-oauth-done" element={<RouteErrorBoundary name="oauth-done"><DesktopOAuthDone /></RouteErrorBoundary>} />
                         <Route
@@ -235,8 +237,8 @@ function AppRoutes() {
                     <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
                     <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
                     <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
+                    <Route path="/billing/return" element={<RouteErrorBoundary name="billing-return"><BillingReturn /></RouteErrorBoundary>} />
                     <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
-                    <Route path="/desktop-oauth-done" element={<RouteErrorBoundary name="oauth-done"><DesktopOAuthDone /></RouteErrorBoundary>} />
                     <Route
                         path="/"
                         element={

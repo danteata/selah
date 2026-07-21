@@ -17,6 +17,7 @@ export const transcriptionErrorCodes = {
     INVALID_AUDIO: 'invalid_audio',
     MICROPHONE_DENIED: 'microphone_denied',
     MICROPHONE_NOT_FOUND: 'mic_not_found',
+    SCREEN_CAPTURE_DENIED: 'screen_capture_denied',
     VAD_LOAD_FAILED: 'vad_load_failed',
     TRANSCRIPTION_TIMEOUT: 'transcription_timeout',
     INTERNAL_ERROR: 'internal_error',
@@ -24,13 +25,14 @@ export const transcriptionErrorCodes = {
 
 export type TranscriptionErrorCode = typeof transcriptionErrorCodes[keyof typeof transcriptionErrorCodes]
 
-export type UserErrorCode = 'invalid_audio' | 'microphone_denied' | 'mic_not_found' | 'model_not_found' | 'vad_load_failed'
+export type UserErrorCode = 'invalid_audio' | 'microphone_denied' | 'mic_not_found' | 'screen_capture_denied' | 'model_not_found' | 'vad_load_failed'
 export type RetryableErrorCode = 'server_not_running' | 'server_busy' | 'server_crashed' | 'network_timeout' | 'transcription_timeout'
 
 const USER_ERRORS: Set<string> = new Set([
     transcriptionErrorCodes.INVALID_AUDIO,
     transcriptionErrorCodes.MICROPHONE_DENIED,
     transcriptionErrorCodes.MICROPHONE_NOT_FOUND,
+    transcriptionErrorCodes.SCREEN_CAPTURE_DENIED,
     transcriptionErrorCodes.MODEL_NOT_FOUND,
     transcriptionErrorCodes.VAD_LOAD_FAILED,
 ])
@@ -82,6 +84,12 @@ export function getUserAction(code: string): string | null {
         }
         case transcriptionErrorCodes.MICROPHONE_NOT_FOUND:
             return 'Connect a microphone and try again.'
+        case transcriptionErrorCodes.SCREEN_CAPTURE_DENIED:
+            // macOS only. System-audio capture runs through ScreenCaptureKit,
+            // gated by the "Screen & System Audio Recording" permission. The OS
+            // prompt appears only once, so after a decline the sole fix is to
+            // enable it manually and relaunch.
+            return 'Selah needs Screen & System Audio Recording permission to capture system audio. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable Selah, then restart the app.'
         case transcriptionErrorCodes.MODEL_NOT_FOUND:
             return 'Download the whisper model in settings.'
         case transcriptionErrorCodes.VAD_LOAD_FAILED:
@@ -137,6 +145,16 @@ export function classifyTranscriptionError(error: unknown): TranscriptionErrorCo
     const message = error instanceof Error ? error.message : String(error)
     const lower = message.toLowerCase()
 
+    // Screen-recording / system-audio TCC denial (macOS). Check before the
+    // generic microphone-permission rule below, since both mention "declined".
+    if (
+        lower.includes('screen_capture_permission_denied') ||
+        lower.includes('declined tccs') ||
+        lower.includes('shareable content') ||
+        (lower.includes('screen') && lower.includes('recording'))
+    ) {
+        return transcriptionErrorCodes.SCREEN_CAPTURE_DENIED
+    }
     if (lower.includes('permission') || lower.includes('notallowederror') || lower.includes('not allowed')) {
         return transcriptionErrorCodes.MICROPHONE_DENIED
     }

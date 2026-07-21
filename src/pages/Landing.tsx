@@ -57,9 +57,9 @@ const collabModes = [
 ]
 
 const betaPerks = [
-    { title: 'Free during beta', description: 'Full access at no cost while we build together.' },
+    { title: '14-day free trial', description: 'Full Pro access for two weeks — no credit card required.' },
     { title: 'Direct line to the team', description: 'Your feedback lands in our build queue, not a support ticket.' },
-    { title: 'Locked-in early-bird pricing', description: '50% off your plan for life when we officially launch.' },
+    { title: 'Free plan after your trial', description: 'Keep running Selah on the Free plan, or upgrade to Pro anytime.' },
     { title: 'Onboard with us, not a tutorial', description: 'We will personally help your first service go live.' },
 ]
 
@@ -113,7 +113,7 @@ function NavBar({
         { href: '#sermon-listener', label: 'Sermon Listener' },
         { href: '#features', label: 'Features' },
         { href: '#dashboard', label: 'Dashboard' },
-        { href: '#early-access', label: 'Beta' },
+        { href: '#pricing', label: 'Pricing' },
     ]
 
     return (
@@ -178,7 +178,7 @@ function NavBar({
                                 boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.2)',
                             }}
                         >
-                            Get Started Free
+                            Start free trial
                             <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                         </Link>
                     </div>
@@ -225,7 +225,7 @@ function NavBar({
                                 className="block w-full py-3 text-center text-sm font-semibold rounded-full text-[#08090c]"
                                 style={{ background: 'linear-gradient(135deg, #14b8a6, #0d9488)' }}
                             >
-                                Get Started Free
+                                Start free trial
                             </Link>
                         </div>
                     </div>
@@ -890,6 +890,145 @@ function StandoutSection() {
 // Early Access — the closing CTA. Calm, confident, no hard sell.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pricing — Free vs Pro
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Keep in sync with the Paystack "Pro" plan (PAYSTACK_PRO_PLAN_CODE).
+const PRO_PRICE = { currency: 'GHS', amount: 120, interval: 'mo' }
+
+const freePlanFeatures = [
+    { label: 'Sermon transcription — 40 min / session', included: true },
+    { label: 'Up to 2 team members', included: true },
+    { label: 'Slides, songs & service order', included: true },
+    { label: 'Works fully offline', included: true },
+    { label: 'NDI network output', included: false },
+    { label: 'Unlimited recording & team', included: false },
+]
+
+const proPlanFeatures = [
+    { label: 'Everything in Free', included: true },
+    { label: 'Unlimited sermon recording', included: true },
+    { label: 'Unlimited team members', included: true },
+    { label: 'NDI network output', included: true },
+    { label: 'Multi-monitor pro output', included: true },
+    { label: 'Priority support', included: true },
+]
+
+function PlanCard({
+    name,
+    price,
+    tagline,
+    features,
+    highlight,
+    cta,
+}: {
+    name: string
+    price: string
+    tagline: string
+    features: { label: string; included: boolean }[]
+    highlight?: boolean
+    cta: string
+}) {
+    return (
+        <div
+            className="relative rounded-3xl p-8 md:p-10 flex flex-col"
+            style={{
+                background: highlight
+                    ? 'linear-gradient(180deg, rgba(20,184,166,0.08) 0%, rgba(255,255,255,0.02) 100%)'
+                    : 'rgba(255,255,255,0.02)',
+                border: highlight ? '1px solid rgba(20,184,166,0.35)' : '1px solid rgba(255,255,255,0.08)',
+                boxShadow: highlight ? '0 40px 80px -20px rgba(0,0,0,0.5), 0 0 80px -20px rgba(20,184,166,0.2)' : 'none',
+            }}
+        >
+            {highlight && (
+                <div
+                    className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.18em] text-white"
+                    style={{ background: 'linear-gradient(135deg, #14b8a6, #0d9488)' }}
+                >
+                    <Sparkles className="w-3 h-3" />
+                    14-day free trial
+                </div>
+            )}
+            <div className="mb-1 text-sm font-semibold uppercase tracking-wider text-teal-400">{name}</div>
+            <div className="mb-1 flex items-baseline gap-1 text-white">
+                <span className="text-4xl font-bold font-serif">{price}</span>
+            </div>
+            <p className="mb-6 text-sm text-zinc-500">{tagline}</p>
+            <ul className="mb-8 space-y-3 flex-1">
+                {features.map((f) => (
+                    <li key={f.label} className="flex items-start gap-3">
+                        {f.included ? (
+                            <Check className="w-4 h-4 text-teal-400 flex-shrink-0 mt-0.5" />
+                        ) : (
+                            <X className="w-4 h-4 text-zinc-600 flex-shrink-0 mt-0.5" />
+                        )}
+                        <span className={`text-sm ${f.included ? 'text-zinc-300' : 'text-zinc-600'}`}>
+                            {f.label}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+            <Link
+                to="/signup"
+                data-cursor="Go"
+                className={`group inline-flex items-center justify-center gap-2 px-6 py-3 font-semibold rounded-full transition-all hover:-translate-y-px ${
+                    highlight ? 'text-[#08090c]' : 'text-white border border-white/15 hover:bg-white/5'
+                }`}
+                style={
+                    highlight
+                        ? {
+                              background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
+                              boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
+                          }
+                        : undefined
+                }
+            >
+                {cta}
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+            </Link>
+        </div>
+    )
+}
+
+function PricingSection() {
+    return (
+        <section id="pricing" className="relative py-24 lg:py-36 overflow-hidden" style={{ background: '#08090c' }}>
+            <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="text-center mb-14">
+                    <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight font-serif tracking-tight">
+                        Simple, honest pricing.
+                    </h2>
+                    <p className="text-lg max-w-2xl mx-auto leading-relaxed text-zinc-400">
+                        Every new church starts with a 14-day free trial of Pro — no credit card.
+                        Keep the Free plan forever, or upgrade when you outgrow it.
+                    </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+                    <PlanCard
+                        name="Free"
+                        price={`${PRO_PRICE.currency} 0`}
+                        tagline="For small teams getting started."
+                        features={freePlanFeatures}
+                        cta="Get started"
+                    />
+                    <PlanCard
+                        name="Pro"
+                        price={`${PRO_PRICE.currency} ${PRO_PRICE.amount}/${PRO_PRICE.interval}`}
+                        tagline="Unlimited everything for your whole team."
+                        features={proPlanFeatures}
+                        highlight
+                        cta="Start free trial"
+                    />
+                </div>
+                <p className="mt-8 text-center text-sm italic text-zinc-500">
+                    No credit card for the trial · Cancel anytime
+                </p>
+            </div>
+        </section>
+    )
+}
+
 function EarlyAccessSection() {
     const sectionRef = useScrollReveal<HTMLElement>('fade-up', { start: 'top 86%' })
 
@@ -927,14 +1066,15 @@ function EarlyAccessSection() {
                         }}
                     >
                         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                        Open beta
+                        14-day free trial
                     </div>
                     <h2 className="text-4xl md:text-5xl font-bold text-white mb-5 leading-tight font-serif tracking-tight">
                         Try Selah on your next service.
                     </h2>
                     <p className="text-lg mb-10 max-w-2xl mx-auto leading-relaxed text-zinc-400">
-                        Free while we&rsquo;re in beta. Set it up once, run it on Sunday, and tell
-                        us what to build next. No sales call, no commitment.
+                        Start with a 14-day free trial — full Pro access, no credit card. Set it up
+                        once, run it on Sunday, and tell us what to build next. No sales call, no
+                        commitment.
                     </p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-10 text-left">
@@ -967,7 +1107,7 @@ function EarlyAccessSection() {
                                 '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
                         }}
                     >
-                        Get Started Free
+                        Start free trial
                         <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                     </Link>
                     <p className="mt-5 text-sm italic text-zinc-500">No credit card · Cancel anytime</p>
@@ -1023,7 +1163,10 @@ function FooterSection() {
                             <ul className="space-y-2.5">
                                 {group.links.map((link) => (
                                     <li key={link}>
-                                        <a href="#" className="text-sm text-zinc-500 hover:text-white transition-colors">
+                                        <a
+                                            href={link === 'Pricing' ? '#pricing' : '#'}
+                                            className="text-sm text-zinc-500 hover:text-white transition-colors"
+                                        >
                                             {link}
                                         </a>
                                     </li>
@@ -1091,6 +1234,7 @@ export default function Landing() {
             <FeaturesRail />
             <DashboardSection />
             <StandoutSection />
+            <PricingSection />
             <EarlyAccessSection />
             <FooterSection />
         </div>

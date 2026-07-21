@@ -31,7 +31,7 @@ use tauri::Manager;
 /// `LICENSE_SIGNING_KEY`). Override for production via the
 /// `SELAH_LICENSE_PUBLIC_KEY_HEX` build-time env var.
 const DEV_PUBLIC_KEY_HEX: &str =
-    "d8311ed692c1b220c5437259fba31e926da1d60c4e052a763092972db4a277f7";
+    "036925ae9e2f158a18b3f1c6a0789914febb43e3df3261f085d3a07e723784fb";
 
 /// Public keys this build trusts, keyed by `key_id`. Add a second entry during a
 /// key rotation so both old and new licenses verify until everyone has refreshed.

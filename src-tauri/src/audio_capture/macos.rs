@@ -174,8 +174,34 @@ fn extract_audio_from_buffers(
     Ok(Vec::new())
 }
 
-/// Check if ScreenCaptureKit is available (macOS 12.3+)
-#[tauri::command]
-pub fn check_screen_capture_permission() -> bool {
-    SCShareableContent::get().is_ok()
+// Screen Recording (a.k.a. "Screen & System Audio Recording" on macOS 15+) is a
+// TCC-gated permission. The system consent prompt is shown ONLY ONCE, ever — if
+// the user declines or dismisses it, macOS records the denial and never prompts
+// again. ScreenCaptureKit then fails every call with "The user declined TCCs
+// for application, window, display capture". The only recovery is for the user
+// to enable it manually in System Settings.
+//
+// These two CoreGraphics APIs are the canonical, crash-free way to work with
+// that grant (unlike calling SCShareableContent::get(), which triggers the
+// one-shot prompt as a side effect):
+//   - CGPreflightScreenCaptureAccess: returns the current grant WITHOUT prompting.
+//   - CGRequestScreenCaptureAccess: shows the prompt the first time; once denied,
+//     returns false immediately without prompting. Available on macOS 10.15+.
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+/// Whether Screen & System Audio Recording permission is currently granted.
+/// Does NOT prompt — safe to call on every start attempt.
+pub fn screen_capture_access_granted() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+/// Ask the OS for Screen & System Audio Recording permission. Shows the system
+/// prompt the FIRST time only; once the user has denied it this returns false
+/// immediately without prompting. Returns whether access is granted afterwards.
+pub fn request_screen_capture_access() -> bool {
+    unsafe { CGRequestScreenCaptureAccess() }
 }

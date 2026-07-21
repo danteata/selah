@@ -108,6 +108,15 @@ export const initializeProCheckout = action({
             })
         }
 
+        // Paystack's /transaction/initialize requires `amount` (and a matching
+        // `currency`) even when a `plan` is supplied — omitting it fails with
+        // "Invalid Amount Sent". Billing still follows the plan; we just fetch
+        // the plan's own amount/currency so the initialize matches it exactly
+        // (this also stays correct for cheaper intro/discount plans).
+        const planDetails = await paystack<{ amount: number; currency: string }>(
+            `/plan/${planCode}`
+        )
+
         const data = await paystack<{
             authorization_url: string
             access_code: string
@@ -115,6 +124,8 @@ export const initializeProCheckout = action({
         }>('/transaction/initialize', 'POST', {
             email: identity.email,
             plan: planCode,
+            amount: planDetails.amount,
+            currency: planDetails.currency,
             callback_url: args.callbackUrl ?? process.env.PAYSTACK_CALLBACK_URL,
             // Echoed back on the webhook so we can resolve the user reliably.
             metadata: { email, plan: 'pro', promoCode: appliedPromo },

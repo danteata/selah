@@ -502,6 +502,14 @@ function SermonListenerPanelInner({
                                 {userAction && (
                                     <p className="text-xs mt-1 opacity-80">{userAction}</p>
                                 )}
+                                {errorCode === transcriptionErrorCodes.SCREEN_CAPTURE_DENIED && (
+                                    <button
+                                        onClick={() => sermonListener.openScreenCaptureSettings()}
+                                        className="mt-2 px-2.5 py-1 rounded bg-amber-600 text-white text-xs font-medium hover:brightness-110 transition-all"
+                                    >
+                                        Open Settings
+                                    </button>
+                                )}
                             </div>
                             <button
                                 onClick={() => sermonListener.reset && sermonListener.reset()}

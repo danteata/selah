@@ -18,6 +18,11 @@ import {
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import type { Id } from '../../../convex/_generated/dataModel'
+import { useEntitlements } from '../../providers/LicenseProvider'
+import { toast } from 'sonner'
+
+/** Free-plan cap on team size (members + pending invites). Pro is unlimited. */
+const FREE_TEAM_LIMIT = 2
 
 interface TeamManagementPanelProps {
     churchId: string
@@ -31,8 +36,24 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
     const teamMembers = useQuery(api.invitations.getTeamMembers, { churchId })
     const invitations = useQuery(api.invitations.getInvitations, { churchId })
     const { trackEvent } = useAnalytics()
+    const { isPro, startProCheckout } = useEntitlements()
     const seenMemberIdsRef = useRef<Set<string>>(new Set())
     const hasInitializedMembersRef = useRef(false)
+
+    // Free tier: members + pending invites can't exceed FREE_TEAM_LIMIT.
+    const pendingInvites = invitations?.filter((i) => i.status === 'pending').length ?? 0
+    const teamSize = (teamMembers?.length ?? 0) + pendingInvites
+    const handleInviteClick = () => {
+        if (!isPro && teamSize >= FREE_TEAM_LIMIT) {
+            toast.warning(`Free plan is limited to ${FREE_TEAM_LIMIT} team members`, {
+                description: 'Upgrade to Selah Pro to add unlimited team members.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        setShowInviteModal(true)
+    }
 
     return (
         <div className="space-y-6">
@@ -48,11 +69,16 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
                 </div>
                 {isAdmin && (
                     <button
-                        onClick={() => setShowInviteModal(true)}
+                        onClick={handleInviteClick}
                         className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
                     >
                         <UserPlus className="w-4 h-4" />
                         Invite Member
+                        {!isPro && teamSize >= FREE_TEAM_LIMIT && (
+                            <span className="ml-1 rounded bg-amber-400 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-amber-950">
+                                Pro
+                            </span>
+                        )}
                     </button>
                 )}
             </div>

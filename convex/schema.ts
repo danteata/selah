@@ -79,9 +79,12 @@ export default defineSchema({
         // Linked Selah user id once we can resolve one (may be unknown at first).
         userId: v.optional(v.string()),
         plan: v.union(v.literal("free"), v.literal("pro")),
-        // Mirrors Paystack subscription status plus a local "past_due" we set
-        // while charges are being retried, so the app doesn't hard-lock mid-retry.
+        // Mirrors Paystack subscription status plus two local states: "past_due"
+        // (set while charges are being retried, so the app doesn't hard-lock
+        // mid-retry) and "trialing" (a card-free 14-day Pro trial granted on
+        // first sign-in; see licensing.maybeStartTrial).
         status: v.union(
+            v.literal("trialing"),
             v.literal("active"),
             v.literal("non-renewing"),
             v.literal("attention"),
@@ -98,10 +101,11 @@ export default defineSchema({
         gracePeriodDays: v.number(),
         // How this subscription was granted. "promo" rows are comped Pro (no
         // Paystack billing); "paystack" rows are billed normally (possibly on a
-        // discounted intro plan that later rolls over — see the fields below).
-        // "trial" covers pre-existing manually-granted trial rows (no current
-        // code path creates new ones, but existing data must stay valid).
-        source: v.optional(v.union(v.literal("paystack"), v.literal("promo"), v.literal("trial"))),
+        // discounted intro plan that later rolls over — see the fields below);
+        // "trial" rows are the card-free 14-day trial auto-granted on signup.
+        source: v.optional(
+            v.union(v.literal("paystack"), v.literal("promo"), v.literal("trial"))
+        ),
         // The promo code applied, if any (for audit / UI).
         promoCode: v.optional(v.string()),
         // --- intro-discount rollover (kind: "discount" promos) ---------------
