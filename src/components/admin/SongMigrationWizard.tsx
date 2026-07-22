@@ -10,13 +10,14 @@
  * - CSV export files
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Upload, FileText, Music, AlertCircle, CheckCircle, XCircle, ChevronRight, ChevronLeft, Loader2, Database, FileStack } from 'lucide-react';
 import { parseEasyWorshipFile, parseEasyWorshipDatabases, toSelahSong } from '../../services/migration/easyWorshipParser';
 import type { ParsedSong, MigrationStatus, EasyWorshipFileType } from '../../services/migration/types';
-import { openFileDialog } from '../../utils/fileDialog';
+import { openFileDialog, filePathsToFiles } from '../../utils/fileDialog';
 import { useSongs } from '../../hooks/useSongs';
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider';
+import { isDesktop } from '../../platform';
 
 type WizardStep = 'upload' | 'preview' | 'importing' | 'complete';
 
@@ -40,6 +41,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     const [importedIds, setImportedIds] = useState<string[]>([]);
     const [isParsing, setIsParsing] = useState(false);
     const [replaceExisting, setReplaceExisting] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
 
     const { createSong, updateSong, songs: existingSongs } = useSongs();
     const { isOffline } = useConvexConnection();
@@ -91,6 +93,52 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         } finally {
             setIsParsing(false);
         }
+    }, []);
+
+    // On desktop (Tauri), the browser's HTML5 drag/drop events receive empty
+    // `dataTransfer.files` because Tauri intercepts OS-level file drags before
+    // they reach the webview. We therefore listen to Tauri's own webview
+    // drag-drop event, which hands back real file paths that we read off disk
+    // the same way the native file picker does. This mirrors the MediaUpload
+    // drop zone (src/components/media/MediaUpload.tsx) so behaviour is
+    // consistent across the app. The HTML5 handlers below early-return on
+    // desktop to avoid double-processing.
+    const handleSingleFileUploadRef = useRef(handleSingleFileUpload);
+    handleSingleFileUploadRef.current = handleSingleFileUpload;
+
+    useEffect(() => {
+        if (!isDesktop()) return;
+
+        let unlisten: (() => void) | undefined;
+        let cancelled = false;
+
+        import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => {
+            if (cancelled) return;
+            getCurrentWebview().onDragDropEvent((event) => {
+                if (event.payload.type === 'enter' || event.payload.type === 'over') {
+                    setIsDragging(true);
+                } else if (event.payload.type === 'drop') {
+                    setIsDragging(false);
+                    filePathsToFiles(event.payload.paths)
+                        .then((droppedFiles) => {
+                            if (droppedFiles.length > 0) {
+                                handleSingleFileUploadRef.current(droppedFiles[0]);
+                            }
+                        })
+                        .catch((error) => console.error('Failed to read dropped file:', error));
+                } else {
+                    setIsDragging(false);
+                }
+            }).then((fn) => {
+                if (cancelled) fn();
+                else unlisten = fn;
+            });
+        });
+
+        return () => {
+            cancelled = true;
+            unlisten?.();
+        };
     }, []);
 
     // Handle multiple database files
@@ -419,23 +467,28 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                                 Quick Import (Single File)
                             </h3>
                             <div
-                                className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 transition-colors"
+                                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragging
+                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                                    : 'border-gray-300 dark:border-gray-700 hover:border-blue-500'
+                                    }`}
                                 onClick={handleSingleFileClick}
-                                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                onDragLeave={(e) => { e.stopPropagation(); }}
+                                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); if (!isDesktop()) setIsDragging(true); }}
+                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!isDesktop()) setIsDragging(true); }}
+                                onDragLeave={(e) => { e.stopPropagation(); if (!isDesktop()) setIsDragging(false); }}
                                 onDrop={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
+                                    if (isDesktop()) return; // handled by Tauri onDragDropEvent listener above
+                                    setIsDragging(false);
                                     const file = e.dataTransfer.files?.[0];
                                     if (file) {
                                         handleSingleFileUpload(file);
                                     }
                                 }}
                             >
-                                <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
+                                <Upload className={`w-10 h-10 mx-auto mb-3 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`} />
                                 <p className="text-base font-medium text-gray-700 dark:text-gray-300">
-                                    Drop EasyWorship export file here
+                                    {isDragging ? 'Drop file to import' : 'Drop EasyWorship export file here'}
                                 </p>
                                 <p className="text-sm text-gray-500 mt-1">
                                     or click to browse
