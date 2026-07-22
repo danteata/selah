@@ -194,3 +194,45 @@ jobs:
           includeUpdaterJson: false
           args: --target ${{ matrix.target }} ${{ matrix.tauri_args }}
 
+  # GitHub auto-generates "Source code (zip)" and "Source code (tar.gz)"
+  # archives for every release tied to a git tag — this is built-in platform
+  # behaviour and can't be disabled via workflow config or tauri-action.
+  # This job strips those two auto-generated assets so the release page only
+  # shows the installer bundles uploaded by the build matrix above.
+  strip-source-assets:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Remove auto-generated source code assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-}"
+          if [ -z "$TAG" ]; then
+            echo "GITHUB_REF_NAME is empty — not a tag push, skipping."
+            exit 0
+          fi
+          echo "Cleaning source archives from release $TAG"
+          # List assets, filter to the two auto-generated source archives, and
+          # delete each. Process substitution (< <(...)) is used instead of a
+          # pipe so that grep's exit code (1 = no match) can't trip `pipefail`
+          # and abort the step — e.g. if a previous run already cleaned them.
+          mapfile -t assets < <(
+            gh release view "$TAG" --json assets --jq '.assets[].name' \
+              | grep -iE '^(Source code \(zip\)|Source code \(tar\.gz\))$' \
+              || true
+          )
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No source archives found — nothing to do."
+          else
+            for name in "${assets[@]}"; do
+              echo "Deleting asset: $name"
+              gh release delete-asset "$TAG" "$name" --yes
+            done
+          fi
+          echo "Done."
+
