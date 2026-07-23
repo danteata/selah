@@ -75,15 +75,15 @@ async function fetchLatestRelease(): Promise<NormalisedRelease> {
     if (!res.ok) {
         if (res.status === 403 || res.status === 429) {
             throw new Error(
-                "GitHub is rate-limiting us. Try refreshing in a minute, or grab the latest version straight from the releases page."
+                "We're being rate-limited right now. Try refreshing in a minute."
             )
         }
         if (res.status === 404) {
             throw new Error(
-                "No releases have been published yet. Check back soon, or grab a build from the actions tab if you're a maintainer."
+                'No downloads have been published yet. Check back soon.'
             )
         }
-        throw new Error(`Couldn't load the latest release (HTTP ${res.status}).`)
+        throw new Error(`Couldn't load the latest download (HTTP ${res.status}).`)
     }
     const json = (await res.json()) as GitHubRelease
     return normalise(json)
