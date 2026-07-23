@@ -26,15 +26,16 @@ jobs:
           - platform: 'macos-latest'
             target: 'aarch64-apple-darwin'
             name: 'macOS (Apple Silicon)'
-          # macos-13 is the last Intel runner image — build x86_64 natively
-          # there so Homebrew installs an x86_64 ONNX Runtime (arm64 runners
-          # would give an arm64 dylib that can't link into an x86_64 binary).
-          - platform: 'macos-13'
+          # Intel macOS is CROSS-COMPILED from the Apple Silicon runner (no
+          # scarce macos-13 Intel runner to queue on). Rust + the transcribe-cpp
+          # C++ cross-compile to x86_64 fine; the only wrinkle is ONNX Runtime —
+          # `ort` ships no x86_64-apple-darwin prebuilt and Microsoft/PyPI dropped
+          # Intel-mac binaries at 1.24+, so the "x86_64 ONNX Runtime" step below
+          # sources the x86_64 dylib from a Homebrew bottle. Bundled via the
+          # config override.
+          - platform: 'macos-latest'
             target: 'x86_64-apple-darwin'
             name: 'macOS (Intel)'
-            # `ort` publishes no prebuilt binary for Intel macOS, so this job
-            # links a Homebrew-installed ONNX Runtime (see the "system ONNX
-            # Runtime" step) and bundles its dylib via this config override.
             tauri_args: '--config src-tauri/tauri.onnxruntime-system.conf.json'
           # ubuntu-24.04 (glibc 2.39) is required: the prebuilt ONNX Runtime in
           # ort references __isoc23_strtol* symbols introduced in glibc 2.38, so
@@ -167,24 +168,62 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --install "$tmp\build" --config Release
 
-      # Intel macOS has no prebuilt `ort` binary, so link a Homebrew ONNX
-      # Runtime instead (ORT_STRATEGY=system). We stage a copy of the dylib with
-      # an @rpath install-name and point ORT_LIB_LOCATION at it, so the linked
-      # binary references @rpath/libonnxruntime.dylib — which the bundled .app
-      # then resolves from Contents/Frameworks (see tauri.onnxruntime-system.conf.json).
-      - name: Setup system ONNX Runtime (Intel macOS only)
+      # Cross-compiling x86_64 from the Apple Silicon runner needs an x86_64
+      # libonnxruntime, but `ort` ships no x86_64-apple-darwin prebuilt and
+      # Microsoft/PyPI dropped Intel-mac ONNX Runtime binaries at 1.24+. Homebrew
+      # still builds an x86_64 bottle, so download that bottle directly (a plain
+      # tarball — no need to install/run it under Rosetta) and extract the
+      # self-contained dylib. `ort`'s system strategy links whatever is at
+      # ORT_LIB_LOCATION with no version check, and a newer runtime (brew ships
+      # 1.27.x) is ABI-compatible with the older API `ort` requests at runtime.
+      # We give it an @rpath install-name so the bundled .app resolves it from
+      # Contents/Frameworks (see tauri.onnxruntime-system.conf.json).
+      # Insurance for the x86_64 cross-build: if any CMake try_run in the
+      # transcribe-cpp/ggml build executes an x86_64 probe binary, Rosetta 2 lets
+      # it run on this arm64 host. GitHub's arm64 runners usually ship Rosetta
+      # already, so this is a fast no-op when present.
+      - name: Ensure Rosetta 2 (Intel macOS cross-build only)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: softwareupdate --install-rosetta --agree-to-license || true
+
+      - name: Setup x86_64 ONNX Runtime (Intel macOS cross-build only)
         if: matrix.target == 'x86_64-apple-darwin'
         run: |
           set -euo pipefail
-          brew install onnxruntime
-          PREFIX="$(brew --prefix onnxruntime)"
+          # Fetch the x86_64 (non-arm64_*) onnxruntime bottle. Try recent macOS
+          # tags newest-first; Homebrew only builds the x86_64 slice for some of
+          # them, so take the first that resolves.
+          tag=""
+          for candidate in tahoe sequoia sonoma ventura; do
+            if brew fetch --quiet --bottle-tag="$candidate" onnxruntime >/dev/null 2>&1; then
+              tag="$candidate"; break
+            fi
+          done
+          if [ -z "$tag" ]; then
+            echo "::error::could not fetch an x86_64 onnxruntime Homebrew bottle"; exit 1
+          fi
+          echo "Using x86_64 onnxruntime bottle tag: $tag"
+          bottle="$(brew --cache --bottle-tag="$tag" onnxruntime)"
+          work="$RUNNER_TEMP/ort-x86_64"; mkdir -p "$work"
+          tar -xzf "$bottle" -C "$work"
+          dylib="$(find "$work" -type f -name 'libonnxruntime*.dylib' | head -n1)"
+          if [ -z "$dylib" ]; then
+            echo "::error::libonnxruntime dylib not found in the fetched bottle"; exit 1
+          fi
+          # Fail loudly if we somehow grabbed the wrong architecture.
+          lipo -archs "$dylib" | tr ' ' '\n' | grep -qx x86_64 || {
+            echo "::error::fetched libonnxruntime is not x86_64 ($(lipo -archs "$dylib"))"; exit 1; }
+          otool -L "$dylib" || true
           mkdir -p src-tauri/onnxruntime-libs
-          # -L follows the version symlink and copies the real dylib.
-          cp -L "$PREFIX/lib/libonnxruntime.dylib" src-tauri/onnxruntime-libs/libonnxruntime.dylib
+          cp "$dylib" src-tauri/onnxruntime-libs/libonnxruntime.dylib
           chmod u+w src-tauri/onnxruntime-libs/libonnxruntime.dylib
           install_name_tool -id @rpath/libonnxruntime.dylib src-tauri/onnxruntime-libs/libonnxruntime.dylib
           echo "ORT_STRATEGY=system" >> "$GITHUB_ENV"
           echo "ORT_LIB_LOCATION=$PWD/src-tauri/onnxruntime-libs" >> "$GITHUB_ENV"
+          # Force the transcribe-cpp/ggml CMake build to the x86_64 slice. The
+          # `cmake` crate usually derives this from the target, but set it
+          # explicitly so the cross-build can't silently produce arm64 objects.
+          echo "TRANSCRIBE_CMAKE_ARGS=-DCMAKE_OSX_ARCHITECTURES=x86_64" >> "$GITHUB_ENV"
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
