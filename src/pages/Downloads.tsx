@@ -7,14 +7,11 @@ import {
     Copy,
     Cpu,
     Download,
-    ExternalLink,
-    Github,
     HardDrive,
     Loader2,
     Menu,
     Monitor,
     RefreshCw,
-    ShieldCheck,
     Sparkles,
     Terminal,
     X,
@@ -23,12 +20,10 @@ import {
 } from 'lucide-react'
 import { gsap } from '../lib/gsap'
 import { useScrollReveal } from '../hooks/useScrollReveal'
-import { useLatestRelease, SELAH_REPO, type PlatformBucket } from '../hooks/useLatestRelease'
+import { useLatestRelease, type PlatformBucket } from '../hooks/useLatestRelease'
 import { detectPlatform, type UserOS, type UserPlatform } from '../lib/userPlatform'
 import { useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
-
-const RELEASES_PAGE = `https://github.com/${SELAH_REPO.owner}/${SELAH_REPO.repo}/releases`
 
 /* ----------------------------- Helpers ---------------------------------- */
 
@@ -76,17 +71,17 @@ function PlatformIcon({ os, className }: { os: UserOS; className?: string }) {
 const OS_META: Record<UserOS, { name: string; tagline: string; accent: string }> = {
     macos: {
         name: 'macOS',
-        tagline: 'Universal build, runs natively on Apple Silicon and Intel.',
+        tagline: 'Native builds for Apple Silicon and Intel Macs.',
         accent: '#a1a1aa',
     },
     windows: {
         name: 'Windows',
-        tagline: 'Signed NSIS installer for 64-bit and ARM64 machines.',
+        tagline: 'Standard installer for 64-bit Windows.',
         accent: '#3b82f6',
     },
     linux: {
         name: 'Linux',
-        tagline: 'Portable AppImage — works on Ubuntu, Fedora, Arch, and friends.',
+        tagline: 'AppImage, .deb, and .rpm builds for x86_64.',
         accent: '#f59e0b',
     },
     unknown: {
@@ -155,14 +150,6 @@ function NavBar({
                         >
                             Download
                         </span>
-                        <a
-                            href={RELEASES_PAGE}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-3 py-2 text-sm font-medium text-white/60 hover:text-white transition-colors rounded-lg hover:bg-white/5"
-                        >
-                            Releases
-                        </a>
                     </div>
 
                     <div className="hidden md:flex items-center gap-3">
@@ -207,14 +194,6 @@ function NavBar({
                         <span className="block py-2.5 px-3 text-sm font-semibold text-white rounded-lg bg-white/5">
                             Download
                         </span>
-                        <a
-                            href={RELEASES_PAGE}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block py-2.5 px-3 text-sm text-white/70 hover:text-white hover:bg-white/5 rounded-lg"
-                        >
-                            Releases
-                        </a>
                         <div className="pt-3 mt-3 border-t border-white/5 space-y-2">
                             <Link
                                 to="/login"
@@ -259,16 +238,9 @@ function HeroCTA({
         return (
             <div className="flex flex-col items-center gap-2">
                 <p className="text-sm text-white/60">
-                    We don't have a {platform.label} build in this release yet.
+                    We don't have a {platform.label} build in this release yet — pick
+                    another platform below.
                 </p>
-                <a
-                    href={RELEASES_PAGE}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary-300 hover:text-primary-200 text-sm font-semibold inline-flex items-center gap-1.5"
-                >
-                    Browse all releases <ExternalLink className="w-3.5 h-3.5" />
-                </a>
             </div>
         )
     }
@@ -751,22 +723,6 @@ function HeroSection({ release, error, retry }: { release: ReturnType<typeof use
                                 </span>
                             </div>
                         )}
-
-                        <a
-                            href={RELEASES_PAGE}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-2 px-6 py-3.5 font-semibold rounded-2xl text-white/80 transition-all hover:text-white hover:bg-white/5"
-                            style={{
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                background: 'rgba(255,255,255,0.03)',
-                                backdropFilter: 'blur(10px)',
-                            }}
-                        >
-                            <Github className="w-4 h-4" />
-                            All releases
-                            <ExternalLink className="w-3 h-3 opacity-60" />
-                        </a>
                     </div>
 
                     {release && (
@@ -835,15 +791,6 @@ function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) 
                 >
                     <RefreshCw className="w-3 h-3" /> Try again
                 </button>
-                <span className="text-white/20">·</span>
-                <a
-                    href={RELEASES_PAGE}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-300 hover:text-primary-200 transition-colors"
-                >
-                    View on GitHub <ExternalLink className="w-3 h-3" />
-                </a>
             </div>
         </div>
     )
@@ -891,8 +838,8 @@ function PlatformsSection({
                         Pick your platform
                     </h2>
                     <p className="text-base max-w-xl mx-auto" style={{ color: 'rgba(228,228,231,0.6)' }}>
-                        The right installer for your machine is highlighted. All builds
-                        include the in-app updater, so you'll only ever download once.
+                        The right installer for your machine is highlighted — download it
+                        and you're ready to go.
                     </p>
                 </div>
 
@@ -970,14 +917,14 @@ function RequirementsSection() {
         {
             os: 'macos',
             title: 'macOS',
-            items: ['macOS 10.13 (High Sierra) or later', 'Apple Silicon or Intel', '4 GB RAM minimum, 8 GB recommended', '~500 MB disk space'],
+            items: ['macOS 10.15 (Catalina) or later', 'Apple Silicon or Intel', '4 GB RAM minimum, 8 GB recommended', '~500 MB disk space'],
             icon: Apple,
             accent: '#a1a1aa',
         },
         {
             os: 'windows',
             title: 'Windows',
-            items: ['Windows 10 (1809) or later', 'x64 or ARM64', '4 GB RAM minimum, 8 GB recommended', '~400 MB disk space'],
+            items: ['Windows 10 (1809) or later', '64-bit (x64)', '4 GB RAM minimum, 8 GB recommended', '~400 MB disk space'],
             icon: Monitor,
             accent: '#3b82f6',
         },
@@ -1060,114 +1007,6 @@ function RequirementsSection() {
     )
 }
 
-function VerifySection({ release }: { release: ReturnType<typeof useLatestRelease>['release'] }) {
-    const headingRef = useScrollReveal<HTMLDivElement>('fade-up', { start: 'top 88%' })
-    if (!release) return null
-    return (
-        <section
-            className="relative py-20 lg:py-28 overflow-hidden"
-            style={{ background: '#08090c' }}
-        >
-            <div
-                className="absolute inset-0 pointer-events-none opacity-40"
-                style={{
-                    background:
-                        'radial-gradient(ellipse 50% 50% at 20% 30%, rgba(20,184,166,0.10), transparent 60%)',
-                }}
-            />
-            <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div ref={headingRef} className="mb-8">
-                    <div
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-4 text-[10px] font-bold uppercase tracking-[0.22em]"
-                        style={{
-                            background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.08) 100%)',
-                            border: '1px solid rgba(20,184,166,0.35)',
-                            color: '#5eead4',
-                        }}
-                    >
-                        <ShieldCheck className="w-3 h-3" /> Verification
-                    </div>
-                    <h2 className="text-3xl sm:text-4xl font-bold text-white mb-3 font-serif tracking-tight">
-                        Trust the bytes
-                    </h2>
-                    <p className="text-base max-w-xl" style={{ color: 'rgba(228,228,231,0.6)' }}>
-                        Every bundle ships with a Tauri-generated signature that the in-app
-                        updater verifies before applying any patch. Power users can verify
-                        the signatures manually using the matching <code className="font-mono text-primary-300">.sig</code> files.
-                    </p>
-                </div>
-
-                <div
-                    className="rounded-2xl p-6"
-                    style={{
-                        background: 'rgba(255,255,255,0.02)',
-                        border: '1px solid rgba(255,255,255,0.07)',
-                    }}
-                >
-                    <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-primary-300" />
-                        Detached signatures
-                    </h3>
-                    {release.signatures.length === 0 ? (
-                        <p className="text-sm text-white/45">
-                            No detached signatures were published with this release. (The
-                            in-app updater still verifies bundles against the embedded public
-                            key, so this is only needed for offline verification.)
-                        </p>
-                    ) : (
-                        <div className="space-y-1.5">
-                            {release.signatures.map((sig) => (
-                                <div
-                                    key={sig.url}
-                                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg"
-                                    style={{ background: 'rgba(0,0,0,0.25)' }}
-                                >
-                                    <code className="text-xs font-mono text-white/70 truncate" title={sig.fileName}>
-                                        {sig.fileName}
-                                    </code>
-                                    <div className="flex items-center gap-3 flex-shrink-0">
-                                        <span className="text-[10px] font-mono text-white/40">
-                                            {formatBytes(sig.size)}
-                                        </span>
-                                        <CopyButton value={sig.url} label="Copy" />
-                                        <a
-                                            href={sig.url}
-                                            className="text-[10px] font-mono uppercase tracking-widest text-primary-300 hover:text-primary-200"
-                                        >
-                                            Download
-                                        </a>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                <div
-                    className="mt-5 rounded-2xl p-5 flex items-start gap-3"
-                    style={{
-                        background:
-                            'linear-gradient(135deg, rgba(20,184,166,0.08) 0%, rgba(20,184,166,0.02) 100%)',
-                        border: '1px solid rgba(20,184,166,0.2)',
-                    }}
-                >
-                    <RefreshCw className="w-5 h-5 text-primary-300 flex-shrink-0 mt-0.5" />
-                    <div>
-                        <h4 className="text-sm font-semibold text-white mb-1">
-                            Updates happen in the background
-                        </h4>
-                        <p className="text-sm text-white/65 leading-relaxed">
-                            Once Selah is installed, it checks for new releases on launch and
-                            downloads signed updates in the background. You pick when to
-                            restart — never mid-service.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </section>
-    )
-}
-
 function Footer() {
     return (
         <footer
@@ -1190,14 +1029,6 @@ function Footer() {
                     </span>
                 </div>
                 <div className="flex items-center gap-5 text-xs text-white/45">
-                    <a
-                        href={RELEASES_PAGE}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:text-white transition-colors inline-flex items-center gap-1.5"
-                    >
-                        <Github className="w-3.5 h-3.5" /> Releases
-                    </a>
                     <Link to="/" className="hover:text-white transition-colors">
                         Back to overview
                     </Link>
@@ -1255,7 +1086,6 @@ export default function Downloads() {
                 <PlatformsSection release={release} detected={userPlatform} />
                 <ReleaseNotesSection release={release} />
                 <RequirementsSection />
-                <VerifySection release={release} />
             </main>
             <Footer />
         </div>
