@@ -1,3 +1,4 @@
+import fuzzysort from 'fuzzysort'
 import { bibleBooks } from '../types'
 
 /**
@@ -175,6 +176,57 @@ export function getPreviousChapter(book: string, chapter: number): { book: strin
     return null
 }
 
+/**
+ * Step the chapter by `delta`, rolling across book boundaries when it runs
+ * off either end (e.g. stepping +1 from the last chapter of John lands on
+ * Acts 1). Reuses `getNextChapter`/`getPreviousChapter` so the book-boundary
+ * logic lives in one place. Stops at the very start/end of the canon.
+ */
+export function stepChapter(bookIndex: number, chapter: number, delta: number): { bookIndex: number; chapter: number } {
+    const book = bibleBooks[bookIndex - 1]
+    if (!book) return { bookIndex, chapter }
+    let cursor: { book: string; chapter: number } = { book, chapter }
+    const step = delta > 0 ? getNextChapter : getPreviousChapter
+    for (let i = 0; i < Math.abs(delta); i++) {
+        const next = step(cursor.book, cursor.chapter)
+        if (!next) break
+        cursor = next
+    }
+    const idx = bibleBooks.indexOf(cursor.book as typeof bibleBooks[number])
+    return { bookIndex: idx >= 0 ? idx + 1 : bookIndex, chapter: cursor.chapter }
+}
+
+/** Step the book by `delta`, clamped to the 66-book canon. */
+export function stepBook(bookIndex: number, delta: number): number {
+    return Math.min(bibleBooks.length, Math.max(1, bookIndex + delta))
+}
+
+/**
+ * Clamp a verse number: never below 1, and — when the caller knows which
+ * verses are actually loaded for the chapter — never above the highest
+ * loaded verse. There is no static verse-per-chapter table, so the upper
+ * bound is best-effort from what the panel has already fetched.
+ */
+export function clampVerse(verse: number, loadedVerseNumbers?: number[]): number {
+    let v = Math.max(1, Math.floor(verse))
+    if (loadedVerseNumbers && loadedVerseNumbers.length > 0) {
+        const max = Math.max(...loadedVerseNumbers)
+        if (v > max) v = max
+    }
+    return v
+}
+
+/**
+ * Canonical query string for a reference — "Book C:V" or "Book C:V-W".
+ * Centralizes the label-building that BibleList and QuickBibleBar both did
+ * inline, so the text input and the stepper chips always agree.
+ */
+export function formatReferenceQuery(bookIndex: number, chapter: number, startVerse: number, endVerse?: number): string {
+    const book = bibleBooks[bookIndex - 1] ?? ''
+    const rangePart = endVerse && endVerse !== startVerse ? `-${endVerse}` : ''
+    return `${book} ${chapter}:${startVerse}${rangePart}`
+}
+
 export function parseBibleQuery(q: string): ParsedBibleQuery | null {
     const trimmed = q.trim()
     if (!trimmed) return null
@@ -217,6 +269,79 @@ export function getBookSuggestions(query: string): string[] {
     const am = bookAbbreviations[lq]
     if (am) return [am]
     return bibleBooks.filter(b => b.toLowerCase().startsWith(lq) || b.toLowerCase().includes(lq)).slice(0, 5)
+}
+
+// Shortest known abbreviation per book, used purely as a display hint in the
+// autocomplete (e.g. "John · jn"). Built once from `bookAbbreviations`.
+const bookToAbbrev: Record<string, string> = (() => {
+    const m: Record<string, string> = {}
+    for (const [abbr, name] of Object.entries(bookAbbreviations)) {
+        if (!m[name] || abbr.length < m[name].length) m[name] = abbr
+    }
+    return m
+})()
+
+export interface RankedBookSuggestion {
+    book: string
+    /** 1-based book number (matches the index convention used everywhere). */
+    bookIndex: number
+    matchType: 'abbrev' | 'prefix' | 'fuzzy'
+    /** A short abbreviation to show as a hint, if one exists. */
+    abbrev?: string
+    /** Indexes into `book` that matched the query — for character highlighting. */
+    matchIndexes?: number[]
+}
+
+const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i)
+
+/**
+ * Ranked, fuzzy book suggestions for the search-input autocomplete.
+ *
+ * Ranking, best first: exact abbreviation (e.g. "jn" → John) > canonical
+ * prefix match (in bible order, so "jo" yields Job, John, Joel, Jonah,
+ * Joshua before fuzzier hits) > `fuzzysort` fuzzy match for everything
+ * else (e.g. "corin" → 1/2 Corinthians, "rvln" → Revelation).
+ *
+ * Distinct from `getBookSuggestions` (kept as-is for its callers/tests):
+ * this returns structured entries with match type + highlight indexes so
+ * the UI can render abbreviations and bold the matched characters.
+ */
+export function getRankedBookSuggestions(query: string, limit = 6): RankedBookSuggestion[] {
+    if (!query) return []
+    const lq = query.toLowerCase().trim()
+    if (!lq || lq.includes(':')) return []
+
+    const results: RankedBookSuggestion[] = []
+    const used = new Set<number>()
+
+    const push = (book: string, matchType: RankedBookSuggestion['matchType'], matchIndexes?: number[]) => {
+        const idx = bibleBooks.indexOf(book as typeof bibleBooks[number])
+        if (idx < 0 || used.has(idx)) return
+        used.add(idx)
+        results.push({ book, bookIndex: idx + 1, matchType, abbrev: bookToAbbrev[book], matchIndexes })
+    }
+
+    // 1. Exact abbreviation (ignoring internal spaces, e.g. "1 jn" → 1 John).
+    const abbrHit = bookAbbreviations[lq.replace(/\s+/g, '')]
+    if (abbrHit) push(abbrHit, 'abbrev')
+
+    // 2. Prefix matches, canonical order.
+    for (const b of bibleBooks) {
+        if (results.length >= limit) break
+        if (b.toLowerCase().startsWith(lq)) push(b, 'prefix', range(lq.length))
+    }
+
+    // 3. Fuzzy fill for the remainder.
+    if (results.length < limit) {
+        const pool = bibleBooks.filter((_, i) => !used.has(i))
+        const fz = fuzzysort.go(lq, pool, { limit: limit - results.length })
+        for (const r of fz) {
+            const idxs = (r as { indexes?: ArrayLike<number> }).indexes
+            push(r.target, 'fuzzy', idxs ? Array.from(idxs) : undefined)
+        }
+    }
+
+    return results.slice(0, limit)
 }
 
 export interface VerseRow {
