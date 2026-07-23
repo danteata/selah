@@ -127,6 +127,34 @@ jobs:
           "VULKAN_SDK=C:\VulkanSDK\$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
           "C:\VulkanSDK\$ver\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
+      # ggml's Vulkan backend calls `find_package(SPIRV-Headers CONFIG REQUIRED)`
+      # (src/ggml-vulkan/CMakeLists.txt), which needs the SPIRV-Headers CMake
+      # package-config files (SPIRV-HeadersConfig.cmake). The LunarG Vulkan SDK
+      # ships the headers but NOT the CMake config, so the transcribe-cpp-sys
+      # build fails with "Could not find a package configuration file provided
+      # by SPIRV-Headers". We build+install the header-only SPIRV-Headers into
+      # $VULKAN_SDK so CMAKE_PREFIX_PATH=$VULKAN_SDK (set by ggml) resolves it.
+      - name: Install SPIRV-Headers CMake config (Windows only)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ver = '1.3.290.0'
+          $sdk = "C:\VulkanSDK\$ver"
+          $tmp = "$env:RUNNER_TEMP\spirv-headers"
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          # Tag matches the Vulkan SDK version (1.3.290.0).
+          curl.exe -L -o "$tmp\src.tar.gz" "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-$ver.tar.gz"
+          tar -xzf "$tmp\src.tar.gz" -C $tmp
+          $src = Get-ChildItem -Directory "$tmp\SPIRV-Headers-*" | Select-Object -First 1
+          if (-not $src) { throw "SPIRV-Headers source not found after extraction" }
+          Write-Host "Installing SPIRV-Headers from $($src.FullName) into $sdk"
+          # Header-only INTERFACE library; install drops SPIRV-HeadersConfig.cmake
+          # under $sdk/share/cmake/SPIRV-Headers/, which CMAKE_PREFIX_PATH resolves.
+          cmake -S "$($src.FullName)" -B "$tmp\build" -G Ninja `
+            -DCMAKE_INSTALL_PREFIX="$sdk" `
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --install "$tmp\build" --config Release
+
       # Intel macOS has no prebuilt `ort` binary, so link a Homebrew ONNX
       # Runtime instead (ORT_STRATEGY=system). We stage a copy of the dylib with
       # an @rpath install-name and point ORT_LIB_LOCATION at it, so the linked
