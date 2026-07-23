@@ -34,11 +34,15 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
         onFinal: (text) => setQuery(text),
     })
 
-    // Filter songs
-    const filteredSongs = songs.filter((song: Song) =>
-        song.title.toLowerCase().includes(query.toLowerCase()) ||
-        song.artist.toLowerCase().includes(query.toLowerCase())
-    )
+    // Filter songs — title/artist plus the actual lyrics, so a half-remembered
+    // line ("amazing grace how sweet") finds the song even when the operator
+    // doesn't know (or misremembers) its title.
+    const filteredSongs = songs.filter((song: Song) => {
+        const q = query.toLowerCase()
+        return song.title.toLowerCase().includes(q) ||
+            song.artist.toLowerCase().includes(q) ||
+            (song.lyrics || '').toLowerCase().includes(q)
+    })
 
     // Throttled song search tracking — fire at most once per 2s
     useEffect(() => {

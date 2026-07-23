@@ -42,16 +42,20 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
         loadHymns()
     }, [getAllHymns])
 
-    // Filter hymns
+    // Filter hymns — title/number plus the actual lyrics (chorus + verses),
+    // so a half-remembered line finds the hymn even without its title/number.
     useEffect(() => {
         if (!query.trim()) {
             setFilteredHymns(hymns)
             return
         }
 
+        const q = query.toLowerCase()
         const filtered = hymns.filter(hymn =>
-            hymn.title.toLowerCase().includes(query.toLowerCase()) ||
-            hymn.number.includes(query)
+            hymn.title.toLowerCase().includes(q) ||
+            hymn.number.includes(query) ||
+            (hymn.chorus || '').toLowerCase().includes(q) ||
+            (hymn.verses || []).some(verse => verse.toLowerCase().includes(q))
         )
         setFilteredHymns(filtered)
     }, [query, hymns])

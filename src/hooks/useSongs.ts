@@ -131,9 +131,11 @@ export function useSongs(): UseSongsReturn {
             return effectiveSongs.slice(0, limit) as Song[]
         }
 
+        const q = query.toLowerCase()
         const filtered = effectiveSongs.filter((song: Song) =>
-            song.title.toLowerCase().includes(query.toLowerCase()) ||
-            song.artist.toLowerCase().includes(query.toLowerCase())
+            song.title.toLowerCase().includes(q) ||
+            song.artist.toLowerCase().includes(q) ||
+            (song.lyrics || '').toLowerCase().includes(q)
         )
 
         return filtered.slice(0, limit) as Song[]
