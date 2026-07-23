@@ -104,6 +104,27 @@ describe('appStore', () => {
 
             expect(useAppStore.getState().liveSlideId).toBe('slide-123')
         })
+
+        it('should toggle liveOutputBlanked independently of liveSlideId', () => {
+            const store = useAppStore.getState()
+
+            act(() => {
+                store.setLiveSlide('slide-123')
+                store.setLiveOutputBlanked(true)
+            })
+
+            expect(useAppStore.getState().liveOutputBlanked).toBe(true)
+            // Clearing the output must not lose the queued slide — that's the
+            // whole point of a separate flag rather than nulling liveSlideId.
+            expect(useAppStore.getState().liveSlideId).toBe('slide-123')
+
+            act(() => {
+                store.setLiveOutputBlanked(false)
+            })
+
+            expect(useAppStore.getState().liveOutputBlanked).toBe(false)
+            expect(useAppStore.getState().liveSlideId).toBe('slide-123')
+        })
     })
 
     describe('schedules', () => {

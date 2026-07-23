@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Mic, Plus } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Mic, Plus, Eye, EyeOff } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
-import { useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
+import { useLiveSession, useVerseNavigationShortcuts, useKeyboardShortcut } from '../../hooks'
 import { generateSlideContent, calculateScreenFontSize } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
@@ -113,6 +113,8 @@ export function LiveOutput() {
     const sharedQueueSlideIds = useAppStore((state) => state.sharedQueueSlideIds)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
+    const liveOutputBlanked = useAppStore((state) => state.liveOutputBlanked)
+    const setLiveOutputBlanked = useAppStore((state) => state.setLiveOutputBlanked)
     const setLiveOutputSlidesId = useAppStore((state) => state.setLiveOutputSlidesId)
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
@@ -156,6 +158,7 @@ export function LiveOutput() {
         addToQueue,
         removeFromQueue,
         acceptFromQueue,
+        toggleBlank,
     } = useLiveSession()
 
     // Role badge label
@@ -255,6 +258,19 @@ export function LiveOutput() {
     const nextUpBodyHtml = nextSlide?.contents[0] || ''
     const nextUpRefHtml = nextSlide?.type === 'bible' ? (nextSlide.contents[1] || '') : ''
 
+    // Blank the live output to a plain black screen without touching
+    // liveSlideId, so the queue position/selected slide is preserved and
+    // un-blanking simply resumes showing it. Reaches the actual output
+    // window via useLiveSync (native IPC + localStorage/BroadcastChannel),
+    // and — when in a collaboration session — via the shared `isBlank` flag
+    // so other connected viewers see the same thing (toggleBlank no-ops on
+    // its own if not applicable, mirroring handleSetLiveSlide below).
+    const handleToggleBlank = useCallback(() => {
+        const next = !liveOutputBlanked
+        setLiveOutputBlanked(next)
+        void toggleBlank(next)
+    }, [liveOutputBlanked, setLiveOutputBlanked, toggleBlank])
+
     const handleSetLiveSlide = useCallback((slideId: string) => {
         if (isConnected && !isOperator && !isOpen) {
             return
@@ -343,6 +359,10 @@ export function LiveOutput() {
         () => verseNavigatorRef.current?.navigateVerse('prev'),
         { enabled: liveSlide?.type === 'bible' }
     )
+
+    // "B" — clear/un-clear the live output to black (documented in
+    // ShortcutsModal as "Black screen").
+    useKeyboardShortcut('b', handleToggleBlank)
 
     // Number shortcuts (Ctrl/Cmd + 0-9)
     useEffect(() => {
@@ -563,6 +583,12 @@ export function LiveOutput() {
                             Program Output
                         </h2>
                     </div>
+                    {liveOutputBlanked && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-amber-500/10 text-amber-500 rounded-full border border-amber-500/20">
+                            <EyeOff className="w-2.5 h-2.5" />
+                            OUTPUT CLEARED
+                        </span>
+                    )}
                     {isConnected && roleLabel && (
                         <span className={`flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${isOperator
                             ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
@@ -592,6 +618,16 @@ export function LiveOutput() {
                             <Radio className="w-4 h-4" />
                         </button>
                     )}
+                    <button
+                        onClick={handleToggleBlank}
+                        className={`flex items-center gap-1.5 p-1.5 rounded-lg transition-colors ${liveOutputBlanked
+                            ? 'text-amber-500 bg-amber-500/10 hover:bg-amber-500/20'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                            }`}
+                        title={liveOutputBlanked ? 'Resume output (B)' : 'Clear output to black (B)'}
+                    >
+                        {liveOutputBlanked ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
                     {isPresenting ? (
                         <button
                             onClick={handleStopLive}

@@ -102,6 +102,10 @@ export interface AppState {
     liveOutputSlidesId: string[] | null
     sharedQueueSlideIds: string[]
     liveSlideId: string | null
+    // True while the operator has deliberately cleared the live output to a
+    // blank screen (e.g. during prayer) — independent of `liveSlideId`, which
+    // keeps pointing at whatever slide is queued up so un-clearing restores it.
+    liveOutputBlanked: boolean
     // Predictive song-lyric auto-advance (Phase 2 wiring).
     songTracking: SongTrackingState
     // Audio-reactive motion-graphics layer on the live output (Phase 4).
@@ -205,6 +209,7 @@ const initialState: AppState = {
     liveOutputSlidesId: null,
     sharedQueueSlideIds: [],
     liveSlideId: null,
+    liveOutputBlanked: false,
     songTracking: DEFAULT_SONG_TRACKING,
     visualizerEnabled: false,
     emitter: null,
@@ -278,6 +283,7 @@ interface AppStore extends AppState {
     addSharedQueueSlideIds: (slideIds: string[]) => void
     removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string | null) => void
+    setLiveOutputBlanked: (blanked: boolean) => void
     setSongTrackingEnabled: (enabled: boolean) => void
     setSongTrackingLocked: (locked: boolean) => void
     setSongAutoDetect: (autoDetect: boolean) => void
@@ -622,6 +628,10 @@ export const useAppStore = create<AppStore>()(
 
             setLiveSlide: (slideId) => {
                 set({ liveSlideId: slideId })
+            },
+
+            setLiveOutputBlanked: (blanked) => {
+                set({ liveOutputBlanked: blanked })
             },
 
             setSongTrackingEnabled: (enabled) => {

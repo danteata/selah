@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, CheckSquare, Rows3, Plus, GripVertical, AlertTriangle } from 'lucide-react'
+import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Rows3, Plus, GripVertical, AlertTriangle, Music } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
@@ -7,6 +7,8 @@ import { bibleBooks } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
 import { EmptyState } from '../utils/EmptyState'
 import { BibleVersionSelect } from '../bible/BibleVersionSelect'
+import { SongVerseBrowser } from '../slides/SongVerseBrowser'
+import { groupQueueItems, type SongGroupItem } from './groupQueueItems'
 
 export function PreviewContent() {
     const [activeSlide, setActiveSlide] = useState<Slide | undefined>()
@@ -74,6 +76,27 @@ export function PreviewContent() {
         // If no active schedule, show all slides without a scheduleId
         return activeSlides.filter((slide) => !slide.scheduleId || slide.scheduleId === '')
     }, [activeSlides, activeSchedule?._id, sessionScheduleId])
+
+    // Collapse a song's verse slides (createSongSlides materializes one per
+    // verse, up front, so the tracker/auto-detect features have somewhere to
+    // point setLiveSlide at) into a single row in the queue — a song with a
+    // dozen verses otherwise buries every other slide under a wall of
+    // "Verse 1", "Verse 2", ... entries. Only groups CONSECUTIVE same-songId
+    // runs (how they're created) into one row; a lone verse (song with just
+    // one section, or one manually separated from its siblings) renders as a
+    // normal single row, matching prior behavior exactly.
+    const queueItems = useMemo(() => groupQueueItems(slides), [slides])
+
+    const [expandedSongGroups, setExpandedSongGroups] = useState<Set<string>>(new Set())
+    const toggleSongGroupExpanded = useCallback((key: string) => {
+        setExpandedSongGroups((prev) => {
+            const next = new Set(prev)
+            if (next.has(key)) next.delete(key)
+            else next.add(key)
+            return next
+        })
+    }, [])
+    const [browsingSongGroup, setBrowsingSongGroup] = useState<SongGroupItem | null>(null)
 
     const canGoLive = !isConnected || isOperator || (isContributor && isOpen)
     const canQueueSlide = isConnected && isContributor && !isStrict
@@ -362,6 +385,119 @@ export function PreviewContent() {
         }
     }, [scriptureRef, activeSlide, fetchScripture, activeSlides, setActiveSlides, setActiveSlide])
 
+    const handleSelectVerseFromBrowser = useCallback((slideId: string) => {
+        setLiveSlide(slideId)
+        if (isConnected) {
+            void setSharedLiveSlide(slideId)
+        }
+    }, [setLiveSlide, isConnected, setSharedLiveSlide])
+
+    // One queue row for a single slide — shared between top-level rows and
+    // the rows nested under an expanded song group, so both stay identical.
+    const renderSlideRow = (slide: Slide, index: number) => (
+        <div
+            key={slide.id}
+            data-slide-index={index}
+            ref={activeSlide?.id === slide.id ? activeSlideRef : undefined}
+            className={`transition-all ${
+                isDraggingIndex === index ? 'opacity-50 scale-95' : ''
+            } ${
+                dragOverIndex === index && isDraggingIndex != null && isDraggingIndex !== index
+                    ? 'border-t-2 border-[var(--accent-teal)] pt-2'
+                    : ''
+            }`}
+        >
+            <div className="flex items-center gap-1">
+                {/* Drag handle */}
+                {!bulkSelectMode && (
+                    <div
+                        onPointerDown={(e) => {
+                            if (e.button !== 0) return
+                            e.preventDefault()
+                            dragStateRef.current = index
+                            setIsDraggingIndex(index)
+                            if (slidesGridRef.current) {
+                                slidesGridRef.current.style.userSelect = 'none'
+                                slidesGridRef.current.style.cursor = 'grabbing'
+                            }
+                        }}
+                        className="cursor-grab active:cursor-grabbing p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)] touch-none"
+                        title="Drag to reorder"
+                    >
+                        <GripVertical className="w-4 h-4" />
+                    </div>
+                )}
+                <div className="flex-1 min-w-0">
+                    <SlideCard
+                        slide={slide}
+                        isActive={activeSlide?.id === slide.id}
+                        isLive={liveSlideId === slide.id}
+                        isSelected={selectedSlideIds.includes(slide.id)}
+                        selectable={bulkSelectMode}
+                        onClick={() => handleSlideClick(slide)}
+                        onDuplicate={() => handleDuplicateSlide(slide)}
+                        onDelete={() => handleDeleteSlide(slide.id)}
+                        onEdit={() => handleEditSlide(slide)}
+                        onSaveToLibrary={() => handleSaveToLibrary(slide)}
+                        isSaved={isInLibrary(slide.id)}
+                        onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
+                        onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
+                        isStickyActive={activeSlide?.id === slide.id}
+                    />
+                </div>
+            </div>
+        </div>
+    )
+
+    // Collapsed row for a song's grouped verses — see queueItems above.
+    // Expanding reveals the same per-slide rows (drag handle + SlideCard,
+    // real data-slide-index) as any other slide, so reordering/deleting
+    // individual verses works exactly as before once expanded.
+    const renderSongGroup = (item: SongGroupItem) => {
+        const isExpanded = expandedSongGroups.has(item.key)
+        const liveVerse = item.verses.find((v) => v.slide.id === liveSlideId)
+        return (
+            <div key={item.key} className="flex flex-col gap-1">
+                <div
+                    className={`flex items-center gap-2 p-2 rounded-lg border transition-colors ${liveVerse
+                        ? 'border-red-500/40 bg-red-500/5'
+                        : 'border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 hover:bg-[var(--bg-tertiary)]/70'
+                        }`}
+                >
+                    <button
+                        onClick={() => toggleSongGroupExpanded(item.key)}
+                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] flex-shrink-0"
+                        title={isExpanded ? 'Collapse' : 'Expand'}
+                    >
+                        {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    </button>
+                    <Music className="w-4 h-4 text-[var(--accent-teal)] flex-shrink-0" />
+                    <button
+                        onClick={() => setBrowsingSongGroup(item)}
+                        className="flex-1 min-w-0 text-left"
+                        title="Browse verses"
+                    >
+                        <div className="text-sm font-medium text-[var(--text-primary)] truncate">{item.songTitle}</div>
+                        <div className="text-xs text-[var(--text-muted)]">
+                            {item.verses.length} verses
+                            {liveVerse && (
+                                <span className="ml-1 font-semibold text-red-500">
+                                    · {liveVerse.slide.verseLabel || `Verse ${(liveVerse.slide.verseIndex ?? 0) + 1}`} live
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                    {liveVerse && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
+                </div>
+                {isExpanded && (
+                    <div className="ml-6 flex flex-col gap-2">
+                        {item.verses.map(({ slide, index }) => renderSlideRow(slide, index))}
+                    </div>
+                )}
+            </div>
+        )
+    }
+
     return (
         <div className="relative flex-1 flex flex-col h-full bg-transparent overflow-hidden">
             {/* Header - Compact */}
@@ -461,61 +597,10 @@ export function PreviewContent() {
                     }
                 }}
             >
-                {slides.length > 0 ? (
-                    slides.map((slide, index) => (
-                        <div
-                            key={slide.id}
-                            data-slide-index={index}
-                            ref={activeSlide?.id === slide.id ? activeSlideRef : undefined}
-                            className={`transition-all ${
-                                isDraggingIndex === index ? 'opacity-50 scale-95' : ''
-                            } ${
-                                dragOverIndex === index && isDraggingIndex != null && isDraggingIndex !== index
-                                    ? 'border-t-2 border-[var(--accent-teal)] pt-2'
-                                    : ''
-                            }`}
-                        >
-                            <div className="flex items-center gap-1">
-                                {/* Drag handle */}
-                                {!bulkSelectMode && (
-                                    <div
-                                        onPointerDown={(e) => {
-                                            if (e.button !== 0) return
-                                            e.preventDefault()
-                                            dragStateRef.current = index
-                                            setIsDraggingIndex(index)
-                                            if (slidesGridRef.current) {
-                                                slidesGridRef.current.style.userSelect = 'none'
-                                                slidesGridRef.current.style.cursor = 'grabbing'
-                                            }
-                                        }}
-                                        className="cursor-grab active:cursor-grabbing p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)] touch-none"
-                                        title="Drag to reorder"
-                                    >
-                                        <GripVertical className="w-4 h-4" />
-                                    </div>
-                                )}
-                                <div className="flex-1 min-w-0">
-                                    <SlideCard
-                                        slide={slide}
-                                        isActive={activeSlide?.id === slide.id}
-                                        isLive={liveSlideId === slide.id}
-                                        isSelected={selectedSlideIds.includes(slide.id)}
-                                        selectable={bulkSelectMode}
-                                        onClick={() => handleSlideClick(slide)}
-                                        onDuplicate={() => handleDuplicateSlide(slide)}
-                                        onDelete={() => handleDeleteSlide(slide.id)}
-                                        onEdit={() => handleEditSlide(slide)}
-                                        onSaveToLibrary={() => handleSaveToLibrary(slide)}
-                                        isSaved={isInLibrary(slide.id)}
-                                        onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
-                                        onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
-                                        isStickyActive={activeSlide?.id === slide.id}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    ))
+                {queueItems.length > 0 ? (
+                    queueItems.map((item) =>
+                        item.type === 'single' ? renderSlideRow(item.slide, item.index) : renderSongGroup(item)
+                    )
                 ) : (
                     <div className="py-20 flex flex-col items-center opacity-40">
                         <EmptyState
@@ -528,6 +613,22 @@ export function PreviewContent() {
                     </div>
                 )}
             </div>
+
+            {/* Song verse browser — chapter-style panel for a song's verses,
+                modeled on the Bible list's browse-and-push-live pattern. */}
+            {browsingSongGroup && (
+                <SongVerseBrowser
+                    songTitle={browsingSongGroup.songTitle}
+                    artist={browsingSongGroup.artist}
+                    verses={browsingSongGroup.verses}
+                    liveSlideId={liveSlideId}
+                    onSelectVerse={(slideId) => {
+                        handleSelectVerseFromBrowser(slideId)
+                        setBrowsingSongGroup(null)
+                    }}
+                    onClose={() => setBrowsingSongGroup(null)}
+                />
+            )}
 
             {/* Clear Queue Confirmation */}
             {showClearConfirm && (

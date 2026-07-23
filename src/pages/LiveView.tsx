@@ -39,6 +39,7 @@ interface LiveState {
         animations?: boolean
         transitionInterval?: number
         visualizerEnabled?: boolean
+        liveOutputBlanked?: boolean
     }
     overlay?: string
     alert?: unknown
@@ -414,20 +415,18 @@ export default function LiveView() {
         [slide?.id]
     )
 
+    // Nothing selected yet (distinct from a deliberate "Clear" — see the
+    // liveOutputBlanked guard around the Content section below, which keeps
+    // the current slide's background so the audience sees the projector is
+    // live, just without text). The audience should see a plain black
+    // screen here, not operator-facing debug text. Only the monitor-identify
+    // badge (used while setting up multi-monitor output) is worth keeping.
     if (!slide) {
         return (
             <div
-                className="h-screen bg-black flex items-center justify-center text-white relative"
+                className="h-screen bg-black relative"
                 style={monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : undefined}
             >
-                <div className="text-center">
-                    <p className="text-xl mb-2">No slide selected</p>
-                    <p className="text-gray-400">Select a slide from the main window to display here</p>
-                    {isDesktop && (
-                        <p className="text-green-400 text-sm mt-4">Running in native desktop mode</p>
-                    )}
-                </div>
-
                 {monitorColor && monitorName && (
                     <div
                         className="absolute top-3 left-3 px-3 py-1.5 rounded-md text-xs font-semibold text-white z-40"
@@ -484,8 +483,11 @@ export default function LiveView() {
                 see the operator toggling it live in the main window. */}
             <AudioReactiveBackground enabled={settings.visualizerEnabled ?? false} />
 
-            {/* Content */}
-            {slide.type === slideTypes.media ? (
+            {/* Content — suppressed while the operator has "Cleared" the
+                output, keeping the background above so the audience still
+                sees the projector is live, just with the text/media hidden
+                rather than looking like nothing is being sent at all. */}
+            {!settings.liveOutputBlanked && (slide.type === slideTypes.media ? (
                 <MediaContent
                     slide={slide}
                     src={backgroundUrl || undefined}
@@ -702,10 +704,11 @@ export default function LiveView() {
                         </div>
                     )
                 })()
-            )}
+            ))}
 
-            {/* Title overlay for hymns/songs */}
-            {slide.title && settings.songAndHymnLabelsVisibility && (
+            {/* Title overlay for hymns/songs — also part of the "content"
+                the Clear action hides. */}
+            {!settings.liveOutputBlanked && slide.title && settings.songAndHymnLabelsVisibility && (
                 <div className="absolute top-8 left-8 text-white/80 text-lg">
                     {slide.title}
                 </div>

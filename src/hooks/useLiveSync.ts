@@ -10,6 +10,7 @@ export function useLiveSync() {
 
     const activeSlides = useAppStore((state) => state.activeSlides)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
+    const liveOutputBlanked = useAppStore((state) => state.liveOutputBlanked)
     const settings = useAppStore((state) => state.settings)
     const activeOverlay = useAppStore((state) => state.activeOverlay)
     const activeAlert = useAppStore((state) => state.activeAlert)
@@ -23,6 +24,11 @@ export function useLiveSync() {
     // Subset of settings the live output window actually needs. Memoized so
     // its identity only changes when one of these values actually changes,
     // not on every unrelated settings update.
+    //
+    // `liveOutputBlanked` rides along in this same object (rather than a
+    // separate channel) so it reaches the live window through the exact same
+    // paths settings already do: native IPC (`sendSettingsToLive`, below) and
+    // the localStorage/BroadcastChannel state used by web-mode windows.
     const liveSettings = useMemo(() => ({
         liveWindowFullscreen: settings.liveWindowFullscreen,
         songAndHymnLabelsVisibility: settings.songAndHymnLabelsVisibility,
@@ -36,7 +42,8 @@ export function useLiveSync() {
         animations: settings.animations ?? true,
         transitionInterval: settings.transitionInterval ?? 0.7,
         visualizerEnabled,
-    }), [settings, visualizerEnabled])
+        liveOutputBlanked,
+    }), [settings, visualizerEnabled, liveOutputBlanked])
 
     useEffect(() => {
         broadcastChannelRef.current = new BroadcastChannel('selah-live-channel')
