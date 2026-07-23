@@ -192,16 +192,26 @@ jobs:
           set -euo pipefail
           # Pick the x86_64 macOS bottle tag from the formula metadata. Intel
           # bottles use the bare OS name (e.g. "sonoma"); arm64 tags are prefixed
-          # `arm64_` and Linux is `*_linux`. We can't trial-and-error tags on
-          # `brew fetch` exit codes — it exits 0 (just warns) when a bottle tag is
-          # unavailable, which previously made us "select" an arm64-only tag
-          # (tahoe) and download nothing.
-          tag="$(brew info --json=v2 onnxruntime \
-            | jq -r '.formulae[0].bottle.stable.files | keys[]' \
-            | grep -vE '^arm64_|_linux$' \
-            | head -n1)"
+          # `arm64_`, Linux is `*_linux`. (We can't trial-and-error tags on `brew
+          # fetch` exit codes — it exits 0 with only a warning when a tag's bottle
+          # is unavailable.)
+          #
+          # Deliberately NO `grep ... | head` here: under `set -o pipefail`, head
+          # closing the pipe early makes grep exit 141 (SIGPIPE), which would kill
+          # this script at the assignment before any diagnostics print. Filter
+          # with a plain bash loop instead (also /bin/bash 3.2-safe — no mapfile).
+          json="$(brew info --json=v2 onnxruntime)"
+          tags="$(printf '%s' "$json" | jq -r '.formulae[0].bottle.stable.files | keys[]')"
+          echo "Available onnxruntime bottle tags:"; printf '  %s\n' $tags
+          tag=""
+          while IFS= read -r t; do
+            case "$t" in
+              arm64_*|*_linux|"") continue ;;
+              *) tag="$t"; break ;;
+            esac
+          done <<< "$tags"
           if [ -z "$tag" ]; then
-            echo "::error::no x86_64 macOS onnxruntime bottle tag found in the formula"; exit 1
+            echo "::error::no x86_64 macOS onnxruntime bottle tag in the formula (tags: $(printf '%s ' $tags))"; exit 1
           fi
           echo "Using x86_64 onnxruntime bottle tag: $tag"
           brew fetch --quiet --bottle-tag="$tag" onnxruntime
