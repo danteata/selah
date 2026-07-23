@@ -113,6 +113,7 @@ pub fn is_system_audio_supported() -> bool {
 
 /// Machine-parseable error the frontend detects to show the "grant permission"
 /// recovery flow. Do not change the string without updating classifyTranscriptionError.
+#[cfg(target_os = "macos")]
 pub const SCREEN_CAPTURE_PERMISSION_DENIED: &str = "SCREEN_CAPTURE_PERMISSION_DENIED";
 
 /// Tauri command: Check whether Screen & System Audio Recording permission is

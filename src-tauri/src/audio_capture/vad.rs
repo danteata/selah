@@ -14,12 +14,14 @@ pub struct VadConfig {
     /// Probability threshold for speech detection (default: 0.5)
     pub speech_threshold: f32,
     /// Probability threshold for silence detection (default: 0.35)
+    #[allow(dead_code)]
     pub silence_threshold: f32,
     /// Minimum speech duration in milliseconds (default: 250)
     pub min_speech_ms: u32,
     /// Minimum silence duration to end speech in milliseconds (default: 100)
     pub min_silence_ms: u32,
     /// Padding to add around speech segments in milliseconds (default: 30)
+    #[allow(dead_code)]
     pub speech_pad_ms: u32,
     /// Number of *consecutive* speech chunks required before a segment is
     /// opened (onset smoothing). A value of 1 reproduces the old behaviour of
@@ -199,6 +201,7 @@ impl SileroVad {
     }
 
     /// Check if probability indicates silence
+    #[allow(dead_code)]
     pub fn is_silence(&self, probability: f32) -> bool {
         probability < self.config.silence_threshold
     }

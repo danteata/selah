@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 
 pub struct SessionRecorder {
     writer: Mutex<Option<WavWriter<BufWriter<File>>>>,
+    #[allow(dead_code)]
     pub path: PathBuf,
 }
 

@@ -59,7 +59,13 @@ pub struct TranscriptionConfig {
 /// Idle-unload policy for the loaded model.
 #[derive(Clone, Copy, Debug)]
 pub enum UnloadTimeout {
+    // `Never` and `Immediately` are matched in `maybe_unload_immediately` and
+    // the idle-unload loop, but currently only `After(..)` is constructed
+    // (via `Default` / config). They remain part of the public API so callers
+    // can opt into never/ immediate unloading via `set_unload_timeout`.
+    #[allow(dead_code)]
     Never,
+    #[allow(dead_code)]
     Immediately,
     After(Duration),
 }
@@ -322,6 +328,7 @@ impl TranscriptionManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_unload_timeout(&self, timeout: UnloadTimeout) {
         if let Ok(mut t) = self.unload_timeout.lock() {
             *t = timeout;
