@@ -1,3 +1,5 @@
 export { BibleList } from './BibleList'
 export { BibleVersionSelect } from './BibleVersionSelect'
 export { BibleVerseNavigator } from './BibleVerseNavigator'
+export { BookAutocomplete } from './BookAutocomplete'
+export { ReferenceEditor } from './ReferenceEditor'

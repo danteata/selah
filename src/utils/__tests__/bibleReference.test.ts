@@ -3,6 +3,11 @@ import {
     parseBibleQuery,
     resolveBookName,
     getBookSuggestions,
+    getRankedBookSuggestions,
+    stepChapter,
+    stepBook,
+    clampVerse,
+    formatReferenceQuery,
     bookAbbreviations,
     buildVerseRows,
     normalizeBibleReference,
@@ -269,9 +274,111 @@ describe('getBookSuggestions', () => {
     })
 })
 
+describe('getRankedBookSuggestions', () => {
+    it('returns [] for empty or colon-bearing input', () => {
+        expect(getRankedBookSuggestions('')).toEqual([])
+        expect(getRankedBookSuggestions('John 3:')).toEqual([])
+    })
+
+    it('ranks an exact abbreviation first', () => {
+        const r = getRankedBookSuggestions('jn')
+        expect(r[0].book).toBe('John')
+        expect(r[0].matchType).toBe('abbrev')
+        expect(r[0].bookIndex).toBe(43)
+    })
+
+    it('returns prefix matches in canonical order before fuzzier hits', () => {
+        const books = getRankedBookSuggestions('jo').map(s => s.book)
+        // Job (18), Joel (29), John (43), Jonah (32), Joshua (6) all start
+        // with "jo"; canonical order is Joshua, Job, Joel, Jonah, John.
+        expect(books).toContain('Joshua')
+        expect(books).toContain('Job')
+        expect(books).toContain('John')
+        const prefixMatches = getRankedBookSuggestions('jo').filter(s => s.matchType === 'prefix')
+        const indexes = prefixMatches.map(s => s.bookIndex)
+        expect(indexes).toEqual([...indexes].sort((a, b) => a - b))
+    })
+
+    it('falls back to fuzzy matching for non-prefix queries', () => {
+        const books = getRankedBookSuggestions('corin').map(s => s.book)
+        expect(books.some(b => b.includes('Corinthians'))).toBe(true)
+    })
+
+    it('respects the limit', () => {
+        expect(getRankedBookSuggestions('a', 3).length).toBeLessThanOrEqual(3)
+    })
+
+    it('never returns duplicate books', () => {
+        const r = getRankedBookSuggestions('jo')
+        const ids = r.map(s => s.bookIndex)
+        expect(new Set(ids).size).toBe(ids.length)
+    })
+})
+
+describe('stepChapter', () => {
+    it('steps within a book', () => {
+        expect(stepChapter(43, 3, 1)).toEqual({ bookIndex: 43, chapter: 4 })
+        expect(stepChapter(43, 3, -1)).toEqual({ bookIndex: 43, chapter: 2 })
+        expect(stepChapter(43, 3, 2)).toEqual({ bookIndex: 43, chapter: 5 })
+    })
+
+    it('rolls forward into the next book past the last chapter', () => {
+        // John has 21 chapters → +1 lands on Acts 1.
+        expect(stepChapter(43, 21, 1)).toEqual({ bookIndex: 44, chapter: 1 })
+    })
+
+    it('rolls backward into the previous book before chapter 1', () => {
+        // John 1 → prev is Luke 24 (Luke has 24 chapters).
+        expect(stepChapter(43, 1, -1)).toEqual({ bookIndex: 42, chapter: 24 })
+    })
+
+    it('stops at the very start and end of the canon', () => {
+        expect(stepChapter(1, 1, -1)).toEqual({ bookIndex: 1, chapter: 1 })
+        expect(stepChapter(66, 22, 1)).toEqual({ bookIndex: 66, chapter: 22 })
+    })
+})
+
+describe('stepBook', () => {
+    it('steps and clamps to the 66-book canon', () => {
+        expect(stepBook(43, 1)).toBe(44)
+        expect(stepBook(1, -1)).toBe(1)
+        expect(stepBook(66, 1)).toBe(66)
+    })
+})
+
+describe('clampVerse', () => {
+    it('never goes below 1', () => {
+        expect(clampVerse(0)).toBe(1)
+        expect(clampVerse(-5)).toBe(1)
+    })
+
+    it('caps at the highest loaded verse when provided', () => {
+        expect(clampVerse(10, [1, 2, 3, 5])).toBe(5)
+        expect(clampVerse(3, [1, 2, 3, 5])).toBe(3)
+    })
+
+    it('leaves the verse alone with no bound', () => {
+        expect(clampVerse(42)).toBe(42)
+    })
+})
+
+describe('formatReferenceQuery', () => {
+    it('formats a single verse', () => {
+        expect(formatReferenceQuery(43, 3, 16)).toBe('John 3:16')
+    })
+
+    it('formats a verse range', () => {
+        expect(formatReferenceQuery(43, 3, 16, 18)).toBe('John 3:16-18')
+    })
+
+    it('omits the range when end equals start', () => {
+        expect(formatReferenceQuery(19, 23, 1, 1)).toBe('Psalms 23:1')
+    })
+})
+
 describe('bookAbbreviations', () => {
     it('maps every value to a valid bibleBooks entry', () => {
-        for (const [abbr, bookName] of Object.entries(bookAbbreviations)) {
+        for (const [, bookName] of Object.entries(bookAbbreviations)) {
             expect(bibleBooks).toContain(bookName)
         }
     })

@@ -392,6 +392,13 @@ export function useSemanticVerseSearch(
         if (abortControllerRef.current) {
             abortControllerRef.current.abort()
         }
+        // Aborting a running search does NOT clear isSearching in the search's
+        // own `finally` (it guards on `!aborted` so a superseding search keeps
+        // the spinner). Since clearResults aborts with no replacement search,
+        // we must clear it here — otherwise the "Searching…" spinner hangs
+        // forever (e.g. when a valid reference like "Malachi 7:8" cancels the
+        // in-flight semantic search for the partial "Malachi 7").
+        setIsSearching(false)
     }, [])
 
     // Cleanup on unmount

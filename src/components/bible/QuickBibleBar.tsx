@@ -1,11 +1,13 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Zap, Plus, X, Loader2, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 import type { Scripture, BibleVerse } from '../../types'
-import { parseBibleQuery } from '../../utils/bibleReference'
+import { parseBibleQuery, normalizeBibleReference, getRankedBookSuggestions, formatReferenceQuery, type ParsedBibleQuery } from '../../utils/bibleReference'
+import { BookAutocomplete } from './BookAutocomplete'
+import { ReferenceEditor } from './ReferenceEditor'
 
 export function QuickBibleBar() {
     const quickBibleBarOpen = useAppStore((s) => s.quickBibleBarOpen)
@@ -36,6 +38,7 @@ export function QuickBibleBar() {
     const [currentPosition, setCurrentPosition] = useState<{ bookIndex: number; bookName: string; chapter: number; startVerse: number; endVerse: number } | null>(null)
     const [neighboringVerses, setNeighboringVerses] = useState<{ prev: BibleVerse[]; next: BibleVerse[] }>({ prev: [], next: [] })
     const [focusedIndex, setFocusedIndex] = useState(-1)
+    const [suggestionIndex, setSuggestionIndex] = useState(0)
     const inputRef = useRef<HTMLInputElement>(null)
 
     const {
@@ -66,7 +69,9 @@ export function QuickBibleBar() {
 
     useEffect(() => {
         const trimmed = query.trim()
-        const looksLikeRef = /^((?:\d\s?)?[a-z]+)\s+(\d+):(\d+)/i.test(trimmed) || /^(\d+):(\d+):(\d+)/.test(trimmed)
+        // Normalize first so colon-less refs ("John 3 16") are recognized as
+        // references and don't fall through to a semantic search.
+        const looksLikeRef = parseBibleQuery(normalizeBibleReference(trimmed)) !== null
         if (trimmed.length >= 3 && !looksLikeRef && hasEmbeddings) {
             semanticSearch(trimmed)
         } else {
@@ -74,8 +79,21 @@ export function QuickBibleBar() {
         }
     }, [query, hasEmbeddings, semanticSearch, clearSemanticResults])
 
+    // Book autocomplete: only while typing the book portion (no digits yet)
+    // and before a scripture is shown.
+    const bookSuggestions = useMemo(() => {
+        if (currentScripture) return []
+        const trimmed = query.trim()
+        if (!trimmed || /\d/.test(trimmed)) return []
+        return getRankedBookSuggestions(trimmed)
+    }, [query, currentScripture])
+    const suggestionsOpen = bookSuggestions.length > 0 && !currentScripture
+
     useEffect(() => {
-        setFocusedIndex(-1)
+        // Auto-highlight the top result so a meaning search is a single
+        // keystroke: type → Enter presents the best match, no arrow/mouse
+        // needed first (matches the BibleList panel).
+        setFocusedIndex(semanticResults.length > 0 ? 0 : -1)
     }, [semanticResults])
 
     const fetchAndSetScripture = useCallback(async (parsed: { bookIndex: number; chapter: number; startVerse: number; endVerse: number; bookName: string }) => {
@@ -99,11 +117,47 @@ export function QuickBibleBar() {
         return result
     }, [fetchScripture, defaultBibleVersion])
 
-    const handleSearch = useCallback(async () => {
-        const parsed = parseBibleQuery(query)
+    // Accept a book from the autocomplete: drop in "Book " and keep typing.
+    const acceptBookSuggestion = useCallback((bookName: string) => {
+        setQuery(bookName + ' ')
+        setSuggestionIndex(0)
+        clearSemanticResults()
+        inputRef.current?.focus()
+    }, [clearSemanticResults])
+
+    // Apply a reference produced by the inline stepper chips — keeps the text
+    // input in sync and re-fetches through the same path as a typed search.
+    const applyEditedReference = useCallback((next: ParsedBibleQuery) => {
+        setQuery(formatReferenceQuery(next.bookIndex, next.chapter, next.startVerse, next.endVerse))
+        void fetchAndSetScripture(next)
+    }, [fetchAndSetScripture])
+
+    // Auto-fetch a valid reference as it's typed so the verse appears
+    // instantly — no separate "search" keystroke, and Enter then presents it
+    // in one press (mirrors the BibleList panel). Debounced so we don't fetch
+    // mid-type. Non-references fall through to the semantic effect above.
+    useEffect(() => {
+        const trimmed = query.trim()
+        if (!trimmed) return
+        const parsed = parseBibleQuery(normalizeBibleReference(trimmed))
         if (!parsed) return
-        await fetchAndSetScripture(parsed)
+        const timer = setTimeout(() => { void fetchAndSetScripture(parsed) }, 300)
+        return () => clearTimeout(timer)
     }, [query, fetchAndSetScripture])
+
+    // Highest loaded verse in the current chapter, to clamp the verse stepper.
+    const maxVerseInChapter = useMemo(() => {
+        if (!currentPosition) return undefined
+        const ch = currentPosition.chapter
+        const inChapter = (v: BibleVerse) => Number(v.chapter) === ch
+        const cur = Array.isArray(currentScripture?.content) ? currentScripture!.content as BibleVerse[] : []
+        const nums = [
+            ...cur.map(v => Number(v.verse)),
+            ...neighboringVerses.prev.filter(inChapter).map(v => Number(v.verse)),
+            ...neighboringVerses.next.filter(inChapter).map(v => Number(v.verse)),
+        ].filter(n => Number.isFinite(n))
+        return nums.length ? Math.max(...nums) : undefined
+    }, [currentPosition, currentScripture, neighboringVerses])
 
     const handleGoLive = useCallback(async (scripture: Scripture) => {
         const slide = createBibleSlide(scripture)
@@ -144,6 +198,19 @@ export function QuickBibleBar() {
         setContextPanelOpen(true)
     }, [createBibleSlide, appendActiveSlide, setQuickBibleBarOpen, setActiveNavSection, setContextPanelOpen, setBiblePanelQuery, currentPosition, query])
 
+    // Enter pressed before the debounced auto-fetch has loaded the verse:
+    // fetch the reference and immediately act on it (present, or queue on
+    // Shift), so a reference is a single keystroke even for fast typers.
+    const fetchAndAct = useCallback(async (queue: boolean) => {
+        const parsed = parseBibleQuery(normalizeBibleReference(query))
+        if (!parsed) return
+        const result = await fetchAndSetScripture(parsed)
+        if (result) {
+            if (queue) handleAddToQueue(result)
+            else handleGoLive(result)
+        }
+    }, [query, fetchAndSetScripture, handleGoLive, handleAddToQueue])
+
     const navigateVerse = useCallback((direction: 'prev' | 'next') => {
         if (!currentPosition) return
         const range = currentPosition.endVerse - currentPosition.startVerse + 1
@@ -172,24 +239,38 @@ export function QuickBibleBar() {
     )
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        // Book autocomplete takes ↑/↓/Tab/Enter/→ while open.
+        if (suggestionsOpen) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setSuggestionIndex(i => (i + 1) % bookSuggestions.length); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setSuggestionIndex(i => i <= 0 ? bookSuggestions.length - 1 : i - 1); return }
+            if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowRight') {
+                const s = bookSuggestions[suggestionIndex] ?? bookSuggestions[0]
+                if (s) { e.preventDefault(); acceptBookSuggestion(s.book); return }
+            }
+        }
         if (e.key === 'Enter') {
             e.preventDefault()
-            if (e.shiftKey && currentScripture) {
-                handleGoLive(currentScripture)
-            } else if (currentScripture) {
-                handleGoLive(currentScripture)
+            // Contract: Enter = present now, Shift+Enter = add to queue.
+            if (currentScripture) {
+                if (e.shiftKey) handleAddToQueue(currentScripture)
+                else handleGoLive(currentScripture)
             } else if (focusedIndex >= 0 && semanticResults.length > 0) {
                 const r = semanticResults[focusedIndex]
                 const label = `${r.bookNumber}:${r.chapter}:${r.verse}`
+                // Capture the modifier before the async gap.
+                const queue = e.shiftKey
                 fetchScripture(label, defaultBibleVersion || 'KJV').then(result => {
                     if (result) {
                         setCurrentScripture(result)
                         setCurrentPosition({ bookIndex: r.bookNumber, bookName: r.reference.split(' ')[0], chapter: r.chapter, startVerse: r.verse, endVerse: r.verse })
-                        if (e.shiftKey) handleGoLive(result)
+                        if (queue) handleAddToQueue(result)
+                        else handleGoLive(result)
                     }
                 })
             } else {
-                handleSearch()
+                // No verse loaded yet (typed a reference and hit Enter before
+                // the auto-fetch fired) — fetch and act in one press.
+                fetchAndAct(e.shiftKey)
             }
         } else if (e.key === 'ArrowDown') {
             if (semanticResults.length > 0 && !currentScripture) {
@@ -210,7 +291,7 @@ export function QuickBibleBar() {
                 setQuickBibleBarOpen(false)
             }
         }
-    }, [currentScripture, focusedIndex, semanticResults, handleGoLive, handleSearch, fetchScripture, defaultBibleVersion, setQuickBibleBarOpen])
+    }, [currentScripture, focusedIndex, semanticResults, handleGoLive, handleAddToQueue, fetchAndAct, fetchScripture, defaultBibleVersion, setQuickBibleBarOpen, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion])
 
     const handleSelectSemantic = useCallback(async (bookNumber: number, chapter: number, verse: number) => {
         const label = `${bookNumber}:${chapter}:${verse}`
@@ -250,6 +331,7 @@ export function QuickBibleBar() {
                                 value={query}
                                 onChange={(e) => {
                                     setQuery(e.target.value)
+                                    setSuggestionIndex(0)
                                     setCurrentScripture(null)
                                     setCurrentPosition(null)
                                 }}
@@ -265,24 +347,46 @@ export function QuickBibleBar() {
                             {loading && <Loader2 className="w-4 h-4 text-[var(--accent-teal)] animate-spin shrink-0" />}
                         </div>
 
+                        {/* Book autocomplete — rendered in-flow so the card's
+                            overflow-hidden doesn't clip it. */}
+                        {suggestionsOpen && (
+                            <div className="p-2 border-b border-[var(--border-subtle)]">
+                                <BookAutocomplete
+                                    suggestions={bookSuggestions}
+                                    activeIndex={suggestionIndex}
+                                    onSelect={(_bi, bookName) => acceptBookSuggestion(bookName)}
+                                    onHoverIndex={setSuggestionIndex}
+                                />
+                            </div>
+                        )}
+
                         {/* Scripture result with verse navigation */}
                         {currentScripture && currentPosition && (
                             <div className="p-3 border-b border-[var(--border-subtle)]">
-                                <div className="flex items-center justify-between mb-2">
-                                    <h4 className="text-sm font-semibold text-[var(--text-primary)]">{currentScripture.label}</h4>
-                                    <div className="flex items-center gap-1">
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
                                         <button
                                             onClick={() => navigateVerse('prev')}
+                                            title="Previous verses"
                                             className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)]"
                                         >
                                             <ChevronLeft className="w-3.5 h-3.5" />
                                         </button>
                                         <button
                                             onClick={() => navigateVerse('next')}
+                                            title="Next verses"
                                             className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)]"
                                         >
                                             <ChevronRight className="w-3.5 h-3.5" />
                                         </button>
+                                        <ReferenceEditor
+                                            bookIndex={currentPosition.bookIndex}
+                                            chapter={currentPosition.chapter}
+                                            startVerse={currentPosition.startVerse}
+                                            endVerse={currentPosition.endVerse}
+                                            maxVerse={maxVerseInChapter}
+                                            onChange={applyEditedReference}
+                                        />
                                     </div>
                                 </div>
                                 <div className="space-y-1 mb-2 max-h-32 overflow-y-auto">
@@ -378,10 +482,17 @@ export function QuickBibleBar() {
                             </div>
                         )}
 
-                        {!currentScripture && semanticResults.length === 0 && !isSemanticSearching && query && (
-                            <div className="px-4 py-3 text-xs text-[var(--text-muted)] text-center">
-                                Type a verse reference like &quot;John 3:16&quot; or search by meaning
-                            </div>
+                        {!currentScripture && semanticResults.length === 0 && !isSemanticSearching && !loading && query && (
+                            parseBibleQuery(normalizeBibleReference(query.trim()))
+                                ? (
+                                    <div className="px-4 py-3 text-xs text-[var(--text-muted)] text-center">
+                                        No verse found for &ldquo;{query.trim()}&rdquo;. Check the chapter and verse.
+                                    </div>
+                                ) : (
+                                    <div className="px-4 py-3 text-xs text-[var(--text-muted)] text-center">
+                                        Type a verse reference like &quot;John 3:16&quot; or search by meaning
+                                    </div>
+                                )
                         )}
                     </div>
                     <div className="text-center mt-2 text-[10px] text-white/30">

@@ -18,8 +18,10 @@ import {
 import type { Scripture, BibleVerse } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
-import { parseBibleQuery, getBookSuggestions as getBookSuggestionsUtil, buildVerseRows as buildVerseRowsUtil, normalizeBibleReference, type BibleVerseLike } from '../../utils/bibleReference'
+import { parseBibleQuery, getRankedBookSuggestions, buildVerseRows as buildVerseRowsUtil, normalizeBibleReference, type BibleVerseLike, type ParsedBibleQuery } from '../../utils/bibleReference'
 import type { VerseRow as VerseRowType } from '../../utils/bibleReference'
+import { BookAutocomplete } from './BookAutocomplete'
+import { ReferenceEditor } from './ReferenceEditor'
 
 const RECENT_VERSES_KEY = 'selah-recent-verses'
 const MAX_RECENT = 5
@@ -40,6 +42,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const [loading, setLoading] = useState(false)
     const [selectedVersion, setSelectedVersion] = useState<string>('')
     const [showSuggestions, setShowSuggestions] = useState(false)
+    const [suggestionIndex, setSuggestionIndex] = useState(0)
     const [currentBookIndex, setCurrentBookIndex] = useState<number | null>(null)
     const [currentChapter, setCurrentChapter] = useState<number | null>(null)
     const [currentStartVerse, setCurrentStartVerse] = useState<number | null>(null)
@@ -84,6 +87,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
     const inputRef = useRef<HTMLInputElement>(null)
     const scrollRef = useRef<HTMLDivElement>(null)
+    const activeRowRef = useRef<HTMLDivElement>(null)
 
     // Voice search — streams interim transcripts into the query input,
     // commits the final text on session end so the user can review and
@@ -353,12 +357,51 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
     })
 
+    // Only offer book autocomplete while the user is still typing the book
+    // portion (no chapter/verse yet) and hasn't run a search — otherwise the
+    // input is in reference or semantic mode and suggestions would be noise.
     const bookSuggestions = useMemo(() => {
-        return getBookSuggestionsUtil(query)
-    }, [query])
+        if (hasSearched) return []
+        const trimmed = query.trim()
+        if (!trimmed || /\d/.test(trimmed)) return []
+        return getRankedBookSuggestions(trimmed)
+    }, [query, hasSearched])
+    const suggestionsOpen = showSuggestions && bookSuggestions.length > 0 && !hasSearched
 
+    // Inline ghost-text completion: the un-typed tail of the top suggestion,
+    // shown faintly after the caret. Tab/→ accepts it (see handleKeyDown).
+    const ghostCompletion = useMemo(() => {
+        if (!suggestionsOpen) return ''
+        const top = bookSuggestions[suggestionIndex] ?? bookSuggestions[0]
+        // Match against the raw query (not trimmed) so the invisible spacer
+        // in the overlay lines the ghost up exactly with the typed text.
+        if (top && top.book.toLowerCase().startsWith(query.toLowerCase()) && top.book.length > query.length) {
+            return top.book.slice(query.length)
+        }
+        return ''
+    }, [suggestionsOpen, bookSuggestions, suggestionIndex, query])
+
+    // Normalize loose/colon-less input ("John 3 16", "John 3, 16") before
+    // parsing, so the docked panel matches the voice path — the raw parser
+    // only accepts the canonical "Book C:V" form. `normalizeBibleReference`
+    // is a no-op on free text, so semantic queries are unaffected.
     const parseQuery = useCallback((q: string) => {
-        return parseBibleQuery(q)
+        return parseBibleQuery(normalizeBibleReference(q))
+    }, [])
+
+    // Accept a book from the autocomplete: drop in "Book " and keep typing
+    // the chapter/verse. Clears semantic results so the two modes don't mix.
+    const acceptBookSuggestion = useCallback((bookName: string) => {
+        setQuery(bookName + ' ')
+        setSuggestionIndex(0)
+        clearSemanticResults()
+        inputRef.current?.focus()
+    }, [clearSemanticResults])
+
+    // Apply a reference produced by the inline stepper chips — reuses the
+    // same single-verse load path as clicking a result row.
+    const applyEditedReference = useCallback((next: ParsedBibleQuery) => {
+        loadVerseWithNeighborsRef.current?.(next.bookIndex, next.chapter, next.startVerse)
     }, [])
 
     const addRecentVerse = useCallback((ref: string) => {
@@ -724,18 +767,74 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
     const verseRows = useMemo(() => buildVerseRows(), [buildVerseRows])
 
+    // Highest verse we've actually loaded for the current chapter — used to
+    // clamp the verse stepper's upper bound (there's no static verse-count
+    // table). Neighbors can spill into adjacent chapters, so filter by chapter.
+    const maxVerseInChapter = useMemo(() => {
+        if (!currentChapter) return undefined
+        const inChapter = (v: BibleVerse) => Number(v.chapter) === currentChapter
+        const nums = [
+            ...currentVerses.map(v => Number(v.verse)),
+            ...neighborVerses.prev.filter(inChapter).map(v => Number(v.verse)),
+            ...neighborVerses.next.filter(inChapter).map(v => Number(v.verse)),
+        ].filter(n => Number.isFinite(n))
+        return nums.length ? Math.max(...nums) : undefined
+    }, [currentVerses, neighborVerses, currentChapter])
+
+    // Bring the just-searched/active verse into view so "the verse you looked
+    // up" is visibly highlighted and centered, not buried among neighbors.
+    useEffect(() => {
+        if (activeVerseKey && activeRowRef.current) {
+            activeRowRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        }
+    }, [activeVerseKey, verseRows])
+
+    // What the input will do on Enter right now — surfaced as a subtle hint so
+    // the shared field's reference-vs-meaning behavior isn't a guess.
+    const inputMode = useMemo<'book' | 'reference' | 'meaning' | null>(() => {
+        if (hasSearched) return null
+        const trimmed = query.trim()
+        if (!trimmed) return null
+        if (suggestionsOpen) return 'book'
+        if (parseBibleQuery(normalizeBibleReference(trimmed))) return 'reference'
+        if (trimmed.length >= 3 && hasEmbeddings) return 'meaning'
+        return null
+    }, [hasSearched, query, suggestionsOpen, hasEmbeddings])
+
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        // While the book autocomplete is open, ↑/↓/Tab/Enter drive the
+        // suggestions (not the result rows or version cycling). Tab and
+        // ArrowRight also accept the inline ghost completion.
+        if (suggestionsOpen) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault(); setSuggestionIndex(i => (i + 1) % bookSuggestions.length); return
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault(); setSuggestionIndex(i => i <= 0 ? bookSuggestions.length - 1 : i - 1); return
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+                const s = bookSuggestions[suggestionIndex] ?? bookSuggestions[0]
+                if (s) { e.preventDefault(); acceptBookSuggestion(s.book); return }
+            }
+            if (e.key === 'ArrowRight' && ghostCompletion) {
+                const s = bookSuggestions[suggestionIndex] ?? bookSuggestions[0]
+                if (s) { e.preventDefault(); acceptBookSuggestion(s.book); return }
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault(); setShowSuggestions(false); return
+            }
+        }
         if (e.key === 'Enter') {
             e.preventDefault()
             if (focusedIndex >= 0 && verseRows.length > 0) {
                 const row = verseRows[focusedIndex]
-                if (row.source === 'semantic') {
-                    loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
-                    if (e.shiftKey) goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
-                } else if (e.shiftKey) {
-                    goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
-                } else {
+                // Contract: Enter = present now, Shift+Enter = add to queue.
+                // goLiveWithScripture already reveals the verse + neighbors, so
+                // a semantic row needs no separate load step here.
+                if (e.shiftKey) {
                     addToQueue(row.bookIndex, row.chapter, row.verse, row.scripture)
+                } else {
+                    goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
                 }
             } else if (!hasSearched) {
                 handleSearch()
@@ -764,7 +863,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             const ci = bibleVersionObjects.findIndex(v => v.id === selectedVersion)
             setSelectedVersion(bibleVersionObjects[(ci + 1) % bibleVersionObjects.length].id)
         }
-    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, loadVerseWithNeighbors, onClose, selectedVersion])
+    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, onClose, selectedVersion, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion, ghostCompletion])
 
     const handleRecentVerseClick = useCallback((ref: string) => {
         setQuery(ref)
@@ -824,7 +923,13 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </select>
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--text-muted)] w-4 h-4" />
-                        <input ref={inputRef} type="text" value={voice.isListening ? voice.transcript : query} onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); if (hasSearched) { setHasSearched(false); setCurrentVerses([]); setNeighborVerses({ prev: [], next: [] }) } }} onKeyDown={handleKeyDown} onFocus={() => setShowSuggestions(true)} placeholder={voice.isListening ? 'Listening…' : 'e.g. John 3:16 or "God so loved"'} className="w-full pl-9 pr-20 py-2.5 border border-[var(--border-default)] rounded-lg focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] transition-all placeholder:text-[var(--text-muted)]" />
+                        <input ref={inputRef} type="text" value={voice.isListening ? voice.transcript : query} onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); setSuggestionIndex(0); if (hasSearched) { setHasSearched(false); setCurrentVerses([]); setNeighborVerses({ prev: [], next: [] }); setCurrentBookIndex(null); setCurrentChapter(null); setCurrentStartVerse(null); setCurrentEndVerse(null); setActiveVerseKey(null); lastSearchedRef.current = null } }} onKeyDown={handleKeyDown} onFocus={() => setShowSuggestions(true)} placeholder={voice.isListening ? 'Listening…' : 'e.g. John 3:16 or "God so loved"'} className="w-full pl-9 pr-20 py-2.5 border border-[var(--border-default)] rounded-lg focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] transition-all placeholder:text-[var(--text-muted)]" />
+                        {ghostCompletion && !voice.isListening && (
+                            <div aria-hidden className="pointer-events-none absolute inset-0 pl-9 pr-20 py-2.5 flex items-center overflow-hidden">
+                                <span className="whitespace-pre invisible">{query}</span>
+                                <span className="whitespace-pre text-[var(--text-muted)]">{ghostCompletion}</span>
+                            </div>
+                        )}
                         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
                             {query && (
                                 <button
@@ -849,11 +954,26 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </div>
                 </div>
 
-                {showSuggestions && bookSuggestions.length > 0 && !hasSearched && (
+                {suggestionsOpen && (
                     <div className="relative mt-2">
-                        <div className="absolute top-0 left-0 right-0 bg-[var(--bg-elevated)] rounded-lg shadow-lg border border-[var(--border-default)] z-10">
-                            {bookSuggestions.map((book) => (<button key={book} onClick={() => { setQuery(book + ' '); inputRef.current?.focus() }} className="w-full text-left px-4 py-2 hover:bg-[var(--accent-teal)]/5 text-[var(--text-primary)] text-sm">{book}</button>))}
+                        <div className="absolute top-0 left-0 right-0 z-10">
+                            <BookAutocomplete
+                                suggestions={bookSuggestions}
+                                activeIndex={suggestionIndex}
+                                onSelect={(_bi, bookName) => acceptBookSuggestion(bookName)}
+                                onHoverIndex={setSuggestionIndex}
+                            />
                         </div>
+                    </div>
+                )}
+
+                {/* Mode hint — tells the operator how the shared input will
+                    interpret what they've typed (reference vs. meaning search). */}
+                {inputMode && (
+                    <div className="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                        {inputMode === 'book' && <><BookOpen className="w-3 h-3" /> Pick a book — Tab to complete</>}
+                        {inputMode === 'reference' && <><BookOpen className="w-3 h-3 text-[var(--accent-teal)]" /> Reference — Enter to present</>}
+                        {inputMode === 'meaning' && <><Search className="w-3 h-3" /> Searching by meaning</>}
                     </div>
                 )}
 
@@ -872,16 +992,23 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </div>
                 )}
 
-                {/* Nav controls when verse is loaded */}
-                {hasSearched && currentBookIndex && currentChapter && (
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-[var(--border-subtle)]">
-                        <div className="flex items-center gap-1">
-                            <button onClick={() => navigateVerse('prev')} className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                            <button onClick={() => navigateVerse('next')} className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronRight className="w-4 h-4" /></button>
-                            <span className="text-xs font-semibold text-[var(--text-primary)] ml-1">{bibleBooks[currentBookIndex - 1]} {currentChapter}:{currentStartVerse}{currentEndVerse !== currentStartVerse ? `-${currentEndVerse}` : ''}</span>
-                            <span className="text-[10px] text-[var(--accent-teal)] ml-1">{selectedVersion}</span>
+                {/* Nav controls when verse is loaded — prev/next range shift plus
+                    the inline stepper chips for editing book / chapter / verse. */}
+                {hasSearched && currentBookIndex && currentChapter && currentStartVerse && currentVerses.length > 0 && (
+                    <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-[var(--border-subtle)]">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            <button onClick={() => navigateVerse('prev')} title="Previous verses" className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+                            <button onClick={() => navigateVerse('next')} title="Next verses" className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                            <ReferenceEditor
+                                bookIndex={currentBookIndex}
+                                chapter={currentChapter}
+                                startVerse={currentStartVerse}
+                                endVerse={currentEndVerse ?? currentStartVerse}
+                                maxVerse={maxVerseInChapter}
+                                onChange={applyEditedReference}
+                            />
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 shrink-0">
                             {downloadedVersions.slice(0, 4).map((v) => (<button key={v.id} onClick={() => changeVersion(v.id)} className={`px-1.5 py-0.5 text-[10px] font-medium rounded transition-colors ${selectedVersion === v.id ? 'bg-[var(--accent-teal)] text-white' : 'text-[var(--text-muted)] hover:bg-[var(--accent-teal)]/10'}`}>{v.id}</button>))}
                         </div>
                     </div>
@@ -894,8 +1021,8 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </summary>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
                         <span>Auto-searches as you type</span>
-                        <span>Enter = Add</span>
-                        <span>Shift+Enter = Live</span>
+                        <span>Enter = Present</span>
+                        <span>Shift+Enter = Add to queue</span>
                         <span>↑↓ Navigate</span>
                     </div>
                 </details>
@@ -940,6 +1067,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                         </div>
                                     )}
                                     <motion.div
+                                        ref={isActive ? activeRowRef : undefined}
                                         layout
                                         initial={{ opacity: 0, y: 4 }}
                                         animate={{ opacity: 1, y: 0 }}
@@ -1022,7 +1150,18 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </div>
                 )}
 
-                {verseRows.length === 0 && !loading && !isSemanticSearching && (
+                {/* Valid reference that returned no verse (e.g. a chapter/verse
+                    out of range like "Malachi 7:8") — tell the user rather than
+                    showing the generic getting-started prompt. */}
+                {hasSearched && verseRows.length === 0 && !loading && !isSemanticSearching && parseQuery(query) && (
+                    <div className="p-4 text-center text-[var(--text-tertiary)]">
+                        <BookOpen className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-30" />
+                        <p className="font-medium text-[var(--text-secondary)]">No verse found</p>
+                        <p className="text-sm mt-1 text-[var(--text-muted)]">&ldquo;{query.trim()}&rdquo; isn&rsquo;t a valid reference in {selectedVersion}. Check the chapter and verse.</p>
+                    </div>
+                )}
+
+                {verseRows.length === 0 && !loading && !isSemanticSearching && !(hasSearched && parseQuery(query)) && (
                     <div className="p-4 text-center text-[var(--text-tertiary)]">
                         <BookOpen className="w-12 h-12 mx-auto mb-3 text-[var(--text-muted)] opacity-30" />
                         <p className="font-medium text-[var(--text-secondary)]">Quick Bible Search</p>
