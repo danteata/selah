@@ -190,49 +190,37 @@ jobs:
         if: matrix.target == 'x86_64-apple-darwin'
         run: |
           set -euo pipefail
-          # Pick the x86_64 macOS bottle tag from the formula metadata. Intel
-          # bottles use the bare OS name (e.g. "sonoma"); arm64 tags are prefixed
-          # `arm64_`, Linux is `*_linux`. (We can't trial-and-error tags on `brew
-          # fetch` exit codes — it exits 0 with only a warning when a tag's bottle
-          # is unavailable.)
+          # Source the x86_64 macOS libonnxruntime from conda-forge. It's the last
+          # channel still building Intel-mac ONNX Runtime: `ort`/pyke ship no
+          # x86_64-apple-darwin prebuilt, Microsoft + PyPI went arm64-only at 1.24,
+          # and Homebrew's current formula has no x86_64 bottle on the runner.
+          # conda-forge's onnxruntime-cpp osx-64 tops out at 1.22.2, which is fine:
+          # ort-sys rc.12 requires only ORT_API_VERSION >= 17 (system strategy, no
+          # build-time version pin), and 1.22.2 is API 22.
           #
-          # Deliberately NO `grep ... | head` here: under `set -o pipefail`, head
-          # closing the pipe early makes grep exit 141 (SIGPIPE), which would kill
-          # this script at the assignment before any diagnostics print. Filter
-          # with a plain bash loop instead (also /bin/bash 3.2-safe — no mapfile).
-          json="$(brew info --json=v2 onnxruntime)"
-          tags="$(printf '%s' "$json" | jq -r '.formulae[0].bottle.stable.files | keys[]')"
-          echo "Available onnxruntime bottle tags:"; printf '  %s\n' $tags
-          tag=""
-          while IFS= read -r t; do
-            case "$t" in
-              arm64_*|*_linux|"") continue ;;
-              *) tag="$t"; break ;;
-            esac
-          done <<< "$tags"
-          if [ -z "$tag" ]; then
-            echo "::error::no x86_64 macOS onnxruntime bottle tag in the formula (tags: $(printf '%s ' $tags))"; exit 1
-          fi
-          echo "Using x86_64 onnxruntime bottle tag: $tag"
-          brew fetch --quiet --bottle-tag="$tag" onnxruntime
-          bottle="$(brew --cache --bottle-tag="$tag" onnxruntime)"
-          if [ ! -f "$bottle" ]; then
-            echo "::error::onnxruntime bottle tarball missing at $bottle after fetch"; exit 1
-          fi
-          work="$RUNNER_TEMP/ort-x86_64"; mkdir -p "$work"
-          tar -xzf "$bottle" -C "$work"
-          dylib="$(find "$work" -type f -name 'libonnxruntime*.dylib' | head -n1)"
+          # micromamba with `--platform osx-64` resolves + downloads the Intel
+          # package on this arm64 runner without running it. The resulting dylib
+          # is self-contained apart from a conda `@rpath/libc++.1.dylib` reference,
+          # which we retarget to the OS libc++ (ABI-stable, always present).
+          curl -Ls https://micro.mamba.pm/api/micromamba/osx-arm64/latest | tar -xj -C "$RUNNER_TEMP" bin/micromamba
+          MAMBA="$RUNNER_TEMP/bin/micromamba"
+          export MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba"
+          "$MAMBA" create -y -p "$RUNNER_TEMP/ortenv" --platform osx-64 -c conda-forge onnxruntime-cpp
+          # The versioned file is the real dylib (libonnxruntime.dylib is a symlink).
+          dylib="$(find "$RUNNER_TEMP/ortenv/lib" -maxdepth 1 -type f -name 'libonnxruntime.*.dylib' | head -n1)"
           if [ -z "$dylib" ]; then
-            echo "::error::libonnxruntime dylib not found in the fetched bottle"; exit 1
+            echo "::error::libonnxruntime dylib not found in the conda-forge package"; exit 1
           fi
-          # Fail loudly if we somehow grabbed the wrong architecture.
           lipo -archs "$dylib" | tr ' ' '\n' | grep -qx x86_64 || {
-            echo "::error::fetched libonnxruntime is not x86_64 ($(lipo -archs "$dylib"))"; exit 1; }
-          otool -L "$dylib" || true
+            echo "::error::conda-forge libonnxruntime is not x86_64 ($(lipo -archs "$dylib"))"; exit 1; }
           mkdir -p src-tauri/onnxruntime-libs
           cp "$dylib" src-tauri/onnxruntime-libs/libonnxruntime.dylib
           chmod u+w src-tauri/onnxruntime-libs/libonnxruntime.dylib
           install_name_tool -id @rpath/libonnxruntime.dylib src-tauri/onnxruntime-libs/libonnxruntime.dylib
+          # Retarget conda's @rpath libc++ to the system one so the bundled dylib
+          # has no non-system dependency to resolve. No-op if not present.
+          install_name_tool -change @rpath/libc++.1.dylib /usr/lib/libc++.1.dylib src-tauri/onnxruntime-libs/libonnxruntime.dylib || true
+          echo "Bundled x86_64 libonnxruntime dependencies:"; otool -L src-tauri/onnxruntime-libs/libonnxruntime.dylib
           echo "ORT_STRATEGY=system" >> "$GITHUB_ENV"
           echo "ORT_LIB_LOCATION=$PWD/src-tauri/onnxruntime-libs" >> "$GITHUB_ENV"
           # Force the transcribe-cpp/ggml CMake build to the x86_64 slice. The
