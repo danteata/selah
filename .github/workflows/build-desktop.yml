@@ -223,6 +223,13 @@ jobs:
           echo "Bundled x86_64 libonnxruntime dependencies:"; otool -L src-tauri/onnxruntime-libs/libonnxruntime.dylib
           echo "ORT_STRATEGY=system" >> "$GITHUB_ENV"
           echo "ORT_LIB_LOCATION=$PWD/src-tauri/onnxruntime-libs" >> "$GITHUB_ENV"
+          # We supply a .dylib, but ort-sys defaults to static/xcframework linking
+          # for a system lib dir and then fails ("can't do xcframework linking for
+          # target 'x86_64-apple-darwin'" / "could not link to the ONNX Runtime
+          # build"). Opt into dynamic linking so it links -lonnxruntime against our
+          # dylib; the @rpath install-name resolves from the bundled .app framework
+          # (tauri.onnxruntime-system.conf.json) at runtime.
+          echo "ORT_PREFER_DYNAMIC_LINK=1" >> "$GITHUB_ENV"
           # Force the transcribe-cpp/ggml CMake build to the x86_64 slice. The
           # `cmake` crate usually derives this from the target, but set it
           # explicitly so the cross-build can't silently produce arm64 objects.
