@@ -28,21 +28,52 @@ const makeRef = (bookIndex: number, chapter: number, startVerse: number, endVers
     endVerse,
 })
 
-/** A number segment (chapter or verse) with stacked up/down chevrons plus
- *  arrow-key support when focused. */
+/** A number segment (chapter or verse) — click/tab in and type a number
+ *  directly, use the stacked chevrons, or Up/Down arrow keys while focused.
+ *  Typed values are converted to a delta and run back through `onStep`, so
+ *  they get exactly the same clamping/book-rollover behavior as a chevron
+ *  click (see stepChapterBy/stepVerseBy in ReferenceEditor) — no separate
+ *  "set absolute value" path to keep in sync. */
 function Stepper({ label, value, onStep }: { label: string; value: number; onStep: (delta: number) => void }) {
+    // null = not currently being edited; the input just mirrors `value`.
+    // Non-null while focused/typing, holding the in-progress digit string
+    // (so an intermediate empty string while backspacing doesn't misparse).
+    const [editText, setEditText] = useState<string | null>(null)
+    const inputRef = useRef<HTMLInputElement>(null)
+
+    const commit = useCallback(() => {
+        setEditText((current) => {
+            if (current !== null && current !== '') {
+                const parsed = parseInt(current, 10)
+                if (Number.isFinite(parsed) && parsed !== value) onStep(parsed - value)
+            }
+            return null
+        })
+    }, [value, onStep])
+
     return (
         <div
-            tabIndex={0}
-            onKeyDown={(e) => {
-                if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); onStep(1) }
-                else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); onStep(-1) }
-            }}
-            className="flex items-center gap-1 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-default)] pl-2 pr-1 py-0.5 outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/40"
-            title={`${label} (↑/↓ to change)`}
-            aria-label={`${label} ${value}`}
+            className="flex items-center gap-1 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-default)] pl-1 pr-1 py-0.5 focus-within:ring-2 focus-within:ring-[var(--accent-teal)]/40"
+            title={`${label} (type a number, or ↑/↓ to change)`}
         >
-            <span className="text-xs font-semibold text-[var(--text-primary)] tabular-nums min-w-[1.25rem] text-center">{value}</span>
+            <input
+                ref={inputRef}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={editText ?? String(value)}
+                onFocus={(e) => { setEditText(String(value)); e.target.select() }}
+                onChange={(e) => setEditText(e.target.value.replace(/\D/g, ''))}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); commit(); inputRef.current?.blur() }
+                    else if (e.key === 'Escape') { e.preventDefault(); setEditText(null); inputRef.current?.blur() }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); setEditText(null); onStep(1) }
+                    else if (e.key === 'ArrowDown') { e.preventDefault(); setEditText(null); onStep(-1) }
+                }}
+                aria-label={`${label} ${value}`}
+                className="text-xs font-semibold text-[var(--text-primary)] tabular-nums w-7 text-center bg-transparent outline-none"
+            />
             <div className="flex flex-col -my-0.5">
                 <button
                     type="button"

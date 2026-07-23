@@ -64,6 +64,65 @@ describe('ReferenceEditor', () => {
         expect(onChange).not.toHaveBeenCalled()
     })
 
+    it('lets you type a chapter number directly and commits on blur', () => {
+        const { onChange } = renderEditor()
+        const input = screen.getByLabelText('Chapter 3')
+        fireEvent.focus(input)
+        fireEvent.change(input, { target: { value: '10' } })
+        fireEvent.blur(input)
+        expect(onChange).toHaveBeenCalledWith({
+            bookIndex: 43, bookName: 'John', chapter: 10, startVerse: 1, endVerse: 1,
+        })
+    })
+
+    it('lets you type a verse number directly and commits on Enter', () => {
+        const { onChange } = renderEditor()
+        const input = screen.getByLabelText('Verse 16')
+        fireEvent.focus(input)
+        fireEvent.change(input, { target: { value: '5' } })
+        fireEvent.keyDown(input, { key: 'Enter' })
+        expect(onChange).toHaveBeenCalledWith({
+            bookIndex: 43, bookName: 'John', chapter: 3, startVerse: 5, endVerse: 5,
+        })
+    })
+
+    it('strips non-digit characters while typing', () => {
+        renderEditor()
+        const input = screen.getByLabelText('Chapter 3') as HTMLInputElement
+        fireEvent.focus(input)
+        fireEvent.change(input, { target: { value: '1a2b' } })
+        expect(input.value).toBe('12')
+    })
+
+    it('reverts to the current value on Escape without committing', () => {
+        const { onChange } = renderEditor()
+        const input = screen.getByLabelText('Chapter 3') as HTMLInputElement
+        fireEvent.focus(input)
+        fireEvent.change(input, { target: { value: '99' } })
+        fireEvent.keyDown(input, { key: 'Escape' })
+        expect(onChange).not.toHaveBeenCalled()
+        expect(input.value).toBe('3')
+    })
+
+    it('does not emit a change when the typed value equals the current one', () => {
+        const { onChange } = renderEditor()
+        const input = screen.getByLabelText('Chapter 3')
+        fireEvent.focus(input)
+        fireEvent.change(input, { target: { value: '3' } })
+        fireEvent.blur(input)
+        expect(onChange).not.toHaveBeenCalled()
+    })
+
+    it('does not emit a change when the field is cleared then blurred', () => {
+        const { onChange } = renderEditor()
+        const input = screen.getByLabelText('Verse 16') as HTMLInputElement
+        fireEvent.focus(input)
+        fireEvent.change(input, { target: { value: '' } })
+        fireEvent.blur(input)
+        expect(onChange).not.toHaveBeenCalled()
+        expect(input.value).toBe('16')
+    })
+
     it('changes the book via the picker and resets to chapter 1 verse 1', () => {
         const { onChange } = renderEditor()
         fireEvent.click(screen.getByTitle('Change book'))
