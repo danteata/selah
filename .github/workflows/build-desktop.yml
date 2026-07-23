@@ -78,6 +78,18 @@ jobs:
             libfuse2 \
             vulkan-sdk
 
+      # AppImage bundling regressed with no code change: a newer ubuntu-24.04
+      # runner image (post ~2026-06-15) ships
+      # kernel.apparmor_restrict_unprivileged_userns=1, which blocks the AppImage
+      # tooling's FUSE self-mount — linuxdeploy fails to even start ("failed to
+      # run linuxdeploy" with zero output). It bundled fine on older images where
+      # this restriction was off. Re-enable unprivileged user namespaces so
+      # FUSE-based AppImage packaging works again. `|| true` so we don't fail if a
+      # future image drops the knob (or it's already 0).
+      - name: Allow unprivileged user namespaces for AppImage (Ubuntu only)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
