@@ -5,7 +5,7 @@ import {
     mergeNewVerses,
     extractVersesWithLLM,
 } from '../llmVerseExtraction'
-import { isLlmConfigured, parseJsonLoose, type LlmConfig } from '../llmClient'
+import { isLlmConfigured, parseJsonLoose, llmChatJson, resetLlmRateLimitState, type LlmConfig } from '../llmClient'
 
 const CONFIG: LlmConfig = {
     baseUrl: 'https://api.example.com/v1',
@@ -88,6 +88,82 @@ describe('mergeNewVerses', () => {
         }).verses
         const result = mergeNewVerses(extracted, ['john 3:16'])
         expect(result.map((v) => v.reference)).toEqual(['Romans 8:28'])
+    })
+})
+
+describe('llmChatJson rate-limit circuit breaker', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals()
+        resetLlmRateLimitState()
+    })
+
+    it('backs off after a 429 instead of hitting the network again immediately', async () => {
+        // Shared across verse extraction (fires every few seconds while
+        // listening) and sermon-notes summarization (fires once at the end) —
+        // without this, a 429 from one just gets retried instantly by the
+        // other against the same still-exhausted quota.
+        const fetchMock = vi.fn().mockResolvedValue({ status: 429, text: async () => '{"error":"quota"}' })
+        vi.stubGlobal('fetch', fetchMock)
+
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/429/)
+        expect(fetchMock).toHaveBeenCalledOnce()
+
+        // Immediately retrying should short-circuit locally, not hit fetch again.
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/rate-limited/)
+        expect(fetchMock).toHaveBeenCalledOnce()
+    })
+
+    it('resumes hitting the network once the cooldown clears', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({ status: 429, text: async () => '{"error":"quota"}' })
+            .mockResolvedValueOnce({
+                status: 200,
+                text: async () => JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+            })
+        vi.stubGlobal('fetch', fetchMock)
+
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/429/)
+        resetLlmRateLimitState() // simulate the cooldown window having elapsed
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).resolves.toEqual({ ok: true })
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('honors a Retry-After header instead of guessing via exponential backoff', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            status: 429,
+            headers: { get: (name: string) => (name === 'retry-after' ? '1' : null) },
+            text: async () => '{"error":"quota"}',
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/429/)
+        // Still within the 1s Retry-After window — short-circuits locally.
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/rate-limited/)
+        expect(fetchMock).toHaveBeenCalledOnce()
+
+        await new Promise((r) => setTimeout(r, 1100))
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/429/) // hits network again, not blocked locally
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not inherit a cooldown from a different provider/model config', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ status: 429, text: async () => '{"error":"quota"}' })
+        vi.stubGlobal('fetch', fetchMock)
+
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/429/)
+        // Same config again — still cooling down, short-circuits locally.
+        await expect(llmChatJson(CONFIG, 'sys', 'user')).rejects.toThrow(/rate-limited/)
+        expect(fetchMock).toHaveBeenCalledOnce()
+
+        // A different model (e.g. the user switched providers/fixed billing on
+        // a new config) should not be blocked by the old config's cooldown.
+        const otherConfig: LlmConfig = { ...CONFIG, model: 'other-model' }
+        fetchMock.mockResolvedValueOnce({
+            status: 200,
+            text: async () => JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+        })
+        await expect(llmChatJson(otherConfig, 'sys', 'user')).resolves.toEqual({ ok: true })
+        expect(fetchMock).toHaveBeenCalledTimes(2)
     })
 })
 

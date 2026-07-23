@@ -1,6 +1,6 @@
 import type { Song } from '../../types'
 import { lineSimilarity, tokenize } from './songTracker'
-import { getContentWords } from '../../lib/semanticRetrievalPolicy'
+import { getContentWords, isTheologicalCommon } from '../../lib/semanticRetrievalPolicy'
 
 /**
  * Song identification from a live transcript (Phase 2 "Searching").
@@ -35,8 +35,39 @@ export interface SongLineEntry {
 
 /** Minimum distinctive content words a candidate line must share with the
  *  query to be considered at all — kills "I have made you…" style function-word
- *  matches against unrelated songs. */
+ *  matches against unrelated songs. This is only a cheap pre-filter to narrow
+ *  candidates; the real accept/reject decision is the full-line similarity
+ *  score below (`corrobBest`/`corrobSecond`), which also has to clear its bar. */
 const MIN_SHARED_CONTENT = 2
+/** Of those shared content words, at least this many must be non-generic
+ *  (see {@link isTheologicalCommon}) — otherwise sermon speech full of "God",
+ *  "Lord", "praise", "grace" etc. corroborates against almost any worship
+ *  song's lyrics on vocabulary alone, with no actual phrase in common. The
+ *  Bible-verse detector already gates the same way (see
+ *  `validateSemanticMatch`'s `distinctiveOverlap`); song identification is
+ *  lexical rather than semantic but faces the identical failure mode.
+ *  Requiring *most* (not just one) of the minimum shared words to be
+ *  distinctive also guards against two unrelated real songs coincidentally
+ *  sharing one distinctive word plus one generic one. */
+const MIN_DISTINCTIVE_SHARED = 2
+/** Minimum fraction of the *query's* distinctive words that a candidate line
+ *  must explain (shared words / query's content-word count). Every gate above
+ *  measures overlap from the line's side only, so a short, ubiquitous worship
+ *  phrase ("lift your voice", "make a joyful sound") fully contained in an
+ *  otherwise unrelated multi-sentence utterance can still score high on line
+ *  coverage alone — it explains 100% of the (tiny) line but almost none of
+ *  what was actually said. Requiring the match to also account for a real
+ *  share of the query catches that: real singing means most of the query's
+ *  distinctive words belong to the song, not just a couple embedded in
+ *  unrelated speech. */
+const MIN_QUERY_COVERAGE = 0.3
+/** Only enforce query coverage once the query has enough distinctive words
+ *  for the ratio to be meaningful. Below this, a couple of unrelated ASR
+ *  filler words can swing the ratio wildly even though the absolute overlap
+ *  (e.g. 2-3 shared words) is unchanged — the ratio is noise, not signal, at
+ *  that size. The other gates (shared-content floor, line-similarity score,
+ *  distinctive-word requirement) still apply regardless. */
+const MIN_QUERY_SIZE_FOR_COVERAGE_CHECK = 6
 
 export interface SongIndex {
     entries: SongLineEntry[]
@@ -127,8 +158,8 @@ export function identifySong(
     opts: IdentifyOptions = {},
 ): SongMatch | null {
     const strong = opts.strongThreshold ?? 0.82
-    const corrobBest = opts.corroborationBest ?? 0.6
-    const corrobSecond = opts.corroborationSecond ?? 0.55
+    const corrobBest = opts.corroborationBest ?? 0.68
+    const corrobSecond = opts.corroborationSecond ?? 0.62
     const minMatched = opts.minMatchedLines ?? 1
     const FLOOR = 0.5
 
@@ -159,13 +190,38 @@ export function identifySong(
     const perSong = new Map<string, Agg>()
     for (const i of candidates) {
         const e = index.entries[i]
-        // Gate: the line must share enough *distinctive* words with the query.
-        // Without this, unrelated songs match on filler ("I/have/you/my").
+        // Gate: the line must share enough words with the query, accounting
+        // for a real share of it (not just a couple embedded in unrelated
+        // speech). Without this, unrelated songs match on filler
+        // ("I/have/you/my") or a short phrase fully contained in an otherwise
+        // unrelated utterance.
         let sharedContent = 0
-        for (const w of e.content) if (qContent.has(w)) sharedContent++
+        let distinctiveShared = 0
+        for (const w of e.content) {
+            if (!qContent.has(w)) continue
+            sharedContent++
+            if (!isTheologicalCommon(w)) distinctiveShared++
+        }
         if (sharedContent < MIN_SHARED_CONTENT) continue
+        if (qContent.size >= MIN_QUERY_SIZE_FOR_COVERAGE_CHECK && sharedContent / qContent.size < MIN_QUERY_COVERAGE) continue
         const score = lineSimilarity(query, e.text)
         if (score < FLOOR) continue // ignore weak incidental token overlap
+        // Distinctive-vocabulary gate: reject a line whose overlap is only
+        // generic theological words ("God"/"Lord"/"praise") UNLESS it matches
+        // near-exactly on its own AND still has at least one distinctive word
+        // — near-verbatim wording (score >= strong) is strong evidence
+        // regardless of how common the vocabulary otherwise is (hymns like
+        // "Holy holy holy Lord God Almighty" are built almost entirely from
+        // such words), but zero distinctive overlap is a different failure
+        // mode: ordinary sermon speech coincidentally reciting the exact same
+        // handful of common words as a decoy line ("Praise the Lord our God
+        // and King") can also score near-exact on coverage alone, with no
+        // actual phrase in common beyond that generic vocabulary. Requiring
+        // >=1 distinctive word even on the exemption path blocks that while
+        // still rescuing genuinely generic-vocabulary hymns.
+        const distinctiveOk = distinctiveShared >= MIN_DISTINCTIVE_SHARED
+            || (distinctiveShared >= 1 && score >= strong)
+        if (!distinctiveOk) continue
         const agg = perSong.get(e.songId)
         if (!agg) {
             perSong.set(e.songId, { title: e.title, scores: [score], bestEntry: e, bestScore: score })

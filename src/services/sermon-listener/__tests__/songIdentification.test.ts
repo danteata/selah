@@ -126,6 +126,123 @@ describe('identifySong', () => {
         expect(m?.songId).not.toBe('decoy')
     })
 
+    it('rejects a song whose only overlap is generic worship vocabulary', () => {
+        // A decoy whose two candidate lines share only common theological
+        // words ("Lord", "God", "praise", "glory", "king") with the query —
+        // no actual phrase in common. Sermon speech uses this vocabulary
+        // constantly, so without a distinctiveness gate two such lines would
+        // corroborate against nearly any worship song in the library.
+        const decoy: Song = {
+            id: 'decoy',
+            title: 'Decoy Song',
+            artist: 'x',
+            lyrics: '',
+            sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: [
+                'Praise the Lord our God and King',
+                'Glory be to God our King',
+            ] }],
+        }
+        const idx = buildSongIndex([...LIBRARY, decoy])
+        const m = identifySong('let us praise the lord our god and give glory to god our king', idx)
+        expect(m?.songId).not.toBe('decoy')
+    })
+
+    it('rejects a coincidental match with only one distinctive word per line', () => {
+        // Two lines that each share exactly one distinctive word ("mountain",
+        // "valley") plus generic theological filler ("God", "Lord") with the
+        // query — a wholly unrelated remark about God's presence "over every
+        // mountain and valley". Before requiring >=2 distinctive shared words,
+        // this coincidence alone was enough to corroborate a false match: each
+        // line's full-line similarity (~0.68) even cleared the old 0.6/0.55
+        // corroboration thresholds.
+        const decoy: Song = {
+            id: 'decoy-mountain',
+            title: 'Decoy Mountain Song',
+            artist: 'x',
+            lyrics: '',
+            sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: [
+                'Our God is Lord of the mountain',
+                'Our God is Lord of the valley',
+            ] }],
+        }
+        const idx = buildSongIndex([...LIBRARY, decoy])
+        const m = identifySong(
+            'so today we remember that god is lord over every mountain and valley in our lives',
+            idx,
+        )
+        expect(m?.songId).not.toBe('decoy-mountain')
+    })
+
+    it('rejects a short ubiquitous worship phrase embedded in unrelated speech', () => {
+        // Real-world regression: a live sermon transcript ("...lift up your
+        // voice and let's pray...") got falsely matched to the hymn "Sing unto
+        // the Lord" because its line "LIFT YOUR VOICE AND" is fully contained
+        // in the query (100% line coverage -> lineSimilarity 0.95, clearing the
+        // single-line strong threshold on its own), even though "lift"/"voice"
+        // explain only 2 of the query's 8 distinctive words — the rest ("pray",
+        // "helen", "brok", "uh") is unrelated spoken prayer, not singing.
+        const song: Song = {
+            id: 'ew_1099',
+            title: 'Sing unto the Lord',
+            artist: 'Unknown',
+            lyrics: '',
+            sections: [
+                { id: 'chorus', type: 'chorus', label: 'Chorus', lines: ['SING UNTO THE LORD', 'SING ALL THE EARTH'] },
+                { id: 'v1', type: 'verse', number: 1, label: 'Verse 1', lines: ['LET YOUR PRAISES RING', 'LIFT YOUR VOICE AND'] },
+                { id: 'v3', type: 'verse', number: 3, label: 'Verse 3', lines: ['MAKE A JOYFUL SOUND', 'LIFT YOUR VOICE AND SHOUT'] },
+            ],
+        }
+        const idx = buildSongIndex([song])
+        const m = identifySong(
+            "s pray and helen brok lift up your voice and let s pray uh",
+            idx,
+        )
+        expect(m).toBeNull()
+    })
+
+    it('identifies an exact line built almost entirely from generic theological vocabulary', () => {
+        // "Holy holy holy Lord God Almighty" only has ONE non-generic word
+        // ("almighty"), so it can never reach the corroboration-level
+        // MIN_DISTINCTIVE_SHARED bar on its own. But it's sung essentially
+        // verbatim (near-exact single-line match), which is strong evidence
+        // regardless of how common the vocabulary is — many real hymns are
+        // built almost entirely from "Holy"/"Lord"/"God" vocabulary.
+        const song: Song = {
+            id: 'holy-holy-holy',
+            title: 'Holy, Holy, Holy',
+            artist: 'Traditional',
+            lyrics: '',
+            sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: [
+                'Holy holy holy Lord God Almighty',
+                'Early in the morning our song shall rise to thee',
+            ] }],
+        }
+        const idx = buildSongIndex([song])
+        const m = identifySong('Holy holy holy Lord God Almighty', idx)
+        expect(m?.songId).toBe('holy-holy-holy')
+    })
+
+    it('still rejects a near-exact decoy line with ZERO distinctive words (coincidental generic overlap)', () => {
+        // Contrast with the case above: this decoy's line has no distinctive
+        // word at all (every shared word is generic theological vocabulary),
+        // so even though ordinary sermon speech can coincidentally recite the
+        // exact same handful of common words and score near-exact via
+        // coverage, it must still be rejected — there's no actual phrase in
+        // common, just shared generic vocabulary.
+        const decoy: Song = {
+            id: 'decoy-generic-exact',
+            title: 'Decoy',
+            artist: 'x',
+            lyrics: '',
+            sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: [
+                'Praise the Lord our God and King',
+            ] }],
+        }
+        const idx = buildSongIndex([decoy])
+        const m = identifySong('let us praise the lord our god and king today', idx)
+        expect(m?.songId).not.toBe('decoy-generic-exact')
+    })
+
     it('respects a stricter minMatchedLines requirement', () => {
         // One line matches, so requiring 2 yields nothing.
         const m = identifySong('amazing grace how sweet the sound', index, { minMatchedLines: 2 })

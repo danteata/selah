@@ -43,6 +43,9 @@ function hostOf(url: string): string {
 interface RawResponse {
     status: number
     body: string
+    /** `Retry-After`, in seconds, when the provider sent one (most commonly
+     *  on a 429). Only the delta-seconds form is recognized. */
+    retryAfterSecs?: number
 }
 
 function isTauri(): boolean {
@@ -78,7 +81,9 @@ export async function httpRequest(
     }
     try {
         const res = await fetch(url, { method: init.method, headers: init.headers, body: init.body, signal: controller.signal })
-        return { status: res.status, body: await res.text() }
+        const retryAfterRaw = res.headers?.get?.('retry-after')
+        const retryAfterSecs = retryAfterRaw && /^\d+$/.test(retryAfterRaw.trim()) ? Number(retryAfterRaw.trim()) : undefined
+        return { status: res.status, body: await res.text(), retryAfterSecs }
     } finally {
         clearTimeout(timer)
     }
@@ -91,6 +96,36 @@ export interface LlmChatOptions {
     signal?: AbortSignal
     /** Request timeout in ms (default 20s). */
     timeoutMs?: number
+}
+
+// Rate-limit circuit breaker, shared across every caller (verse extraction runs
+// every few seconds during live listening; sermon-notes summarization runs once
+// at the end) since they use the same provider config/quota. Without this, a
+// 429 from one call site doesn't stop the others from immediately retrying
+// against the same still-exhausted quota — verse extraction alone can fire
+// dozens of times over a sermon, so an un-backed-off 429 loop burns whatever
+// quota window is left (or hammers the endpoint) for the rest of the session,
+// which is also why the final notes summary silently falls back to local
+// summarization instead of using the configured LLM.
+//
+// Keyed by (baseUrl, model): if the user fixes their key/plan or switches
+// provider mid-session, that's a different quota and shouldn't inherit
+// whatever backoff the previous config's 429s built up.
+let rateLimitCooldownUntil = 0
+let consecutiveRateLimitHits = 0
+let rateLimitedConfigKey: string | null = null
+const RATE_LIMIT_BASE_COOLDOWN_MS = 30_000
+const RATE_LIMIT_MAX_COOLDOWN_MS = 5 * 60_000
+
+function configKey(c: LlmConfig): string {
+    return `${c.baseUrl}::${c.model}`
+}
+
+/** Test-only: clear cooldown state between test cases. */
+export function resetLlmRateLimitState(): void {
+    rateLimitCooldownUntil = 0
+    consecutiveRateLimitHits = 0
+    rateLimitedConfigKey = null
 }
 
 /**
@@ -110,6 +145,20 @@ export async function llmChatJson<T = unknown>(
 ): Promise<T> {
     const { temperature = 0, signal, timeoutMs = 20000 } = options
 
+    const key = configKey(config)
+    if (key !== rateLimitedConfigKey) {
+        // Different provider/model than whatever tripped the last cooldown
+        // (or none yet) — don't inherit someone else's backoff.
+        rateLimitCooldownUntil = 0
+        consecutiveRateLimitHits = 0
+        rateLimitedConfigKey = key
+    }
+    const now = Date.now()
+    if (now < rateLimitCooldownUntil) {
+        const remainingSec = Math.ceil((rateLimitCooldownUntil - now) / 1000)
+        throw new Error(`LLM rate-limited, backing off for ${remainingSec}s more`)
+    }
+
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.apiKey ?? ''}`,
@@ -120,7 +169,7 @@ export async function llmChatJson<T = unknown>(
         headers['anthropic-dangerous-direct-browser-access'] = 'true'
     }
 
-    const { status, body } = await httpRequest(endpointFor(config.baseUrl), {
+    const { status, body, retryAfterSecs } = await httpRequest(endpointFor(config.baseUrl), {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -136,9 +185,25 @@ export async function llmChatJson<T = unknown>(
         signal,
     })
 
+    if (status === 429) {
+        consecutiveRateLimitHits++
+        // Honor the provider's own Retry-After when it sends one — it knows
+        // its actual quota window, which may be much shorter or longer than
+        // our local exponential guess. Fall back to backoff otherwise.
+        const backoff = retryAfterSecs != null
+            ? Math.min(retryAfterSecs * 1000, RATE_LIMIT_MAX_COOLDOWN_MS)
+            : Math.min(
+                RATE_LIMIT_BASE_COOLDOWN_MS * 2 ** (consecutiveRateLimitHits - 1),
+                RATE_LIMIT_MAX_COOLDOWN_MS,
+            )
+        rateLimitCooldownUntil = Date.now() + backoff
+        throw new Error(`LLM request failed: ${status} ${body.slice(0, 200)}`)
+    }
     if (status < 200 || status >= 300) {
         throw new Error(`LLM request failed: ${status} ${body.slice(0, 200)}`)
     }
+    consecutiveRateLimitHits = 0
+    rateLimitCooldownUntil = 0
 
     let data: { choices?: Array<{ message?: { content?: string } }> }
     try {

@@ -5,6 +5,8 @@ import { useSlideCreation } from './useSlideCreation'
 import { getIndexedDB } from './useIndexedDB'
 import { notifySongsChanged } from './useSongs'
 import { buildSongIndex, identifySong, type SongIndex } from '../services/sermon-listener/songIdentification'
+import { looksLikeSinging } from '../services/sermon-listener/singingDetection'
+import { SongConfirmationTracker } from '../services/sermon-listener/songConfirmation'
 import { resolveExternalSong } from '../services/sermon-listener/externalLyrics'
 import { isLlmConfigured } from '../services/sermon-listener/llmClient'
 import type { Song } from '../types'
@@ -19,9 +21,20 @@ import type { Song } from '../types'
  *
  * Mounted once (see SongTrackerBridge). Guarded so it only acts when
  * auto-detect is enabled, the listener is running, and a song isn't already
- * displayed. A song must be confirmed across two consecutive transcript windows
- * before it's loaded, which (with the identifier's high threshold) keeps sermon
- * speech from triggering false pop-ups.
+ * displayed. A song is loaded once its soft-evidence posterior (see
+ * {@link SongConfirmationTracker}) clears a threshold — evidence accumulates
+ * from each window's own match confidence and decays over real time rather
+ * than needing the exact same songId on exactly two consecutive windows, so a
+ * strong match confirms fast, weak/coincidental matches need more
+ * corroboration, and a single unlucky in-between window doesn't wipe progress.
+ *
+ * Set-list scoping: if the operator already queued songs on the active output
+ * (their planned service), those are searched FIRST against a small index of
+ * just those songs — a candidate pool of 4-8 songs is far harder for ordinary
+ * sermon speech to coincidentally clear than the whole library, which is where
+ * most surviving false positives come from. Only if nothing in that pool
+ * matches does it fall back to the full library, so an unplanned/spontaneous
+ * song is still found, just less precisely gated.
  */
 
 // Library index, built once per session (the seeder populates the library at
@@ -47,7 +60,6 @@ async function ensureIndex(): Promise<void> {
 }
 
 const MATCH_WINDOW_WORDS = 14
-const CONFIRMATIONS_REQUIRED = 2
 // Consecutive full unmatched windows of singing before trying an online lookup.
 const EXTERNAL_UNMATCHED_THRESHOLD = 3
 
@@ -74,7 +86,10 @@ export function useSongAutoDetect() {
 
     const processedCountRef = useRef(0)
     const bufferRef = useRef<string[]>([])
-    const pendingRef = useRef<{ songId: string; count: number } | null>(null)
+    // Soft-posterior evidence accumulator — see songConfirmation.ts. One
+    // instance for the hook's lifetime; `reset()` is called (not replaced)
+    // whenever search stops or a song is confirmed.
+    const confirmationRef = useRef(new SongConfirmationTracker())
     // Online-fallback throttling: count sustained unmatched windows, guard
     // against concurrent lookups, and never retry the same snippet.
     const unmatchedRef = useRef(0)
@@ -84,6 +99,9 @@ export function useSongAutoDetect() {
     useEffect(() => {
         createSongSlidesRef.current = createSongSlides
     })
+    // Cache of the small set-list-scoped index, rebuilt only when the set of
+    // queued song ids actually changes (not on every transcript window).
+    const scopedIndexRef = useRef<{ key: string; index: SongIndex } | null>(null)
 
     // The song currently displayed (its library id), if any. While it's being
     // tracked well, the tracker owns advancing verses within it and we stay
@@ -92,6 +110,19 @@ export function useSongAutoDetect() {
         const s = activeSlides.find((sl) => sl.id === liveSlideId)
         return s && s.type === 'song' ? s.songId ?? null : null
     }, [activeSlides, liveSlideId])
+
+    // Songs the operator already queued on the active output (their planned
+    // service) — the set-list scoping pool. Order-independent identity so this
+    // only changes (and the effect below only reruns) when the actual set of
+    // queued songs changes, not on every slide reorder/edit.
+    const scopedSongIds = useMemo(() => {
+        const ids = new Set<string>()
+        for (const sl of activeSlides) {
+            if (sl.type === 'song' && sl.songId) ids.add(sl.songId)
+        }
+        return Array.from(ids).sort()
+    }, [activeSlides])
+    const scopedSongIdsKey = scopedSongIds.join('|')
 
     useEffect(() => {
         if (!autoDetect || !isListening) return
@@ -116,12 +147,30 @@ export function useSongAutoDetect() {
         // finding the right verse within it, and we must not fight that.
         const shouldSearch = !liveSongKey || trackerPhase === 'lost'
         if (!shouldSearch) {
-            pendingRef.current = null
+            confirmationRef.current.reset()
             unmatchedRef.current = 0
             return
         }
 
         const query = bufferRef.current.slice(-MATCH_WINDOW_WORDS).join(' ')
+
+        // Pre-gate: don't even attempt song matching (local or external) against
+        // text that reads like spoken sermon narrative rather than sung lyrics.
+        // Ordinary preaching is long and varied enough that some window of it
+        // will eventually clear the matcher's thresholds by coincidence — this
+        // stops that before it starts, instead of relying solely on tightening
+        // those thresholds forever. See singingDetection.ts.
+        //
+        // Still ticks the confirmation tracker forward with no evidence (pure
+        // decay, no reset) — this window simply wasn't attempted, it isn't
+        // evidence of "no match". A single ASR-boundary window that trips the
+        // pre-gate (e.g. a stray transcription artifact) shouldn't discard an
+        // otherwise-real, in-progress confirmation, but real time has still
+        // passed and lingering evidence should fade accordingly.
+        if (!looksLikeSinging(query)) {
+            confirmationRef.current.update(Date.now(), null)
+            return
+        }
 
         /** Display an identified song: reuse existing deck slides if present,
          *  else create + append them, then make the matched section live. Reads
@@ -151,32 +200,49 @@ export function useSongAutoDetect() {
             await ensureIndex()
             if (!cachedIndex || !cachedSongs) return
 
-            const match = identifySong(query, cachedIndex)
+            // Set-list scoping: search the operator's already-queued songs
+            // first, against a small dedicated index — a 4-8 song candidate
+            // pool is far harder for sermon speech to coincidentally clear
+            // than the whole library. Fall back to the full library only if
+            // nothing in that pool matches, so an unplanned song still gets
+            // found (just without the extra precision).
+            let match = null
+            if (scopedSongIds.length > 0) {
+                if (scopedIndexRef.current?.key !== scopedSongIdsKey) {
+                    const scopedSongs = scopedSongIds
+                        .map((id) => cachedSongs!.get(id))
+                        .filter((s): s is Song => !!s)
+                    scopedIndexRef.current = { key: scopedSongIdsKey, index: buildSongIndex(scopedSongs) }
+                }
+                match = identifySong(query, scopedIndexRef.current.index)
+            }
+            if (!match) match = identifySong(query, cachedIndex)
+
             if (match) {
                 unmatchedRef.current = 0
                 // Same song that's already up (tracker briefly went 'lost' on a
                 // hard passage) — let the tracker re-acquire it; don't reload.
                 if (match.songId === liveSongKey) {
-                    pendingRef.current = null
+                    confirmationRef.current.reset()
                     return
                 }
-                // Require the same (new) song on two consecutive windows before switching.
-                if (pendingRef.current?.songId === match.songId) {
-                    pendingRef.current.count++
-                } else {
-                    pendingRef.current = { songId: match.songId, count: 1 }
-                }
-                if (pendingRef.current.count < CONFIRMATIONS_REQUIRED) return
-                pendingRef.current = null
+                const confirmed = confirmationRef.current.update(Date.now(), {
+                    songId: match.songId,
+                    confidence: match.confidence,
+                })
+                if (!confirmed) return
 
-                const song = cachedSongs.get(match.songId)
+                const song = cachedSongs.get(confirmed)
                 if (song) loadAndDisplay(song, match.sectionId)
                 return
             }
 
-            // No library match. Optionally look the song up online after a
+            // No library match this window — still ticks the tracker forward
+            // (decay only, see above).
+            confirmationRef.current.update(Date.now(), null)
+
+            // Optionally look the song up online after a
             // sustained run of unmatched singing (see externalLyrics.ts).
-            pendingRef.current = null
             if (!externalLyrics || externalBusyRef.current) return
             if (query.split(' ').filter(Boolean).length < MATCH_WINDOW_WORDS) return
             unmatchedRef.current++
@@ -208,5 +274,5 @@ export function useSongAutoDetect() {
                 unmatchedRef.current = 0 // throttle: re-accumulate before next try
             }
         })()
-    }, [transcriptSegments, autoDetect, isListening, liveSongKey, trackerPhase, externalLyrics])
+    }, [transcriptSegments, autoDetect, isListening, liveSongKey, trackerPhase, externalLyrics, scopedSongIds, scopedSongIdsKey])
 }

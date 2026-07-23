@@ -343,7 +343,13 @@ export class SongPositionTracker {
         if (this.consecutiveMisses >= this.config.maxMisses) {
             this.phase = 'lost'
             this.pendingJump = null
-            return this.snapshot(false, 'lost')
+            // Nothing confident is playing anymore — clear the display target so
+            // callers stop re-asserting this section onto the live output (which
+            // otherwise fights any other detector, e.g. Bible-verse auto-detect,
+            // that tries to take over the live slide once this song is lost).
+            const changed = this.displaySectionId !== null
+            this.displaySectionId = null
+            return this.snapshot(changed, 'lost')
         }
         return this.snapshot(false, 'miss')
     }

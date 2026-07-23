@@ -510,6 +510,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Ref for start function to avoid TDZ issues (start is defined after processTranscript)
     const startRef = useRef<() => Promise<boolean>>(async () => false)
     const stopRef = useRef<() => void>(() => {})
+    // Synchronous mutex for `start()`. `isListening`/`isStarting` are React state
+    // and don't commit until after several `await`s inside `start()` (provider
+    // check, semantic detector warm-up, AudioContext unlock), so a second call
+    // (button click, tray toggle, voice command, watchdog auto-restart — all can
+    // fire concurrently) would otherwise race past those checks and reach the
+    // native layer twice, surfacing as an "Already capturing" error.
+    const startInFlightRef = useRef(false)
     const versionChangeRequestIdRef = useRef(0)
     const verseLookupRequestIdRef = useRef(0)
     const activeLookupCountRef = useRef(0)
@@ -1552,10 +1559,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             usePhonetic: false,
         })
 
-        // Optional LLM augmentation: debounced pass that catches references the
-        // local detector missed. No-op unless the user configured an endpoint.
-        scheduleLlmExtraction(cleanText)
-
         const regexDetectionIdAtStart = regexVerseDetectionRef.current
         const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
         const inNavigationCooldown = Date.now() < navigationCooldownUntilRef.current
@@ -1567,6 +1570,15 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // later used against the UN-windowed cleanText (see excludedRanges below).
         const windowOffset = Math.max(0, cleanText.length - RECENT_VERSE_DETECTION_WINDOW_CHARS)
         const recentTextForVerseDetection = cleanText.slice(windowOffset)
+
+        // Optional LLM augmentation: debounced pass that catches references the
+        // local detector missed. No-op unless the user configured an endpoint.
+        // Windowed the same way as the regex pass above — cleanText is the
+        // ENTIRE accumulated session transcript, so without this an hour into a
+        // sermon every debounce firing would resend the whole thing (tens of
+        // thousands of tokens), burning through the provider's rate/quota limit
+        // far faster than the sermon actually needs LLM help.
+        scheduleLlmExtraction(recentTextForVerseDetection)
 
         let verses = detectVerses(recentTextForVerseDetection)
 
@@ -2185,294 +2197,313 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             return false
         }
 
-        // System-audio capture on desktop runs through the OS screen-recording
-        // permission (macOS: "Screen & System Audio Recording"). That system
-        // prompt is shown only ONCE — if the user previously declined or
-        // dismissed it, macOS never prompts again and ScreenCaptureKit fails
-        // silently. Detect the grant up front: request it (a no-op after a prior
-        // decline) and, if still not granted, route the user to Settings instead
-        // of spinning up a capture that will die with no signal.
-        if (isDesktop() && sermonSettings?.captureSource === 'system') {
-            try {
-                const { invoke } = await import('@tauri-apps/api/core')
-                let granted = await invoke<boolean>('check_screen_capture_permission')
-                if (!granted) {
-                    granted = await invoke<boolean>('request_screen_capture_permission')
-                }
-                if (!granted) {
-                    const msg = 'Selah needs Screen & System Audio Recording permission to capture system audio. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable Selah, then restart the app.'
-                    setError(msg)
-                    onError?.(msg)
-                    trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, { reason: 'screen_capture_denied' })
-                    return false
-                }
-            } catch (err) {
-                // Non-fatal (e.g. web build or IPC hiccup): fall through and let
-                // the capture attempt surface any real error downstream.
-                console.warn('[useSermonListener] Screen capture permission check failed:', err)
-            }
+        if (startInFlightRef.current) {
+            console.warn('[useSermonListener] Start already in progress, ignoring duplicate call')
+            return false
         }
+        startInFlightRef.current = true
+        try {
 
-        // Lazily initialize the provider when the user starts listening.
-        // This avoids blocking the UI for 60s on app startup.
-        if (!providerReady && provider !== 'web-speech') {
-            setIsInitializingProvider(true)
-            try {
-                console.log('[useSermonListener] Provider not ready yet, checking via Rust:', provider)
-                // Use Rust-side health check which CAN reach localhost even when
-                // the browser can't (macOS WKWebView limitation).
-                const { invoke } = await import('@tauri-apps/api/core')
-                const result = await invoke<{ ready: boolean }>('check_whisper_ready')
-                if (result.ready) {
-                    console.log('[useSermonListener] Whisper server is available (Rust check), marking ready')
-                    setProviderReady(true)
-                    setError(null)
-                } else {
-                    console.log('[useSermonListener] Whisper server not ready yet, will auto-detect')
+            // System-audio capture on desktop runs through the OS screen-recording
+            // permission (macOS: "Screen & System Audio Recording"). That system
+            // prompt is shown only ONCE — if the user previously declined or
+            // dismissed it, macOS never prompts again and ScreenCaptureKit fails
+            // silently. Detect the grant up front: request it (a no-op after a prior
+            // decline) and, if still not granted, route the user to Settings instead
+            // of spinning up a capture that will die with no signal.
+            if (isDesktop() && sermonSettings?.captureSource === 'system') {
+                try {
+                    const { invoke } = await import('@tauri-apps/api/core')
+                    let granted = await invoke<boolean>('check_screen_capture_permission')
+                    if (!granted) {
+                        granted = await invoke<boolean>('request_screen_capture_permission')
+                    }
+                    if (!granted) {
+                        const msg = 'Selah needs Screen & System Audio Recording permission to capture system audio. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable Selah, then restart the app.'
+                        setError(msg)
+                        onError?.(msg)
+                        trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, { reason: 'screen_capture_denied' })
+                        return false
+                    }
+                } catch (err) {
+                    // Non-fatal (e.g. web build or IPC hiccup): fall through and let
+                    // the capture attempt surface any real error downstream.
+                    console.warn('[useSermonListener] Screen capture permission check failed:', err)
+                }
+            }
+
+            // Lazily initialize the provider when the user starts listening.
+            // This avoids blocking the UI for 60s on app startup.
+            if (!providerReady && provider !== 'web-speech') {
+                setIsInitializingProvider(true)
+                try {
+                    console.log('[useSermonListener] Provider not ready yet, checking via Rust:', provider)
+                    // Use Rust-side health check which CAN reach localhost even when
+                    // the browser can't (macOS WKWebView limitation).
+                    const { invoke } = await import('@tauri-apps/api/core')
+                    const result = await invoke<{ ready: boolean }>('check_whisper_ready')
+                    if (result.ready) {
+                        console.log('[useSermonListener] Whisper server is available (Rust check), marking ready')
+                        setProviderReady(true)
+                        setError(null)
+                    } else {
+                        console.log('[useSermonListener] Whisper server not ready yet, will auto-detect')
+                        setIsInitializingProvider(false)
+                        return false
+                    }
+                } catch (err) {
+                    console.error('[useSermonListener] Provider availability check error:', err)
                     setIsInitializingProvider(false)
                     return false
+                } finally {
+                    setIsInitializingProvider(false)
                 }
-            } catch (err) {
-                console.error('[useSermonListener] Provider availability check error:', err)
-                setIsInitializingProvider(false)
-                return false
-            } finally {
-                setIsInitializingProvider(false)
             }
-        }
 
-        // NOTE: model loading is moving to the in-process native engine
-        // (transcribe-rs, Phase 3b). The selected model is configured in
-        // Sermon Listener settings and downloaded there; the engine loads it on
-        // demand. The current desktop-whisper sidecar auto-loads its bundled
-        // base.en, so no per-start model switch is needed here during migration.
+            // NOTE: model loading is moving to the in-process native engine
+            // (transcribe-rs, Phase 3b). The selected model is configured in
+            // Sermon Listener settings and downloaded there; the engine loads it on
+            // demand. The current desktop-whisper sidecar auto-loads its bundled
+            // base.en, so no per-start model switch is needed here during migration.
 
-        // Initialize semantic detector on first use if not already ready.
-        // Once `semanticDetectorReady` is true, the detector singleton's own
-        // `initialize()` short-circuits on every future call — so without the
-        // else branch below, a worker torn down by embeddingSyncManager's
-        // 5-minute idle-unload timer (or from a much earlier session) would
-        // otherwise only get reloaded lazily on the first live semantic query
-        // mid-sermon, which is exactly the multi-second "sometimes" delay.
-        // `initializeEmbedder()` is a cheap idempotent no-op when the worker
-        // is already warm, so eagerly re-warming here on every start costs
-        // nothing when nothing was disposed.
-        if (!semanticDetectorReady) {
-            initSemanticDetector().catch(err => {
-                console.warn('[useSermonListener] Semantic detector init failed:', err)
-            })
-        } else if (enableSemanticDetection) {
-            initializeEmbedder().catch(err => {
-                console.warn('[useSermonListener] Embedder re-warm failed:', err)
-            })
-        }
-
-        console.log('[useSermonListener] Starting transcription with provider:', provider)
-        setIsStarting(true)
-
-        // Prevent device from sleeping during sermon recording
-        startKeepAwake().catch(err => {
-            console.warn('[useSermonListener] Keep-awake failed (non-fatal):', err)
-        })
-
-
-        // Unlock AudioContext early so the VAD's internal AudioContext can resume
-        try {
-            const unlockCtx = new AudioContext()
-            if (unlockCtx.state === 'suspended') {
-                await unlockCtx.resume()
-                console.log('[useSermonListener] AudioContext unlocked for transcription')
-            }
-            await unlockCtx.close()
-        } catch (e) {
-            console.warn('[useSermonListener] AudioContext unlock failed:', e)
-        }
-
-        // `unifiedTranscriptionService` is a module-level singleton, so its
-        // internal `isListening` can outlive our React state (e.g. after this
-        // provider remounts on navigation). When that happens our state resets
-        // to false but the service still thinks it's running, so start() would
-        // no-op with "Already listening" and the button would stay on "Start".
-        // Reconcile by stopping the stale session before starting fresh.
-        if (unifiedTranscriptionService.getStatus().isListening) {
-            console.warn('[useSermonListener] Reconciling stale listening state before start')
-            try {
-                await unifiedTranscriptionService.stop()
-            } catch (e) {
-                console.warn('[useSermonListener] Failed to stop stale session:', e)
-            }
-        }
-
-        const success = await unifiedTranscriptionService.start({
-            provider,
-            language,
-            captureSource: sermonSettings?.captureSource,
-            microphoneDeviceId: sermonSettings?.selectedMicrophoneId,
-            continuous: true,
-            interimResults: true,
-            useVAD: globalSettings?.sermonListener_useVAD,
-            // The Bible-biased prompt steers Whisper toward scripture vocabulary,
-            // which garbles sung lyrics and surfaces spurious verses. When song
-            // auto-detect is on (worship mode), use a neutral prompt so lyrics
-            // transcribe cleanly; keep the scripture bias for sermon mode.
-            initialPrompt: useAppStore.getState().songTracking.autoDetect ? '' : buildBibleInitialPrompt(),
-            onStart: () => {
-                setIsListening(true)
-                setIsStarting(false)
-                setError(null)
-                audioFeedbackService.playStart()
-                sessionStartTimeRef.current = Date.now()
-                chunkStartTimeRef.current = 0
-                trackEvent(AnalyticsEventType.SERMON_LISTENER_STARTED, {
-                    provider,
-                    language,
-                    capture_source: sermonSettings?.captureSource,
+            // Initialize semantic detector on first use if not already ready.
+            // Once `semanticDetectorReady` is true, the detector singleton's own
+            // `initialize()` short-circuits on every future call — so without the
+            // else branch below, a worker torn down by embeddingSyncManager's
+            // 5-minute idle-unload timer (or from a much earlier session) would
+            // otherwise only get reloaded lazily on the first live semantic query
+            // mid-sermon, which is exactly the multi-second "sometimes" delay.
+            // `initializeEmbedder()` is a cheap idempotent no-op when the worker
+            // is already warm, so eagerly re-warming here on every start costs
+            // nothing when nothing was disposed.
+            if (!semanticDetectorReady) {
+                initSemanticDetector().catch(err => {
+                    console.warn('[useSermonListener] Semantic detector init failed:', err)
                 })
-            },
-            onEnd: () => {
-                setIsListening(false)
-            },
-            onResult: (text, isFinal, _confidence, whisperSegments) => {
-                console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal, hasSegments: !!whisperSegments?.length })
+            } else if (enableSemanticDetection) {
+                initializeEmbedder().catch(err => {
+                    console.warn('[useSermonListener] Embedder re-warm failed:', err)
+                })
+            }
 
-                // Clean up repeated phrases in the incoming text
-                let cleanedText = cleanRepeatedPhrases(text)
+            console.log('[useSermonListener] Starting transcription with provider:', provider)
+            setIsStarting(true)
 
-                // Strip overlap with the very last chunk to avoid stuttering/repetitions (common in ASR)
-                if (isFinal && recentChunksRef.current.length > 0) {
-                    cleanedText = stripOverlap(cleanedText, recentChunksRef.current[recentChunksRef.current.length - 1])
+            // Prevent device from sleeping during sermon recording
+            startKeepAwake().catch(err => {
+                console.warn('[useSermonListener] Keep-awake failed (non-fatal):', err)
+            })
+
+
+            // Unlock AudioContext early so the VAD's internal AudioContext can resume
+            try {
+                const unlockCtx = new AudioContext()
+                if (unlockCtx.state === 'suspended') {
+                    await unlockCtx.resume()
+                    console.log('[useSermonListener] AudioContext unlocked for transcription')
                 }
+                await unlockCtx.close()
+            } catch (e) {
+                console.warn('[useSermonListener] AudioContext unlock failed:', e)
+            }
 
-                // Skip transcript append for duplicates, but still process commands in the chunk.
-                if (isDuplicateText(cleanedText)) {
-                    console.log('[useSermonListener] Skipping duplicate text:', cleanedText.substring(0, 50))
-                    processTranscript(transcriptBufferRef.current, cleanedText)
-                    return
+            // `unifiedTranscriptionService` is a module-level singleton, so its
+            // internal `isListening` can outlive our React state (e.g. after this
+            // provider remounts on navigation). When that happens our state resets
+            // to false but the service still thinks it's running, so start() would
+            // no-op with "Already listening" and the button would stay on "Start".
+            // Reconcile by stopping the stale session before starting fresh.
+            if (unifiedTranscriptionService.getStatus().isListening) {
+                console.warn('[useSermonListener] Reconciling stale listening state before start')
+                try {
+                    await unifiedTranscriptionService.stop()
+                } catch (e) {
+                    console.warn('[useSermonListener] Failed to stop stale session:', e)
                 }
+            }
 
-                if (isFinal) {
-                    // Add to recent chunks for deduplication
-                    recentChunksRef.current.push(cleanedText)
-                    if (recentChunksRef.current.length > MAX_RECENT_CHUNKS) {
-                        recentChunksRef.current.shift()
+            const success = await unifiedTranscriptionService.start({
+                provider,
+                language,
+                captureSource: sermonSettings?.captureSource,
+                microphoneDeviceId: sermonSettings?.selectedMicrophoneId,
+                continuous: true,
+                interimResults: true,
+                useVAD: globalSettings?.sermonListener_useVAD,
+                // The Bible-biased prompt steers Whisper toward scripture vocabulary,
+                // which garbles sung lyrics and surfaces spurious verses. When song
+                // auto-detect is on (worship mode), use a neutral prompt so lyrics
+                // transcribe cleanly; keep the scripture bias for sermon mode.
+                initialPrompt: useAppStore.getState().songTracking.autoDetect ? '' : buildBibleInitialPrompt(),
+                onStart: () => {
+                    setIsListening(true)
+                    setIsStarting(false)
+                    setError(null)
+                    audioFeedbackService.playStart()
+                    sessionStartTimeRef.current = Date.now()
+                    chunkStartTimeRef.current = 0
+                    trackEvent(AnalyticsEventType.SERMON_LISTENER_STARTED, {
+                        provider,
+                        language,
+                        capture_source: sermonSettings?.captureSource,
+                    })
+                },
+                onEnd: () => {
+                    setIsListening(false)
+                },
+                onResult: (text, isFinal, _confidence, whisperSegments) => {
+                    console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal, hasSegments: !!whisperSegments?.length })
+
+                    // Clean up repeated phrases in the incoming text
+                    let cleanedText = cleanRepeatedPhrases(text)
+
+                    // Strip overlap with the very last chunk to avoid stuttering/repetitions (common in ASR)
+                    if (isFinal && recentChunksRef.current.length > 0) {
+                        cleanedText = stripOverlap(cleanedText, recentChunksRef.current[recentChunksRef.current.length - 1])
                     }
 
-                    // Track raw utterance for learning
-                    setRawUtterances(prev => [...prev, { text: cleanedText, timestamp: Date.now() }].slice(-200))
-
-                    // Cancel any pending interim debounce
-                    if (interimDebounceRef.current) {
-                        clearTimeout(interimDebounceRef.current)
-                        interimDebounceRef.current = null
+                    // Skip transcript append for duplicates, but still process commands in the chunk.
+                    if (isDuplicateText(cleanedText)) {
+                        console.log('[useSermonListener] Skipping duplicate text:', cleanedText.substring(0, 50))
+                        processTranscript(transcriptBufferRef.current, cleanedText)
+                        return
                     }
 
-                    setInterimTranscript('')
-
-                    // Build timestamped segment(s)
-                    const now = Date.now()
-                    const sessionStart = sessionStartTimeRef.current || now
-
-                    if (whisperSegments && whisperSegments.length > 0 && provider === 'native') {
-                        // Whisper returns segment timing in seconds relative to the utterance start.
-                        // These are already adjusted by the desktop whisper service to be
-                        // session-relative (VAD adds vadSpeechStartMs, native adds startOffsetMs).
-                        // So we can use them directly — just convert seconds → milliseconds.
-                        const newSegments: TranscriptSegment[] = whisperSegments.map((seg, idx) => {
-                            return {
-                                id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
-                                text: seg.text.trim(),
-                                startMs: Math.max(0, Math.round(seg.start * 1000)),
-                                endMs: Math.max(0, Math.round(seg.end * 1000)),
-                                source: 'whisper' as const,
-                            }
-                        }).filter(seg => seg.text.length > 0)
-
-                        setTranscriptSegments(prev => {
-                            const next = [...prev, ...newSegments]
-                            const fullText = next.map(s => s.text).join(' ').trim()
-                            transcriptBufferRef.current = fullText
-                            setTranscript(fullText)
-                            return next
-                        })
-                    } else {
-                        // Web Speech or no segment timing — use wall-clock offsets.
-                        // chunkStartTimeRef tracks when the current chunk started (set on first
-                        // interim, or falls back to sessionStart for immediate finals).
-                        const segmentStart = chunkStartTimeRef.current || now
-                        const segment: TranscriptSegment = {
-                            id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${Math.random().toString(36).slice(2, 9)}`,
-                            text: cleanedText,
-                            startMs: Math.max(0, segmentStart - sessionStart),
-                            endMs: Math.max(0, now - sessionStart),
-                            source: provider === 'native' ? 'whisper' : 'web-speech',
+                    if (isFinal) {
+                        // Add to recent chunks for deduplication
+                        recentChunksRef.current.push(cleanedText)
+                        if (recentChunksRef.current.length > MAX_RECENT_CHUNKS) {
+                            recentChunksRef.current.shift()
                         }
 
-                        setTranscriptSegments(prev => {
-                            const next = [...prev, segment]
-                            const fullText = next.map(s => s.text).join(' ').trim()
-                            transcriptBufferRef.current = fullText
-                            setTranscript(fullText)
-                            return next
-                        })
-                    }
+                        // Track raw utterance for learning
+                        setRawUtterances(prev => [...prev, { text: cleanedText, timestamp: Date.now() }].slice(-200))
 
-                    const newFullTranscript = `${transcriptBufferRef.current}`.trim()
-                    processTranscript(newFullTranscript, cleanedText)
-                    chunkStartTimeRef.current = 0
-                    // Debounced transcript event — fire only on final results so
-                    // we don't flood Amplitude with interim chunks.
-                    if (lastTranscriptEventRef.current && Date.now() - lastTranscriptEventRef.current > 5000) {
-                        trackEvent(AnalyticsEventType.SERMON_LISTENER_TRANSCRIPTION, {
-                            length: newFullTranscript.length,
-                            provider,
-                        })
-                        lastTranscriptEventRef.current = Date.now()
-                    } else if (!lastTranscriptEventRef.current) {
-                        lastTranscriptEventRef.current = Date.now()
-                    }
-                } else {
-                    setInterimTranscript(cleanedText)
-                    if (chunkStartTimeRef.current === 0) {
-                        chunkStartTimeRef.current = Date.now()
-                    }
-                    const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
-                    // Debounce interim verse detection to reduce processing load
-                    if (interimDebounceRef.current) {
-                        clearTimeout(interimDebounceRef.current)
-                    }
-                    interimDebounceRef.current = setTimeout(() => {
-                        processTranscript(rollingContext, cleanedText)
-                        interimDebounceRef.current = null
-                    }, INTERIM_DEBOUNCE_MS)
-                }
-                onTranscriptUpdate?.(cleanedText, !isFinal)
-            },
-            onError: (err, message) => {
-                const resolvedError = message || err
-                setError(resolvedError)
-                setIsListening(false)
-                setIsStarting(false)
-                onError?.(resolvedError)
-                trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, {
-                    provider,
-                    message: typeof resolvedError === 'string' ? resolvedError : 'unknown',
-                })
-            },
-            onStatusChange: (status: TranscriptionStatus) => {
-                setIsListening(status.isListening)
-            },
-            onSpeechStart: () => {
-                setIsSpeechDetected(true)
-            },
-            onSpeechEnd: () => {
-                setIsSpeechDetected(false)
-            },
-        })
+                        // Cancel any pending interim debounce
+                        if (interimDebounceRef.current) {
+                            clearTimeout(interimDebounceRef.current)
+                            interimDebounceRef.current = null
+                        }
 
-        // Safety net: if the provider resolved without ever firing onStart
-        // (e.g. it failed silently), don't leave the button stuck on "Starting".
-        setIsStarting(false)
-        return success
+                        setInterimTranscript('')
+
+                        // Build timestamped segment(s)
+                        const now = Date.now()
+                        const sessionStart = sessionStartTimeRef.current || now
+
+                        if (whisperSegments && whisperSegments.length > 0 && provider === 'native') {
+                            // Whisper returns segment timing in seconds relative to the utterance start.
+                            // These are already adjusted by the desktop whisper service to be
+                            // session-relative (VAD adds vadSpeechStartMs, native adds startOffsetMs).
+                            // So we can use them directly — just convert seconds → milliseconds.
+                            const newSegments: TranscriptSegment[] = whisperSegments.map((seg, idx) => {
+                                return {
+                                    id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
+                                    text: seg.text.trim(),
+                                    startMs: Math.max(0, Math.round(seg.start * 1000)),
+                                    endMs: Math.max(0, Math.round(seg.end * 1000)),
+                                    source: 'whisper' as const,
+                                }
+                            }).filter(seg => seg.text.length > 0)
+
+                            setTranscriptSegments(prev => {
+                                const next = [...prev, ...newSegments]
+                                const fullText = next.map(s => s.text).join(' ').trim()
+                                transcriptBufferRef.current = fullText
+                                setTranscript(fullText)
+                                return next
+                            })
+                        } else {
+                            // Web Speech or no segment timing — use wall-clock offsets.
+                            // chunkStartTimeRef tracks when the current chunk started (set on first
+                            // interim, or falls back to sessionStart for immediate finals).
+                            const segmentStart = chunkStartTimeRef.current || now
+                            const segment: TranscriptSegment = {
+                                id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${Math.random().toString(36).slice(2, 9)}`,
+                                text: cleanedText,
+                                startMs: Math.max(0, segmentStart - sessionStart),
+                                endMs: Math.max(0, now - sessionStart),
+                                source: provider === 'native' ? 'whisper' : 'web-speech',
+                            }
+
+                            setTranscriptSegments(prev => {
+                                const next = [...prev, segment]
+                                const fullText = next.map(s => s.text).join(' ').trim()
+                                transcriptBufferRef.current = fullText
+                                setTranscript(fullText)
+                                return next
+                            })
+                        }
+
+                        const newFullTranscript = `${transcriptBufferRef.current}`.trim()
+                        processTranscript(newFullTranscript, cleanedText)
+                        chunkStartTimeRef.current = 0
+                        // Debounced transcript event — fire only on final results so
+                        // we don't flood Amplitude with interim chunks.
+                        if (lastTranscriptEventRef.current && Date.now() - lastTranscriptEventRef.current > 5000) {
+                            trackEvent(AnalyticsEventType.SERMON_LISTENER_TRANSCRIPTION, {
+                                length: newFullTranscript.length,
+                                provider,
+                            })
+                            lastTranscriptEventRef.current = Date.now()
+                        } else if (!lastTranscriptEventRef.current) {
+                            lastTranscriptEventRef.current = Date.now()
+                        }
+                    } else {
+                        setInterimTranscript(cleanedText)
+                        if (chunkStartTimeRef.current === 0) {
+                            chunkStartTimeRef.current = Date.now()
+                        }
+                        const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
+                        // Debounce interim verse detection to reduce processing load
+                        if (interimDebounceRef.current) {
+                            clearTimeout(interimDebounceRef.current)
+                        }
+                        interimDebounceRef.current = setTimeout(() => {
+                            processTranscript(rollingContext, cleanedText)
+                            interimDebounceRef.current = null
+                        }, INTERIM_DEBOUNCE_MS)
+                    }
+                    onTranscriptUpdate?.(cleanedText, !isFinal)
+                },
+                onError: (err, message) => {
+                    const resolvedError = message || err
+                    setError(resolvedError)
+                    setIsListening(false)
+                    setIsStarting(false)
+                    onError?.(resolvedError)
+                    trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, {
+                        provider,
+                        message: typeof resolvedError === 'string' ? resolvedError : 'unknown',
+                    })
+                },
+                onStatusChange: (status: TranscriptionStatus) => {
+                    setIsListening(status.isListening)
+                },
+                onSpeechStart: () => {
+                    setIsSpeechDetected(true)
+                },
+                onSpeechEnd: () => {
+                    setIsSpeechDetected(false)
+                },
+            })
+
+            // Safety net: if the provider resolved without ever firing onStart
+            // (e.g. it failed silently), don't leave the button stuck on "Starting".
+            setIsStarting(false)
+            return success
+        } catch (err) {
+            // If anything above throws (e.g. unifiedTranscriptionService.start()
+            // rejects rather than resolving false), don't leave the button
+            // stuck on "Starting…" forever with no recovery but a manual stop().
+            console.error('[useSermonListener] start() failed:', err)
+            setIsStarting(false)
+            setIsListening(false)
+            setError(err instanceof Error ? err.message : String(err))
+            return false
+        } finally {
+            startInFlightRef.current = false
+        }
     }, [
         isSupported,
         isListening,

@@ -35,9 +35,15 @@ pub struct LlmProxyRequest {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LlmProxyResponse {
     status: u16,
     body: String,
+    /// The `Retry-After` header, in seconds, when the provider sent one (most
+    /// commonly on a 429). Only the delta-seconds form is parsed; the less
+    /// common HTTP-date form is left as `None` so callers fall back to their
+    /// own backoff.
+    retry_after_secs: Option<u64>,
 }
 
 /// Perform an HTTP request to an LLM provider from Rust (no CORS).
@@ -63,6 +69,11 @@ pub async fn llm_proxy(req: LlmProxyRequest) -> Result<LlmProxyResponse, String>
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
     let status = resp.status().as_u16();
+    let retry_after_secs = resp
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok());
     // Read as bytes + lossy UTF-8 rather than `.text()`: reqwest's `.text()`
     // strictly charset-decodes and errors ("error decoding response body") on
     // any non-UTF-8 byte. Decompression (gzip/brotli/deflate/zstd) is handled
@@ -73,7 +84,7 @@ pub async fn llm_proxy(req: LlmProxyRequest) -> Result<LlmProxyResponse, String>
         .await
         .map_err(|e| format!("Read body failed: {}", e))?;
     let body = String::from_utf8_lossy(&bytes).into_owned();
-    Ok(LlmProxyResponse { status, body })
+    Ok(LlmProxyResponse { status, body, retry_after_secs })
 }
 
 /// List the catalog with per-model downloaded/downloading state.

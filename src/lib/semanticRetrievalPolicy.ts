@@ -251,7 +251,7 @@ const THEOLOGICAL_COMMON = new Set([
     'baptism', 'cross', 'resurrection', 'born', 'gather', 'gathered',
 ])
 
-function isTheologicalCommon(word: string): boolean {
+export function isTheologicalCommon(word: string): boolean {
     return THEOLOGICAL_COMMON.has(word.toLowerCase())
 }
 

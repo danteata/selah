@@ -155,6 +155,22 @@ describe('SongPositionTracker', () => {
         expect(u.phase).toBe('lost')
     })
 
+    it('clears the display target on Lost so callers stop re-asserting the stale section', () => {
+        // Regression: previously `displaySectionId` stayed pointed at the last
+        // matched section forever, so a caller driving the live slide off of it
+        // (e.g. useSongTracker) would keep yanking the display back to the old
+        // song even after another detector (Bible-verse auto-detect) took over.
+        const t = newTracker()
+        t.ingest({ text: 'Amazing grace how sweet the sound' })
+        expect(t.getState().displaySectionId).toBe('v1')
+        let u = t.getState()
+        for (let i = 0; i < 3; i++) {
+            u = t.ingest({ text: 'completely unrelated sermon words here', audioEnergy: 0 })
+        }
+        expect(u.phase).toBe('lost')
+        expect(u.displaySectionId).toBeNull()
+    })
+
     it('re-acquires from Lost when lyrics return', () => {
         const t = newTracker()
         t.ingest({ text: 'Amazing grace how sweet the sound' })
