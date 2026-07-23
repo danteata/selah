@@ -190,20 +190,25 @@ jobs:
         if: matrix.target == 'x86_64-apple-darwin'
         run: |
           set -euo pipefail
-          # Fetch the x86_64 (non-arm64_*) onnxruntime bottle. Try recent macOS
-          # tags newest-first; Homebrew only builds the x86_64 slice for some of
-          # them, so take the first that resolves.
-          tag=""
-          for candidate in tahoe sequoia sonoma ventura; do
-            if brew fetch --quiet --bottle-tag="$candidate" onnxruntime >/dev/null 2>&1; then
-              tag="$candidate"; break
-            fi
-          done
+          # Pick the x86_64 macOS bottle tag from the formula metadata. Intel
+          # bottles use the bare OS name (e.g. "sonoma"); arm64 tags are prefixed
+          # `arm64_` and Linux is `*_linux`. We can't trial-and-error tags on
+          # `brew fetch` exit codes — it exits 0 (just warns) when a bottle tag is
+          # unavailable, which previously made us "select" an arm64-only tag
+          # (tahoe) and download nothing.
+          tag="$(brew info --json=v2 onnxruntime \
+            | jq -r '.formulae[0].bottle.stable.files | keys[]' \
+            | grep -vE '^arm64_|_linux$' \
+            | head -n1)"
           if [ -z "$tag" ]; then
-            echo "::error::could not fetch an x86_64 onnxruntime Homebrew bottle"; exit 1
+            echo "::error::no x86_64 macOS onnxruntime bottle tag found in the formula"; exit 1
           fi
           echo "Using x86_64 onnxruntime bottle tag: $tag"
+          brew fetch --quiet --bottle-tag="$tag" onnxruntime
           bottle="$(brew --cache --bottle-tag="$tag" onnxruntime)"
+          if [ ! -f "$bottle" ]; then
+            echo "::error::onnxruntime bottle tarball missing at $bottle after fetch"; exit 1
+          fi
           work="$RUNNER_TEMP/ort-x86_64"; mkdir -p "$work"
           tar -xzf "$bottle" -C "$work"
           dylib="$(find "$work" -type f -name 'libonnxruntime*.dylib' | head -n1)"
