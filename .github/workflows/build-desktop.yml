@@ -219,6 +219,27 @@ jobs:
           node scripts/download-gguf-model.mjs
           node scripts/download-embedding-model.mjs
 
+      # Vite inlines `import.meta.env.VITE_*` at build time. Without these the
+      # desktop bundle ships an empty Clerk key and crashes on boot with
+      # "@clerk/clerk-react: Missing publishableKey" (and Convex/analytics would
+      # be misconfigured). GitHub leaves an undefined secret as an empty string,
+      # so fail loudly here rather than shipping a broken app. These are all
+      # publishable/client-side values (they end up in the bundle regardless).
+      - name: Verify frontend build env is present
+        shell: bash
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+          VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL }}
+        run: |
+          missing=0
+          for v in VITE_CLERK_PUBLISHABLE_KEY VITE_CONVEX_URL; do
+            if [ -z "${!v}" ]; then
+              echo "::error::$v is not set — add it under repo Settings ▸ Secrets and variables ▸ Actions ▸ Secrets"
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ]
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -227,6 +248,16 @@ jobs:
           # instead of FUSE-mounting — the GitHub runner sandbox can't always
           # mount FUSE even with libfuse2 present. No-op off Linux.
           APPIMAGE_EXTRACT_AND_RUN: 1
+          # Frontend build-time config, inlined by Vite during `bun run build`
+          # (tauri-action's beforeBuildCommand). All client-side/publishable.
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+          VITE_CONVEX_URL: ${{ secrets.VITE_CONVEX_URL }}
+          VITE_ANALYTICS_PROVIDER: ${{ secrets.VITE_ANALYTICS_PROVIDER }}
+          VITE_AMPLITUDE_KEY: ${{ secrets.VITE_AMPLITUDE_KEY }}
+          VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+          VITE_PAYMENT_PROVIDER: ${{ secrets.VITE_PAYMENT_PROVIDER }}
+          VITE_PAYSTACK_PUBLIC_KEY: ${{ secrets.VITE_PAYSTACK_PUBLIC_KEY }}
+          VITE_FF_SERMON_LISTENER: ${{ secrets.VITE_FF_SERMON_LISTENER }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Selah v__VERSION__'
@@ -237,46 +268,4 @@ jobs:
           # createUpdaterArtifacts in tauri.conf + the TAURI_SIGNING_* secrets.
           includeUpdaterJson: false
           args: --target ${{ matrix.target }} ${{ matrix.tauri_args }}
-
-  # GitHub auto-generates "Source code (zip)" and "Source code (tar.gz)"
-  # archives for every release tied to a git tag — this is built-in platform
-  # behaviour and can't be disabled via workflow config or tauri-action.
-  # This job strips those two auto-generated assets so the release page only
-  # shows the installer bundles uploaded by the build matrix above.
-  strip-source-assets:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Remove auto-generated source code assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME:-}"
-          if [ -z "$TAG" ]; then
-            echo "GITHUB_REF_NAME is empty — not a tag push, skipping."
-            exit 0
-          fi
-          echo "Cleaning source archives from release $TAG"
-          # List assets, filter to the two auto-generated source archives, and
-          # delete each. Process substitution (< <(...)) is used instead of a
-          # pipe so that grep's exit code (1 = no match) can't trip `pipefail`
-          # and abort the step — e.g. if a previous run already cleaned them.
-          mapfile -t assets < <(
-            gh release view "$TAG" --json assets --jq '.assets[].name' \
-              | grep -iE '^(Source code \(zip\)|Source code \(tar\.gz\))$' \
-              || true
-          )
-          if [ "${#assets[@]}" -eq 0 ]; then
-            echo "No source archives found — nothing to do."
-          else
-            for name in "${assets[@]}"; do
-              echo "Deleting asset: $name"
-              gh release delete-asset "$TAG" "$name" --yes
-            done
-          fi
-          echo "Done."
 
