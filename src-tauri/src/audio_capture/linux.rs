@@ -8,6 +8,9 @@ use std::sync::Arc;
 use super::types::*;
 
 /// Start system audio capture on Linux using loopback monitor device
+// Not yet wired into audio_capture::mod (only macOS/Windows are dispatched);
+// kept as the Linux implementation for when Linux system audio is enabled.
+#[allow(dead_code)]
 pub fn start_system_audio_capture(
     is_capturing: Arc<AtomicBool>,
     audio_buffer: Arc<Mutex<Vec<f32>>>,
@@ -138,6 +141,7 @@ pub fn start_system_audio_capture(
 }
 
 /// Check if we can capture system audio on Linux
+#[allow(dead_code)]
 #[tauri::command]
 pub fn check_system_audio_permission() -> bool {
     // On Linux, we generally don't have a high-level permission check like macOS

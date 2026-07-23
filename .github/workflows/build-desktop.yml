@@ -69,7 +69,13 @@ jobs:
           wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc >/dev/null
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-noble.list https://packages.lunarg.com/vulkan/lunarg-vulkan-noble.list
           sudo apt-get update
+          # libfuse2: the AppImage tooling (linuxdeploy + its plugins, which are
+          # themselves AppImages) mounts via FUSE 2. Ubuntu 24.04 no longer ships
+          # it by default, so without it the appimage bundle step dies with
+          # "failed to run linuxdeploy". Combined with APPIMAGE_EXTRACT_AND_RUN=1
+          # on the build step as a fallback for the FUSE-less runner sandbox.
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev \
+            libfuse2 \
             vulkan-sdk
 
       - name: Setup Node.js
@@ -217,6 +223,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Run the AppImage tooling (linuxdeploy + plugins) by extracting them
+          # instead of FUSE-mounting — the GitHub runner sandbox can't always
+          # mount FUSE even with libfuse2 present. No-op off Linux.
+          APPIMAGE_EXTRACT_AND_RUN: 1
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Selah v__VERSION__'
