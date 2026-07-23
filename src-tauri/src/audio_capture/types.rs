@@ -29,6 +29,7 @@ pub struct AudioDeviceInfo {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)] // Output/Loopback are populated by platform-specific enumeration code
 pub enum DeviceType {
     Input,    // Microphone
     Output,   // Speaker/System
@@ -91,6 +92,7 @@ impl AudioChunk {
 
     /// Check if chunk has meaningful audio (not silence)
     /// Uses RMS (root mean square) with a higher threshold to filter out noise
+    #[allow(dead_code)]
     pub fn has_audio(&self, threshold: f32) -> bool {
         if self.samples.is_empty() {
             return false;
@@ -113,6 +115,7 @@ impl AudioChunk {
     }
 
     /// Get audio duration in seconds
+    #[allow(dead_code)]
     pub fn duration_secs(&self) -> f64 {
         self.duration_ms as f64 / 1000.0
     }
@@ -152,6 +155,7 @@ pub fn decode_wav_to_f32(path: &str) -> Result<Vec<f32>, String> {
 }
 
 /// Simple linear resampling
+#[allow(dead_code)]
 pub fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
     if from_rate == to_rate {
         return samples.to_vec();

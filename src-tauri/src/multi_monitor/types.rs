@@ -99,6 +99,7 @@ impl Default for WindowState {
 }
 
 /// Event payload sent to the frontend when monitor configuration changes
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorEventPayload {
     /// The type of event

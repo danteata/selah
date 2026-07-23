@@ -5,6 +5,70 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{ndi_lib}");
     }
 
+    // Windows: stage the transcribe-cpp shared-library DLLs so the installer
+    // can ship them next to Selah.exe.
+    //
+    // On Windows `transcribe-cpp` is built with `dynamic-backends` (=> `shared`),
+    // so the native core is a runtime `transcribe.dll` plus the ggml backend /
+    // compute-module DLLs, loaded from the executable's own directory (Windows
+    // has no rpath). transcribe-cpp-sys already copies these next to cargo's
+    // build artifacts so `cargo run`/tests work — but the Tauri NSIS/MSI bundler
+    // only packages the exe + declared `resources`, so without staging them here
+    // the installed app dies at launch with "transcribe.dll was not found".
+    //
+    // The sys crate exposes their location via `DEP_TRANSCRIBE_CPP_RUNTIME_DIR`
+    // (bin/ on Windows) and `DEP_TRANSCRIBE_CPP_MODULE_DIR` (the dynamic-backend
+    // modules). Both are set only in the shared posture, so this whole block is a
+    // no-op on the static macOS build. We copy every DLL into `windows-runtime/`,
+    // which tauri.windows.conf.json maps flat into the bundle root (next to the
+    // exe). See that config's `resources` map.
+    #[cfg(target_os = "windows")]
+    {
+        use std::path::PathBuf;
+
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let dest = PathBuf::from(&manifest_dir).join("windows-runtime");
+        // Recreate clean so a DLL renamed/removed upstream never lingers stale.
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(&dest).expect("create windows-runtime staging dir");
+
+        let mut copied = 0usize;
+        for var in [
+            "DEP_TRANSCRIBE_CPP_RUNTIME_DIR",
+            "DEP_TRANSCRIBE_CPP_MODULE_DIR",
+        ] {
+            println!("cargo:rerun-if-env-changed={var}");
+            let Some(dir) = std::env::var_os(var) else {
+                continue;
+            };
+            let dir = PathBuf::from(dir);
+            println!("cargo:rerun-if-changed={}", dir.display());
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("dll") {
+                    continue;
+                }
+                if let Some(name) = path.file_name() {
+                    // read_dir over both vars can yield the same file (Windows
+                    // keeps modules in bin/ too); copying twice is harmless.
+                    if std::fs::copy(&path, dest.join(name)).is_ok() {
+                        copied += 1;
+                    }
+                }
+            }
+        }
+        if copied == 0 {
+            println!(
+                "cargo:warning=selah build.rs: staged no transcribe-cpp DLLs for the \
+                 Windows bundle (DEP_TRANSCRIBE_CPP_RUNTIME_DIR unset or empty) — the \
+                 installed app will fail at launch with 'transcribe.dll was not found'"
+            );
+        }
+    }
+
     // Embed a custom Windows app manifest (PerMonitorV2 DPI awareness,
     // asInvoker trust level, Common-Controls 6 for visual styles).
     //

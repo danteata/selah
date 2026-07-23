@@ -45,6 +45,12 @@ jobs:
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
             name: 'Windows'
+            # transcribe-cpp builds a runtime transcribe.dll + ggml backend DLLs
+            # on Windows (dynamic-backends => shared). build.rs stages them into
+            # src-tauri/windows-runtime/; this config maps them flat next to
+            # Selah.exe so the installed app can load them (otherwise: "The code
+            # execution cannot proceed because transcribe.dll was not found").
+            tauri_args: '--config src-tauri/tauri.windows.conf.json'
 
     runs-on: ${{ matrix.platform }}
     name: Build ${{ matrix.name }}

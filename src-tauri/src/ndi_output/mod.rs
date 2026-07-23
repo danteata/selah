@@ -86,6 +86,7 @@ impl NdiManager {
         *self.app.write() = Some(app);
     }
 
+    #[allow(dead_code)]
     pub fn get_app(&self) -> Option<AppHandle> {
         self.app.read().clone()
     }
@@ -98,6 +99,9 @@ impl NdiManager {
         NDI_RUNTIME_AVAILABLE.load(Ordering::SeqCst)
     }
 
+    // Called from commands.rs, but only inside `#[cfg(feature = "ndi")]`
+    // command bodies, so without the feature it reads as dead code.
+    #[allow(dead_code)]
     pub fn update_state(&self, f: impl FnOnce(&mut NdiOutputState)) {
         let mut state = self.state.write();
         f(&mut state);

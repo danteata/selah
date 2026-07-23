@@ -487,6 +487,7 @@ impl MultiMonitorState {
     }
 
     /// Send a message to the live window via eval
+    #[allow(dead_code)]
     pub fn send_to_live_window(&self, message: &str) -> Result<(), MultiMonitorError> {
         let app = self.get_app().ok_or_else(|| MultiMonitorError {
             code: "NO_APP_HANDLE".to_string(),

@@ -75,3 +75,7 @@ src-tauri/assets/whisper-models-gguf/*.bin
 
 # Homebrew ONNX Runtime staged for the Intel-mac CI build (system ort linking)
 src-tauri/onnxruntime-libs/
+
+# Windows transcribe-cpp runtime DLLs, staged by src-tauri/build.rs at build
+# time and bundled next to the exe on Windows (see tauri.windows.conf.json).
+src-tauri/windows-runtime/

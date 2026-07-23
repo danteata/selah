@@ -88,6 +88,7 @@ impl MultiMonitorState {
     }
 
     /// Save window state to storage (returns the state to be saved)
+    #[allow(dead_code)]
     pub fn save_state(&self) -> WindowState {
         let state = self.window_state.read().clone();
         
