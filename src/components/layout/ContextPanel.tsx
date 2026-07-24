@@ -16,6 +16,7 @@ import { generateObjectId } from '../../hooks/useSlideCreation'
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
 import { SongList } from '../songs/SongList'
+import { LiveSongNavigator } from '../songs/LiveSongNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { MediaPicker, type MediaItem } from '../media/MediaPicker'
 import { TemplateBrowser } from '../templates/TemplateBrowser'
@@ -474,6 +475,9 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
 
     return (
         <div className="flex flex-col h-full">
+            {/* When a song is live, surface its verses for quick navigation. */}
+            <LiveSongNavigator />
+
             {/* Unified search across songs + hymns */}
             <div className="p-2 border-b border-[var(--border-subtle)]">
                 <div className="relative">
