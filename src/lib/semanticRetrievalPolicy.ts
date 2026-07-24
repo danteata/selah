@@ -35,6 +35,20 @@ function clampThreshold(t: number): number {
     return Math.max(THRESHOLD_FLOOR, Math.min(THRESHOLD_CEILING, t))
 }
 
+/**
+ * The similarity cutoff to actually use. When a caller supplies an explicit
+ * `override` (the `threshold` option on useSemanticVerseSearch) we honor it —
+ * clamped to the safe [floor, ceiling] band so a stray low value can't flood
+ * results with noise — instead of silently ignoring it. With no override we
+ * fall back to the word-count-based dynamic threshold. Previously the caller
+ * `threshold` was dead: the hook always used getDynamicThreshold, so the
+ * "looser cutoff for short phrases" the callers asked for never took effect.
+ */
+export function getEffectiveThreshold(wordCount: number, override?: number): number {
+    if (typeof override === 'number') return clampThreshold(override)
+    return getDynamicThreshold(wordCount)
+}
+
 const STOP_WORDS = new Set([
     'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
     'of', 'with', 'by', 'from', 'is', 'was', 'are', 'were', 'be', 'been',

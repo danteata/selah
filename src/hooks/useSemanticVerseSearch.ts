@@ -33,7 +33,9 @@ import {
     searchVerseEmbeddings,
 } from '../services/sermon-listener/verseEmbeddingStore'
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
-import { getDynamicThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
+import { getEffectiveThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
+import { lexicalSearchVerses } from '../lib/bibleLexicalSearch'
+import { useScripture } from './useScripture'
 
 export interface SemanticVerseResult {
     _id: string
@@ -90,7 +92,9 @@ export function useSemanticVerseSearch(
     options: UseSemanticVerseSearchOptions = {}
 ): UseSemanticVerseSearchReturn {
     const {
-        threshold = 0.65,
+        // No default: when omitted, the word-count dynamic threshold governs
+        // (see getEffectiveThreshold). An explicit value is honored, clamped.
+        threshold,
         limit = 5,
         version,
         debounceMs = 200,
@@ -100,6 +104,7 @@ export function useSemanticVerseSearch(
 
     const convex = useConvex()
     const { trackEvent } = useAnalytics()
+    const { downloadBibleVersion } = useScripture()
     const [results, setResults] = useState<SemanticVerseResult[]>([])
     const [isSearching, setIsSearching] = useState(false)
     const cacheKey = version || 'KJV'
@@ -240,12 +245,13 @@ export function useSemanticVerseSearch(
             return
         }
 
-        if (!hasEmbeddings) {
-            return
-        }
+        // NOTE: we no longer bail when embeddings are unavailable. Lexical
+        // search runs over the locally-bundled verse text and works for every
+        // version on every platform, so it must proceed even when the
+        // semantic index (KJV/desktop-only, or Convex-synced) is absent.
 
         const wordCount = query.trim().split(/\s+/).length
-        const dynamicThreshold = getDynamicThreshold(wordCount)
+        const dynamicThreshold = getEffectiveThreshold(wordCount, threshold)
 
         // Debounce the search
         debounceRef.current = setTimeout(async () => {
@@ -257,115 +263,147 @@ export function useSemanticVerseSearch(
             setError(null)
 
             try {
-                // Ensure embedder is ready
-                if (!isEmbedderReady) {
-                    await initEmbedder()
-                }
-
-                if (abortController.signal.aborted) return
-
-                // Generate embedding for the query (with cache)
-                const cacheKey = query.trim().toLowerCase()
-                let queryEmbedding = embeddingCache.current.get(cacheKey)
-                if (!queryEmbedding) {
-                    const embeddingResult = await embedText(query)
-                    queryEmbedding = embeddingResult.embedding
-                    if (embeddingCache.current.size > 50) {
-                        const firstKey = embeddingCache.current.keys().next().value
-                        if (firstKey) embeddingCache.current.delete(firstKey)
-                    }
-                    embeddingCache.current.set(cacheKey, queryEmbedding)
-                }
-
-                if (abortController.signal.aborted) return
-
-                // Lazy-load embeddings into the packed-Float32Array worker
-                // store on the first local search. The worker keeps the
-                // index; the main thread retains only metadata-light state.
                 const workingVersion = effectiveVersionRef.current || version || 'KJV'
-                if (preferLocal && hasLocalEmbeddings) {
-                    const loaded = getLoadedIndex()
-                    if (!loaded || loaded.version !== workingVersion) {
-                        let rows = getPrewarmedEmbeddings(workingVersion)
-                        if (!rows || rows.length === 0) {
-                            rows = await getCachedVerseEmbeddings(workingVersion)
-                        }
-                        if (rows && rows.length > 0) {
-                            loadVerseStore(workingVersion, rows)
-                            // Release our reference; the worker owns it now.
-                            rows = []
-                        }
+
+                // --- Lexical pass (always, offline, every version) -----------
+                // Guarantees that a verse literally containing the typed
+                // phrase / all its content words is surfaced, regardless of
+                // whether the semantic index ranks it. Runs over the bundled
+                // verse text, so it never needs embeddings or network.
+                let lexicalResults: SemanticVerseResult[] = []
+                try {
+                    const corpus = await downloadBibleVersion(workingVersion)
+                    if (corpus && corpus.length > 0) {
+                        lexicalResults = lexicalSearchVerses(workingVersion, corpus, query, limit)
+                            // Drop matchType so the shape matches SemanticVerseResult.
+                            .map(({ _id, reference, book, bookNumber, chapter, verse, text, score }) => ({
+                                _id, reference, book, bookNumber, chapter, verse, text, score,
+                            }))
                     }
+                } catch (lexErr) {
+                    console.warn('[useSemanticVerseSearch] Lexical search failed:', lexErr)
                 }
 
                 if (abortController.signal.aborted) return
 
-                let searchResults: SemanticVerseResult[] = []
+                // --- Semantic pass (only when an embedding index exists) -----
+                let semanticResults: SemanticVerseResult[] = []
+                let usedLocal = false
+                if (hasEmbeddings) {
+                    if (!isEmbedderReady) {
+                        await initEmbedder()
+                    }
+                    if (abortController.signal.aborted) return
 
-                // Prefer local search if available
-                const loadedIdx = getLoadedIndex()
-                if (preferLocal && hasLocalEmbeddings && loadedIdx) {
-                    const localResults = await searchVerseEmbeddings(
-                        queryEmbedding,
-                        dynamicThreshold,
-                        limit,
-                    )
-                    searchResults = localResults.map((r) => {
-                        // Determine book number - could be in bookNumber field or book field (as string or number)
-                        let bookNum = r.bookNumber
+                    // Generate embedding for the query (with cache)
+                    const cacheKey = query.trim().toLowerCase()
+                    let queryEmbedding = embeddingCache.current.get(cacheKey)
+                    if (!queryEmbedding) {
+                        const embeddingResult = await embedText(query)
+                        queryEmbedding = embeddingResult.embedding
+                        if (embeddingCache.current.size > 50) {
+                            const firstKey = embeddingCache.current.keys().next().value
+                            if (firstKey) embeddingCache.current.delete(firstKey)
+                        }
+                        embeddingCache.current.set(cacheKey, queryEmbedding)
+                    }
 
-                        // If bookNumber is missing or 0, try to parse from book field
-                        if (!bookNum) {
-                            const parsedBook = parseInt(r.book, 10)
-                            if (!isNaN(parsedBook)) {
-                                // book field is a number string like "45"
-                                bookNum = parsedBook
+                    if (abortController.signal.aborted) return
+
+                    // Lazy-load embeddings into the packed-Float32Array worker
+                    // store on the first local search. The worker keeps the
+                    // index; the main thread retains only metadata-light state.
+                    if (preferLocal && hasLocalEmbeddings) {
+                        const loaded = getLoadedIndex()
+                        if (!loaded || loaded.version !== workingVersion) {
+                            let rows = getPrewarmedEmbeddings(workingVersion)
+                            if (!rows || rows.length === 0) {
+                                rows = await getCachedVerseEmbeddings(workingVersion)
+                            }
+                            if (rows && rows.length > 0) {
+                                loadVerseStore(workingVersion, rows)
+                                // Release our reference; the worker owns it now.
+                                rows = []
                             }
                         }
+                    }
 
-                        // Get book name from bookNumber
-                        const bookName = (bookNum && NUMBER_TO_BOOK[bookNum]) ||
-                            // If book field is already a name (not a number), use it
-                            (isNaN(parseInt(r.book)) ? r.book : 'Unknown')
+                    if (abortController.signal.aborted) return
 
-                        return {
-                            _id: r.reference,
-                            ...r,
-                            bookNumber: bookNum || 0,
-                            book: bookName,
-                            // Format reference as "Book Chapter:Verse"
-                            reference: `${bookName} ${r.chapter}:${r.verse}`,
-                        }
-                    })
-                } else {
-                    const convexResults = await convex.action(api.verseEmbeddings.findSimilarVerses, {
-                        queryEmbedding,
-                        threshold: dynamicThreshold,
-                        limit,
-                        version: effectiveVersionRef.current || version,
-                    })
-                    // Also format Convex results
-                    searchResults = (convexResults as SemanticVerseResult[]).map(r => {
-                        const bookName = NUMBER_TO_BOOK[r.bookNumber] || r.book || 'Unknown'
-                        return {
-                            ...r,
-                            book: bookName,
-                            reference: `${bookName} ${r.chapter}:${r.verse}`,
-                        }
-                    })
+                    // Prefer local search if available
+                    const loadedIdx = getLoadedIndex()
+                    usedLocal = preferLocal && hasLocalEmbeddings && !!loadedIdx
+                    let rawResults: SemanticVerseResult[] = []
+                    if (usedLocal) {
+                        const localResults = await searchVerseEmbeddings(
+                            queryEmbedding,
+                            dynamicThreshold,
+                            limit,
+                        )
+                        rawResults = localResults.map((r) => {
+                            // bookNumber could be in bookNumber field or book field (string/number)
+                            let bookNum = r.bookNumber
+                            if (!bookNum) {
+                                const parsedBook = parseInt(r.book, 10)
+                                if (!isNaN(parsedBook)) bookNum = parsedBook
+                            }
+                            const bookName = (bookNum && NUMBER_TO_BOOK[bookNum]) ||
+                                (isNaN(parseInt(r.book)) ? r.book : 'Unknown')
+                            return {
+                                _id: r.reference,
+                                ...r,
+                                bookNumber: bookNum || 0,
+                                book: bookName,
+                                reference: `${bookName} ${r.chapter}:${r.verse}`,
+                            }
+                        })
+                    } else {
+                        const convexResults = await convex.action(api.verseEmbeddings.findSimilarVerses, {
+                            queryEmbedding,
+                            threshold: dynamicThreshold,
+                            limit,
+                            version: effectiveVersionRef.current || version,
+                        })
+                        rawResults = (convexResults as SemanticVerseResult[]).map(r => {
+                            const bookName = NUMBER_TO_BOOK[r.bookNumber] || r.book || 'Unknown'
+                            return {
+                                ...r,
+                                book: bookName,
+                                reference: `${bookName} ${r.chapter}:${r.verse}`,
+                            }
+                        })
+                    }
+
+                    if (abortController.signal.aborted) return
+
+                    // Reject surface-overlap noise (keeps the tuned behavior),
+                    // but fall back to raw if validation would empty the list.
+                    const validated = rawResults.filter(r =>
+                        validateSemanticMatch(query, r.text, wordCount)
+                    )
+                    semanticResults = validated.length > 0 ? validated : rawResults
                 }
 
                 if (abortController.signal.aborted) return
 
-                const validatedResults = searchResults.filter(r =>
-                    validateSemanticMatch(query, r.text, wordCount)
-                )
+                // --- Merge: lexical (exact/keyword) outranks semantic --------
+                // Dedupe by reference; when a verse appears in both, keep the
+                // higher score (a lexical exact match = 1.0 wins).
+                const byRef = new Map<string, SemanticVerseResult>()
+                for (const r of semanticResults) byRef.set(r.reference, r)
+                for (const r of lexicalResults) {
+                    const existing = byRef.get(r.reference)
+                    if (!existing || r.score > existing.score) byRef.set(r.reference, r)
+                }
+                const merged = [...byRef.values()]
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, limit)
 
-                setResults(validatedResults.length > 0 ? validatedResults : searchResults)
+                setResults(merged)
                 trackEvent(AnalyticsEventType.BIBLE_SEMANTIC_SEARCH, {
                     query_length: query.length,
-                    result_count: (validatedResults.length > 0 ? validatedResults : searchResults).length,
-                    used_local: preferLocal && hasLocalEmbeddings && !!loadedIdx,
+                    result_count: merged.length,
+                    used_local: usedLocal,
                     version: workingVersion,
                 })
             } catch (err) {
@@ -380,7 +418,7 @@ export function useSemanticVerseSearch(
                 }
             }
         }, debounceMs)
-    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, convex, threshold, limit, version, debounceMs, preferLocal, minQueryLength, trackEvent])
+    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, convex, threshold, limit, version, debounceMs, preferLocal, minQueryLength, trackEvent, downloadBibleVersion])
 
     // Clear results
     const clearResults = useCallback(() => {
