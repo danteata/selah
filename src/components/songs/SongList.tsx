@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide-react'
+import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap } from 'lucide-react'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
+import { useGoLive } from '../../hooks/useGoLive'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -31,8 +32,31 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
     const { getSong } = useSong()
     const { createSongSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
+    const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const lastSearchTrackRef = useRef<number>(0)
+
+    // Quick "Add" / "Live" straight from a result row — no detail-view detour.
+    // Live appends the song's verses and puts verse 1 on the output; Add just
+    // queues it. Mirrors BibleList's per-result Add/Live buttons.
+    const quickSelect = useCallback(async (song: Song, goLive: boolean) => {
+        const full = await getSong(song)
+        const slides = createSongSlides((full ?? song) as Song, { template: selectedTemplate })
+        if (slides.length === 0) return
+        // Keep the panel open (Add and Live) so the operator can navigate the
+        // song's verses in the LiveSongNavigator and keep searching.
+        if (goLive) {
+            addAndGoLive(slides)
+            trackEvent(AnalyticsEventType.SONG_SELECTED, {
+                song_id: (full ?? song)._id || (full ?? song).id,
+                title: song.title,
+                slide_count: slides.length,
+                has_template: !!selectedTemplate,
+            })
+        } else {
+            addToQueue(slides)
+        }
+    }, [getSong, createSongSlides, selectedTemplate, addAndGoLive, addToQueue, trackEvent])
 
     const voice = useVoiceSearch({
         onFinal: (text) => setQuery(text),
@@ -101,9 +125,11 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                     has_template: !!selectedTemplate,
                 })
             }
-            onClose()
+            // Keep the panel open; return to the list so the operator can pick
+            // another song or navigate verses.
+            setSelectedSong(null)
         }
-    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, onClose, selectedTemplate, trackEvent])
+    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, selectedTemplate, trackEvent])
 
     const handleDeleteSong = useCallback(async (songId: string) => {
         const success = await deleteSong(songId)
@@ -251,21 +277,43 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                             </h3>
                                             <p className="text-sm text-gray-500">{song.artist}</p>
                                         </button>
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex items-center gap-1">
+                                            {/* Quick actions — always visible so you can
+                                                go live in one click without the detail view. */}
                                             <button
-                                                onClick={() => handleEditSong(song)}
-                                                className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
-                                                title="Edit song"
+                                                onClick={() => void quickSelect(song, false)}
+                                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors"
+                                                title="Add to queue"
                                             >
-                                                <Edit className="w-4 h-4" />
+                                                <Plus className="w-3.5 h-3.5" />
+                                                Add
                                             </button>
-                                            <button
-                                                onClick={() => setDeleteConfirmId(song._id || song.id)}
-                                                className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                                                title="Delete song"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            {canGoLive && (
+                                                <button
+                                                    onClick={() => void quickSelect(song, true)}
+                                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
+                                                    title="Send to live output"
+                                                >
+                                                    <Zap className="w-3.5 h-3.5" />
+                                                    Live
+                                                </button>
+                                            )}
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => handleEditSong(song)}
+                                                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+                                                    title="Edit song"
+                                                >
+                                                    <Edit className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteConfirmId(song._id || song.id)}
+                                                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                                    title="Delete song"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
