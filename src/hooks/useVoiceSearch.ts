@@ -339,12 +339,12 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
             } else if (code === 'audio-capture') {
                 setError('No microphone was found. Check that a mic is connected and try again.')
             } else if (code === 'network') {
-                // Chrome's Web Speech API actually round-trips audio to
-                // Google's cloud servers — a literal network failure can
-                // also be a privacy extension or corporate firewall
-                // blocking the speech service. Suggest the typed fallback
-                // so the user has a working path forward.
-                setError("Voice search couldn't reach the speech service. Check your network, or any browser extensions that block requests. You can still type your search below.")
+                // The Web Speech API round-trips audio to Google's cloud, and
+                // that backend ships only in Google Chrome. Other Chromium
+                // browsers (Arc, Brave, etc.) lack the key and fail here even
+                // on a fine network — so lead with the browser cause, not the
+                // network, and point to the typed fallback.
+                setError("Voice search isn't available in this browser. On the web it works in Google Chrome or Safari — Arc, Brave and some others aren't supported. You can type your search below instead.")
             } else {
                 setError(`Voice search error: ${code}`)
             }
