@@ -86,6 +86,10 @@ export function useSongAutoDetect() {
 
     const processedCountRef = useRef(0)
     const bufferRef = useRef<string[]>([])
+    // Monotonic count of all words ever seen — the window position fed to the
+    // confirmation tracker so overlapping re-scores of one phrase aren't
+    // mistaken for independent corroboration (see songConfirmation.ts).
+    const wordsSeenRef = useRef(0)
     // Soft-posterior evidence accumulator — see songConfirmation.ts. One
     // instance for the hook's lifetime; `reset()` is called (not replaced)
     // whenever search stops or a song is confirmed.
@@ -134,7 +138,11 @@ export function useSongAutoDetect() {
 
         for (let i = processedCountRef.current; i < segs.length; i++) {
             const text = (segs[i]?.text || '').trim()
-            if (text) bufferRef.current.push(...text.split(/\s+/))
+            if (text) {
+                const words = text.split(/\s+/)
+                bufferRef.current.push(...words)
+                wordsSeenRef.current += words.length
+            }
         }
         processedCountRef.current = segs.length
         if (bufferRef.current.length > MATCH_WINDOW_WORDS * 2) {
@@ -229,6 +237,7 @@ export function useSongAutoDetect() {
                 const confirmed = confirmationRef.current.update(Date.now(), {
                     songId: match.songId,
                     confidence: match.confidence,
+                    windowId: wordsSeenRef.current,
                 })
                 if (!confirmed) return
 

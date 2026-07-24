@@ -1,6 +1,6 @@
 import type { Song } from '../../types'
 import { lineSimilarity, tokenize } from './songTracker'
-import { getContentWords, isTheologicalCommon } from '../../lib/semanticRetrievalPolicy'
+import { getContentWords, isTheologicalCommon, isAmbiguousMatch, type ScoredVerseCandidate } from '../../lib/semanticRetrievalPolicy'
 
 /**
  * Song identification from a live transcript (Phase 2 "Searching").
@@ -234,7 +234,7 @@ export function identifySong(
         }
     }
 
-    let best: SongMatch | null = null
+    const qualifying: Array<{ match: SongMatch; cand: ScoredVerseCandidate }> = []
     for (const [songId, agg] of perSong) {
         const sorted = agg.scores.slice().sort((a, b) => b - a)
         const b0 = sorted[0] ?? 0
@@ -246,18 +246,36 @@ export function identifySong(
         const matchedLines = sorted.filter((s) => s >= corrobSecond).length
         if (matchedLines < minMatched) continue
         const confidence = strongHit ? b0 : (b0 + b1) / 2
-        if (!best || confidence > best.confidence) {
-            best = {
+        // Total evidence (top line + a discounted second line) is what
+        // disambiguates two songs that share a verbatim line: the one that ALSO
+        // matches a second, distinctive line wins. `confidence` stays 0..1 for
+        // the confirmation tracker; `evidence` is only for ranking/ambiguity.
+        const evidence = b0 + 0.5 * b1
+        qualifying.push({
+            match: {
                 songId,
                 title: agg.title,
                 sectionId: agg.bestEntry.sectionId,
                 lineIndex: agg.bestEntry.lineIndex,
                 confidence,
                 matchedLines,
-            }
-        }
+            },
+            // songId in `book` lets us reuse the verse detector's ambiguity guard.
+            cand: { score: evidence, book: songId, chapter: 0 },
+        })
     }
-    return best
+
+    if (qualifying.length === 0) return null
+    qualifying.sort((a, b) => b.cand.score - a.cand.score)
+    const top = qualifying[0]
+
+    // Inter-song ambiguity guard: if the top song doesn't clearly beat a
+    // DIFFERENT runner-up song, we can't tell which is being sung — return
+    // nothing rather than commit the wrong one. Songs that share
+    // "holy/worthy/hallelujah/your love" phrasing are the classic trap. This
+    // reuses the exact guard the Bible-verse detector already uses.
+    if (isAmbiguousMatch(top.cand, qualifying.map((q) => q.cand))) return null
+    return top.match
 }
 
 export { EMPTY_INDEX }

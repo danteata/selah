@@ -35,6 +35,14 @@ export interface SongEvidence {
     songId: string
     /** The identifier's own per-window confidence, 0..1. */
     confidence: number
+    /** Monotonic position of the query window (e.g. cumulative words seen).
+     *  Consecutive matches whose windows overlap heavily are NOT independent
+     *  corroboration — the same coincidental phrase re-scored on the next
+     *  transcript segment. When provided, a hit is only accumulated if the
+     *  window has advanced by `minWindowAdvance` since this song's last
+     *  accumulated hit; otherwise it's ignored (decay still applies). This is
+     *  the primary defense against the sliding-buffer false positive. */
+    windowId?: number
 }
 
 export interface SongConfirmationConfig {
@@ -49,17 +57,25 @@ export interface SongConfirmationConfig {
     /** Hypotheses decayed below this are pruned so the map doesn't grow
      *  unbounded over a multi-hour service. */
     pruneBelow: number
+    /** Minimum window advance (in `windowId` units) required between two
+     *  accumulated hits for the SAME song, so overlapping re-scores of one
+     *  phrase can't masquerade as independent corroboration. Only enforced
+     *  when evidence carries a `windowId`. */
+    minWindowAdvance: number
 }
 
 export const DEFAULT_SONG_CONFIRMATION_CONFIG: SongConfirmationConfig = {
     halfLifeMs: 3000,
     emitThreshold: 1.3,
     pruneBelow: 0.05,
+    minWindowAdvance: 6,
 }
 
 interface Hypothesis {
     score: number
     lastUpdatedAt: number
+    /** windowId of the last accumulated hit for this song (if any). */
+    lastWindowId?: number
 }
 
 export class SongConfirmationTracker {
@@ -102,8 +118,25 @@ export class SongConfirmationTracker {
         if (!evidence) return null
 
         const existing = this.hypotheses.get(evidence.songId)
+
+        // Independence gate: if this song already has an accumulated hit and
+        // the window hasn't advanced enough, treat this as the SAME window
+        // re-scored (not new corroboration). Let it decay; don't accumulate.
+        if (
+            existing &&
+            evidence.windowId !== undefined &&
+            existing.lastWindowId !== undefined &&
+            evidence.windowId - existing.lastWindowId < this.config.minWindowAdvance
+        ) {
+            return null
+        }
+
         const score = (existing?.score ?? 0) + evidence.confidence
-        this.hypotheses.set(evidence.songId, { score, lastUpdatedAt: now })
+        this.hypotheses.set(evidence.songId, {
+            score,
+            lastUpdatedAt: now,
+            lastWindowId: evidence.windowId ?? existing?.lastWindowId,
+        })
 
         if (score >= this.config.emitThreshold) {
             this.hypotheses.delete(evidence.songId)
