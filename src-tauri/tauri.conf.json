@@ -12,7 +12,7 @@
     "bundle": {
         "active": true,
         "targets": "all",
-        "createUpdaterArtifacts": false,
+        "createUpdaterArtifacts": true,
         "resources": [
             "assets/*",
             "assets/whisper-models-gguf/**/*",

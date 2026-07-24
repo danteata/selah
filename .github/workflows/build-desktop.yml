@@ -301,10 +301,29 @@ jobs:
           done
           [ "$missing" = 0 ]
 
+      - name: Read release notes
+        id: relnotes
+        shell: bash
+        run: |
+          {
+            echo 'body<<RELNOTES_EOF'
+            if [ -f RELEASE_NOTES.md ]; then
+              cat RELEASE_NOTES.md
+            else
+              echo 'See the assets to download and install this version.'
+            fi
+            echo 'RELNOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing — required now that createUpdaterArtifacts is on.
+          # Set these repo secrets (tauri signer generate); the matching public
+          # key is in tauri.conf.json's plugins.updater.pubkey.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Run the AppImage tooling (linuxdeploy + plugins) by extracting them
           # instead of FUSE-mounting — the GitHub runner sandbox can't always
           # mount FUSE even with libfuse2 present. No-op off Linux.
@@ -322,11 +341,12 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Selah v__VERSION__'
-          releaseBody: 'See the assets to download and install this version.'
+          releaseBody: ${{ steps.relnotes.outputs.body }}
           releaseDraft: false
           prerelease: false
-          # Updater disabled for now (no signing key). Re-enable alongside
-          # createUpdaterArtifacts in tauri.conf + the TAURI_SIGNING_* secrets.
-          includeUpdaterJson: false
+          # Publishes latest.json + signed updater artifacts so installed apps
+          # auto-update. Requires createUpdaterArtifacts in tauri.conf + the
+          # TAURI_SIGNING_* secrets (set in the env above).
+          includeUpdaterJson: true
           args: --target ${{ matrix.target }} ${{ matrix.tauri_args }}
 
