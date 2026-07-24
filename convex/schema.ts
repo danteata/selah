@@ -78,6 +78,11 @@ export default defineSchema({
         email: v.string(),
         // Linked Selah user id once we can resolve one (may be unknown at first).
         userId: v.optional(v.string()),
+        // The church this subscription entitles. This is the billing unit:
+        // one active row per church, and every member inherits its plan. Kept
+        // optional for backward-compat with legacy per-email rows during the
+        // migration to church-scoped billing (see convex/entitlements.ts).
+        churchId: v.optional(v.string()),
         plan: v.union(v.literal("free"), v.literal("pro")),
         // Mirrors Paystack subscription status plus two local states: "past_due"
         // (set while charges are being retried, so the app doesn't hard-lock
@@ -126,7 +131,8 @@ export default defineSchema({
     })
         .index("by_email", ["email"])
         .index("by_subscription_code", ["paystackSubscriptionCode"])
-        .index("by_user", ["userId"]),
+        .index("by_user", ["userId"])
+        .index("by_church", ["churchId"]),
 
     // Promo codes — there is no native Paystack coupon system, so codes are
     // modeled here. Two kinds:
