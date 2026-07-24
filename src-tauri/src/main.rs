@@ -39,7 +39,7 @@ mod oauth_listener;
 mod transcription;
 
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WindowEvent};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_updater::UpdaterExt;
@@ -99,6 +99,7 @@ use multi_monitor::{
     restore_main_window_state,
     is_desktop,
     identify_monitor,
+    LIVE_WINDOW_LABEL,
 };
 
 use ndi_output::{
@@ -352,6 +353,23 @@ pub fn run() {
                 transcription::engine::init_transcribe_cpp_backend();
                 transcription::engine::apply_default_accelerators();
                 app.manage(transcription::TranscriptionManager::new(app.handle()));
+            }
+
+            // Tear down the live output window when the main window closes.
+            // The live output is a separate webview window; Tauri only exits
+            // once ALL windows are closed, so without this a still-open live
+            // output would keep the process (and the projected output) alive
+            // after the user "quit" by closing the main window — the classic
+            // stuck-live-output-after-quit symptom.
+            if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main_window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { .. } = event {
+                        if let Some(live) = app_handle.get_webview_window(LIVE_WINDOW_LABEL) {
+                            let _ = live.close();
+                        }
+                    }
+                });
             }
 
             // System tray (start/stop listening, show window, quit).
