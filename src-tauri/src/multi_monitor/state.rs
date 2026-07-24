@@ -3,6 +3,7 @@
  */
 
 use parking_lot::RwLock;
+use std::sync::Arc;
 use tauri::AppHandle;
 
 use super::types::*;
@@ -16,10 +17,14 @@ pub struct MultiMonitorState {
     pub(crate) app: RwLock<Option<AppHandle>>,
     /// Current window state for persistence
     pub(crate) window_state: RwLock<WindowState>,
-    /// Current live window state
-    pub(crate) live_window_state: RwLock<LiveWindowState>,
-    /// Current monitor ID for live output
-    pub(crate) current_live_monitor: RwLock<Option<String>>,
+    /// Current live window state. Wrapped in `Arc` so the live window's
+    /// `CloseRequested` handler (a `'static` closure) can share and mutate
+    /// the *same* state when the window is closed by any external path
+    /// (user clicks X, display unplugged, OS close) — not a disconnected copy.
+    pub(crate) live_window_state: Arc<RwLock<LiveWindowState>>,
+    /// Current monitor ID for live output. `Arc` for the same reason as
+    /// `live_window_state` above.
+    pub(crate) current_live_monitor: Arc<RwLock<Option<String>>>,
 }
 
 impl MultiMonitorState {
@@ -28,8 +33,8 @@ impl MultiMonitorState {
         Self {
             app: RwLock::new(None),
             window_state: RwLock::new(WindowState::default()),
-            live_window_state: RwLock::new(LiveWindowState::Closed),
-            current_live_monitor: RwLock::new(None),
+            live_window_state: Arc::new(RwLock::new(LiveWindowState::Closed)),
+            current_live_monitor: Arc::new(RwLock::new(None)),
         }
     }
 

@@ -1,12 +1,15 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     X, BookOpen, Music, Image, Layout, Clock,
-    AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin
+    AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin, Search, Zap, Plus
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import { useSongs, useSong, useHymn, useSlideCreation } from '../../hooks'
+import { useGoLive } from '../../hooks/useGoLive'
+import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import type { NavSection } from '../../types/studio'
-import type { Slide, ExternalVideo } from '../../types'
+import type { Slide, ExternalVideo, Song, Hymn } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { resolveLocalUrl } from '../../hooks/useLocalBackground'
 import { generateObjectId } from '../../hooks/useSlideCreation'
@@ -14,6 +17,7 @@ import { generateObjectId } from '../../hooks/useSlideCreation'
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
 import { SongList } from '../songs/SongList'
+import { LiveSongNavigator } from '../songs/LiveSongNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { MediaPicker, type MediaItem } from '../media/MediaPicker'
 import { TemplateBrowser } from '../templates/TemplateBrowser'
@@ -394,40 +398,222 @@ export function ContextPanel() {
     )
 }
 
+interface UnifiedHit {
+    id: string
+    kind: 'song' | 'hymn'
+    title: string
+    subtitle: string
+    song?: Song
+    hymn?: Hymn
+}
+
 function MusicBrowser({ onClose }: { onClose: () => void }) {
-    const [tab, setTab] = useState<'hymns' | 'songs'>('hymns')
+    // Songs first and selected by default — they're searched far more often
+    // than hymns, and operators kept forgetting to switch to the Songs tab
+    // when it sat in second position.
+    const [tab, setTab] = useState<'songs' | 'hymns'>('songs')
+    // One search box drives a ranked, interleaved list across BOTH songs and
+    // hymns, so operators don't have to be on the right tab to find something.
+    // Empty query falls back to the per-tab browse lists below.
+    const [query, setQuery] = useState('')
+
+    const { songs } = useSongs()
+    const { getSong } = useSong()
+    const { getAllHymns } = useHymn()
+    const { createSongSlides, createHymnSlides } = useSlideCreation()
+    const [hymns, setHymns] = useState<Hymn[]>([])
+    const searchInputRef = useRef<HTMLInputElement>(null)
+
+    useEffect(() => {
+        let alive = true
+        void getAllHymns().then((all) => { if (alive) setHymns(all) })
+        return () => { alive = false }
+    }, [getAllHymns])
+
+    // Focus the search box as soon as the music panel opens, so you can type
+    // immediately without an extra click — matching the Bible panel.
+    useEffect(() => {
+        searchInputRef.current?.focus()
+    }, [])
+
+    // Combined BM25 index over songs + hymns (rebuilt only when either list
+    // changes), plus an id → source map to resolve a hit back to its record.
+    const { index, byId } = useMemo(() => {
+        const map = new Map<string, UnifiedHit>()
+        const items = [
+            ...songs.map((s) => {
+                const id = `song:${s._id || s.id}`
+                map.set(id, { id, kind: 'song', title: s.title, subtitle: s.artist, song: s })
+                return { id, title: s.title, subtitle: s.artist, body: s.lyrics || '' }
+            }),
+            ...hymns.map((h) => {
+                const id = `hymn:${h.number}`
+                map.set(id, { id, kind: 'hymn', title: h.title, subtitle: `Hymn ${h.number}`, hymn: h })
+                return {
+                    id,
+                    title: h.title,
+                    subtitle: `${h.author ?? ''} ${h.number}`.trim(),
+                    body: `${h.chorus ?? ''}\n${(h.verses ?? []).join('\n')}`,
+                }
+            }),
+        ]
+        return { index: buildMusicIndex(items), byId: map }
+    }, [songs, hymns])
+
+    const results = useMemo(() => {
+        const q = query.trim()
+        if (!q) return []
+        return searchMusicIndex(index, q, 40)
+            .map((r) => byId.get(r.item.id))
+            .filter((h): h is UnifiedHit => !!h)
+    }, [index, byId, query])
+
+    const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
+
+    // Primary action on a result is "go live" (append + verse 1 live); the
+    // secondary Add button just queues it. Going live closes the panel; Add
+    // keeps it open so several items can be queued in a row.
+    const handleSelect = useCallback(async (hit: UnifiedHit, goLive: boolean) => {
+        let slides: Slide[] = []
+        if (hit.kind === 'song' && hit.song) {
+            const full = await getSong(hit.song)
+            slides = createSongSlides((full ?? hit.song) as Song)
+        } else if (hit.kind === 'hymn' && hit.hymn) {
+            slides = createHymnSlides(hit.hymn)
+        }
+        if (slides.length === 0) return
+        // Keep the panel open on both Add and Live — the LiveSongNavigator
+        // lives here, so staying open lets the operator immediately navigate
+        // the verses of the song they just put live (and keep searching).
+        if (goLive) {
+            addAndGoLive(slides)
+        } else {
+            addToQueue(slides)
+        }
+    }, [getSong, createSongSlides, createHymnSlides, addAndGoLive, addToQueue])
 
     return (
         <div className="flex flex-col h-full">
-            <div className="flex border-b border-[var(--border-subtle)] px-2">
-                <button
-                    onClick={() => setTab('hymns')}
-                    className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-                        tab === 'hymns'
-                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                            : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                    }`}
-                >
-                    Hymns
-                </button>
-                <button
-                    onClick={() => setTab('songs')}
-                    className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-                        tab === 'songs'
-                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                            : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                    }`}
-                >
-                    Songs
-                </button>
+            {/* When a song is live, surface its verses for quick navigation. */}
+            <LiveSongNavigator />
+
+            {/* Unified search across songs + hymns */}
+            <div className="p-2 border-b border-[var(--border-subtle)]">
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] w-4 h-4" />
+                    <input
+                        ref={searchInputRef}
+                        type="text"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search songs & hymns…"
+                        autoFocus
+                        className="w-full pl-9 pr-8 py-2 text-sm border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                    />
+                    {query && (
+                        <button
+                            onClick={() => setQuery('')}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                            aria-label="Clear search"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-2">
-                {tab === 'hymns' ? (
-                    <HymnList isInline onClose={onClose} />
-                ) : (
-                    <SongList isInline onClose={onClose} />
-                )}
-            </div>
+
+            {query.trim() ? (
+                /* Unified results — interleaved, ranked, with a type badge. */
+                <div className="flex-1 overflow-y-auto p-2">
+                    {results.length === 0 ? (
+                        <div className="p-8 text-center text-[var(--text-muted)] text-sm">
+                            No songs or hymns match “{query.trim()}”
+                        </div>
+                    ) : (
+                        <div className="space-y-0.5">
+                            {results.map((hit) => (
+                                <div
+                                    key={hit.id}
+                                    className="w-full flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors group"
+                                >
+                                    {/* Primary: title area sends it live in one click. */}
+                                    <button
+                                        onClick={() => void handleSelect(hit, true)}
+                                        className="min-w-0 flex-1 flex items-center gap-2 text-left"
+                                        title="Send to live output"
+                                    >
+                                        <span className={`flex-shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                                            hit.kind === 'song'
+                                                ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                                : 'bg-amber-500/10 text-amber-500'
+                                        }`}>
+                                            {hit.kind === 'song' ? 'Song' : 'Hymn'}
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block text-sm text-[var(--text-primary)] truncate">{hit.title}</span>
+                                            {hit.subtitle && (
+                                                <span className="block text-xs text-[var(--text-muted)] truncate">{hit.subtitle}</span>
+                                            )}
+                                        </span>
+                                    </button>
+                                    {/* Secondary: queue without projecting. */}
+                                    <button
+                                        onClick={() => void handleSelect(hit, false)}
+                                        className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors"
+                                        title="Add to queue"
+                                    >
+                                        <Plus className="w-3.5 h-3.5" />
+                                        Add
+                                    </button>
+                                    {canGoLive && (
+                                        <button
+                                            onClick={() => void handleSelect(hit, true)}
+                                            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
+                                            title="Send to live output"
+                                        >
+                                            <Zap className="w-3.5 h-3.5" />
+                                            Live
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            ) : (
+                /* Browse mode — tabs, each list's own search box hidden. */
+                <>
+                    <div className="flex border-b border-[var(--border-subtle)] px-2">
+                        <button
+                            onClick={() => setTab('songs')}
+                            className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                                tab === 'songs'
+                                    ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                            }`}
+                        >
+                            Songs
+                        </button>
+                        <button
+                            onClick={() => setTab('hymns')}
+                            className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                                tab === 'hymns'
+                                    ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                            }`}
+                        >
+                            Hymns
+                        </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2">
+                        {tab === 'songs' ? (
+                            <SongList isInline hideSearch onClose={onClose} />
+                        ) : (
+                            <HymnList isInline hideSearch onClose={onClose} />
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     )
 }

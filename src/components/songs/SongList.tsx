@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap } from 'lucide-react'
+import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
+import { useGoLive } from '../../hooks/useGoLive'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -13,9 +15,12 @@ import type { Song } from '../../types'
 interface SongListProps {
     onClose: () => void
     isInline?: boolean
+    /** Hide the internal search box (the parent owns search, e.g. the unified
+     *  MusicBrowser). The New-song button stays. */
+    hideSearch?: boolean
 }
 
-export function SongList({ onClose, isInline = false }: SongListProps) {
+export function SongList({ onClose, isInline = false, hideSearch = false }: SongListProps) {
     const [query, setQuery] = useState('')
     const [selectedSong, setSelectedSong] = useState<Song | null>(null)
     const [songToEdit, setSongToEdit] = useState<Song | null>(null)
@@ -27,22 +32,62 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
     const { getSong } = useSong()
     const { createSongSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
+    const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const lastSearchTrackRef = useRef<number>(0)
+
+    // Quick "Add" / "Live" straight from a result row — no detail-view detour.
+    // Live appends the song's verses and puts verse 1 on the output; Add just
+    // queues it. Mirrors BibleList's per-result Add/Live buttons.
+    const quickSelect = useCallback(async (song: Song, goLive: boolean) => {
+        const full = await getSong(song)
+        const slides = createSongSlides((full ?? song) as Song, { template: selectedTemplate })
+        if (slides.length === 0) return
+        // Keep the panel open (Add and Live) so the operator can navigate the
+        // song's verses in the LiveSongNavigator and keep searching.
+        if (goLive) {
+            addAndGoLive(slides)
+            trackEvent(AnalyticsEventType.SONG_SELECTED, {
+                song_id: (full ?? song)._id || (full ?? song).id,
+                title: song.title,
+                slide_count: slides.length,
+                has_template: !!selectedTemplate,
+            })
+        } else {
+            addToQueue(slides)
+        }
+    }, [getSong, createSongSlides, selectedTemplate, addAndGoLive, addToQueue, trackEvent])
 
     const voice = useVoiceSearch({
         onFinal: (text) => setQuery(text),
     })
 
-    // Filter songs — title/artist plus the actual lyrics, so a half-remembered
-    // line ("amazing grace how sweet") finds the song even when the operator
-    // doesn't know (or misremembers) its title.
-    const filteredSongs = songs.filter((song: Song) => {
-        const q = query.toLowerCase()
-        return song.title.toLowerCase().includes(q) ||
-            song.artist.toLowerCase().includes(q) ||
-            (song.lyrics || '').toLowerCase().includes(q)
-    })
+    // BM25 index over the loaded library — title/artist field-weighted above
+    // lyrics — rebuilt only when the list changes, then queried per keystroke.
+    const songIndex = useMemo(
+        () => buildMusicIndex(
+            songs.map((s: Song) => ({
+                id: s._id || s.id,
+                title: s.title,
+                subtitle: s.artist,
+                body: s.lyrics || '',
+            })),
+        ),
+        [songs],
+    )
+
+    // Ranked, typo/punctuation/whitespace-tolerant search over title/artist +
+    // lyrics, so a half-remembered line ("amazing grace how sweet") finds the
+    // song even when the operator misremembers the title. Empty query browses
+    // the full list in stored order.
+    const filteredSongs = useMemo(() => {
+        const q = query.trim()
+        if (!q) return songs
+        const byId = new Map(songs.map((s) => [s._id || s.id, s]))
+        return searchMusicIndex(songIndex, q, 50)
+            .map((r) => byId.get(r.item.id))
+            .filter((s): s is Song => !!s)
+    }, [songs, songIndex, query])
 
     // Throttled song search tracking — fire at most once per 2s
     useEffect(() => {
@@ -80,9 +125,11 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                     has_template: !!selectedTemplate,
                 })
             }
-            onClose()
+            // Keep the panel open; return to the list so the operator can pick
+            // another song or navigate verses.
+            setSelectedSong(null)
         }
-    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, onClose, selectedTemplate, trackEvent])
+    }, [selectedSong, getSong, createSongSlides, appendActiveSlide, selectedTemplate, trackEvent])
 
     const handleDeleteSong = useCallback(async (songId: string) => {
         const success = await deleteSong(songId)
@@ -147,27 +194,48 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                     </div>
                 )}
 
-                {/* Search */}
-                <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                        <input
-                            type="text"
-                            value={voice.isListening ? voice.transcript : query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
-                        className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
-                        />
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                            <VoiceSearchButton
-                                isListening={voice.isListening}
-                                isSupported={voice.isSupported}
-                                error={voice.error}
-                                onClick={voice.isListening ? voice.stop : voice.start}
-                            />
+                {/* Search — hidden when a parent (unified MusicBrowser) owns it. */}
+                {!(hideSearch && !isInline) && (
+                    <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+                        <div className="flex items-center gap-2">
+                            {!hideSearch && (
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                                    <input
+                                        type="text"
+                                        value={voice.isListening ? voice.transcript : query}
+                                        onChange={(e) => setQuery(e.target.value)}
+                                        placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
+                                    className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                    />
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                        <VoiceSearchButton
+                                            isListening={voice.isListening}
+                                            isSupported={voice.isSupported}
+                                            error={voice.error}
+                                            onClick={voice.isListening ? voice.stop : voice.start}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                            {/* Inline mode hides the header, so surface a persistent
+                                New-song button here — otherwise, once the list loads,
+                                there's no way to create a song (the empty-state button
+                                vanishes as soon as any song appears). */}
+                            {isInline && (
+                                <button
+                                    onClick={() => setIsAddModalOpen(true)}
+                                    title="New song"
+                                    aria-label="New song"
+                                    className={`flex items-center gap-1 px-2.5 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm ${hideSearch ? 'w-full justify-center' : 'flex-shrink-0'}`}
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    <span className="text-sm font-medium">New Song</span>
+                                </button>
+                            )}
                         </div>
                     </div>
-                </div>
+                )}
 
                 {/* Songs List */}
                 {!selectedSong ? (
@@ -209,21 +277,43 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                                             </h3>
                                             <p className="text-sm text-gray-500">{song.artist}</p>
                                         </button>
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex items-center gap-1">
+                                            {/* Quick actions — always visible so you can
+                                                go live in one click without the detail view. */}
                                             <button
-                                                onClick={() => handleEditSong(song)}
-                                                className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
-                                                title="Edit song"
+                                                onClick={() => void quickSelect(song, false)}
+                                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors"
+                                                title="Add to queue"
                                             >
-                                                <Edit className="w-4 h-4" />
+                                                <Plus className="w-3.5 h-3.5" />
+                                                Add
                                             </button>
-                                            <button
-                                                onClick={() => setDeleteConfirmId(song._id || song.id)}
-                                                className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                                                title="Delete song"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            {canGoLive && (
+                                                <button
+                                                    onClick={() => void quickSelect(song, true)}
+                                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
+                                                    title="Send to live output"
+                                                >
+                                                    <Zap className="w-3.5 h-3.5" />
+                                                    Live
+                                                </button>
+                                            )}
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => handleEditSong(song)}
+                                                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+                                                    title="Edit song"
+                                                >
+                                                    <Edit className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteConfirmId(song._id || song.id)}
+                                                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                                    title="Delete song"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}

@@ -226,8 +226,9 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
 
             {/* Right actions — desktop shows all, mobile collapses to theme + user */}
             <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
-                {/* Collaboration: Presence & Live Session — desktop only, mobile users
-                    get the live status indicator in the bottom nav (added in AppShell). */}
+                {/* Collaboration: Presence & Live Session — shown here on lg+.
+                    Below lg the mobile layout (MobileStudioWorkspace) renders
+                    the same controls in its live-indicator strip. */}
                 {churchId && (
                     <div className="hidden lg:flex items-center gap-1.5">
                         <PresenceAvatars churchId={churchId} maxVisible={3} />

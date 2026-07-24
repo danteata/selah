@@ -40,6 +40,8 @@ const { nativeMock, webMock } = vi.hoisted(() => {
         openLiveViewOnScreen: vi.fn().mockResolvedValue(null),
         subscribe: vi.fn().mockReturnValue(() => { }),
         terminatePresentation: vi.fn().mockResolvedValue(undefined),
+        registerLiveWindow: vi.fn(),
+        isPresenting: vi.fn().mockReturnValue(false),
         broadcastSlideUpdate: vi.fn(),
         getState: () => ({ screens: [], selectedScreenId: null, liveWindow: null, isPresenting: false }),
         isPresentationApiAvailable: () => false,
@@ -86,6 +88,7 @@ function resetMocks() {
     webMock.detectScreens.mockResolvedValue([])
     webMock.startPresentation.mockResolvedValue(false)
     webMock.openLiveViewOnScreen.mockResolvedValue(null)
+    webMock.isPresenting.mockReturnValue(false)
     localStorage.clear()
 }
 

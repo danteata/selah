@@ -78,4 +78,35 @@ describe('SongConfirmationTracker', () => {
         const result = t.update(0, { songId: 'a', confidence: 0.6 })
         expect(result).toBe('a')
     })
+
+    describe('window independence (defeats the sliding-buffer false positive)', () => {
+        it('ignores a second hit from an overlapping (barely-advanced) window', () => {
+            const t = new SongConfirmationTracker()
+            expect(t.update(0, { songId: 'a', confidence: 0.9, windowId: 100 })).toBeNull()
+            // Same coincidental phrase re-scored on the next transcript segment:
+            // the 14-word window moved only 2 words → NOT independent evidence.
+            const r = t.update(500, { songId: 'a', confidence: 0.9, windowId: 102 })
+            expect(r).toBeNull()
+            // The non-independent hit was not accumulated (only decay applied).
+            expect(t.scoreFor('a')).toBeLessThan(0.9)
+        })
+
+        it('confirms when the window has genuinely advanced between hits', () => {
+            const t = new SongConfirmationTracker()
+            expect(t.update(0, { songId: 'a', confidence: 0.9, windowId: 100 })).toBeNull()
+            // 10 new words later — a genuinely different window that also matches.
+            expect(t.update(1000, { songId: 'a', confidence: 0.9, windowId: 110 })).toBe('a')
+        })
+
+        it('never confirms from a phrase stuck in the window across many ticks', () => {
+            const t = new SongConfirmationTracker()
+            let res: string | null = null
+            // Window advances by <minWindowAdvance total (Whisper re-emitting the
+            // same segment) — the classic false positive; must never confirm.
+            for (let i = 0; i < 6; i++) {
+                res = t.update(i * 300, { songId: 'a', confidence: 0.95, windowId: 100 + i })
+            }
+            expect(res).toBeNull()
+        })
+    })
 })

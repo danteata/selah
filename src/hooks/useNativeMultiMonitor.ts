@@ -247,8 +247,34 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
         }
     }, [isDesktop])
 
+    // Close live window
+    const closeLiveWindow = useCallback(async () => {
+        if (isDesktop) {
+            // Only mark the UI as stopped once the native close actually
+            // succeeds — the service now throws on failure. If it throws we
+            // leave the state alone (the 1s poll reconciles from real state),
+            // so the button doesn't lie about the output being gone.
+            await nativeMultiMonitorService.closeLiveWindow()
+            setLiveWindowState('Closed')
+            setSelectedMonitorId(null)
+        } else {
+            await multiMonitorService.terminatePresentation()
+        }
+    }, [isDesktop])
+
     // Open live window
     const openLiveWindow = useCallback(async (config?: LiveWindowConfig) => {
+        // Dedup guard: never stack a second output on top of a live one.
+        // On desktop the native side already replaces any existing window,
+        // but on web an untracked popup could otherwise be orphaned, so we
+        // always tear down a known-live output first. Teardown is a no-op
+        // when nothing is open.
+        const alreadyPresenting = isDesktop
+            ? (await nativeMultiMonitorService.getLiveWindowState()) !== 'Closed'
+            : multiMonitorService.isPresenting()
+        if (alreadyPresenting) {
+            await closeLiveWindow()
+        }
         if (isDesktop) {
             await nativeMultiMonitorService.openLiveWindow(config)
             setLiveWindowState(config?.fullscreen !== false ? 'Fullscreen' : 'Open')
@@ -286,9 +312,13 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     setLiveWindowState('Fullscreen')
                     method = 'presentation_api'
                 } else {
-                    // Fallback: open a popup window
+                    // Fallback: open a popup window. Register it with the
+                    // service so it becomes the single source of truth —
+                    // otherwise isPresenting stays false and Stop can't
+                    // close it, which is how duplicate outputs pile up.
                     const win = window.open(liveViewUrl, 'selah-live', 'width=1280,height=720')
                     if (win) {
+                        multiMonitorService.registerLiveWindow(win)
                         setLiveWindowState('Open')
                     }
                 }
@@ -300,18 +330,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 fullscreen: config?.fullscreen !== false,
             })
         }
-    }, [isDesktop, monitors.length, trackEvent])
-
-    // Close live window
-    const closeLiveWindow = useCallback(async () => {
-        if (isDesktop) {
-            await nativeMultiMonitorService.closeLiveWindow()
-            setLiveWindowState('Closed')
-            setSelectedMonitorId(null)
-        } else {
-            await multiMonitorService.terminatePresentation()
-        }
-    }, [isDesktop])
+    }, [isDesktop, monitors.length, trackEvent, closeLiveWindow])
 
     // Toggle fullscreen
     const toggleFullscreen = useCallback(async () => {

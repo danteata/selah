@@ -13,4 +13,6 @@ mod window_manager;
 
 pub use commands::*;
 pub use state::MultiMonitorState;
-// LIVE_WINDOW_LABEL is used internally by window_manager
+// Exposed so the app lifecycle (main.rs) can tear down the live output
+// window when the main window closes.
+pub use state::LIVE_WINDOW_LABEL;

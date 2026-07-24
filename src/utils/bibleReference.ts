@@ -228,7 +228,11 @@ export function formatReferenceQuery(bookIndex: number, chapter: number, startVe
 }
 
 export function parseBibleQuery(q: string): ParsedBibleQuery | null {
-    const trimmed = q.trim()
+    // Strip trailing sentence punctuation ("John 3:16." from voice dictation,
+    // or a stray typed period) — the patterns below are $-anchored, so a
+    // trailing "." would otherwise fail the match and the reference wouldn't
+    // be recognized.
+    const trimmed = q.trim().replace(/[.,;!?]+$/, '')
     if (!trimmed) return null
 
     const fullPattern = /^((?:\d\s?)?[a-z]+)\s+(\d+):(\d+)(?:-(\d+))?$/i

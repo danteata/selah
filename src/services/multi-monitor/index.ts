@@ -39,6 +39,42 @@ class MultiMonitorService {
     }
     private listeners: Set<Listener> = new Set()
     private presentationConnection: PresentationConnection | null = null
+    private checkClosedInterval: ReturnType<typeof setInterval> | null = null
+
+    /**
+     * Poll a live window and reset presentation state once it's closed
+     * (e.g. the user closed the popup directly). Replaces any prior watcher.
+     */
+    private watchLiveWindow(liveWindow: Window): void {
+        if (this.checkClosedInterval) {
+            clearInterval(this.checkClosedInterval)
+        }
+        this.checkClosedInterval = setInterval(() => {
+            if (liveWindow.closed) {
+                if (this.checkClosedInterval) {
+                    clearInterval(this.checkClosedInterval)
+                    this.checkClosedInterval = null
+                }
+                this.state.liveWindow = null
+                this.state.isPresenting = false
+                this.state.selectedScreenId = null
+                this.notifyListeners()
+            }
+        }, 1000)
+    }
+
+    /**
+     * Register an externally-opened live window (e.g. the popup fallback in
+     * useNativeMultiMonitor) so the service becomes the single source of
+     * truth: `isPresenting` reflects reality and `terminatePresentation`
+     * can actually close it.
+     */
+    registerLiveWindow(liveWindow: Window): void {
+        this.state.liveWindow = liveWindow
+        this.state.isPresenting = true
+        this.notifyListeners()
+        this.watchLiveWindow(liveWindow)
+    }
 
     /**
      * Check if the Presentation API is available
@@ -162,16 +198,7 @@ class MultiMonitorService {
             this.state.selectedScreenId = screenId
             this.state.isPresenting = true
             this.notifyListeners()
-
-            // Listen for window close
-            const checkClosed = setInterval(() => {
-                if (liveWindow.closed) {
-                    clearInterval(checkClosed)
-                    this.state.liveWindow = null
-                    this.state.isPresenting = false
-                    this.notifyListeners()
-                }
-            }, 1000)
+            this.watchLiveWindow(liveWindow)
         }
 
         return liveWindow
@@ -259,6 +286,11 @@ class MultiMonitorService {
      * Terminate the current presentation
      */
     async terminatePresentation(): Promise<void> {
+        if (this.checkClosedInterval) {
+            clearInterval(this.checkClosedInterval)
+            this.checkClosedInterval = null
+        }
+
         if (this.presentationConnection) {
             this.presentationConnection.terminate()
             this.presentationConnection = null

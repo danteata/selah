@@ -420,6 +420,74 @@ describe('appStore', () => {
             expect(after.some((s) => s.id === 'local-1')).toBe(true)
             expect(after.some((s) => s.id === 'server-new')).toBe(true)
         })
+
+        it('preserves device-local media pointers stripped by the server round-trip', () => {
+            // Regression: starting a collab session syncs slides to Convex via
+            // toSyncableSlide, which drops localMediaId/localFilePath and nulls
+            // the local blob/asset `background`. When the stripped server copy
+            // came back and overwrote the local slide, the OWNER lost the
+            // pointers needed to resolve their own media and saw the
+            // "LOCAL MEDIA" placeholder. The merge must carry those fields over.
+            const store = useAppStore.getState()
+            const localMedia = makeSlide({
+                id: 'media-1',
+                type: 'media',
+                backgroundType: 'image',
+                background: 'blob:http://localhost/abc',
+                localMediaId: 'idb-123',
+                localFilePath: '/media-library/pic.png',
+            })
+            // Server copy after the strip: shared fields only, local pointers gone.
+            const serverStripped = makeSlide({
+                id: 'media-1',
+                type: 'media',
+                backgroundType: 'image',
+                background: undefined,
+            })
+
+            act(() => {
+                store.setActiveSlides([localMedia])
+            })
+            act(() => {
+                store.replaceSlidesForSchedule('schedule-a', [serverStripped], true)
+            })
+
+            const merged = useAppStore.getState().activeSlides.find((s) => s.id === 'media-1')
+            expect(merged?.localMediaId).toBe('idb-123')
+            expect(merged?.localFilePath).toBe('/media-library/pic.png')
+            expect(merged?.background).toBe('blob:http://localhost/abc')
+        })
+
+        it('does NOT invent local pointers for a remote collaborator (placeholder stays)', () => {
+            // A collaborator who never had the file has no local pointers on
+            // their copy, so nothing is restored — they correctly fall through
+            // to the placeholder.
+            const store = useAppStore.getState()
+            const remoteCopy = makeSlide({
+                id: 'media-1',
+                type: 'media',
+                backgroundType: 'image',
+                background: undefined,
+            })
+            const serverStripped = makeSlide({
+                id: 'media-1',
+                type: 'media',
+                backgroundType: 'image',
+                background: undefined,
+            })
+
+            act(() => {
+                store.setActiveSlides([remoteCopy])
+            })
+            act(() => {
+                store.replaceSlidesForSchedule('schedule-a', [serverStripped], true)
+            })
+
+            const merged = useAppStore.getState().activeSlides.find((s) => s.id === 'media-1')
+            expect(merged?.localMediaId).toBeUndefined()
+            expect(merged?.localFilePath).toBeUndefined()
+            expect(merged?.background).toBeUndefined()
+        })
     })
 
     describe('signOut', () => {

@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Search, X, ChevronLeft, Music } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Search, X, ChevronLeft, Music, Zap, Plus } from 'lucide-react'
+import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
+import { useGoLive } from '../../hooks/useGoLive'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -12,12 +14,14 @@ import type { Hymn } from '../../types'
 interface HymnListProps {
     onClose: () => void
     isInline?: boolean
+    /** Hide the internal search box (the parent owns search, e.g. the unified
+     *  MusicBrowser). */
+    hideSearch?: boolean
 }
 
-export function HymnList({ onClose, isInline = false }: HymnListProps) {
+export function HymnList({ onClose, isInline = false, hideSearch = false }: HymnListProps) {
     const [query, setQuery] = useState('')
     const [hymns, setHymns] = useState<Hymn[]>([])
-    const [filteredHymns, setFilteredHymns] = useState<Hymn[]>([])
     const [selectedHymn, setSelectedHymn] = useState<Hymn | null>(null)
     const [loading, setLoading] = useState(true)
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
@@ -25,7 +29,26 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
     const { getAllHymns } = useHymn()
     const { createHymnSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
+    const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+
+    // Quick Add / Live straight from a hymn row — no detail-view detour.
+    const quickSelect = useCallback((hymn: Hymn, goLive: boolean) => {
+        const slides = createHymnSlides(hymn, { template: selectedTemplate })
+        if (slides.length === 0) return
+        // Keep the panel open (Add and Live) so the operator can keep browsing.
+        if (goLive) {
+            addAndGoLive(slides)
+            trackEvent(AnalyticsEventType.HYMN_VIEWED, {
+                hymn_number: hymn.number,
+                title: hymn.title,
+                slide_count: slides.length,
+                has_template: !!selectedTemplate,
+            })
+        } else {
+            addToQueue(slides)
+        }
+    }, [createHymnSlides, selectedTemplate, addAndGoLive, addToQueue, trackEvent])
 
     const voice = useVoiceSearch({
         onFinal: (text) => setQuery(text),
@@ -36,29 +59,36 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
         const loadHymns = async () => {
             const allHymns = await getAllHymns()
             setHymns(allHymns)
-            setFilteredHymns(allHymns)
             setLoading(false)
         }
         loadHymns()
     }, [getAllHymns])
 
-    // Filter hymns — title/number plus the actual lyrics (chorus + verses),
-    // so a half-remembered line finds the hymn even without its title/number.
-    useEffect(() => {
-        if (!query.trim()) {
-            setFilteredHymns(hymns)
-            return
-        }
+    // BM25 index over title/number/author + lyrics (chorus + verses). The
+    // number goes in the subtitle field so a numeric lookup ("123") still
+    // works; digits survive normalizeText.
+    const hymnIndex = useMemo(
+        () => buildMusicIndex(
+            hymns.map((h) => ({
+                id: h.number,
+                title: h.title,
+                subtitle: `${h.author ?? ''} ${h.number}`.trim(),
+                body: `${h.chorus ?? ''}\n${(h.verses ?? []).join('\n')}`,
+            })),
+        ),
+        [hymns],
+    )
 
-        const q = query.toLowerCase()
-        const filtered = hymns.filter(hymn =>
-            hymn.title.toLowerCase().includes(q) ||
-            hymn.number.includes(query) ||
-            (hymn.chorus || '').toLowerCase().includes(q) ||
-            (hymn.verses || []).some(verse => verse.toLowerCase().includes(q))
-        )
-        setFilteredHymns(filtered)
-    }, [query, hymns])
+    // Ranked, typo/punctuation/whitespace-tolerant search, so a half-remembered
+    // line finds the hymn even without its title/number. Empty query browses all.
+    const filteredHymns = useMemo(() => {
+        const q = query.trim()
+        if (!q) return hymns
+        const byId = new Map(hymns.map((h) => [h.number, h]))
+        return searchMusicIndex(hymnIndex, q, 50)
+            .map((r) => byId.get(r.item.id))
+            .filter((h): h is Hymn => !!h)
+    }, [hymns, hymnIndex, query])
 
     const handleCreateSlides = useCallback(() => {
         if (selectedHymn) {
@@ -72,9 +102,10 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                 slide_count: slides.length,
                 has_template: !!selectedTemplate,
             })
-            onClose()
+            // Keep the panel open; return to the list.
+            setSelectedHymn(null)
         }
-    }, [selectedHymn, createHymnSlides, appendActiveSlide, onClose, selectedTemplate, trackEvent])
+    }, [selectedHymn, createHymnSlides, appendActiveSlide, selectedTemplate, trackEvent])
 
     if (loading) {
         return (
@@ -101,7 +132,8 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                 </div>
             )}
 
-            {/* Search */}
+            {/* Search — hidden when a parent (unified MusicBrowser) owns it. */}
+            {!hideSearch && (
             <div className="p-4 border-b border-gray-200 dark:border-gray-800">
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -122,6 +154,7 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                     </div>
                 </div>
             </div>
+            )}
 
             {/* Hymn List */}
             {!selectedHymn ? (
@@ -134,26 +167,51 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                     ) : (
                         <div className="divide-y divide-gray-200 dark:divide-gray-800">
                             {filteredHymns.map((hymn) => (
-                                <button
+                                <div
                                     key={hymn.number}
-                                    onClick={() => setSelectedHymn(hymn)}
-                                    className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                                    className="flex items-center justify-between gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
                                 >
-                                    <div className="flex items-center gap-3">
-                                        <span className="w-10 h-10 flex items-center justify-center bg-primary-100 text-primary-600 rounded-full text-sm font-medium">
-                                            {hymn.number}
-                                        </span>
-                                        <div>
-                                            <h3 className="font-medium text-gray-900 dark:text-white">
-                                                {hymn.title}
-                                            </h3>
-                                            <p className="text-sm text-gray-500">
-                                                {hymn.verses.length} verses
-                                                {hymn.chorus && ' + chorus'}
-                                            </p>
+                                    <button
+                                        onClick={() => setSelectedHymn(hymn)}
+                                        className="flex-1 min-w-0 text-left"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className="w-10 h-10 flex-shrink-0 flex items-center justify-center bg-primary-100 text-primary-600 rounded-full text-sm font-medium">
+                                                {hymn.number}
+                                            </span>
+                                            <div className="min-w-0">
+                                                <h3 className="font-medium text-gray-900 dark:text-white truncate">
+                                                    {hymn.title}
+                                                </h3>
+                                                <p className="text-sm text-gray-500">
+                                                    {hymn.verses.length} verses
+                                                    {hymn.chorus && ' + chorus'}
+                                                </p>
+                                            </div>
                                         </div>
+                                    </button>
+                                    {/* Quick actions — one click to queue or go live. */}
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                        <button
+                                            onClick={() => quickSelect(hymn, false)}
+                                            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors"
+                                            title="Add to queue"
+                                        >
+                                            <Plus className="w-3.5 h-3.5" />
+                                            Add
+                                        </button>
+                                        {canGoLive && (
+                                            <button
+                                                onClick={() => quickSelect(hymn, true)}
+                                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors"
+                                                title="Send to live output"
+                                            >
+                                                <Zap className="w-3.5 h-3.5" />
+                                                Live
+                                            </button>
+                                        )}
                                     </div>
-                                </button>
+                                </div>
                             ))}
                         </div>
                     )}

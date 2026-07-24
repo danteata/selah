@@ -48,6 +48,7 @@ export function PreviewContent() {
     } = useLiveSession()
     const slidesGridRef = useRef<HTMLDivElement>(null)
     const activeSlideRef = useRef<HTMLDivElement>(null)
+    const liveSlideRef = useRef<HTMLDivElement>(null)
     const userClickedSlideRef = useRef(false)
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
     const [isDraggingIndex, setIsDraggingIndex] = useState<number | null>(null)
@@ -63,6 +64,18 @@ export function PreviewContent() {
             userClickedSlideRef.current = false
         }
     }, [activeSlide?.id])
+
+    // Keep the LIVE slide centered in the queue so the operator always sees it
+    // and its neighbouring queued slides. This fires on every live change —
+    // including auto-advance and the song tracker — sliding to reposition on
+    // the newly-activated slide. It deliberately runs only WHEN live changes,
+    // so between activations a user who scrolls away to look around is left
+    // alone until the next slide goes live.
+    useEffect(() => {
+        if (!liveSlideId) return
+        const node = liveSlideRef.current
+        if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, [liveSlideId])
 
     // Derive slides from store - single source of truth
     // Show slides that match the active schedule, or slides without a schedule if no active schedule
@@ -100,6 +113,22 @@ export function PreviewContent() {
 
     const canGoLive = !isConnected || isOperator || (isContributor && isOpen)
     const canQueueSlide = isConnected && isContributor && !isStrict
+
+    // Enter promotes the previewed (active) slide to live — the keyboard
+    // counterpart to the always-visible Live button. Ignored while typing or
+    // when a button/link is focused (so it doesn't double-fire with a click).
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key !== 'Enter') return
+            const el = document.activeElement as HTMLElement | null
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'BUTTON' || el.tagName === 'A' || el.isContentEditable)) return
+            if (!activeSlide || !canGoLive || liveSlideId === activeSlide.id) return
+            e.preventDefault()
+            void setSharedLiveSlide(activeSlide.id)
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [activeSlide, canGoLive, liveSlideId, setSharedLiveSlide])
 
     const handleDeleteSlide = useCallback((slideId: string) => {
         const slide = slides.find(s => s.id === slideId)
@@ -398,7 +427,10 @@ export function PreviewContent() {
         <div
             key={slide.id}
             data-slide-index={index}
-            ref={activeSlide?.id === slide.id ? activeSlideRef : undefined}
+            ref={liveSlideId === slide.id ? liveSlideRef : activeSlide?.id === slide.id ? activeSlideRef : undefined}
+            // Double-click / double-tap a queued slide to send it live (single
+            // click still just previews). Gated by collaboration mode.
+            onDoubleClick={() => { if (canGoLive && liveSlideId !== slide.id) void setSharedLiveSlide(slide.id) }}
             className={`transition-all ${
                 isDraggingIndex === index ? 'opacity-50 scale-95' : ''
             } ${
@@ -457,7 +489,14 @@ export function PreviewContent() {
         const isExpanded = expandedSongGroups.has(item.key)
         const liveVerse = item.verses.find((v) => v.slide.id === liveSlideId)
         return (
-            <div key={item.key} className="flex flex-col gap-1">
+            <div
+                key={item.key}
+                className="flex flex-col gap-1"
+                // When a live verse sits inside a COLLAPSED group its own row
+                // isn't in the DOM, so anchor the auto-center on the group
+                // header instead. (Expanded groups let the inner row claim it.)
+                ref={liveVerse && !isExpanded ? liveSlideRef : undefined}
+            >
                 <div
                     className={`flex items-center gap-2 p-2 rounded-lg border transition-colors ${liveVerse
                         ? 'border-red-500/40 bg-red-500/5'

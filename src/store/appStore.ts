@@ -548,7 +548,30 @@ export const useAppStore = create<AppStore>()(
                     )
                     const serverById = new Map(slides.map((s) => [s.id, s]))
                     const mergedSlides = [
-                        ...existingForSchedule.map((local) => serverById.get(local.id) || local),
+                        ...existingForSchedule.map((local) => {
+                            const server = serverById.get(local.id)
+                            if (!server) return local
+                            // The server copy is authoritative for shared fields,
+                            // but it never stores device-local media pointers:
+                            // `toSyncableSlide` (useLiveSession) strips
+                            // localMediaId/localFilePath and nulls the local
+                            // blob/asset `background` before syncing. Carry those
+                            // back from our local copy so THIS device keeps
+                            // resolving its own local media instead of falling
+                            // through to the "LOCAL MEDIA" placeholder (which is
+                            // meant only for remote collaborators who genuinely
+                            // don't have the file — their local copy lacks these
+                            // fields too, so nothing is restored for them).
+                            const localMediaId = server.localMediaId ?? local.localMediaId
+                            const localFilePath = server.localFilePath ?? local.localFilePath
+                            const isLocalMedia = Boolean(localMediaId || localFilePath)
+                            return {
+                                ...server,
+                                localMediaId,
+                                localFilePath,
+                                background: server.background || (isLocalMedia ? local.background : server.background),
+                            }
+                        }),
                         ...slides.filter((s) => !existingForSchedule.some((local) => local.id === s.id)),
                     ]
                     const uniqueSlides = ensureUniqueIds(mergedSlides)

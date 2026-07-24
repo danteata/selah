@@ -89,6 +89,17 @@ describe('parseBibleQuery', () => {
             })
         })
 
+        it('tolerates trailing punctuation from voice dictation', () => {
+            // Speech recognition often appends "." — must still parse.
+            expect(parseBibleQuery('John 3:16.')).toEqual({
+                bookIndex: 43, bookName: 'John', chapter: 3, startVerse: 16, endVerse: 16,
+            })
+            expect(parseBibleQuery('John 3:16-18.')).toEqual({
+                bookIndex: 43, bookName: 'John', chapter: 3, startVerse: 16, endVerse: 18,
+            })
+            expect(parseBibleQuery('Gen 1:1?')?.bookName).toBe('Genesis')
+        })
+
         it('parses verse range', () => {
             const result = parseBibleQuery('John 3:16-18')
             expect(result).toEqual({

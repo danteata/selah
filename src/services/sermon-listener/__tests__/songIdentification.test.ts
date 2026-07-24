@@ -248,4 +248,46 @@ describe('identifySong', () => {
         const m = identifySong('amazing grace how sweet the sound', index, { minMatchedLines: 2 })
         expect(m).toBeNull()
     })
+
+    describe('inter-song ambiguity guard', () => {
+        // Two different songs that share the same two distinctive lines — the
+        // "worthy is the Lamb / holy holy holy" trap where many worship songs
+        // reuse identical phrasing.
+        const SONG_X: Song = {
+            id: 'song-x', title: 'Song X', artist: 'x', lyrics: '',
+            sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: [
+                'Worthy is the Lamb that was slain for us',
+                'Holy holy holy is the Lord God Almighty',
+                'Glory and honour and power belong to you',
+            ] }],
+        }
+        const SONG_Y: Song = {
+            id: 'song-y', title: 'Song Y', artist: 'y', lyrics: '',
+            sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: [
+                'Worthy is the Lamb that was slain for us',
+                'Holy holy holy is the Lord God Almighty',
+                'Wisdom and strength and honour be to our God',
+            ] }],
+        }
+
+        it('returns null when two songs match a shared passage near-identically', () => {
+            const idx = buildSongIndex([SONG_X, SONG_Y])
+            const m = identifySong(
+                'worthy is the lamb that was slain for us holy holy holy is the lord god almighty',
+                idx,
+            )
+            // Both songs corroborate equally on the two shared lines — we can't
+            // tell which is being sung, so commit neither.
+            expect(m).toBeNull()
+        })
+
+        it('identifies the correct song once a distinctive line breaks the tie', () => {
+            const idx = buildSongIndex([SONG_X, SONG_Y])
+            const m = identifySong(
+                'worthy is the lamb that was slain for us glory and honour and power belong to you',
+                idx,
+            )
+            expect(m?.songId).toBe('song-x')
+        })
+    })
 })

@@ -374,8 +374,12 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
             // We only call `onFinal` if the session actually got off
             // the ground and produced at least one character of
             // finalized text.
-            if (didStart && finalTextRef.current.trim() && onFinalRef.current) {
-                onFinalRef.current(finalTextRef.current.trim())
+            // Speech recognition often appends sentence punctuation
+            // (e.g. "John 3:16.") which breaks Bible-reference parsing and
+            // exact-phrase search — strip trailing punctuation before commit.
+            const finalText = finalTextRef.current.replace(/[.,!?;]+\s*$/, '').trim()
+            if (didStart && finalText && onFinalRef.current) {
+                onFinalRef.current(finalText)
             }
             recognitionRef.current = null
         }

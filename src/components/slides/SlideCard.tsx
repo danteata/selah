@@ -225,11 +225,17 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                     )
                 )}
 
-                {/* Quick Present button - appears on hover */}
+                {/* Quick Present button. Always visible on the active/selected
+                    card (so it's discoverable and works on touch, where there's
+                    no hover); hover-revealed on the others. */}
                 {onGoLive && !isLive && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onGoLive(); }}
-                        className="absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all transform scale-90 group-hover:scale-100"
+                        className={`absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg transition-all transform ${
+                            isActive
+                                ? 'opacity-100 scale-100'
+                                : 'opacity-0 group-hover:opacity-100 focus:opacity-100 scale-90 group-hover:scale-100'
+                        }`}
                         title="Send to Live"
                     >
                         <Zap className="w-4 h-4" />
