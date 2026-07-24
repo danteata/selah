@@ -62,7 +62,7 @@ export function LiveSongNavigator() {
                     {artist && <span className="block text-[10px] text-[var(--text-muted)] truncate">{artist}</span>}
                 </div>
             </div>
-            <div className="max-h-44 overflow-y-auto px-2 pb-2 flex flex-col gap-1 custom-scrollbar">
+            <div className="max-h-80 overflow-y-auto px-2 pb-2 flex flex-col gap-1 custom-scrollbar">
                 {verses.map((slide) => {
                     const isLive = liveSlideId === slide.id
                     return (
