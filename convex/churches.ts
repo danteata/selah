@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import { assertTeamMemberLimit } from "./entitlements";
 
 // Generate a random invite code (URL-safe, 12 characters)
 function generateInviteCode(): string {
@@ -158,6 +159,11 @@ export const joinChurch = mutation({
             .query("users")
             .withIndex("by_email", (q) => q.eq("email", identity.email!))
             .unique();
+
+        // Enforce the church's plan team-size cap before adding a NEW member.
+        if (user?.churchId !== invitation.churchId) {
+            await assertTeamMemberLimit(ctx, invitation.churchId);
+        }
 
         // Create user if they don't exist (just-in-time user creation)
         if (!user) {
