@@ -4,7 +4,6 @@
  * Handles creating, positioning, and managing the live output window
  * across multiple monitors.
  */
-use parking_lot::RwLock;
 use std::sync::Arc;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
@@ -342,19 +341,19 @@ impl MultiMonitorState {
             state.live_fullscreen = config.fullscreen;
         });
 
-        // Set up window close handler using a cloned state
-        let live_window_state = self.live_window_state.read().clone();
-        let current_live_monitor = self.current_live_monitor.read().clone();
-
-        let state_for_closure = Arc::new(MultiMonitorStateClone {
-            live_window_state: RwLock::new(live_window_state),
-            current_live_monitor: RwLock::new(current_live_monitor),
-        });
+        // Set up window close handler. Share the *real* state (Arc clones of
+        // the same locks) so that closing the window by any path — the user
+        // clicking its X, the display being unplugged, an OS/Alt-F4 close —
+        // updates the authoritative state. Previously this wrote to a
+        // throwaway copy, so the frontend's 1s poll kept seeing "Open" and
+        // the Stop/Present button got stuck.
+        let live_window_state = Arc::clone(&self.live_window_state);
+        let current_live_monitor = Arc::clone(&self.current_live_monitor);
 
         window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { .. } = event {
-                state_for_closure.set_live_window_state(LiveWindowState::Closed);
-                state_for_closure.set_current_live_monitor(None);
+                *live_window_state.write() = LiveWindowState::Closed;
+                *current_live_monitor.write() = None;
             }
         });
 
@@ -525,18 +524,3 @@ impl MultiMonitorState {
     }
 }
 
-/// A lightweight clone-able version of the state for closures
-struct MultiMonitorStateClone {
-    live_window_state: RwLock<LiveWindowState>,
-    current_live_monitor: RwLock<Option<String>>,
-}
-
-impl MultiMonitorStateClone {
-    fn set_live_window_state(&self, state: LiveWindowState) {
-        *self.live_window_state.write() = state;
-    }
-
-    fn set_current_live_monitor(&self, monitor_id: Option<String>) {
-        *self.current_live_monitor.write() = monitor_id;
-    }
-}

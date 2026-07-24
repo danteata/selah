@@ -231,7 +231,10 @@ class NativeMultiMonitorService {
         try {
             await this.tauriApis!.invoke('close_live_window')
         } catch (e) {
-            console.error('Failed to close live window:', e)
+            const error = e as MultiMonitorError
+            // Propagate so the caller doesn't optimistically mark the UI as
+            // "stopped" while the native window is in fact still open.
+            throw new Error(`Failed to close live window: ${error?.message ?? String(e)}`)
         }
     }
 
