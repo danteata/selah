@@ -395,21 +395,14 @@ export function ContextPanel() {
 }
 
 function MusicBrowser({ onClose }: { onClose: () => void }) {
-    const [tab, setTab] = useState<'hymns' | 'songs'>('hymns')
+    // Songs first and selected by default — they're searched far more often
+    // than hymns, and operators kept forgetting to switch to the Songs tab
+    // when it sat in second position.
+    const [tab, setTab] = useState<'songs' | 'hymns'>('songs')
 
     return (
         <div className="flex flex-col h-full">
             <div className="flex border-b border-[var(--border-subtle)] px-2">
-                <button
-                    onClick={() => setTab('hymns')}
-                    className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-                        tab === 'hymns'
-                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                            : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                    }`}
-                >
-                    Hymns
-                </button>
                 <button
                     onClick={() => setTab('songs')}
                     className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
@@ -420,12 +413,22 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                 >
                     Songs
                 </button>
+                <button
+                    onClick={() => setTab('hymns')}
+                    className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                        tab === 'hymns'
+                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                            : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
+                >
+                    Hymns
+                </button>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
-                {tab === 'hymns' ? (
-                    <HymnList isInline onClose={onClose} />
-                ) : (
+                {tab === 'songs' ? (
                     <SongList isInline onClose={onClose} />
+                ) : (
+                    <HymnList isInline onClose={onClose} />
                 )}
             </div>
         </div>
