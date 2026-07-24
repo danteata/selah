@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff } from 'lucide-react'
+import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
@@ -34,15 +35,32 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
         onFinal: (text) => setQuery(text),
     })
 
-    // Filter songs — title/artist plus the actual lyrics, so a half-remembered
-    // line ("amazing grace how sweet") finds the song even when the operator
-    // doesn't know (or misremembers) its title.
-    const filteredSongs = songs.filter((song: Song) => {
-        const q = query.toLowerCase()
-        return song.title.toLowerCase().includes(q) ||
-            song.artist.toLowerCase().includes(q) ||
-            (song.lyrics || '').toLowerCase().includes(q)
-    })
+    // BM25 index over the loaded library — title/artist field-weighted above
+    // lyrics — rebuilt only when the list changes, then queried per keystroke.
+    const songIndex = useMemo(
+        () => buildMusicIndex(
+            songs.map((s: Song) => ({
+                id: s._id || s.id,
+                title: s.title,
+                subtitle: s.artist,
+                body: s.lyrics || '',
+            })),
+        ),
+        [songs],
+    )
+
+    // Ranked, typo/punctuation/whitespace-tolerant search over title/artist +
+    // lyrics, so a half-remembered line ("amazing grace how sweet") finds the
+    // song even when the operator misremembers the title. Empty query browses
+    // the full list in stored order.
+    const filteredSongs = useMemo(() => {
+        const q = query.trim()
+        if (!q) return songs
+        const byId = new Map(songs.map((s) => [s._id || s.id, s]))
+        return searchMusicIndex(songIndex, q, 50)
+            .map((r) => byId.get(r.item.id))
+            .filter((s): s is Song => !!s)
+    }, [songs, songIndex, query])
 
     // Throttled song search tracking — fire at most once per 2s
     useEffect(() => {

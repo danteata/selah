@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Search, X, ChevronLeft, Music } from 'lucide-react'
+import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
@@ -17,7 +18,6 @@ interface HymnListProps {
 export function HymnList({ onClose, isInline = false }: HymnListProps) {
     const [query, setQuery] = useState('')
     const [hymns, setHymns] = useState<Hymn[]>([])
-    const [filteredHymns, setFilteredHymns] = useState<Hymn[]>([])
     const [selectedHymn, setSelectedHymn] = useState<Hymn | null>(null)
     const [loading, setLoading] = useState(true)
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
@@ -36,29 +36,36 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
         const loadHymns = async () => {
             const allHymns = await getAllHymns()
             setHymns(allHymns)
-            setFilteredHymns(allHymns)
             setLoading(false)
         }
         loadHymns()
     }, [getAllHymns])
 
-    // Filter hymns — title/number plus the actual lyrics (chorus + verses),
-    // so a half-remembered line finds the hymn even without its title/number.
-    useEffect(() => {
-        if (!query.trim()) {
-            setFilteredHymns(hymns)
-            return
-        }
+    // BM25 index over title/number/author + lyrics (chorus + verses). The
+    // number goes in the subtitle field so a numeric lookup ("123") still
+    // works; digits survive normalizeText.
+    const hymnIndex = useMemo(
+        () => buildMusicIndex(
+            hymns.map((h) => ({
+                id: h.number,
+                title: h.title,
+                subtitle: `${h.author ?? ''} ${h.number}`.trim(),
+                body: `${h.chorus ?? ''}\n${(h.verses ?? []).join('\n')}`,
+            })),
+        ),
+        [hymns],
+    )
 
-        const q = query.toLowerCase()
-        const filtered = hymns.filter(hymn =>
-            hymn.title.toLowerCase().includes(q) ||
-            hymn.number.includes(query) ||
-            (hymn.chorus || '').toLowerCase().includes(q) ||
-            (hymn.verses || []).some(verse => verse.toLowerCase().includes(q))
-        )
-        setFilteredHymns(filtered)
-    }, [query, hymns])
+    // Ranked, typo/punctuation/whitespace-tolerant search, so a half-remembered
+    // line finds the hymn even without its title/number. Empty query browses all.
+    const filteredHymns = useMemo(() => {
+        const q = query.trim()
+        if (!q) return hymns
+        const byId = new Map(hymns.map((h) => [h.number, h]))
+        return searchMusicIndex(hymnIndex, q, 50)
+            .map((r) => byId.get(r.item.id))
+            .filter((h): h is Hymn => !!h)
+    }, [hymns, hymnIndex, query])
 
     const handleCreateSlides = useCallback(() => {
         if (selectedHymn) {
