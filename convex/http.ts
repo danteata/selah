@@ -316,7 +316,7 @@ const issueLicense = httpAction(async (ctx, request) => {
     }
 
     const email = identity.email.toLowerCase()
-    const subscription = await ctx.runQuery(internal.licensing.getSubscriptionForEmail, { email })
+    const subscription = await ctx.runQuery(internal.licensing.getEffectiveSubscriptionByEmail, { email })
     const license = signPayload(
         buildLicense({
             email,

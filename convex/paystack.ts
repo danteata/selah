@@ -14,9 +14,10 @@
  */
 
 import { action, query } from './_generated/server'
-import { internal } from './_generated/api'
+import { internal, api } from './_generated/api'
 import { v } from 'convex/values'
 import { normalizeCode } from './promos'
+import { getEffectiveSubscription, churchIsPro, countTeamMembers, PLAN_LIMITS } from './entitlements'
 
 const PAYSTACK_API = 'https://api.paystack.co'
 
@@ -63,6 +64,16 @@ export const initializeProCheckout = action({
         const identity = await ctx.auth.getUserIdentity()
         if (!identity?.email) throw new Error('Not authenticated')
         const email = identity.email.toLowerCase()
+
+        // Billing is per-church: only a church admin can subscribe, and the
+        // payment is tagged with their churchId so the webhook attaches Pro to
+        // the whole church (every member inherits it).
+        const me = await ctx.runQuery(api.users.getCurrentUser, { clerkId: identity.subject })
+        if (!me) throw new Error('User not found')
+        if (me.role !== 'admin' && me.role !== 'superadmin') {
+            throw new Error('Only a church admin can manage the subscription.')
+        }
+        const churchId = me.churchId
 
         const normalPlan = process.env.PAYSTACK_PRO_PLAN_CODE
         if (!normalPlan) throw new Error('PAYSTACK_PRO_PLAN_CODE is not configured on this deployment.')
@@ -127,8 +138,8 @@ export const initializeProCheckout = action({
             amount: planDetails.amount,
             currency: planDetails.currency,
             callback_url: args.callbackUrl ?? process.env.PAYSTACK_CALLBACK_URL,
-            // Echoed back on the webhook so we can resolve the user reliably.
-            metadata: { email, plan: 'pro', promoCode: appliedPromo },
+            // Echoed back on the webhook so we can resolve the church/user reliably.
+            metadata: { email, plan: 'pro', promoCode: appliedPromo, churchId },
         })
 
         return {
@@ -149,7 +160,7 @@ export const getSubscriptionManageLink = action({
         const identity = await ctx.auth.getUserIdentity()
         if (!identity?.email) throw new Error('Not authenticated')
 
-        const sub = await ctx.runQuery(internal.licensing.getSubscriptionForEmail, {
+        const sub = await ctx.runQuery(internal.licensing.getEffectiveSubscriptionByEmail, {
             email: identity.email.toLowerCase(),
         })
         if (!sub?.paystackSubscriptionCode) return { link: null }
@@ -172,9 +183,66 @@ export const getMySubscription = query({
     handler: async (ctx) => {
         const identity = await ctx.auth.getUserIdentity()
         if (!identity?.email) return null
-        return await ctx.db
-            .query('subscriptions')
-            .withIndex('by_email', (q) => q.eq('email', identity.email!.toLowerCase()))
+        // Resolve entitlement through the user's CHURCH (with a legacy
+        // per-email fallback), so invited members inherit the church's plan.
+        const user = await ctx.db
+            .query('users')
+            .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
             .unique()
+        return await getEffectiveSubscription(ctx, {
+            churchId: user?.churchId ?? null,
+            email: identity.email,
+        })
+    },
+})
+
+/**
+ * Church billing summary for the team-management UI: the authoritative plan,
+ * the team-size cap for that plan, and how full the team is. The client uses
+ * this to gate the "Invite Member" action and to warn a church that has more
+ * members than its (possibly downgraded) plan now allows. Single source of
+ * truth so the cap never drifts from the server's enforcement (assertTeamMemberLimit).
+ */
+export const getMyChurchBilling = query({
+    args: {},
+    handler: async (ctx) => {
+        const identity = await ctx.auth.getUserIdentity()
+        if (!identity?.email) return null
+        const user = await ctx.db
+            .query('users')
+            .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
+            .unique()
+        const churchId = user?.churchId ?? null
+
+        const pro = churchId ? await churchIsPro(ctx, churchId) : false
+        const plan: 'free' | 'pro' = pro ? 'pro' : 'free'
+        const maxTeamMembers = PLAN_LIMITS[plan].maxTeamMembers
+        const memberCount = churchId ? await countTeamMembers(ctx, churchId) : 0
+
+        // Pending *email* invites also claim a future seat, so count them toward
+        // the gate — otherwise an admin could send invites that only bounce at
+        // accept time. The persistent link/join code is not a seat, so exclude
+        // non-email invites.
+        let pendingInvites = 0
+        if (churchId) {
+            const invites = await ctx.db
+                .query('invitations')
+                .withIndex('by_church', (q) => q.eq('churchId', churchId))
+                .collect()
+            pendingInvites = invites.filter((i) => i.status === 'pending' && i.type === 'email').length
+        }
+
+        const projected = memberCount + pendingInvites
+        return {
+            plan,
+            maxTeamMembers,
+            memberCount,
+            pendingInvites,
+            // Can the admin send another invite without exceeding the cap?
+            canAddMember: projected < maxTeamMembers,
+            // Church already over its plan cap (e.g. was Pro with 5, downgraded to free=1).
+            overCap: memberCount > maxTeamMembers,
+            isAdmin: user?.role === 'admin' || user?.role === 'superadmin',
+        }
     },
 })

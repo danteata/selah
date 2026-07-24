@@ -24,6 +24,7 @@
 
 import { internalQuery, internalMutation, mutation, type MutationCtx } from './_generated/server'
 import { v } from 'convex/values'
+import { getEffectiveSubscription, getChurchSubscription } from './entitlements'
 import * as ed from '@noble/ed25519'
 import { sha512 } from '@noble/hashes/sha2.js'
 
@@ -120,7 +121,7 @@ export function signPayload(payload: LicensePayload): LicenseFile {
 }
 
 /** True when a subscription should currently confer the Pro plan. */
-function isProActive(sub: SubscriptionRow | null, now: Date): boolean {
+export function isProActive(sub: SubscriptionRow | null, now: Date): boolean {
     if (!sub || sub.plan !== 'pro') return false
     if (sub.status === 'cancelled') return false
     if (!sub.currentPeriodEnd) return sub.status === 'active'
@@ -160,6 +161,7 @@ export function buildLicense(args: {
 export interface SubscriptionRow {
     email: string
     userId?: string
+    churchId?: string
     plan: Plan
     status: 'trialing' | 'active' | 'non-renewing' | 'attention' | 'past_due' | 'cancelled'
     paystackCustomerCode?: string
@@ -175,7 +177,7 @@ export interface SubscriptionRow {
 
 // --- data access ------------------------------------------------------------
 
-/** Look up a subscription by (lowercased) email. Used by GET /license. */
+/** Look up a subscription by (lowercased) email. Legacy per-email lookup. */
 export const getSubscriptionForEmail = internalQuery({
     args: { email: v.string() },
     handler: async (ctx, args) => {
@@ -184,6 +186,24 @@ export const getSubscriptionForEmail = internalQuery({
             .query('subscriptions')
             .withIndex('by_email', (q) => q.eq('email', email))
             .unique()
+    },
+})
+
+/**
+ * Church-aware subscription lookup used by GET /license and the manage link:
+ * resolve the user (by email) → their church's governing subscription, with a
+ * legacy per-email fallback. This is what makes invited members inherit the
+ * church's plan on desktop too.
+ */
+export const getEffectiveSubscriptionByEmail = internalQuery({
+    args: { email: v.string() },
+    handler: async (ctx, args) => {
+        const email = args.email.toLowerCase()
+        const user = await ctx.db
+            .query('users')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+        return await getEffectiveSubscription(ctx, { churchId: user?.churchId ?? null, email })
     },
 })
 
@@ -274,9 +294,19 @@ export const applyPaystackEvent = internalMutation({
             }
         }
 
+        // Resolve the church this subscription entitles: keep an existing
+        // churchId, else the payer's church (by email). This is what makes the
+        // whole church inherit Pro.
+        const userByEmail = await ctx.db
+            .query('users')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+        const churchId = existing?.churchId ?? userByEmail?.churchId ?? undefined
+
         const now = args.eventAt
         const patch = {
             email,
+            churchId,
             plan: args.plan,
             status: args.status,
             paystackCustomerCode: args.paystackCustomerCode ?? existing?.paystackCustomerCode,
@@ -298,16 +328,10 @@ export const applyPaystackEvent = internalMutation({
             return { id: existing._id, rollover }
         }
 
-        // Link to a Selah user if one already exists for this email.
-        const user = await ctx.db
-            .query('users')
-            .withIndex('by_email', (q) => q.eq('email', email))
-            .unique()
-
         const id = await ctx.db.insert('subscriptions', {
             ...patch,
             source: 'paystack' as const,
-            userId: user?._id,
+            userId: userByEmail?._id,
             createdAt: now,
         })
         return { id, rollover }
@@ -322,6 +346,12 @@ export const applyPaystackEvent = internalMutation({
 export const grantCompSubscription = internalMutation({
     args: { email: v.string(), compDays: v.number(), promoCode: v.string() },
     handler: async (ctx, args): Promise<string> => {
+        // Comped Pro MUST be time-boxed — never grant an undated Pro (an
+        // undated Pro license is entitled forever offline). See the licensing
+        // header note on expiry.
+        if (!Number.isFinite(args.compDays) || args.compDays <= 0) {
+            throw new Error('Comped Pro requires a positive duration (compDays); undated comps are not allowed.')
+        }
         const email = args.email.toLowerCase()
         const now = new Date()
         const expires = new Date(now.getTime() + args.compDays * 24 * 60 * 60 * 1000)
@@ -333,6 +363,12 @@ export const grantCompSubscription = internalMutation({
             .withIndex('by_email', (q) => q.eq('email', email))
             .unique()
 
+        const user = await ctx.db
+            .query('users')
+            .withIndex('by_email', (q) => q.eq('email', email))
+            .unique()
+        const churchId = existing?.churchId ?? user?.churchId ?? undefined
+
         // Don't shorten an existing longer paid/comp period.
         const periodEnd =
             existing?.currentPeriodEnd && new Date(existing.currentPeriodEnd) > expires
@@ -341,6 +377,7 @@ export const grantCompSubscription = internalMutation({
 
         if (existing) {
             await ctx.db.patch(existing._id, {
+                churchId,
                 plan: 'pro',
                 status: 'active',
                 source: 'promo',
@@ -353,13 +390,9 @@ export const grantCompSubscription = internalMutation({
             return periodEnd
         }
 
-        const user = await ctx.db
-            .query('users')
-            .withIndex('by_email', (q) => q.eq('email', email))
-            .unique()
-
         await ctx.db.insert('subscriptions', {
             email,
+            churchId,
             userId: user?._id,
             plan: 'pro',
             status: 'active',
@@ -471,33 +504,45 @@ export const finalizeRollover = internalMutation({
  */
 export async function maybeStartTrial(
     ctx: MutationCtx,
-    args: { email: string; userId?: string | null }
+    args: { email: string; userId?: string | null; churchId?: string | null }
 ): Promise<void> {
     const email = args.email.toLowerCase()
+
+    const userRow = await ctx.db
+        .query('users')
+        .withIndex('by_email', (q) => q.eq('email', email))
+        .unique()
+    const churchId = args.churchId ?? userRow?.churchId ?? undefined
+
+    // The trial is ONE per church: if the church already has any subscription
+    // (trial/paid/comp/expired), an invited member inherits it rather than
+    // starting a fresh trial of their own.
+    if (churchId) {
+        const churchSub = await getChurchSubscription(ctx, churchId)
+        if (churchSub) return
+    }
 
     const existing = await ctx.db
         .query('subscriptions')
         .withIndex('by_email', (q) => q.eq('email', email))
         .unique()
-    if (existing) return
+    if (existing) {
+        // Backfill churchId onto a legacy per-email row so it becomes the
+        // church's subscription (and future members inherit it).
+        if (churchId && !existing.churchId) {
+            await ctx.db.patch(existing._id, { churchId, updatedAt: new Date().toISOString() })
+        }
+        return
+    }
 
     const now = new Date()
     const nowIso = now.toISOString()
     const end = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
-    // Link to a Selah user if one already exists for this email.
-    const userId =
-        args.userId ??
-        (
-            await ctx.db
-                .query('users')
-                .withIndex('by_email', (q) => q.eq('email', email))
-                .unique()
-        )?._id
-
     await ctx.db.insert('subscriptions', {
         email,
-        userId: userId ?? undefined,
+        churchId,
+        userId: args.userId ?? userRow?._id ?? undefined,
         plan: 'pro',
         status: 'trialing',
         source: 'trial',
