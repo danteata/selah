@@ -14,9 +14,12 @@ import type { Song } from '../../types'
 interface SongListProps {
     onClose: () => void
     isInline?: boolean
+    /** Hide the internal search box (the parent owns search, e.g. the unified
+     *  MusicBrowser). The New-song button stays. */
+    hideSearch?: boolean
 }
 
-export function SongList({ onClose, isInline = false }: SongListProps) {
+export function SongList({ onClose, isInline = false, hideSearch = false }: SongListProps) {
     const [query, setQuery] = useState('')
     const [selectedSong, setSelectedSong] = useState<Song | null>(null)
     const [songToEdit, setSongToEdit] = useState<Song | null>(null)
@@ -165,44 +168,48 @@ export function SongList({ onClose, isInline = false }: SongListProps) {
                     </div>
                 )}
 
-                {/* Search */}
-                <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-                    <div className="flex items-center gap-2">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                            <input
-                                type="text"
-                                value={voice.isListening ? voice.transcript : query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
-                            className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
-                            />
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                                <VoiceSearchButton
-                                    isListening={voice.isListening}
-                                    isSupported={voice.isSupported}
-                                    error={voice.error}
-                                    onClick={voice.isListening ? voice.stop : voice.start}
-                                />
-                            </div>
+                {/* Search — hidden when a parent (unified MusicBrowser) owns it. */}
+                {!(hideSearch && !isInline) && (
+                    <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+                        <div className="flex items-center gap-2">
+                            {!hideSearch && (
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                                    <input
+                                        type="text"
+                                        value={voice.isListening ? voice.transcript : query}
+                                        onChange={(e) => setQuery(e.target.value)}
+                                        placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
+                                    className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                    />
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                        <VoiceSearchButton
+                                            isListening={voice.isListening}
+                                            isSupported={voice.isSupported}
+                                            error={voice.error}
+                                            onClick={voice.isListening ? voice.stop : voice.start}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                            {/* Inline mode hides the header, so surface a persistent
+                                New-song button here — otherwise, once the list loads,
+                                there's no way to create a song (the empty-state button
+                                vanishes as soon as any song appears). */}
+                            {isInline && (
+                                <button
+                                    onClick={() => setIsAddModalOpen(true)}
+                                    title="New song"
+                                    aria-label="New song"
+                                    className={`flex items-center gap-1 px-2.5 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm ${hideSearch ? 'w-full justify-center' : 'flex-shrink-0'}`}
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    <span className="text-sm font-medium">New Song</span>
+                                </button>
+                            )}
                         </div>
-                        {/* Inline mode hides the header, so surface a persistent
-                            New-song button here — otherwise, once the list loads,
-                            there's no way to create a song (the empty-state button
-                            vanishes as soon as any song appears). */}
-                        {isInline && (
-                            <button
-                                onClick={() => setIsAddModalOpen(true)}
-                                title="New song"
-                                aria-label="New song"
-                                className="flex items-center gap-1 px-2.5 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm flex-shrink-0"
-                            >
-                                <Plus className="w-4 h-4" />
-                                <span className="text-sm font-medium">New</span>
-                            </button>
-                        )}
                     </div>
-                </div>
+                )}
 
                 {/* Songs List */}
                 {!selectedSong ? (

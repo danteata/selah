@@ -13,9 +13,12 @@ import type { Hymn } from '../../types'
 interface HymnListProps {
     onClose: () => void
     isInline?: boolean
+    /** Hide the internal search box (the parent owns search, e.g. the unified
+     *  MusicBrowser). */
+    hideSearch?: boolean
 }
 
-export function HymnList({ onClose, isInline = false }: HymnListProps) {
+export function HymnList({ onClose, isInline = false, hideSearch = false }: HymnListProps) {
     const [query, setQuery] = useState('')
     const [hymns, setHymns] = useState<Hymn[]>([])
     const [selectedHymn, setSelectedHymn] = useState<Hymn | null>(null)
@@ -108,7 +111,8 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                 </div>
             )}
 
-            {/* Search */}
+            {/* Search — hidden when a parent (unified MusicBrowser) owns it. */}
+            {!hideSearch && (
             <div className="p-4 border-b border-gray-200 dark:border-gray-800">
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -129,6 +133,7 @@ export function HymnList({ onClose, isInline = false }: HymnListProps) {
                     </div>
                 </div>
             </div>
+            )}
 
             {/* Hymn List */}
             {!selectedHymn ? (
