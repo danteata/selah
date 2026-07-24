@@ -32,6 +32,7 @@ import {
     getLoadedIndex,
     searchVerseEmbeddings,
 } from '../services/sermon-listener/verseEmbeddingStore'
+import { hasEmbeddingPack, tryLoadEmbeddingPack } from '../services/sermon-listener/embeddingPackLoader'
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
 import { getEffectiveThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
 import { lexicalSearchVerses } from '../lib/bibleLexicalSearch'
@@ -90,6 +91,18 @@ interface UseSemanticVerseSearchReturn {
 }
 
 const embeddingsAvailabilityCache = new Map<string, boolean>()
+
+// Max candidates requested from the Convex vector-search fallback (web /
+// versions without a local embedding index). Kept small on purpose: the
+// action reads one document per hit, so this bounds Convex cost per query.
+const REMOTE_DENSE_LIMIT = 12
+
+// The embedding pack that powers SEMANTIC search for every Bible version.
+// Meaning is ~translation-independent, so KJV embeddings find the right verse
+// references and we re-render them in the active version's (locally bundled)
+// text. This is why semantic search works for NIV/NLT/etc. with no per-version
+// pack. If a per-version pack is ever shipped, prefer it here.
+const SEMANTIC_PACK_VERSION = 'KJV'
 
 export function useSemanticVerseSearch(
     options: UseSemanticVerseSearchOptions = {}
@@ -175,6 +188,16 @@ export function useSemanticVerseSearch(
             if (hasLocal) {
                 // Don't load all embeddings into memory here — defer to first search.
                 // Just record that local embeddings are available.
+                setHasLocalEmbeddings(true)
+                setHasEmbeddings(true)
+                embeddingsAvailabilityCache.set(cacheKey, true)
+            } else if (await hasEmbeddingPack(SEMANTIC_PACK_VERSION)) {
+                // The KJV pack powers semantic search for ANY active version
+                // (bundled on desktop, or the small int8 web pack, cached in
+                // IndexedDB). Treat it as local so search runs in-browser —
+                // Convex stays a fallback only. Results are re-rendered in the
+                // active version's text. Heavy load deferred to first search.
+                effectiveVersionRef.current = requestedVersion
                 setHasLocalEmbeddings(true)
                 setHasEmbeddings(true)
                 embeddingsAvailabilityCache.set(cacheKey, true)
@@ -272,11 +295,20 @@ export function useSemanticVerseSearch(
                 // Behind a flag so the MVP path below stays the default until
                 // V2 clears its eval gates. The dense retriever wraps the same
                 // embedding path but WITHOUT the aggressive pre-fusion cutoff.
-                // Strict === true: only a real boolean-true enables V2, so a
-                // future async provider returning a (truthy) Promise can't
-                // switch it on by accident. Off by default until eval gates pass.
-                if (featureFlags.isEnabled('hybridVerseSearchV2', false) === true) {
-                    const corpus = (await downloadBibleVersion(workingVersion)) ?? []
+                // Hybrid V2 (BM25 + dense + weighted RRF) is ON by default; it
+                // can be disabled by seeding the flag false in the feature-flag
+                // config. Strict `!== false` so only an explicit false turns it
+                // off (a truthy Promise from a future async provider can't).
+                if (featureFlags.isEnabled('hybridVerseSearchV2', true) !== false) {
+                    // Display + lexical BM25 use the ACTIVE version (its text is
+                    // bundled locally for every version). The dense/semantic half
+                    // uses the KJV embedding pack for ALL versions — searchVerses
+                    // re-renders each matched reference in the active version's
+                    // text — so "search by meaning" works even for versions with
+                    // no embedding pack (e.g. NIV on web).
+                    const activeVersion = version || 'KJV'
+                    const embeddingVersion = SEMANTIC_PACK_VERSION
+                    const corpus = (await downloadBibleVersion(activeVersion)) ?? []
                     if (abortController.signal.aborted) return
 
                     const denseRetriever: DenseRetriever = async (q, topK) => {
@@ -294,10 +326,18 @@ export function useSemanticVerseSearch(
                         }
                         if (preferLocal && hasLocalEmbeddings) {
                             const loaded = getLoadedIndex()
-                            if (!loaded || loaded.version !== workingVersion) {
-                                let rows = getPrewarmedEmbeddings(workingVersion)
-                                if (!rows || rows.length === 0) rows = await getCachedVerseEmbeddings(workingVersion)
-                                if (rows && rows.length > 0) { loadVerseStore(workingVersion, rows); rows = [] }
+                            if (!loaded || loaded.version !== embeddingVersion) {
+                                let rows = getPrewarmedEmbeddings(embeddingVersion)
+                                if (!rows || rows.length === 0) rows = await getCachedVerseEmbeddings(embeddingVersion)
+                                if (rows && rows.length > 0) {
+                                    loadVerseStore(embeddingVersion, rows); rows = []
+                                } else {
+                                    // No in-IndexedDB rows — load the prebuilt pack
+                                    // (desktop asset, or the int8 web pack; cached in
+                                    // IndexedDB after first download). This is what
+                                    // keeps web search local instead of hitting Convex.
+                                    await tryLoadEmbeddingPack(embeddingVersion)
+                                }
                             }
                         }
                         const floor = DEFAULT_SEARCH_OPTIONS.denseSafetyFloor
@@ -307,18 +347,29 @@ export function useSemanticVerseSearch(
                             const reference = `${bookName} ${r.chapter}:${r.verse}`
                             return { canonicalVerseId: reference, reference, text: r.text, cosineSimilarity: r.score }
                         }
+                        // Local worker (in-browser, zero Convex cost): a large
+                        // candidate pool is free, so use the full topK.
                         if (preferLocal && hasLocalEmbeddings && loadedIdx) {
                             return (await searchVerseEmbeddings(emb, floor, topK)).map(toCand)
                         }
+                        // Remote (Convex) path costs real money: findSimilarVerses
+                        // runs vectorSearch(limit×4) AND one getVerseById read per
+                        // hit above the threshold. So keep the limit small and the
+                        // floor cost-reasonable — a big topK / low floor here would
+                        // mean hundreds of Convex reads per keystroke-settled query.
+                        // The free local BM25 pass is the backbone on web; dense is
+                        // just an enhancer, so ~a dozen candidates is plenty.
                         const remote = await convex.action(api.verseEmbeddings.findSimilarVerses, {
-                            queryEmbedding: emb, threshold: floor, limit: topK,
-                            version: effectiveVersionRef.current || version,
+                            queryEmbedding: emb,
+                            threshold: Math.max(floor, 0.55),
+                            limit: REMOTE_DENSE_LIMIT,
+                            version: embeddingVersion,
                         })
                         return (remote as Array<Parameters<typeof toCand>[0]>).map(toCand)
                     }
 
                     const v2 = await searchVerses(query, corpus, denseRetriever, {
-                        version: workingVersion,
+                        version: activeVersion,
                         resultLimit: limit,
                     })
                     if (abortController.signal.aborted) return
@@ -332,7 +383,7 @@ export function useSemanticVerseSearch(
                         query_length: query.length,
                         result_count: v2.length,
                         used_local: preferLocal && hasLocalEmbeddings && !!getLoadedIndex(),
-                        version: workingVersion,
+                        version: activeVersion,
                     })
                     return
                 }

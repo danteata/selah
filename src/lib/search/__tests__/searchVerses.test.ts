@@ -107,6 +107,47 @@ describe('searchVerses — integration', () => {
         expect(results).toHaveLength(0)
     })
 
+    // A deterministic "semantic" proxy (token-overlap) standing in for the
+    // embedding model, so these tests exercise the fused pipeline.
+    const BOOK_NAMES: Record<string, string> = { '1': 'Genesis', '19': 'Psalms', '40': 'Matthew', '43': 'John', '66': 'Revelation' }
+    const overlapDense: DenseRetriever = async (query) => {
+        const q = new Set(query.tokens)
+        return FIXTURE_CORPUS
+            .map((v) => {
+                const vt = new Set(v.scripture.toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean))
+                let inter = 0
+                for (const t of q) if (vt.has(t)) inter++
+                const cosineSimilarity = inter / (q.size + vt.size - inter || 1)
+                const reference = `${BOOK_NAMES[v.book] ?? v.book} ${v.chapter}:${v.verse}`
+                return { canonicalVerseId: reference, reference, text: v.scripture, cosineSimilarity }
+            })
+            .filter((x) => x.cosineSimilarity > 0)
+            .sort((a, b) => b.cosineSimilarity - a.cosineSimilarity)
+    }
+
+    it('REGRESSION (#2): exact-phrase dwelling query ranks the target, not a house/lord flood', async () => {
+        const results = await searchVerses('i will dwell in the house of the lord', FIXTURE_CORPUS, noDense, { version: 'T' })
+        expect(results[0].reference).toBe('Psalms 23:6')
+        expect(results[0].matchType).toBe('exact_phrase')
+    })
+
+    it('REGRESSION (#2): a common-word paraphrase does not flood with identical scores', async () => {
+        // "be" (not "dwell") → no verbatim phrase, only common words house/lord.
+        // The old keyword tier returned every house+lord verse at an identical
+        // 90%, ordered by Bible position (a wall of Genesis). The hybrid must
+        // instead rank them with varied scores.
+        const results = await searchVerses('i will be in the house of the lord', FIXTURE_CORPUS, overlapDense, { version: 'T' })
+        expect(results.length).toBeGreaterThan(0)
+        expect(results.length).toBeLessThanOrEqual(8)
+        // Not all the same score (the flood symptom).
+        expect(new Set(results.map((r) => Math.round(r.score * 100))).size).toBeGreaterThan(1)
+        // A house-of-the-LORD Psalm outranks the Genesis "house" decoys.
+        const psalmRank = results.findIndex((r) => r.reference === 'Psalms 23:6' || r.reference === 'Psalms 27:4')
+        const genesisRank = results.findIndex((r) => r.reference.startsWith('Genesis'))
+        expect(psalmRank).toBeGreaterThanOrEqual(0)
+        if (genesisRank >= 0) expect(psalmRank).toBeLessThan(genesisRank)
+    })
+
     it('does not emit clause ids as separate results', async () => {
         const denseClauses: DenseRetriever = async () => ([
             { canonicalVerseId: 'Matthew 16:18__clause_4', reference: 'Matthew 16:18', text: '', cosineSimilarity: 0.8 },

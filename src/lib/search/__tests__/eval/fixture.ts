@@ -30,6 +30,14 @@ export const FIXTURE_CORPUS: BibleVerse[] = [
     { book: '66', chapter: '3', verse: '20', scripture: 'Behold, I stand at the door, and knock: if any man hear my voice, and open the door, I will come in to him.' },
     { book: '40', chapter: '11', verse: '28', scripture: 'Come unto me, all ye that labour and are heavy laden, and I will give you rest.' },
     { book: '23', chapter: '40', verse: '31', scripture: 'But they that wait upon the LORD shall renew their strength; they shall mount up with wings as eagles.' },
+    // "house of the LORD" family — the target verses for dwelling queries…
+    { book: '19', chapter: '23', verse: '6', scripture: 'Surely goodness and mercy shall follow me all the days of my life: and I will dwell in the house of the LORD for ever.' },
+    { book: '19', chapter: '27', verse: '4', scripture: 'One thing have I desired of the LORD, that will I seek after; that I may dwell in the house of the LORD all the days of my life.' },
+    // …plus common-word decoys that also contain "house" + "LORD" but are NOT
+    // about dwelling there. These are what floods the old keyword search.
+    { book: '1', chapter: '7', verse: '1', scripture: 'And the LORD said unto Noah, Come thou and all thy house into the ark; for thee have I seen righteous before me in this generation.' },
+    { book: '1', chapter: '12', verse: '1', scripture: "Now the LORD had said unto Abram, Get thee out of thy country, and from thy kindred, and from thy father's house, unto a land that I will shew thee." },
+    { book: '1', chapter: '39', verse: '2', scripture: 'And the LORD was with Joseph, and he was a prosperous man; and he was in the house of his master the Egyptian.' },
 ]
 
 export type EvalCategory =
@@ -54,6 +62,7 @@ export const EVAL_CASES: EvaluationCase[] = [
     { query: 'on this rock I will build my church', expectedVerseIds: ['Matthew 16:18'], expectedTopRank: 1, category: 'exact_quote' },
     { query: 'for God so loved the world', expectedVerseIds: ['John 3:16'], expectedTopRank: 1, category: 'exact_quote' },
     { query: 'the LORD is my shepherd', expectedVerseIds: ['Psalms 23:1'], expectedTopRank: 1, category: 'exact_quote' },
+    { query: 'i will dwell in the house of the lord', expectedVerseIds: ['Psalms 23:6'], expectedTopRank: 1, category: 'exact_quote' },
 
     // Partial / truncated / reordered quotes.
     { query: 'gates of hell shall not prevail', expectedVerseIds: ['Matthew 16:18'], category: 'partial_quote' },
