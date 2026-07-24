@@ -1,30 +1,22 @@
 /**
  * Embedding Pack Loader
  *
- * Loads a *prebuilt* verse embedding pack from disk (desktop) or HTTP (web)
- * and hands the packed `Float32Array` to the similarity worker. This avoids
- * the multi-minute first-run embedding generation entirely.
+ * Loads a *prebuilt* verse embedding pack and hands the packed `Float32Array`
+ * to the similarity worker, avoiding multi-minute first-run embedding
+ * generation and — on web — avoiding per-query Convex vector-search cost.
  *
- * Pack layout (under `src-tauri/assets/embedding-packs/<VERSION>/`):
+ * Two pack shapes:
+ *  - Desktop: `src-tauri/assets/embedding-packs/<VERSION>/` bundled as Tauri
+ *    resources, read via `asset://`. Full verses + fragments, float32
+ *    (`embeddings.f32`, ~250 MB) — fine inside a native app.
+ *  - Web: `/embedding-packs/<VERSION>/` served as a static asset. Canonical
+ *    verses only, int8-quantized (`embeddings.i8`, ~12 MB) so the browser can
+ *    download it once, cache it in IndexedDB, and search locally & offline.
+ *    Built by `scripts/build-web-embedding-pack.mjs`.
  *
- *   manifest.json
- *     { version: "KJV", dim: 384, count: 31102,
- *       modelName: "Xenova/all-MiniLM-L6-v2", builtAt: "2026-05-18T..." }
- *
- *   metadata.json
- *     [{ reference, book, bookNumber, chapter, verse, text }, ...]
- *     // count items, in the same order as the binary
- *
- *   embeddings.f32
- *     Raw little-endian Float32 buffer of length count × dim × 4 bytes.
- *     Embeddings are L2-normalised so cosine similarity == dot product.
- *
- * On desktop the three files are bundled as Tauri resources and read via
- * the `asset://` protocol. On web the loader falls back to the relative
- * URL `/embedding-packs/<VERSION>/...`, which can be served from the
- * static site host if the operator wants instant search on the browser
- * build too. In practice the pack is desktop-only — the web build keeps
- * doing on-demand IndexedDB caching.
+ * manifest.json: { version, dim, count, quantization?: 'int8', scale?, ... }
+ * Embeddings are L2-normalised so cosine == dot product. int8 packs store
+ * round(x*scale); we dequantize with q/scale on load.
  */
 
 import { isDesktop } from '../../platform'
@@ -34,6 +26,8 @@ interface PackManifest {
     version: string
     dim: number
     count: number
+    quantization?: 'int8'
+    scale?: number
     modelName?: string
     builtAt?: string
 }
@@ -45,13 +39,81 @@ interface LoadResult {
     error?: string
 }
 
+// ---------------------------------------------------------------------------
+// IndexedDB cache — so the web pack downloads once, then loads offline.
+// A tiny standalone store (no Dexie schema migration needed).
+// ---------------------------------------------------------------------------
+
+const IDB_NAME = 'selah-embedding-packs'
+const IDB_STORE = 'packs'
+
+interface CachedPack {
+    version: string
+    dim: number
+    quantization?: 'int8'
+    scale?: number
+    metadata: VerseMeta[]
+    /** Raw embeddings bytes exactly as fetched (int8 or float32). */
+    embeddings: ArrayBuffer
+}
+
+function idbOpen(): Promise<IDBDatabase | null> {
+    return new Promise((resolve) => {
+        if (typeof indexedDB === 'undefined') return resolve(null)
+        try {
+            const req = indexedDB.open(IDB_NAME, 1)
+            req.onupgradeneeded = () => {
+                const db = req.result
+                if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE)
+            }
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => resolve(null)
+        } catch {
+            resolve(null)
+        }
+    })
+}
+
+async function idbGetPack(version: string): Promise<CachedPack | null> {
+    const db = await idbOpen()
+    if (!db) return null
+    return new Promise((resolve) => {
+        try {
+            const tx = db.transaction(IDB_STORE, 'readonly')
+            const req = tx.objectStore(IDB_STORE).get(version)
+            req.onsuccess = () => resolve((req.result as CachedPack) ?? null)
+            req.onerror = () => resolve(null)
+        } catch {
+            resolve(null)
+        } finally {
+            db.close()
+        }
+    })
+}
+
+async function idbPutPack(pack: CachedPack): Promise<void> {
+    const db = await idbOpen()
+    if (!db) return
+    return new Promise((resolve) => {
+        try {
+            const tx = db.transaction(IDB_STORE, 'readwrite')
+            tx.objectStore(IDB_STORE).put(pack, pack.version)
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => resolve()
+        } catch {
+            resolve()
+        } finally {
+            db.close()
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+
 /**
- * Resolve the base URL where the pack files live for a given version.
- * Returns null if neither the desktop bundle nor the web fallback exists.
- *
- * On the web build we deliberately return `null` so the caller falls back to
- * the on-demand IndexedDB path. The pack is desktop-only by design and
- * probing `/embedding-packs/...` on web just produces console 404s.
+ * Base URL where pack files live for a version, or null if none applies.
+ * Desktop → the bundled Tauri asset dir. Web → the static `/embedding-packs`
+ * path (only KJV ships a web pack today; other versions 404 → Convex fallback).
  */
 async function resolvePackBaseUrl(version: string): Promise<string | null> {
     if (typeof window === 'undefined') return null
@@ -64,98 +126,123 @@ async function resolvePackBaseUrl(version: string): Promise<string | null> {
             ])
             const root = await resourceDir()
             const sep = root.endsWith('/') || root.endsWith('\\') ? '' : '/'
-            // The trailing slash matters — we'll join filenames onto it.
             return convertFileSrc(`${root}${sep}assets/embedding-packs/${version}/`)
         } catch {
             return null
         }
     }
 
-    // Web: no pack deployment expected. Returning null here keeps the
-    // browser console clean (no 404s) and the caller falls back to the
-    // IndexedDB-cached embeddings.
-    return null
+    // Web: served statically from the site root.
+    return `/embedding-packs/${version}/`
 }
 
-async function fetchManifest(baseUrl: string): Promise<PackManifest | null> {
+async function fetchJson<T>(url: string): Promise<T | null> {
     try {
-        const res = await fetch(`${baseUrl}manifest.json`)
+        const res = await fetch(url)
         if (!res.ok) return null
-        return (await res.json()) as PackManifest
+        return (await res.json()) as T
     } catch {
         return null
     }
 }
 
-async function fetchMetadata(baseUrl: string): Promise<VerseMeta[] | null> {
+async function fetchBytes(url: string): Promise<ArrayBuffer | null> {
     try {
-        const res = await fetch(`${baseUrl}metadata.json`)
+        const res = await fetch(url)
         if (!res.ok) return null
-        return (await res.json()) as VerseMeta[]
+        return await res.arrayBuffer()
     } catch {
         return null
     }
 }
 
-async function fetchEmbeddings(baseUrl: string): Promise<Float32Array | null> {
-    try {
-        const res = await fetch(`${baseUrl}embeddings.f32`)
-        if (!res.ok) return null
-        const buf = await res.arrayBuffer()
-        // Zero-copy view over the response buffer.
-        return new Float32Array(buf)
-    } catch {
-        return null
+/** Dequantize raw pack bytes into the L2-normalised Float32Array the worker
+ *  expects. int8 → q/scale; float32 → zero-copy view. */
+function toPackedFloat32(manifest: PackManifest, raw: ArrayBuffer): Float32Array {
+    if (manifest.quantization === 'int8') {
+        const scale = manifest.scale ?? 127
+        const i8 = new Int8Array(raw)
+        const packed = new Float32Array(i8.length)
+        for (let i = 0; i < i8.length; i++) packed[i] = i8[i] / scale
+        return packed
     }
+    return new Float32Array(raw)
+}
+
+function embeddingsFileName(manifest: PackManifest): string {
+    return manifest.quantization === 'int8' ? 'embeddings.i8' : 'embeddings.f32'
+}
+
+/** Cheap availability check: is a local pack usable for this version without a
+ *  full download? True if it's already cached in IndexedDB or the manifest is
+ *  reachable. Used to decide "local vs Convex" before doing the heavy load. */
+export async function hasEmbeddingPack(version: string): Promise<boolean> {
+    if (await idbGetPack(version)) return true
+    const baseUrl = await resolvePackBaseUrl(version)
+    if (!baseUrl) return false
+    const manifest = await fetchJson<PackManifest>(`${baseUrl}manifest.json`)
+    return !!manifest && manifest.version === version
 }
 
 /**
- * Try to load a prebuilt embedding pack for the given version. If any of
- * the three files (manifest, metadata, embeddings) is missing the function
- * resolves with `{ ok: false }` and the caller can fall back to the
- * IndexedDB-cached embeddings (or kick off a fresh sync).
- *
- * Loading is idempotent: if the worker already holds the right version
- * the function short-circuits and returns success without re-reading
- * disk.
+ * Load a prebuilt embedding pack into the similarity worker. Tries the
+ * IndexedDB cache first (offline, instant), else fetches the pack over HTTP
+ * and caches it. Idempotent: if the worker already holds this version it's a
+ * no-op success. Returns `{ ok: false }` (with a reason) if no pack is
+ * available, so the caller can fall back to Convex.
  */
 export async function tryLoadEmbeddingPack(version: string): Promise<LoadResult> {
+    // 1) IndexedDB cache (web, second+ visits) — no network.
+    const cached = await idbGetPack(version)
+    if (cached && cached.metadata.length > 0) {
+        const packed = toPackedFloat32(
+            { version: cached.version, dim: cached.dim, count: cached.metadata.length, quantization: cached.quantization, scale: cached.scale },
+            cached.embeddings,
+        )
+        const ok = loadFromPackedBuffer({ version: cached.version, dim: cached.dim, packed, metadata: cached.metadata })
+        if (ok) return { ok: true, version: cached.version, count: cached.metadata.length }
+    }
+
+    // 2) Fetch over HTTP (desktop asset:// or web static path).
     const baseUrl = await resolvePackBaseUrl(version)
     if (!baseUrl) return { ok: false, error: 'no pack base url' }
 
-    const manifest = await fetchManifest(baseUrl)
+    const manifest = await fetchJson<PackManifest>(`${baseUrl}manifest.json`)
     if (!manifest) return { ok: false, error: 'manifest missing' }
     if (manifest.version !== version) {
         return { ok: false, error: `manifest version ${manifest.version} != requested ${version}` }
     }
 
-    const [metadata, packed] = await Promise.all([
-        fetchMetadata(baseUrl),
-        fetchEmbeddings(baseUrl),
+    const [metadata, raw] = await Promise.all([
+        fetchJson<VerseMeta[]>(`${baseUrl}metadata.json`),
+        fetchBytes(`${baseUrl}${embeddingsFileName(manifest)}`),
     ])
     if (!metadata) return { ok: false, error: 'metadata missing' }
-    if (!packed) return { ok: false, error: 'embeddings binary missing' }
-
+    if (!raw) return { ok: false, error: 'embeddings binary missing' }
     if (metadata.length !== manifest.count) {
-        return {
-            ok: false,
-            error: `metadata count ${metadata.length} != manifest count ${manifest.count}`,
-        }
-    }
-    if (packed.length !== manifest.count * manifest.dim) {
-        return {
-            ok: false,
-            error: `packed length ${packed.length} != count×dim ${manifest.count * manifest.dim}`,
-        }
+        return { ok: false, error: `metadata count ${metadata.length} != manifest count ${manifest.count}` }
     }
 
-    const ok = loadFromPackedBuffer({
-        version: manifest.version,
-        dim: manifest.dim,
-        packed,
-        metadata,
-    })
+    const packed = toPackedFloat32(manifest, raw)
+    if (packed.length !== manifest.count * manifest.dim) {
+        return { ok: false, error: `packed length ${packed.length} != count×dim ${manifest.count * manifest.dim}` }
+    }
+
+    const ok = loadFromPackedBuffer({ version: manifest.version, dim: manifest.dim, packed, metadata })
     if (!ok) return { ok: false, error: 'worker rejected pack' }
+
+    // 3) Persist to IndexedDB (web) so subsequent sessions load offline. Only
+    //    worth caching the compact int8 web pack, not the ~250 MB desktop one.
+    if (!isDesktop() && manifest.quantization === 'int8') {
+        void idbPutPack({
+            version: manifest.version,
+            dim: manifest.dim,
+            quantization: manifest.quantization,
+            scale: manifest.scale,
+            metadata,
+            embeddings: raw,
+        })
+    }
 
     return { ok: true, version: manifest.version, count: manifest.count }
 }

@@ -1,0 +1,11 @@
+{
+  "version": "KJV",
+  "dim": 384,
+  "count": 31103,
+  "quantization": "int8",
+  "scale": 127,
+  "hasFragments": false,
+  "modelName": "Xenova/all-MiniLM-L6-v2",
+  "builtAt": "2026-07-24T09:28:18.792Z",
+  "source": "build-web-embedding-pack"
+}
