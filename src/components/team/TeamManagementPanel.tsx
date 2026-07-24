@@ -21,8 +21,13 @@ import type { Id } from '../../../convex/_generated/dataModel'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 
-/** Free-plan cap on team size (members + pending invites). Pro is unlimited. */
-const FREE_TEAM_LIMIT = 2
+/**
+ * Pro team-size cap, for upgrade copy only. The server (convex/entitlements.ts
+ * PLAN_LIMITS) is the source of truth that actually enforces it; this mirror
+ * exists just so the free-plan prompt can name the number without importing
+ * server code into the client bundle.
+ */
+const PRO_TEAM_LIMIT = 5
 
 interface TeamManagementPanelProps {
     churchId: string
@@ -35,21 +40,43 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
 
     const teamMembers = useQuery(api.invitations.getTeamMembers, { churchId })
     const invitations = useQuery(api.invitations.getInvitations, { churchId })
+    // Authoritative plan + team-size cap from the server (single source of truth
+    // for the "free = solo, Pro = up to 5" model — never drifts from enforcement).
+    const billing = useQuery(api.paystack.getMyChurchBilling)
     const { trackEvent } = useAnalytics()
-    const { isPro, startProCheckout } = useEntitlements()
+    const { startProCheckout } = useEntitlements()
     const seenMemberIdsRef = useRef<Set<string>>(new Set())
     const hasInitializedMembersRef = useRef(false)
 
-    // Free tier: members + pending invites can't exceed FREE_TEAM_LIMIT.
-    const pendingInvites = invitations?.filter((i) => i.status === 'pending').length ?? 0
-    const teamSize = (teamMembers?.length ?? 0) + pendingInvites
+    const plan = billing?.plan ?? 'free'
+    const maxTeamMembers = billing?.maxTeamMembers ?? 1
+    // Prefer the server's projection (members + pending email invites); fall
+    // back to a client estimate before the billing query resolves.
+    const clientPending = invitations?.filter((i) => i.status === 'pending' && i.type === 'email').length ?? 0
+    const teamSize = billing
+        ? billing.memberCount + billing.pendingInvites
+        : (teamMembers?.length ?? 0) + clientPending
+    const atCap = billing ? !billing.canAddMember : teamSize >= maxTeamMembers
+    const overCap = billing?.overCap ?? false
+
     const handleInviteClick = () => {
-        if (!isPro && teamSize >= FREE_TEAM_LIMIT) {
-            toast.warning(`Free plan is limited to ${FREE_TEAM_LIMIT} team members`, {
-                description: 'Upgrade to Selah Pro to add unlimited team members.',
-                duration: 10000,
-                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
-            })
+        if (atCap) {
+            toast.warning(
+                plan === 'pro'
+                    ? `You've reached your Pro plan limit of ${maxTeamMembers} team members.`
+                    : 'Team collaboration is a Pro feature.',
+                {
+                    description:
+                        plan === 'pro'
+                            ? 'Remove a member to free up a seat, or contact us about a larger plan.'
+                            : `Upgrade to Selah Pro to invite your team (up to ${PRO_TEAM_LIMIT} members).`,
+                    duration: 10000,
+                    action:
+                        plan === 'pro'
+                            ? undefined
+                            : { label: 'Upgrade', onClick: () => void startProCheckout() },
+                },
+            )
             return
         }
         setShowInviteModal(true)
@@ -74,7 +101,7 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
                     >
                         <UserPlus className="w-4 h-4" />
                         Invite Member
-                        {!isPro && teamSize >= FREE_TEAM_LIMIT && (
+                        {plan === 'free' && atCap && (
                             <span className="ml-1 rounded bg-amber-400 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-amber-950">
                                 Pro
                             </span>
@@ -82,6 +109,29 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
                     </button>
                 )}
             </div>
+
+            {/* Over-cap warning: the team is larger than the current plan allows
+                (e.g. a Pro church that lapsed to Free). Existing members are kept,
+                but no new ones can be added until the plan is restored/upgraded. */}
+            {overCap && (
+                <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+                    <span>
+                        Your team has {billing?.memberCount} members but the{' '}
+                        {plan === 'pro' ? 'Pro' : 'Free'} plan allows {maxTeamMembers}.
+                        {plan === 'pro'
+                            ? ' Remove members to get back within the limit.'
+                            : ' Team collaboration is paused — resubscribe to Pro to restore it.'}
+                    </span>
+                    {isAdmin && plan === 'free' && (
+                        <button
+                            onClick={() => void startProCheckout()}
+                            className="shrink-0 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600"
+                        >
+                            Resubscribe to Pro
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg w-fit">
