@@ -35,6 +35,9 @@ import {
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
 import { getEffectiveThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
 import { lexicalSearchVerses } from '../lib/bibleLexicalSearch'
+import { searchVerses, DEFAULT_SEARCH_OPTIONS } from '../lib/search'
+import type { DenseRetriever } from '../lib/search'
+import { featureFlags } from '../services/feature-flags'
 import { useScripture } from './useScripture'
 
 export interface SemanticVerseResult {
@@ -264,6 +267,75 @@ export function useSemanticVerseSearch(
 
             try {
                 const workingVersion = effectiveVersionRef.current || version || 'KJV'
+
+                // --- Hybrid V2 pipeline (BM25 + dense + weighted RRF) --------
+                // Behind a flag so the MVP path below stays the default until
+                // V2 clears its eval gates. The dense retriever wraps the same
+                // embedding path but WITHOUT the aggressive pre-fusion cutoff.
+                // Strict === true: only a real boolean-true enables V2, so a
+                // future async provider returning a (truthy) Promise can't
+                // switch it on by accident. Off by default until eval gates pass.
+                if (featureFlags.isEnabled('hybridVerseSearchV2', false) === true) {
+                    const corpus = (await downloadBibleVersion(workingVersion)) ?? []
+                    if (abortController.signal.aborted) return
+
+                    const denseRetriever: DenseRetriever = async (q, topK) => {
+                        if (!hasEmbeddings) return []
+                        if (!isEmbedderReady) await initEmbedder()
+                        const ck = q.raw.toLowerCase()
+                        let emb = embeddingCache.current.get(ck)
+                        if (!emb) {
+                            emb = (await embedText(q.raw)).embedding
+                            if (embeddingCache.current.size > 50) {
+                                const first = embeddingCache.current.keys().next().value
+                                if (first) embeddingCache.current.delete(first)
+                            }
+                            embeddingCache.current.set(ck, emb)
+                        }
+                        if (preferLocal && hasLocalEmbeddings) {
+                            const loaded = getLoadedIndex()
+                            if (!loaded || loaded.version !== workingVersion) {
+                                let rows = getPrewarmedEmbeddings(workingVersion)
+                                if (!rows || rows.length === 0) rows = await getCachedVerseEmbeddings(workingVersion)
+                                if (rows && rows.length > 0) { loadVerseStore(workingVersion, rows); rows = [] }
+                            }
+                        }
+                        const floor = DEFAULT_SEARCH_OPTIONS.denseSafetyFloor
+                        const loadedIdx = getLoadedIndex()
+                        const toCand = (r: { book: string; bookNumber: number; chapter: number; verse: number; text: string; score: number }) => {
+                            const bookName = NUMBER_TO_BOOK[r.bookNumber] || r.book || 'Unknown'
+                            const reference = `${bookName} ${r.chapter}:${r.verse}`
+                            return { canonicalVerseId: reference, reference, text: r.text, cosineSimilarity: r.score }
+                        }
+                        if (preferLocal && hasLocalEmbeddings && loadedIdx) {
+                            return (await searchVerseEmbeddings(emb, floor, topK)).map(toCand)
+                        }
+                        const remote = await convex.action(api.verseEmbeddings.findSimilarVerses, {
+                            queryEmbedding: emb, threshold: floor, limit: topK,
+                            version: effectiveVersionRef.current || version,
+                        })
+                        return (remote as Array<Parameters<typeof toCand>[0]>).map(toCand)
+                    }
+
+                    const v2 = await searchVerses(query, corpus, denseRetriever, {
+                        version: workingVersion,
+                        resultLimit: limit,
+                    })
+                    if (abortController.signal.aborted) return
+
+                    setResults(v2.map((r) => ({
+                        _id: r._id, reference: r.reference, book: r.book,
+                        bookNumber: r.bookNumber, chapter: r.chapter, verse: r.verse,
+                        text: r.text, score: r.score,
+                    })))
+                    trackEvent(AnalyticsEventType.BIBLE_SEMANTIC_SEARCH, {
+                        query_length: query.length,
+                        result_count: v2.length,
+                        used_local: preferLocal && hasLocalEmbeddings && !!getLoadedIndex(),
+                        version: workingVersion,
+                    })
+                    return
+                }
 
                 // --- Lexical pass (always, offline, every version) -----------
                 // Guarantees that a verse literally containing the typed
