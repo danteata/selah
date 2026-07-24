@@ -114,6 +114,22 @@ export function PreviewContent() {
     const canGoLive = !isConnected || isOperator || (isContributor && isOpen)
     const canQueueSlide = isConnected && isContributor && !isStrict
 
+    // Enter promotes the previewed (active) slide to live — the keyboard
+    // counterpart to the always-visible Live button. Ignored while typing or
+    // when a button/link is focused (so it doesn't double-fire with a click).
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key !== 'Enter') return
+            const el = document.activeElement as HTMLElement | null
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'BUTTON' || el.tagName === 'A' || el.isContentEditable)) return
+            if (!activeSlide || !canGoLive || liveSlideId === activeSlide.id) return
+            e.preventDefault()
+            void setSharedLiveSlide(activeSlide.id)
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+    }, [activeSlide, canGoLive, liveSlideId, setSharedLiveSlide])
+
     const handleDeleteSlide = useCallback((slideId: string) => {
         const slide = slides.find(s => s.id === slideId)
         if (slide) {
@@ -412,6 +428,9 @@ export function PreviewContent() {
             key={slide.id}
             data-slide-index={index}
             ref={liveSlideId === slide.id ? liveSlideRef : activeSlide?.id === slide.id ? activeSlideRef : undefined}
+            // Double-click / double-tap a queued slide to send it live (single
+            // click still just previews). Gated by collaboration mode.
+            onDoubleClick={() => { if (canGoLive && liveSlideId !== slide.id) void setSharedLiveSlide(slide.id) }}
             className={`transition-all ${
                 isDraggingIndex === index ? 'opacity-50 scale-95' : ''
             } ${
