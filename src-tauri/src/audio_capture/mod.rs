@@ -811,6 +811,19 @@ pub fn start_capture_with_vad(
                         if let Some(tm) = native_transcription_manager.as_ref() {
                             tm.start_stream();
                         }
+                        // Seed the fresh stream with the VAD pre-roll (pre-speech
+                        // + onset frames) so the streaming model sees the start of
+                        // the utterance. Without this, feeding only begins on the
+                        // onset tick and the first word or two gets clipped —
+                        // exactly what the batch path avoids by prepending the same
+                        // pre_speech_buffer to its committed segment. The prefill
+                        // excludes this tick's `samples`, which are fed next.
+                        if let Some(router) = native_stream_router.as_ref() {
+                            let prefill = vad.stream_prefill(samples.len());
+                            if !prefill.is_empty() {
+                                router.feed(prefill);
+                            }
+                        }
                     }
                     if was_speaking || now_speaking {
                         if let Some(router) = native_stream_router.as_ref() {
