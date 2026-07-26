@@ -24,17 +24,14 @@ const actionIconMap: Record<string, React.ReactNode> = {
     'i-bx-command': <Keyboard className="w-4 h-4" />,
 }
 
-// Quick action items for sidebar
+// Quick-create actions unique to this panel — a blank text slide and a lower
+// third, neither of which the NavRail's section browser covers. Everything
+// else (Bible, songs, hymns, media, templates, countdowns, alerts) is reached
+// through the search box above or the NavRail → ContextPanel, so it isn't
+// duplicated here as a button.
 const SIDEBAR_ACTIONS = [
-    { id: 'bible', icon: <Book className="w-4 h-4" />, label: 'Bible', action: appWideActions.newBible },
-    { id: 'hymn', icon: <Music className="w-4 h-4" />, label: 'Hymn', action: appWideActions.newHymn },
-    { id: 'song', icon: <Music className="w-4 h-4" />, label: 'Song', action: appWideActions.newSong },
-    { id: 'slide', icon: <FileText className="w-4 h-4" />, label: 'Slide', action: appWideActions.newSlide },
+    { id: 'slide', icon: <FileText className="w-4 h-4" />, label: 'Text Slide', action: appWideActions.newSlide },
     { id: 'lower-third', icon: <PanelBottom className="w-4 h-4" />, label: 'Lower Third', action: appWideActions.newLowerThird },
-    { id: 'media', icon: <Image className="w-4 h-4" />, label: 'Media', action: appWideActions.newMedia },
-    { id: 'template', icon: <Layout className="w-4 h-4" />, label: 'Templates', action: appWideActions.newTemplates },
-    { id: 'countdown', icon: <Clock className="w-4 h-4" />, label: 'Countdown', action: appWideActions.newCountdown },
-    { id: 'alert', icon: <AlertCircle className="w-4 h-4" />, label: 'Alert', action: appWideActions.newAlert },
 ]
 
 export function QuickActionsSidebar() {
@@ -648,8 +645,13 @@ export function QuickActionsSidebar() {
                         )}
                     </div>
                 ) : (
-                    /* Quick Action Buttons */
+                    /* Quick-create actions unique to this panel, plus a pointer
+                       to where the rest of the content lives now (search + NavRail),
+                       so nothing is duplicated across surfaces. */
                     <div className="space-y-0.5">
+                        <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                            Create
+                        </div>
                         {SIDEBAR_ACTIONS.map((action) => (
                             <button
                                 key={action.id}
@@ -663,32 +665,9 @@ export function QuickActionsSidebar() {
                                 <ChevronRight className="w-3 h-3 text-[var(--text-muted)]" />
                             </button>
                         ))}
-
-                        {/* Divider */}
-                        <div className="border-t border-[var(--border-subtle)] my-2" />
-
-                        {/* Settings & Schedule */}
-                        <button
-                            onClick={() => handleSidebarAction(appWideActions.openScheduleModal)}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                        >
-                            <Calendar className="w-4 h-4" />
-                            <span className="truncate">Schedule</span>
-                        </button>
-                        <button
-                            onClick={() => handleSidebarAction(appWideActions.openSettings)}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                        >
-                            <Settings className="w-4 h-4" />
-                            <span className="truncate">Settings</span>
-                        </button>
-                        <button
-                            onClick={() => handleSidebarAction(appWideActions.openShortcutsModal)}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                        >
-                            <Keyboard className="w-4 h-4" />
-                            <span className="truncate">Shortcuts</span>
-                        </button>
+                        <p className="px-2 pt-3 text-[10px] leading-relaxed text-[var(--text-muted)]">
+                            Search above to insert scripture, songs, hymns &amp; verses — or pick a section on the left rail to browse Bible, media, templates, countdowns &amp; alerts.
+                        </p>
                     </div>
                 )}
             </div>

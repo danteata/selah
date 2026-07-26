@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Mic, Plus, Eye, EyeOff } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Plus, Eye, EyeOff, Rows3, Columns2, Maximize2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -22,7 +22,7 @@ import { KineticText } from './KineticText'
 import { audioFeatures } from '../../services/visualizer/audioFeatures'
 import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
-import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
+import { ContextSectionContent } from '../layout/ContextPanel'
 import { VideoBackground } from './VideoBackground'
 import { MediaContent, type MediaProgress } from './MediaContent'
 import { AudioReactiveBackground } from './AudioReactiveBackground'
@@ -47,16 +47,25 @@ function formatSecondsToTime(totalSeconds: number): string {
 }
 
 export function LiveOutput() {
-    const sermonListener = useSermonListenerContext()
     const { trackEvent } = useAnalytics()
     const activeNavSection = useAppStore((s) => s.activeNavSection)
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
+    const lastContentSection = useAppStore((s) => s.lastContentSection)
 
     // Hide sermon listener panel when the ContextPanel sidebar is already showing it
     const sermonShownInSidebar = activeNavSection === 'sermon' && contextPanelOpen
 
     const [ctrlOrMetaActive, setCtrlOrMetaActive] = useState(false)
     const [showScreenPicker, setShowScreenPicker] = useState(false)
+
+    // Center layout mode — how Preview / Program / context are arranged:
+    //  • 'stacked' — Next Up + Active + Sermon aside beside the feed
+    //  • 'split'   — Preview | Program on top, tabbed context (Verses/Sermon) below
+    //  • 'focus'   — the live feed maximized, side controls slimmed, context hidden
+    // Held in the store (persisted) so a workspace preset can drive it, and the
+    // header picker and preset stay in sync.
+    const layoutMode = useAppStore((s) => s.liveOutputLayout)
+    const setLayoutMode = useAppStore((s) => s.setLiveOutputLayout)
 
     // Countdown preview state
     const [previewCountdownSeconds, setPreviewCountdownSeconds] = useState(0)
@@ -572,14 +581,95 @@ export function LiveOutput() {
         }
     }, [liveSlide, isDesktop, sendSlideToLive])
 
+    // ── Extracted center-area pieces ─────────────────────────────────────
+    // Defined once so the layout modes can place them in different spots (in
+    // the aside for 'stacked', in the tabbed bottom for 'split', hidden for
+    // 'focus') without duplicating markup.
+    const sermonBox = !sermonShownInSidebar ? (
+        <div className="studio-output-sermon min-h-0 flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-2 overflow-hidden">
+            <div className="mb-2 flex items-center justify-between px-1">
+                <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                    Sermon Listener
+                </span>
+            </div>
+            <div className="h-[calc(100%-1.25rem)] min-h-0 overflow-y-auto custom-scrollbar pr-1">
+                <SermonListenerPanel compact />
+            </div>
+        </div>
+    ) : null
+
+    const verseNav = liveSlide?.type === 'bible' ? (
+        <BibleVerseNavigator
+            ref={verseNavigatorRef}
+            currentSlide={liveSlide}
+            onVerseSelect={handleVerseSelect}
+        />
+    ) : null
+
+    // Layout picker shown in the header — three arrangements of the center.
+    const LAYOUT_OPTIONS = [
+        { id: 'stacked' as const, label: 'Stacked', Icon: Rows3 },
+        { id: 'split' as const, label: 'Split', Icon: Columns2 },
+        { id: 'focus' as const, label: 'Focus', Icon: Maximize2 },
+    ]
+    const layoutPicker = (
+        <div className="hidden sm:flex items-center gap-0.5 p-0.5 rounded-lg bg-[var(--bg-tertiary)]/60 border border-[var(--border-subtle)] flex-shrink-0">
+            {LAYOUT_OPTIONS.map(({ id, label, Icon }) => (
+                <button
+                    key={id}
+                    onClick={() => setLayoutMode(id)}
+                    className={`p-1.5 rounded-md transition-colors ${
+                        layoutMode === id
+                            ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
+                    title={`${label} layout`}
+                    aria-pressed={layoutMode === id}
+                >
+                    <Icon className="w-3.5 h-3.5" />
+                </button>
+            ))}
+        </div>
+    )
+
+    // Split-layout context — both surfaces visible at once, no tabs. The verse
+    // navigator sits as a short strip directly under the Preview | Program row
+    // (only when a scripture is live); the Sermon Listener fills the rest as a
+    // wider-but-shorter panel. Both stay in view.
+    const splitContext = (
+        <div className="studio-output-context flex-1 min-h-0 flex flex-col gap-3">
+            {verseNav && (
+                <div className="flex-shrink-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 overflow-hidden">
+                    {verseNav}
+                </div>
+            )}
+            {sermonShownInSidebar ? (
+                // The sermon listener has taken the sidebar — show whatever it
+                // displaced there (Bible, Songs, Media, …) in this freed slot, so
+                // both stay visible at once.
+                lastContentSection && lastContentSection !== 'sermon' ? (
+                    <div className="flex-1 min-h-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 overflow-hidden">
+                        <ContextSectionContent section={lastContentSection} />
+                    </div>
+                ) : (
+                    <div className="flex-1 flex items-center justify-center text-center text-[11px] text-[var(--text-muted)] italic px-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40">
+                        Sermon Listener is open in the sidebar.
+                    </div>
+                )
+            ) : (
+                sermonBox
+            )}
+        </div>
+    )
+
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
             {/* Header - Broadcast Controls */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/35">
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${liveSlide ? 'bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.55)]' : 'bg-[var(--text-muted)]/60'}`} />
-                        <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/35">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className={`shrink-0 w-2 h-2 rounded-full ${liveSlide ? 'bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.55)]' : 'bg-[var(--text-muted)]/60'}`} />
+                        <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)] truncate" title="Program Output">
                             Program Output
                         </h2>
                     </div>
@@ -608,7 +698,8 @@ export function LiveOutput() {
                     )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    {layoutPicker}
                     {ndiAvailable && (
                         <button
                             onClick={handleNdiToggle}
@@ -631,29 +722,36 @@ export function LiveOutput() {
                     {isPresenting ? (
                         <button
                             onClick={handleStopLive}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-red-500/20"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-red-500/20 whitespace-nowrap flex-shrink-0"
                         >
                             STOP
                         </button>
                     ) : (
                         <button
                             onClick={handleOpenLive}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-teal)] hover:brightness-110 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-[var(--accent-teal)]/20"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-teal)] hover:brightness-110 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-[var(--accent-teal)]/20 whitespace-nowrap flex-shrink-0"
                         >
-                            <Presentation className="w-4 h-4" />
+                            <Presentation className="w-4 h-4 shrink-0" />
                             PRESENT
                         </button>
                     )}
                 </div>
             </div>
 
-            {/* Main Content — Next Up + Controls on left, Live Feed on right */}
-            <div className="flex-1 min-h-0 flex flex-col p-4 lg:p-5 gap-3">
-                <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-4 lg:gap-5">
-                    {/* Left: Next Up + Active Slide controls + Sermon Listener */}
-                    <aside className="studio-output-sidecar w-full xl:w-[260px] 2xl:w-[300px] flex-shrink-0 flex flex-row xl:flex-col gap-3 order-1">
-                        {/* Next Up Preview — 16:9 aspect ratio */}
-                        <div className="flex flex-col">
+            {/* Main Content — Next Up + Controls on left, Live Feed on right.
+                This wrapper (not the panel root) is the query container so the
+                fixed Screen Picker modal below isn't trapped by containment. */}
+            <div className="studio-liveoutput flex-1 min-h-0 flex flex-col p-3 lg:p-3.5 gap-2.5" data-layout={layoutMode}>
+                <div className="studio-output-main flex-1 min-h-0 flex gap-4 lg:gap-5">
+                    {/* Left: Next Up + Active Slide controls + Sermon Listener.
+                        Width/direction come from a container query (see
+                        .studio-output-sidecar in index.css) so a narrow panel
+                        stacks these above the feed instead of clipping. */}
+                    <aside className="studio-output-sidecar flex-shrink-0 flex gap-3 order-1">
+                        {/* Next Up Preview — 16:9. When the panel is narrow the
+                            aside stacks above the feed; there Next Up widens to
+                            fill the row (see .studio-output-nextup in index.css). */}
+                        <div className="studio-output-nextup flex flex-col min-w-0">
                             <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Next Up</div>
                             <div className="aspect-video rounded-xl overflow-hidden relative border border-[var(--border-subtle)] bg-black/30 shadow-sm">
                                 {nextSlide ? (
@@ -745,7 +843,8 @@ export function LiveOutput() {
                                             <div className="absolute inset-0 flex flex-col p-3">
                                                 {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
                                                     <div
-                                                        className="shrink-0 text-center text-white text-[11px] font-medium pb-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
+                                                        className="shrink-0 text-center pb-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
+                                                        style={getVerseRefStyle(nextSlide.slideStyle, globalSlideStyles, { minPx: 7, coefficient: 1.4, unit: 'cqw', maxPx: 13 })}
                                                         dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
                                                     />
                                                 )}
@@ -758,7 +857,8 @@ export function LiveOutput() {
                                                 />
                                                 {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
                                                     <div
-                                                        className="shrink-0 text-center text-white text-[11px] font-medium pt-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
+                                                        className="shrink-0 text-center pt-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
+                                                        style={getVerseRefStyle(nextSlide.slideStyle, globalSlideStyles, { minPx: 7, coefficient: 1.4, unit: 'cqw', maxPx: 13 })}
                                                         dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
                                                     />
                                                 )}
@@ -766,7 +866,7 @@ export function LiveOutput() {
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-black/30 text-[var(--text-muted)] italic text-[10px]">
+                                    <div className="w-full h-full flex items-center justify-center bg-black/30 text-[var(--text-muted)] italic text-[10px] text-center leading-tight px-2">
                                         End of Schedule
                                     </div>
                                 )}
@@ -826,31 +926,10 @@ export function LiveOutput() {
                             </div>
                         </div>
 
-                        <div className="min-h-0 flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-2 overflow-hidden">
-                            <div className="mb-2 flex items-center justify-between px-1">
-                                <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                                    Sermon Listener
-                                </span>
-                            </div>
-                            <div className="h-[calc(100%-1.25rem)] min-h-0 overflow-y-auto custom-scrollbar pr-1">
-                                {sermonShownInSidebar ? (
-                                    <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
-                                        <Mic className={`w-5 h-5 ${sermonListener?.isListening ? 'text-red-500' : 'text-[var(--text-muted)]'}`} />
-                                        {sermonListener?.isListening && (
-                                            <span className="relative flex h-2 w-2">
-                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
-                                            </span>
-                                        )}
-                                        <p className="text-[10px] text-[var(--text-muted)]">
-                                            {sermonListener?.isListening ? 'Recording — see sidebar' : 'Open in sidebar'}
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <SermonListenerPanel compact />
-                                )}
-                            </div>
-                        </div>
+                        {/* Sermon Listener sits in the aside only in 'stacked'.
+                            In 'split' it moves to the tabbed context below; in
+                            'focus' it's hidden (still available in the sidebar). */}
+                        {layoutMode === 'stacked' && sermonBox}
                     </aside>
 
                     {/* Right: Live Feed + contextual Bible navigator */}
@@ -997,7 +1076,10 @@ export function LiveOutput() {
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             lineHeight: 1.05,
-                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 20, coefficient: 4, unit: 'cqw', maxPx: 56 }),
+                                                            // cqw (not vw) so the reference scales with the preview
+                                                            // box, and a low px floor so it doesn't dominate the
+                                                            // small monitor — matches the output's 2.4vw proportion.
+                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 8, coefficient: 2.4, unit: 'cqw', maxPx: 28 }),
                                                         }}
                                                         dangerouslySetInnerHTML={{ __html: liveRefHtml }}
                                                     />
@@ -1023,7 +1105,10 @@ export function LiveOutput() {
                                                         style={{
                                                             fontFamily: liveSlide.slideStyle?.font || defaultFont,
                                                             lineHeight: 1.05,
-                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 20, coefficient: 4, unit: 'cqw', maxPx: 56 }),
+                                                            // cqw (not vw) so the reference scales with the preview
+                                                            // box, and a low px floor so it doesn't dominate the
+                                                            // small monitor — matches the output's 2.4vw proportion.
+                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 8, coefficient: 2.4, unit: 'cqw', maxPx: 28 }),
                                                         }}
                                                         dangerouslySetInnerHTML={{ __html: liveRefHtml }}
                                                     />
@@ -1105,16 +1190,14 @@ export function LiveOutput() {
                                 </div>
                             )}
 
-                        {/* Bible verse navigation — only when a bible slide is live */}
-                        {liveSlide?.type === 'bible' && (
-                            <BibleVerseNavigator
-                                ref={verseNavigatorRef}
-                                currentSlide={liveSlide}
-                                onVerseSelect={handleVerseSelect}
-                            />
-                        )}
+                        {/* Verse navigator sits under the feed only in 'stacked';
+                            'split' moves it into the tabbed context below. */}
+                        {layoutMode === 'stacked' && verseNav}
                     </div>
                 </div>
+
+                {/* Split layout: tabbed context (Verses / Sermon) below the top row. */}
+                {layoutMode === 'split' && splitContext}
 
                 {/* Shared Queue — contributions from non-operators */}
                 {isConnected && sharedQueueSlides.length > 0 && (

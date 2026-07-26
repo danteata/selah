@@ -748,7 +748,11 @@ h6 {
 
 /* Slide queue (left side of workspace) */
 .studio-slide-queue {
-    flex-shrink: 0;
+    /* Shrinkable (down to min-width) so opening the docked ContextPanel steals
+       width from the queue rather than collapsing the live area to nothing.
+       Its resizable width (inline style) still wins whenever there's room. */
+    flex-shrink: 1;
+    min-width: 200px;
     border-right: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
@@ -759,7 +763,9 @@ h6 {
 /* Live preview area (right side of workspace) */
 .studio-live-area {
     flex: 1;
-    min-width: 0;
+    /* Reserve a real minimum so the Live Output never disappears when the
+       queue is wide and the docked ContextPanel (bible, etc.) is open. */
+    min-width: 300px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -804,6 +810,111 @@ h6 {
 .studio-output-sidecar:hover,
 .studio-output-sidecar:focus-within {
     opacity: 1;
+}
+
+/* Live Output responds to its OWN width (via a container query), not the
+   viewport — so a narrow panel stacks the Next-Up / Active / Sermon controls
+   above the feed and lets them use the full width, instead of a fixed-width
+   sidebar overflowing and clipping ("PRES", "End of Sche…", "Recording — see…").
+   The container is Live Output's main-content wrapper (not its root) so the
+   fixed Screen Picker modal isn't trapped by CSS containment. Works in both the
+   dashboard grid and the studio split. */
+.studio-liveoutput {
+    container-type: inline-size;
+}
+
+.studio-output-main {
+    flex-direction: column;
+}
+
+/* Narrow / stacked: the side controls sit ABOVE the live feed. The live feed
+   is the priority, so the strip is capped and the tall Sermon transcript is
+   hidden here (it stays available in the sidebar + the Now/Next status bar) —
+   otherwise it grows unbounded and pushes the feed off-screen. Next Up widens
+   to fill the row beside the Active controls. */
+.studio-output-sidecar {
+    width: 100%;
+    flex-direction: row;
+    max-height: 42%;
+    overflow: hidden;
+}
+
+.studio-output-sermon {
+    display: none;
+}
+
+.studio-output-nextup {
+    flex: 1 1 0%;
+}
+
+@container (min-width: 900px) {
+    .studio-output-main {
+        flex-direction: row;
+    }
+
+    /* Wide: the side controls become a full-height column beside the feed. */
+    .studio-output-sidecar {
+        width: 260px;
+        flex-direction: column;
+        max-height: none;
+        overflow: visible;
+    }
+
+    .studio-output-sermon {
+        display: block;
+    }
+
+    .studio-output-nextup {
+        flex: 0 0 auto;
+    }
+}
+
+@container (min-width: 1120px) {
+    .studio-output-sidecar {
+        width: 300px;
+    }
+}
+
+/* ── Center layout modes (data-layout on .studio-liveoutput) ─────────────
+   'stacked' uses the rules above. 'split' and 'focus' re-arrange the center;
+   the attribute selectors outrank the plain-class rules, so they win at any
+   container width (overriding the stacked container-query behaviour). */
+
+/* Split — Preview | Program on top (always side by side), tabbed context below. */
+.studio-liveoutput[data-layout="split"] .studio-output-main {
+    flex: 2 1 0%;
+    flex-direction: row;
+}
+.studio-liveoutput[data-layout="split"] .studio-output-context {
+    flex: 3 1 0%;
+}
+.studio-liveoutput[data-layout="split"] .studio-output-sidecar {
+    flex-direction: column;
+    width: clamp(200px, 32%, 320px);
+    max-height: none;
+    overflow: visible;
+}
+.studio-liveoutput[data-layout="split"] .studio-output-nextup {
+    flex: 0 0 auto;
+}
+/* The sermon box moves into the tabbed context here, so un-hide it (the base
+   rule hides it in the stacked aside when narrow). */
+.studio-liveoutput[data-layout="split"] .studio-output-sermon {
+    display: block;
+}
+
+/* Focus — live feed maximized; the side controls become a slim column. */
+.studio-liveoutput[data-layout="focus"] .studio-output-main {
+    flex-direction: row;
+}
+.studio-liveoutput[data-layout="focus"] .studio-output-sidecar {
+    flex-direction: column;
+    width: clamp(120px, 18%, 190px);
+    max-height: none;
+    overflow: visible;
+}
+.studio-liveoutput[data-layout="focus"] .studio-output-nextup {
+    flex: 0 0 auto;
 }
 
 /* Floating context panel */

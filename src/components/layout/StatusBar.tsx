@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Radio, Mic, PanelRight, Keyboard, Monitor, Search, Wifi, WifiOff } from 'lucide-react'
+import { Radio, Mic, PanelRight, Keyboard, Monitor, Search, Wifi, WifiOff, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { SlideChip } from '../slides/SlideChip'
 import { OfflineIndicator } from '../offline/OfflineIndicator'
@@ -53,9 +53,19 @@ export function StatusBar() {
         return activeSlides.find((s) => s.id === liveSlideId)
     }, [activeSlides, liveSlideId])
 
+    // The on-deck slide — the one right after what's live, so the operator
+    // always sees "what's next" at a glance no matter how the panels are laid
+    // out. Mirrors LiveOutput's next = slide after the live one.
+    const nextSlide = useMemo(() => {
+        const liveIndex = activeSlides.findIndex((s) => s.id === liveSlideId)
+        return liveIndex >= 0 ? activeSlides[liveIndex + 1] : undefined
+    }, [activeSlides, liveSlideId])
+
     return (
         <footer className="studio-status-bar glass-panel border-t border-[var(--border-subtle)] flex items-center px-3 gap-4 text-[11px]">
-            {/* Left — Live indicator */}
+            {/* Left — Now / Next HUD: the operator's two most critical facts,
+                always visible regardless of how the dashboard panels are laid
+                out. LIVE (red) dominates; NEXT (teal) is the secondary cue. */}
             <div className="flex items-center gap-2 flex-1 min-w-0">
                 {liveSlide ? (
                     <div className="flex items-center gap-2 min-w-0">
@@ -81,9 +91,30 @@ export function StatusBar() {
                         <SlideChip slideType={liveSlide.type} />
                     </div>
                 ) : (
-                    <div className="flex items-center gap-1.5 text-[var(--text-muted)]">
+                    <div className="flex items-center gap-1.5 text-[var(--text-muted)] flex-shrink-0">
                         <Monitor className="w-3 h-3" />
                         <span>Not live</span>
+                    </div>
+                )}
+
+                {/* NEXT — on-deck slide after the live one */}
+                {nextSlide && (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                        <ChevronRight className="w-3 h-3 text-[var(--text-muted)]/50 flex-shrink-0" />
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-[var(--accent-teal)] flex-shrink-0">Next</span>
+                        <AnimatePresence mode="wait">
+                            <motion.span
+                                key={nextSlide.id}
+                                className="text-[var(--text-secondary)] truncate"
+                                initial={{ opacity: 0, y: 4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -4 }}
+                                transition={{ duration: 0.15 }}
+                            >
+                                {nextSlide.name}
+                            </motion.span>
+                        </AnimatePresence>
+                        <SlideChip slideType={nextSlide.type} />
                     </div>
                 )}
             </div>

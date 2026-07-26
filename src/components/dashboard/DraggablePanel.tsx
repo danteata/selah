@@ -22,6 +22,8 @@ interface DraggablePanelProps {
     onCollapse?: () => void
     className?: string
     accentColor?: string
+    /** When false, the header isn't a drag handle (layout is locked). */
+    draggable?: boolean
 }
 
 export function DraggablePanel({
@@ -35,6 +37,7 @@ export function DraggablePanel({
     onCollapse,
     className = '',
     accentColor = 'teal',
+    draggable = true,
 }: DraggablePanelProps) {
     const [isHovered, setIsHovered] = useState(false)
     const [showMenu, setShowMenu] = useState(false)
@@ -145,7 +148,7 @@ export function DraggablePanel({
                     px-3 py-2.5
                     bg-[var(--bg-tertiary)]/50
                     ${!isCollapsed ? 'border-b border-[var(--border-subtle)]' : ''}
-                    cursor-move
+                    ${draggable ? 'cursor-move' : ''}
                     select-none
                     transition-all duration-200
                     flex-shrink-0
@@ -157,15 +160,17 @@ export function DraggablePanel({
                     {/* Accent indicator */}
                     <div className={`w-1 h-4 rounded-full ${colors.indicator} opacity-80`} />
 
-                    <div className="cursor-grab active:cursor-grabbing flex-shrink-0 flex items-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">
-                        <GripVertical className="w-4 h-4" />
-                    </div>
+                    {draggable && (
+                        <div className="cursor-grab active:cursor-grabbing flex-shrink-0 flex items-center text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">
+                            <GripVertical className="w-4 h-4" />
+                        </div>
+                    )}
 
                     <div className={`${colors.text} flex-shrink-0`}>
                         {icon}
                     </div>
 
-                    <h3 className="text-xs font-medium text-[var(--text-secondary)] truncate tracking-wide">
+                    <h3 className="text-xs font-medium text-[var(--text-secondary)] truncate tracking-wide" title={title}>
                         {title}
                     </h3>
                 </div>
