@@ -248,8 +248,12 @@ export function MediaPicker({
                         {/* Media Grid/List */}
                         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
                             {isLoading ? (
-                                <div className="flex items-center justify-center h-full">
-                                    <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
+                                /* Skeleton grid while the media library loads —
+                                   matches the tile grid so nothing shifts on load. */
+                                <div className={`grid ${isInline ? 'grid-cols-2' : 'grid-cols-4'} gap-4`}>
+                                    {Array.from({ length: isInline ? 6 : 12 }).map((_, i) => (
+                                        <div key={i} className="aspect-video rounded-lg bg-gray-200 dark:bg-gray-800 animate-pulse" />
+                                    ))}
                                 </div>
                             ) : filteredMedia.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 dark:text-gray-400">

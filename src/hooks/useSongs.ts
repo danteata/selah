@@ -394,9 +394,15 @@ export function useSongs(): UseSongsReturn {
 
     const songs = useMemo(() => effectiveSongs as Song[], [effectiveSongs])
 
+    // Report "loading" during the initial fetch too (the Convex query is
+    // `undefined` until it resolves), not just during mutations — otherwise the
+    // UI flashes an empty "No songs yet" before the library arrives.
+    const initialLoading = allSongsQuery === undefined && songs.length === 0
+    const loadingState = loading || initialLoading
+
     return {
         songs,
-        loading,
+        loading: loadingState,
         searchSongs,
         getAllSongs,
         getSongById,
