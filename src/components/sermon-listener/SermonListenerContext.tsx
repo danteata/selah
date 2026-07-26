@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { useSermonListener, type UseSermonListenerReturn } from '../../hooks/useSermonListener'
+import { useAppStore } from '../../store/appStore'
 
 const SermonListenerContext = createContext<UseSermonListenerReturn | null>(null)
 
@@ -23,10 +24,14 @@ export function SermonListenerProvider({ children }: { children: ReactNode }) {
         check()
     }, [])
 
+    const enableVoiceCommands = useAppStore(
+        (s) => s.settings.sermonListener?.enableVoiceCommands ?? true,
+    )
+
     const sermonListener = useSermonListener({
         autoLookup: true,
         enableSemanticDetection: true,
-        enableVoiceCommands: true,
+        enableVoiceCommands,
     })
 
     // Let the desktop system tray toggle listening. The tray (Rust) emits

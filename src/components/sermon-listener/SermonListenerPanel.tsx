@@ -17,6 +17,7 @@ import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetec
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
 import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, Copy, MoreHorizontal, Music, Sparkles } from 'lucide-react'
 import type { Scripture } from '../../types'
+import type { VoiceCommand } from '../../services/sermon-listener/voiceCommandDetection'
 import type { Transcript } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
 import { classifyTranscriptionError, getUserAction, transcriptionErrorCodes, isRetryableError } from '../../services/sermon-listener/transcriptionErrors'
@@ -131,10 +132,23 @@ function SermonListenerPanelInner({
         isInitializingProvider,
         providerReady,
         rawUtterances,
+        lastVoiceCommand,
         start,
         stop,
         reset,
     } = sermonListener
+
+    // Flash the last recognized voice command for a few seconds so the operator
+    // sees it registered (e.g. "Next verse", "Switched to NIV"). lastVoiceCommand
+    // holds the most recent one indefinitely; we surface it transiently.
+    const voiceCommandsEnabled = appSettings.sermonListener?.enableVoiceCommands ?? true
+    const [recentCommand, setRecentCommand] = useState<string | null>(null)
+    useEffect(() => {
+        if (!lastVoiceCommand || !voiceCommandsEnabled) return
+        setRecentCommand(voiceCommandLabel(lastVoiceCommand))
+        const t = setTimeout(() => setRecentCommand(null), 3000)
+        return () => clearTimeout(t)
+    }, [lastVoiceCommand, voiceCommandsEnabled])
 
     // Dev-only: record this session's raw audio to disk so it can be
     // re-transcribed offline afterward and compared against what was
@@ -174,6 +188,7 @@ function SermonListenerPanelInner({
     }
 
     const uniqueDetectedVerses = detectedVerses.filter((verse, index, arr) => arr.findIndex(v => v.reference === verse.reference) === index)
+    const confirmedVerseCount = uniqueDetectedVerses.filter(v => v.isBestMatch).length
 
     const {
         transcripts,
@@ -409,7 +424,11 @@ function SermonListenerPanelInner({
                             : isStarting ? 'Starting…'
                             : isInitializingProvider ? 'Loading model...'
                             : (provider !== 'web-speech' && !providerReady && isSupported) ? 'Starting transcription...'
-                            : 'Sermon Listener'}
+                            // The panel header already says "Sermon Listener", so when
+                            // idle surface the detected-verse count here instead.
+                            : confirmedVerseCount > 0
+                                ? `${confirmedVerseCount} confirmed verse${confirmedVerseCount !== 1 ? 's' : ''}`
+                                : 'Sermon Listener'}
                     </p>
                     {activeSchedule && (
                         <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
@@ -420,6 +439,19 @@ function SermonListenerPanelInner({
                         <p className="text-[10px] text-[var(--accent-teal)] truncate">Auto-saving</p>
                     )}
                 </div>
+
+                {/* Transient voice-command feedback — flashes the last recognized
+                    spoken command so the operator knows it registered. */}
+                {recentCommand && (
+                    <span
+                        key={recentCommand}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--accent-teal)]/15 text-[var(--accent-teal)] text-[10px] font-medium flex-shrink-0 animate-in fade-in slide-in-from-right-2"
+                        title="Recognized voice command"
+                    >
+                        <Check className="w-3 h-3" />
+                        {recentCommand}
+                    </span>
+                )}
 
                 {/* Auto-display detected verses - icon toggle (compact, keeps Stop button on-screen at narrow panel widths) */}
                 <button
@@ -523,29 +555,30 @@ function SermonListenerPanelInner({
             })()}
 
 
-            {/* Detected verses link to Bible panel */}
+            {/* Detected verses → Bible panel. One compact line now that the count
+                lives in the header: current verse (or count) on the left, action
+                on the right. */}
             {uniqueDetectedVerses.length > 0 && (
-                <div className="px-2 py-1.5 rounded-lg bg-[var(--accent-amber)]/5 border border-[var(--accent-amber)]/20">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                            <BookOpen className="w-3.5 h-3.5 text-[var(--accent-amber)]" />
-                            <span className="text-xs font-medium text-[var(--accent-amber)]">
-                                {uniqueDetectedVerses.filter(v => v.isBestMatch).length} confirmed verse{uniqueDetectedVerses.filter(v => v.isBestMatch).length !== 1 ? 's' : ''}
+                <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-[var(--accent-amber)]/5 border border-[var(--accent-amber)]/20">
+                    <div className="min-w-0 flex items-center gap-1.5">
+                        <BookOpen className="w-3.5 h-3.5 text-[var(--accent-amber)] shrink-0" />
+                        {currentVerse ? (
+                            <span className="text-[11px] truncate text-[var(--text-secondary)]">
+                                Current: <span className="text-[var(--accent-teal)] font-medium">{formatVerseForDisplay(currentVerse)}</span>
                             </span>
-                        </div>
-                        <button
-                            onClick={() => openBibleFromSermon(formatVerseForDisplay(currentVerse || uniqueDetectedVerses[0]))}
-                            className="flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal)] text-white rounded text-[10px] font-medium hover:brightness-110 transition-all shadow-sm"
-                        >
-                            <BookOpen className="w-3 h-3" />
-                            View in Bible
-                        </button>
+                        ) : (
+                            <span className="text-[11px] font-medium text-[var(--accent-amber)] truncate">
+                                {confirmedVerseCount} confirmed verse{confirmedVerseCount !== 1 ? 's' : ''}
+                            </span>
+                        )}
                     </div>
-                    {currentVerse && (
-                        <p className="text-[10px] text-[var(--text-muted)] mt-1">
-                            Current: <span className="text-[var(--accent-teal)] font-medium">{formatVerseForDisplay(currentVerse)}</span>
-                        </p>
-                    )}
+                    <button
+                        onClick={() => openBibleFromSermon(formatVerseForDisplay(currentVerse || uniqueDetectedVerses[0]))}
+                        className="flex-shrink-0 flex items-center gap-1 px-2 py-0.5 bg-[var(--accent-teal)] text-white rounded text-[10px] font-medium hover:brightness-110 transition-all shadow-sm"
+                    >
+                        <BookOpen className="w-3 h-3" />
+                        View in Bible
+                    </button>
                 </div>
             )}
 
@@ -851,10 +884,10 @@ function SermonListenerPanelInner({
             )}
 
             {/* Saved Transcripts Section */}
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-1">
                 <button
                     onClick={() => setShowSavedTranscripts(!showSavedTranscripts)}
-                    className="flex items-center justify-between w-full p-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
+                    className="flex items-center justify-between w-full px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
                 >
                     <span className="flex items-center gap-1">
                         <FileText className="w-3 h-3" />
@@ -969,6 +1002,24 @@ function SermonListenerPanelInner({
             )}
         </div>
     )
+}
+
+// Short human label for a recognized voice command, shown in the transient
+// feedback chip. Mirrors the command types in voiceCommandDetection.
+function voiceCommandLabel(cmd: VoiceCommand): string {
+    switch (cmd.type) {
+        case 'change_version': return `Switched to ${cmd.versionId || cmd.versionName || 'version'}`
+        case 'next_verse': return 'Next verse'
+        case 'previous_verse': return 'Previous verse'
+        case 'next_chapter': return 'Next chapter'
+        case 'previous_chapter': return 'Previous chapter'
+        case 'go_to_verse': return cmd.targetVerse ? `Verse ${cmd.targetVerse}` : 'Go to verse'
+        case 'go_to_reference': return cmd.verseRef ? `Opened ${cmd.verseRef}` : 'Opened reference'
+        case 'display': return 'Sent to live'
+        case 'stop_listening': return 'Stopped listening'
+        case 'start_listening': return 'Started listening'
+        default: return 'Command'
+    }
 }
 
 function MissedVerseTapButton({ onFlag, flagCount }: { onFlag: (timestamp: number) => void; flagCount: number }) {

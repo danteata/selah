@@ -71,21 +71,18 @@ export function SongTrackingControl() {
                     </button>
                 )}
 
-                <span className={`ml-auto font-medium capitalize ${phaseColor}`}>{status.phase}</span>
-            </div>
-
-            {/* Confidence meter */}
-            <div className="flex items-center gap-2">
-                <span className="text-[10px] text-gray-500 dark:text-gray-400 w-16 flex-shrink-0">Confidence</span>
-                <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                {/* Confidence meter inline — saves the separate row; the bar is
+                    self-explanatory so the "Confidence" label is dropped. */}
+                <div className="flex-1 min-w-[40px] h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden" title="Tracking confidence">
                     <div
                         className={`h-full rounded-full transition-[width] duration-200 ${meterColor}`}
                         style={{ width: `${confidencePct}%` }}
                     />
                 </div>
-                <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 w-8 text-right">
+                <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 w-8 text-right flex-shrink-0">
                     {confidencePct}%
                 </span>
+                <span className={`font-medium capitalize flex-shrink-0 ${phaseColor}`}>{status.phase}</span>
             </div>
 
             {/* Arrangement chips (click-to-jump) */}
