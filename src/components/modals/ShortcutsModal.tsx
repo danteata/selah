@@ -65,6 +65,15 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
             ],
         },
         {
+            title: 'Bible Panel',
+            shortcuts: [
+                { keys: ['`'], description: 'Edit reference — book · chapter · verse' },
+                { keys: ['0-9'], description: 'Go to verse (live bible slide)' },
+                { keys: ['V'], description: 'Version picker — then press its number' },
+                { keys: ['⇧', 'V'], description: 'Cycle Bible version' },
+            ],
+        },
+        {
             title: 'Live Presentation',
             shortcuts: [
                 { keys: ['⌘', 'P'], description: 'Promote to live' },
