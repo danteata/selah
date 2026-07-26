@@ -136,9 +136,14 @@ export interface AppState {
 
     // Studio Mode layout state
     activeNavSection: NavSection | null
+    /** Last non-sermon content section shown in the sidebar — so a surface the
+     * sermon listener displaces (e.g. the center split) can show it instead. */
+    lastContentSection: NavSection | null
     contextPanelOpen: boolean
     contextPanelWidth: number
     slideQueueWidth: number
+    /** Center (Live Output) arrangement — driven by the workspace preset or the header picker. */
+    liveOutputLayout: 'stacked' | 'split' | 'focus'
     panelMode: 'docked' | 'floating'
     panelPosition: { x: number; y: number }
     commandBarOpen: boolean
@@ -236,9 +241,11 @@ const initialState: AppState = {
     selectedSlideIds: [],
     // Studio Mode layout state
     activeNavSection: null as NavSection | null,
+    lastContentSection: null as NavSection | null,
     contextPanelOpen: true,
     contextPanelWidth: 320,
     slideQueueWidth: 280,
+    liveOutputLayout: 'stacked' as 'stacked' | 'split' | 'focus',
     panelMode: 'docked' as 'docked' | 'floating',
     panelPosition: { x: 0, y: 0 },
     commandBarOpen: false,
@@ -294,6 +301,7 @@ interface AppStore extends AppState {
     setAppSettings: (settings: AppSettings) => void
     setSlideStyles: (styles: SlideStyle) => void
     setDefaultBibleVersion: (version: string) => void
+    setBibleVersionOrder: (order: string[]) => void
     setDefaultFont: (font: string) => void
     setAlerts: (alerts: Alert[]) => void
     addAlert: (alert: Alert) => void
@@ -358,6 +366,7 @@ interface AppStore extends AppState {
     setContextPanelOpen: (open: boolean) => void
     setContextPanelWidth: (width: number) => void
     setSlideQueueWidth: (width: number) => void
+    setLiveOutputLayout: (mode: 'stacked' | 'split' | 'focus') => void
     setPanelMode: (mode: 'docked' | 'floating') => void
     setPanelPosition: (position: { x: number; y: number }) => void
     setCommandBarOpen: (open: boolean) => void
@@ -703,6 +712,15 @@ export const useAppStore = create<AppStore>()(
                     settings: {
                         ...state.settings,
                         defaultBibleVersion: version
+                    }
+                }))
+            },
+
+            setBibleVersionOrder: (order) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        bibleVersionOrder: order
                     }
                 }))
             },
@@ -1200,6 +1218,9 @@ export const useAppStore = create<AppStore>()(
                 set((state) => ({
                     activeNavSection: section,
                     contextPanelOpen: section !== null ? true : state.contextPanelOpen,
+                    // Remember the last non-sermon content section so a surface
+                    // the sermon listener displaces can show it instead.
+                    lastContentSection: section && section !== 'sermon' ? section : state.lastContentSection,
                 }))
             },
 
@@ -1217,6 +1238,10 @@ export const useAppStore = create<AppStore>()(
 
             setSlideQueueWidth: (width) => {
                 set({ slideQueueWidth: Math.max(200, Math.min(500, width)) })
+            },
+
+            setLiveOutputLayout: (mode) => {
+                set({ liveOutputLayout: mode })
             },
 
             setPanelMode: (mode) => {
@@ -1256,10 +1281,24 @@ export const useAppStore = create<AppStore>()(
             },
 
             openBibleFromSermon: (verseReference) => {
-                set({ 
-                    activeNavSection: 'bible',
-                    contextPanelOpen: true,
-                    biblePanelQuery: verseReference,
+                set((state) => {
+                    // If the split center is already showing the Bible (because the
+                    // sermon listener displaced it into the center), just load the
+                    // verse there — don't yank the Bible into the sidebar, which
+                    // would kick the sermon listener out of it.
+                    const bibleAlreadyInCenter =
+                        state.liveOutputLayout === 'split' &&
+                        state.activeNavSection === 'sermon' &&
+                        state.contextPanelOpen &&
+                        state.lastContentSection === 'bible'
+                    if (bibleAlreadyInCenter) {
+                        return { biblePanelQuery: verseReference }
+                    }
+                    return {
+                        activeNavSection: 'bible',
+                        contextPanelOpen: true,
+                        biblePanelQuery: verseReference,
+                    }
                 })
             },
 
@@ -1281,6 +1320,7 @@ export const useAppStore = create<AppStore>()(
                 contextPanelOpen: state.contextPanelOpen,
                 contextPanelWidth: state.contextPanelWidth,
                 slideQueueWidth: state.slideQueueWidth,
+                liveOutputLayout: state.liveOutputLayout,
                 panelMode: state.panelMode,
                 panelPosition: state.panelPosition,
                 activeNavSection: state.activeNavSection,

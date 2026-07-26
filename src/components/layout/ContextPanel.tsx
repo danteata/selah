@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     X, BookOpen, Music, Image, Layout, Clock,
-    AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin, Search, Zap, Plus
+    AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin, Search, Zap, Plus, Edit, Trash2
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSongs, useSong, useHymn, useSlideCreation } from '../../hooks'
@@ -17,6 +17,7 @@ import { generateObjectId } from '../../hooks/useSlideCreation'
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
 import { SongList } from '../songs/SongList'
+import { AddSongModal } from '../songs/AddSongModal'
 import { LiveSongNavigator } from '../songs/LiveSongNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { MediaPicker, type MediaItem } from '../media/MediaPicker'
@@ -131,6 +132,114 @@ export function ContextPanel() {
         setPanelMode('docked')
     }, [setPanelMode])
 
+    const INLINE_SECTIONS: NavSection[] = ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'sermon']
+    const showInline = activeNavSection && INLINE_SECTIONS.includes(activeNavSection)
+
+    if (!contextPanelOpen || !showInline || !activeNavSection) return null
+
+    const meta = SECTION_META[activeNavSection]
+    const SectionIcon = meta.icon
+
+    const panelHeader = (
+        <div
+            className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)] flex-shrink-0 bg-[var(--bg-tertiary)]/25"
+            onMouseDown={startDrag}
+            style={panelMode === 'floating' ? { cursor: 'grab' } : undefined}
+        >
+            <div className="flex items-center gap-2">
+                <SectionIcon className="w-4 h-4 text-[var(--accent-teal)]" />
+                <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                    {meta.title}
+                </h3>
+            </div>
+            <div className="flex items-center gap-1">
+                {panelMode === 'docked' && (
+                    <button
+                        onClick={handleDetach}
+                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                        title="Pop out panel"
+                    >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                    </button>
+                )}
+                {panelMode === 'floating' && (
+                    <button
+                        onClick={handlePin}
+                        className="p-1 text-[var(--accent-teal)] hover:text-[var(--accent-teal)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                        title="Pin panel back to dock"
+                    >
+                        <Pin className="w-3.5 h-3.5" />
+                    </button>
+                )}
+                <button
+                    onClick={handleClose}
+                    className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                >
+                    <X className="w-4 h-4" />
+                </button>
+            </div>
+        </div>
+    )
+
+    const panelContent = (
+        <div className="flex-1 min-h-0 overflow-hidden">
+            <ContextSectionContent section={activeNavSection} onClose={handleClose} />
+        </div>
+    )
+
+    if (panelMode === 'floating') {
+        return (
+            <motion.aside
+                className="studio-context-panel--floating bg-[var(--bg-secondary)] border border-[var(--border-default)] flex flex-col rounded-lg shadow-2xl overflow-hidden"
+                style={{
+                    position: 'fixed',
+                    left: panelPosition.x,
+                    top: panelPosition.y,
+                    width: contextPanelWidth,
+                    height: '70vh',
+                    zIndex: 50,
+                }}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            >
+                {panelHeader}
+                {panelContent}
+            </motion.aside>
+        )
+    }
+
+    return (
+        <motion.aside
+            className="studio-context-panel bg-[var(--bg-secondary)] border-l border-[var(--border-subtle)] flex flex-col relative shrink-0"
+            style={{ width: contextPanelWidth }}
+            initial={{ x: 20, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 20, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        >
+            <div
+                ref={resizeRef}
+                onMouseDown={startResize}
+                className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[var(--accent-teal)]/20 transition-colors z-10"
+            />
+            {panelHeader}
+            {panelContent}
+        </motion.aside>
+    )
+}
+
+// The content for a nav section (Bible, Songs & Hymns, Media, …). Shared so it
+// can render both in the sidebar (ContextPanel) and, when the sermon listener
+// displaces it from the sidebar, in the center split (LiveOutput).
+export function ContextSectionContent({
+    section,
+    onClose = () => {},
+}: {
+    section: NavSection
+    onClose?: () => void
+}) {
     const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
     const updateActiveSlide = useAppStore((s) => s.updateActiveSlide)
     const activeSchedule = useAppStore((s) => s.activeSchedule)
@@ -244,157 +353,51 @@ export function ContextPanel() {
         appendActiveSlide(slide)
     }
 
-    const INLINE_SECTIONS: NavSection[] = ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'sermon']
-    const showInline = activeNavSection && INLINE_SECTIONS.includes(activeNavSection)
-
-    if (!contextPanelOpen || !showInline || !activeNavSection) return null
-
-    const meta = SECTION_META[activeNavSection]
-    const SectionIcon = meta.icon
-
-    const panelHeader = (
-        <div
-            className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)] flex-shrink-0 bg-[var(--bg-tertiary)]/25"
-            onMouseDown={startDrag}
-            style={panelMode === 'floating' ? { cursor: 'grab' } : undefined}
-        >
-            <div className="flex items-center gap-2">
-                <SectionIcon className="w-4 h-4 text-[var(--accent-teal)]" />
-                <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                    {meta.title}
-                </h3>
-            </div>
-            <div className="flex items-center gap-1">
-                {panelMode === 'docked' && (
-                    <button
-                        onClick={handleDetach}
-                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-                        title="Pop out panel"
-                    >
-                        <Maximize2 className="w-3.5 h-3.5" />
-                    </button>
-                )}
-                {panelMode === 'floating' && (
-                    <button
-                        onClick={handlePin}
-                        className="p-1 text-[var(--accent-teal)] hover:text-[var(--accent-teal)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-                        title="Pin panel back to dock"
-                    >
-                        <Pin className="w-3.5 h-3.5" />
-                    </button>
-                )}
-                <button
-                    onClick={handleClose}
-                    className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-                >
-                    <X className="w-4 h-4" />
-                </button>
-            </div>
-        </div>
-    )
-
-    const panelContent = (
-        <div className="flex-1 min-h-0 overflow-hidden">
-            <AnimatePresence mode="wait">
-                <motion.div
-                    key={activeNavSection}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.2 }}
-                    className="h-full"
-                >
-                    {activeNavSection === 'bible' && (
-                        <div className="h-full">
-                            <BibleList isInline onClose={handleClose} />
-                        </div>
-                    )}
-                    {activeNavSection === 'music' && (
-                        <MusicBrowser onClose={handleClose} />
-                    )}
-                    {activeNavSection === 'sermon' && (
-                        <div className="h-full">
-                            <SermonListenerPanel onHide={handleClose} />
-                        </div>
-                    )}
-                    {activeNavSection === 'media' && (
-                        <div className="h-full">
-                            <MediaPicker
-                                isInline
-                                onSelect={handleMediaSelect}
-                            />
-                        </div>
-                    )}
-                    {activeNavSection === 'templates' && (
-                        <div className="h-full">
-                            <TemplateBrowser
-                                isInline
-                                onSelect={handleTemplateSelect}
-                            />
-                        </div>
-                    )}
-                    {activeNavSection === 'countdown' && (
-                        <div className="h-full">
-                            <AddCountdownModal
-                                isInline
-                                onAdd={handleCountdownCreate}
-                                editingSlide={editingSlide}
-                            />
-                        </div>
-                    )}
-                    {activeNavSection === 'alerts' && (
-                        <div className="h-full">
-                            <AddAlertModal
-                                isInline
-                                editingSlide={editingSlide}
-                            />
-                        </div>
-                    )}
-                </motion.div>
-            </AnimatePresence>
-        </div>
-    )
-
-    if (panelMode === 'floating') {
-        return (
-            <motion.aside
-                className="studio-context-panel--floating bg-[var(--bg-secondary)] border border-[var(--border-default)] flex flex-col rounded-lg shadow-2xl overflow-hidden"
-                style={{
-                    position: 'fixed',
-                    left: panelPosition.x,
-                    top: panelPosition.y,
-                    width: contextPanelWidth,
-                    height: '70vh',
-                    zIndex: 50,
-                }}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            >
-                {panelHeader}
-                {panelContent}
-            </motion.aside>
-        )
-    }
-
     return (
-        <motion.aside
-            className="studio-context-panel bg-[var(--bg-secondary)] border-l border-[var(--border-subtle)] flex flex-col relative shrink-0"
-            style={{ width: contextPanelWidth }}
-            initial={{ x: 20, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 20, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-        >
-            <div
-                ref={resizeRef}
-                onMouseDown={startResize}
-                className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[var(--accent-teal)]/20 transition-colors z-10"
-            />
-            {panelHeader}
-            {panelContent}
-        </motion.aside>
+        <AnimatePresence mode="wait">
+            <motion.div
+                key={section}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+                className="h-full"
+            >
+                {section === 'bible' && (
+                    <div className="h-full">
+                        <BibleList isInline onClose={onClose} />
+                    </div>
+                )}
+                {section === 'music' && (
+                    <MusicBrowser onClose={onClose} />
+                )}
+                {section === 'sermon' && (
+                    <div className="h-full">
+                        <SermonListenerPanel onHide={onClose} />
+                    </div>
+                )}
+                {section === 'media' && (
+                    <div className="h-full">
+                        <MediaPicker isInline onSelect={handleMediaSelect} />
+                    </div>
+                )}
+                {section === 'templates' && (
+                    <div className="h-full">
+                        <TemplateBrowser isInline onSelect={handleTemplateSelect} />
+                    </div>
+                )}
+                {section === 'countdown' && (
+                    <div className="h-full">
+                        <AddCountdownModal isInline onAdd={handleCountdownCreate} editingSlide={editingSlide} />
+                    </div>
+                )}
+                {section === 'alerts' && (
+                    <div className="h-full">
+                        <AddAlertModal isInline editingSlide={editingSlide} />
+                    </div>
+                )}
+            </motion.div>
+        </AnimatePresence>
     )
 }
 
@@ -407,6 +410,19 @@ interface UnifiedHit {
     hymn?: Hymn
 }
 
+// Subtitle under a result title — the author when it's meaningful, otherwise a
+// short lyrics preview for songs (many have "Unknown" authors), so the second
+// line helps you decide to Add / go Live instead of just reading "Unknown".
+function hitSubtitle(hit: UnifiedHit): string {
+    if (hit.kind === 'song' && hit.song) {
+        const artist = (hit.song.artist || '').trim()
+        if (artist && artist.toLowerCase() !== 'unknown') return artist
+        const preview = (hit.song.lyrics || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+        return preview || hit.subtitle
+    }
+    return hit.subtitle
+}
+
 function MusicBrowser({ onClose }: { onClose: () => void }) {
     // Songs first and selected by default — they're searched far more often
     // than hymns, and operators kept forgetting to switch to the Songs tab
@@ -417,11 +433,17 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
     // Empty query falls back to the per-tab browse lists below.
     const [query, setQuery] = useState('')
 
-    const { songs } = useSongs()
+    const { songs, deleteSong } = useSongs()
     const { getSong } = useSong()
     const { getAllHymns } = useHymn()
     const { createSongSlides, createHymnSlides } = useSlideCreation()
     const [hymns, setHymns] = useState<Hymn[]>([])
+    // Song to edit / delete straight from a search result — the browse list
+    // (which normally carries these actions) is hidden while searching, so
+    // without these you'd have to clear the query and scroll thousands of songs.
+    const [songToEdit, setSongToEdit] = useState<Song | null>(null)
+    const [songToDelete, setSongToDelete] = useState<Song | null>(null)
+    const [showAddSong, setShowAddSong] = useState(false)
     const searchInputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
@@ -497,9 +519,10 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
             {/* When a song is live, surface its verses for quick navigation. */}
             <LiveSongNavigator />
 
-            {/* Unified search across songs + hymns */}
-            <div className="p-2 border-b border-[var(--border-subtle)]">
-                <div className="relative">
+            {/* Unified search across songs + hymns, with a compact New-song
+                action on the same line to save vertical space. */}
+            <div className="p-2 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] w-4 h-4" />
                     <input
                         ref={searchInputRef}
@@ -520,6 +543,14 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                         </button>
                     )}
                 </div>
+                <button
+                    onClick={() => setShowAddSong(true)}
+                    title="New song"
+                    aria-label="New song"
+                    className="flex-shrink-0 flex items-center justify-center w-9 h-9 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
+                >
+                    <Plus className="w-4 h-4" />
+                </button>
             </div>
 
             {query.trim() ? (
@@ -530,7 +561,10 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                             No songs or hymns match “{query.trim()}”
                         </div>
                     ) : (
-                        <div className="space-y-0.5">
+                        <div
+                            className="grid gap-1"
+                            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}
+                        >
                             {results.map((hit) => (
                                 <div
                                     key={hit.id}
@@ -551,11 +585,32 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                                         </span>
                                         <span className="min-w-0 flex-1">
                                             <span className="block text-sm text-[var(--text-primary)] truncate">{hit.title}</span>
-                                            {hit.subtitle && (
-                                                <span className="block text-xs text-[var(--text-muted)] truncate">{hit.subtitle}</span>
+                                            {hitSubtitle(hit) && (
+                                                <span className="block text-xs text-[var(--text-muted)] truncate">{hitSubtitle(hit)}</span>
                                             )}
                                         </span>
                                     </button>
+                                    {/* Edit — songs only; opens the editor so you
+                                        can fix a song found via search without
+                                        clearing the query to reach the browse list. */}
+                                    {hit.kind === 'song' && hit.song && (
+                                        <>
+                                            <button
+                                                onClick={() => setSongToEdit(hit.song!)}
+                                                className="flex-shrink-0 p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] hidden group-hover:flex items-center justify-center"
+                                                title="Edit song"
+                                            >
+                                                <Edit className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={() => setSongToDelete(hit.song!)}
+                                                className="flex-shrink-0 p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/10 hidden group-hover:flex items-center justify-center"
+                                                title="Delete song"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </>
+                                    )}
                                     {/* Secondary: queue without projecting. */}
                                     <button
                                         onClick={() => void handleSelect(hit, false)}
@@ -613,6 +668,44 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                         )}
                     </div>
                 </>
+            )}
+
+            {/* Editor for a song opened from the search results, or a new song
+                started from the + button. */}
+            <AddSongModal
+                isOpen={songToEdit !== null || showAddSong}
+                song={songToEdit}
+                onClose={() => { setSongToEdit(null); setShowAddSong(false) }}
+                onSuccess={() => { setSongToEdit(null); setShowAddSong(false) }}
+            />
+
+            {/* Delete confirmation for a song removed from the search results. */}
+            {songToDelete && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="w-full max-w-sm bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-xl shadow-2xl p-6">
+                        <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">Delete Song?</h3>
+                        <p className="text-[var(--text-secondary)] mb-4">
+                            Delete &ldquo;{songToDelete.title}&rdquo;? This can&rsquo;t be undone.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setSongToDelete(null)}
+                                className="px-4 py-2 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    await deleteSong(songToDelete._id || songToDelete.id)
+                                    setSongToDelete(null)
+                                }}
+                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     )

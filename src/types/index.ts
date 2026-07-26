@@ -382,6 +382,10 @@ export interface DefaultBackgroundConfig {
 export interface AppSettings {
     appVersion: string
     defaultBibleVersion: string
+    /** Operator's preferred Bible-version order (version ids). Drives the
+     *  numbered version slots / chips on the live verse navigator; versions not
+     *  listed fall back after these in their default order. */
+    bibleVersionOrder?: string[]
     defaultFont: string
     defaultBackground: {
         default?: DefaultBackgroundConfig
@@ -431,6 +435,10 @@ export interface AppSettings {
         selectedMicrophoneId?: string
         /** Selected Whisper model id (catalog id, e.g. "base.en", "small.en"). */
         whisperModel?: string
+        /** Act on spoken commands ("next verse", "switch to NIV", …) heard in
+         *  the sermon audio. Defaults to on. The Bible panel's push-to-talk
+         *  search always honors commands regardless of this setting. */
+        enableVoiceCommands?: boolean
     }
     /**
      * Optional OpenAI-compatible LLM for transcript cleanup + verse extraction.

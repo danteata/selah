@@ -379,6 +379,21 @@ impl VadSegmenter {
     pub fn is_speaking(&self) -> bool {
         self.is_speaking
     }
+
+    /// The pre-roll (pre-speech ambience + onset frames) buffered for the
+    /// segment that just opened, EXCLUDING its trailing `exclude_len` samples.
+    ///
+    /// The batch path prepends the whole `pre_speech_buffer` to `speech_buffer`
+    /// on commit so the first word isn't clipped. A streaming consumer that
+    /// only starts feeding on the `is_speaking` false->true edge would miss
+    /// that pre-roll, so it should feed this prefix first. `exclude_len` is the
+    /// length of the current tick the caller is about to feed separately (the
+    /// pre-roll's tail overlaps it, since those samples were just pushed here),
+    /// so subtracting it avoids re-feeding that audio.
+    pub fn stream_prefill(&self, exclude_len: usize) -> &[f32] {
+        let end = self.pre_speech_buffer.len().saturating_sub(exclude_len);
+        &self.pre_speech_buffer[..end]
+    }
 }
 
 #[cfg(test)]

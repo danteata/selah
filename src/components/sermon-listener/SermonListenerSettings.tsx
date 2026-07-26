@@ -12,6 +12,23 @@ import { AudioLevelTest } from './AudioLevelTest'
 
 const CUSTOM_MODEL_OPTION = '__custom__'
 
+// The spoken phrases the sermon listener recognizes (see
+// services/sermon-listener/voiceCommandDetection). Shown as a quick reference
+// so operators know what they can say; phrasing is flexible — these are
+// representative examples, not the only accepted wording.
+const VOICE_COMMAND_EXAMPLES: { say: string; does: string }[] = [
+    { say: 'next verse', does: 'advance one verse' },
+    { say: 'previous verse', does: 'go back one verse' },
+    { say: 'next chapter', does: 'jump a chapter forward' },
+    { say: 'previous chapter', does: 'jump a chapter back' },
+    { say: 'go to verse 7', does: 'jump within the chapter' },
+    { say: 'open Psalm 23', does: 'load a reference' },
+    { say: 'switch to NIV', does: 'change Bible version' },
+    { say: 'put that up', does: 'send to live' },
+    { say: 'stop listening', does: 'pause the listener' },
+    { say: 'start listening', does: 'resume the listener' },
+]
+
 interface SermonListenerSettingsProps {
     onClose?: () => void
 }
@@ -182,6 +199,38 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         />
                     </button>
                 </div>
+
+                <div className="flex items-center justify-between">
+                    <div>
+                        <div className="font-medium text-gray-900 dark:text-white">Voice commands</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                            Act on phrases heard in the sermon — “next verse”, “switch to NIV”, “put that up”
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => update({ enableVoiceCommands: !(sermon?.enableVoiceCommands ?? true) })}
+                        className={`relative w-12 h-6 rounded-full transition-colors ${(sermon?.enableVoiceCommands ?? true) ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                        <span
+                            className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
+                            style={{ transform: (sermon?.enableVoiceCommands ?? true) ? 'translateX(28px)' : 'translateX(0)' }}
+                        />
+                    </button>
+                </div>
+
+                {(sermon?.enableVoiceCommands ?? true) && (
+                    <div className="rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 p-3">
+                        <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Things you can say</div>
+                        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
+                            {VOICE_COMMAND_EXAMPLES.map((ex) => (
+                                <li key={ex.say} className="flex items-baseline gap-1.5">
+                                    <span className="font-medium text-gray-800 dark:text-gray-200">“{ex.say}”</span>
+                                    <span className="opacity-70">— {ex.does}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
             </div>
 
             {/* Audio Source */}

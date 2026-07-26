@@ -13,6 +13,7 @@ import { SongMigrationWizard } from '../admin/SongMigrationWizard'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
+import { getVersion } from '@tauri-apps/api/app'
 import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
 
@@ -115,12 +116,12 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         >
             <div className="w-full max-w-4xl h-[600px] bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden flex">
                 {/* Sidebar */}
-                <div className="w-56 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center gap-2 p-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="w-56 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
+                    <div className="flex items-center gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
                         <Settings className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                         <h2 className="font-semibold text-gray-900 dark:text-white">Settings</h2>
                     </div>
-                    <nav className="p-2">
+                    <nav className="p-2 flex-1 overflow-y-auto">
                         {tabs.map((tab) => (
                             <button
                                 key={tab.id}
@@ -1244,6 +1245,10 @@ function ShortcutsSettings() {
         { keys: ['↑', '↓'], description: 'Navigate slides' },
         { keys: ['Space'], description: 'Toggle live slide' },
         { keys: ['Esc'], description: 'Close modals / Clear live' },
+        { keys: ['N', 'P'], description: 'Next / previous verse (bible slide)' },
+        { keys: ['0-9'], description: 'Go to verse on the live bible slide' },
+        { keys: ['`'], description: 'Edit reference — book · chapter · verse' },
+        { keys: ['V'], description: 'Bible version picker — then press its number' },
     ]
 
     return (
@@ -1280,12 +1285,20 @@ function ShortcutsSettings() {
 // running, lets them check on demand, and surfaces any update errors.
 function UpdatesSettings() {
     const { state, message, runCheck } = useAppUpdater()
-    const appVersion =
-        (typeof window !== 'undefined' && (window as any).__TAURI__?.metadata?.version) ||
-        (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__?.metadata?.version) ||
-        '0.1.0'
 
     const isDesktop = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+
+    // The old `window.__TAURI__.metadata.version` path isn't populated in
+    // Tauri v2, so it always fell through to the hardcoded "0.1.0". Read the
+    // real bundle version from the plugin API instead (same source App.tsx
+    // uses), falling back to the package version only if that call fails.
+    const [appVersion, setAppVersion] = useState('0.1.0')
+    useEffect(() => {
+        if (!isDesktop) return
+        getVersion().then(setAppVersion).catch(() => {
+            // Leave the fallback in place — version is informational only.
+        })
+    }, [isDesktop])
 
     if (!isDesktop) {
         return (

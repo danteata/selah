@@ -107,13 +107,8 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
         }
     }, [selectedHymn, createHymnSlides, appendActiveSlide, selectedTemplate, trackEvent])
 
-    if (loading) {
-        return (
-            <div className="h-full flex items-center justify-center">
-                <div className="animate-spin w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full" />
-            </div>
-        )
-    }
+    // No early-return spinner — the list body renders a skeleton while hymns
+    // load (see below), consistent with the songs list.
 
     return (
         <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
@@ -159,7 +154,20 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
             {/* Hymn List */}
             {!selectedHymn ? (
                 <div className="flex-1 overflow-y-auto">
-                    {filteredHymns.length === 0 ? (
+                    {loading && filteredHymns.length === 0 ? (
+                        /* Skeleton while hymns load — avoids a spinner / empty flash. */
+                        <div className="p-3 space-y-2.5">
+                            {Array.from({ length: 7 }).map((_, i) => (
+                                <div key={i} className="flex items-center gap-2 px-1 py-1.5">
+                                    <div className="flex-1 min-w-0 space-y-1.5">
+                                        <div className="h-3.5 rounded bg-gray-200 dark:bg-gray-800 animate-pulse" style={{ width: `${66 - (i % 3) * 14}%` }} />
+                                        <div className="h-2.5 w-1/4 rounded bg-gray-200/70 dark:bg-gray-800/70 animate-pulse" />
+                                    </div>
+                                    <div className="h-6 w-14 rounded-lg bg-gray-200 dark:bg-gray-800 animate-pulse flex-shrink-0" />
+                                </div>
+                            ))}
+                        </div>
+                    ) : filteredHymns.length === 0 ? (
                         <div className="p-8 text-center text-gray-500">
                             <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
                             <p>No hymns found</p>

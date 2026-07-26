@@ -75,3 +75,17 @@ When adding features to `useNativeMultiMonitor`, `ScreenPicker`, or `LiveOutput`
 ### Testing
 - Test files: `src/store/__tests__/sharedQueue.test.ts`, `src/hooks/__tests__/liveSessionSync.test.ts`, `src/hooks/__tests__/useNativeMultiMonitor.test.ts`
 - Key scenarios covered: queue sync backward compat (queue vs queuedSlideIds), operatorSlideIds operator-only sync, collaboration mode behaviors, session cleanup race conditions, screen detection mapping
+
+<!-- convex-ai-start -->
+
+This project uses [Convex](https://convex.dev) as its backend.
+
+When working on Convex code, **always read
+`convex/_generated/ai/guidelines.md` first** for important guidelines on
+how to correctly use Convex APIs and patterns. The file contains rules that
+override what you may have learned about Convex from training data.
+
+Convex agent skills for common tasks can be installed by running
+`npx convex ai-files install`.
+
+<!-- convex-ai-end -->

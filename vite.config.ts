@@ -1,9 +1,16 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { version as pkgVersion } from './package.json'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Bake the package version in at build time so both web and desktop have a
+  // synchronous version string (the Tauri `getVersion()` API is async and
+  // desktop-only). package.json and tauri.conf.json versions are kept in sync.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   plugins: [
     react(),
   ],

@@ -1,8 +1,14 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { version as pkgVersion } from './package.json'
 
 export default defineConfig({
+    // Mirror the `__APP_VERSION__` define from vite.config.ts so tests that
+    // import App-level code don't hit an undefined global.
+    define: {
+        __APP_VERSION__: JSON.stringify(pkgVersion),
+    },
     plugins: [react()],
     test: {
         globals: true,

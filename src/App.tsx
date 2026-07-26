@@ -170,7 +170,7 @@ function AppRoutes() {
         const start = Date.now()
         analytics.trackEvent(AnalyticsEventType.APP_INITIALIZED, {
             is_desktop: isDesktop(),
-            app_version: '0.1.0',
+            app_version: __APP_VERSION__,
         })
         analytics.trackEvent(AnalyticsEventType.APP_LOADED, {
             load_ms: Date.now() - start,

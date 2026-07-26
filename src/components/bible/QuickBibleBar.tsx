@@ -125,13 +125,6 @@ export function QuickBibleBar() {
         inputRef.current?.focus()
     }, [clearSemanticResults])
 
-    // Apply a reference produced by the inline stepper chips — keeps the text
-    // input in sync and re-fetches through the same path as a typed search.
-    const applyEditedReference = useCallback((next: ParsedBibleQuery) => {
-        setQuery(formatReferenceQuery(next.bookIndex, next.chapter, next.startVerse, next.endVerse))
-        void fetchAndSetScripture(next)
-    }, [fetchAndSetScripture])
-
     // Auto-fetch a valid reference as it's typed so the verse appears
     // instantly — no separate "search" keystroke, and Enter then presents it
     // in one press (mirrors the BibleList panel). Debounced so we don't fetch
@@ -211,6 +204,19 @@ export function QuickBibleBar() {
         }
     }, [query, fetchAndSetScripture, handleGoLive, handleAddToQueue])
 
+    // Apply a reference produced by the inline stepper chips — keeps the text
+    // input in sync and re-fetches through the same path as a typed search. On
+    // Enter (submit) it presents live; on Shift+Enter (queue) it adds to queue.
+    const applyEditedReference = useCallback((next: ParsedBibleQuery, opts?: { submit?: boolean; queue?: boolean }) => {
+        setQuery(formatReferenceQuery(next.bookIndex, next.chapter, next.startVerse, next.endVerse))
+        void fetchAndSetScripture(next).then(result => {
+            if (result && opts?.submit) {
+                if (opts.queue) handleAddToQueue(result)
+                else handleGoLive(result)
+            }
+        })
+    }, [fetchAndSetScripture, handleGoLive, handleAddToQueue])
+
     const navigateVerse = useCallback((direction: 'prev' | 'next') => {
         if (!currentPosition) return
         const range = currentPosition.endVerse - currentPosition.startVerse + 1
@@ -254,8 +260,10 @@ export function QuickBibleBar() {
             if (currentScripture) {
                 if (e.shiftKey) handleAddToQueue(currentScripture)
                 else handleGoLive(currentScripture)
-            } else if (focusedIndex >= 0 && semanticResults.length > 0) {
-                const r = semanticResults[focusedIndex]
+            } else if (semanticResults.length > 0) {
+                // Default to the first (highlighted) result when nothing has been
+                // explicitly focused yet, so Enter presents it without a prior keystroke.
+                const r = semanticResults[focusedIndex >= 0 ? focusedIndex : 0]
                 const label = `${r.bookNumber}:${r.chapter}:${r.verse}`
                 // Capture the modifier before the async gap.
                 const queue = e.shiftKey
@@ -321,10 +329,14 @@ export function QuickBibleBar() {
                     exit={{ y: -10, opacity: 0, scale: 0.98 }}
                     transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                 >
-                    <div className="bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden">
+                    <div className="relative bg-gradient-to-b from-[var(--bg-elevated)] to-[var(--bg-secondary)] border border-[var(--border-default)] rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden">
+                        {/* Teal accent hairline along the top edge */}
+                        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[var(--accent-teal)]/60 to-transparent" />
                         {/* Search input */}
-                        <div className="flex items-center gap-2 p-3 border-b border-[var(--border-subtle)]">
-                            <BookOpen className="w-4 h-4 text-[var(--accent-teal)] shrink-0" />
+                        <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[var(--border-subtle)]">
+                            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] shrink-0">
+                                <BookOpen className="w-4 h-4" />
+                            </div>
                             <input
                                 ref={inputRef}
                                 type="text"
@@ -336,12 +348,12 @@ export function QuickBibleBar() {
                                     setCurrentPosition(null)
                                 }}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Quick verse... (Enter = Present, Shift+Enter = Add to queue, Esc = back)"
-                                className="flex-1 bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none text-sm"
+                                placeholder="Search a verse or by meaning…"
+                                className="flex-1 bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none text-base"
                             />
                             {query && (
-                                <button onClick={() => { setQuery(''); setCurrentScripture(null); setCurrentPosition(null); setNeighboringVerses({ prev: [], next: [] }) }} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                                    <X className="w-3.5 h-3.5" />
+                                <button onClick={() => { setQuery(''); setCurrentScripture(null); setCurrentPosition(null); setNeighboringVerses({ prev: [], next: [] }) }} className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors shrink-0">
+                                    <X className="w-4 h-4" />
                                 </button>
                             )}
                             {loading && <Loader2 className="w-4 h-4 text-[var(--accent-teal)] animate-spin shrink-0" />}
@@ -494,9 +506,28 @@ export function QuickBibleBar() {
                                     </div>
                                 )
                         )}
+
+                        {/* Shortcut hints — moved out of the input placeholder so
+                            the field stays clean while the actions stay visible. */}
+                        <div className="flex items-center gap-3 px-4 py-2.5 border-t border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/30 text-[10px] text-[var(--text-muted)]">
+                            <span className="flex items-center gap-1.5">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-medium">Enter</kbd>
+                                Present
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-medium">⇧ Enter</kbd>
+                                Queue
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                                <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-medium">Esc</kbd>
+                                Back
+                            </span>
+                        </div>
                     </div>
-                    <div className="text-center mt-2 text-[10px] text-white/30">
-                        <kbd className="px-1 py-0.5 bg-white/10 rounded text-[9px]">Ctrl+B</kbd> to toggle &middot; <kbd className="px-1 py-0.5 bg-white/10 rounded text-[9px]">↑↓</kbd> navigate
+                    <div className="text-center mt-2.5 text-[10px] text-[var(--text-muted)]/60">
+                        <kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[9px]">Ctrl+B</kbd> to toggle
+                        <span className="mx-1.5">&middot;</span>
+                        <kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[9px]">↑↓</kbd> navigate
                     </div>
                 </motion.div>
             </motion.div>

@@ -70,20 +70,36 @@ describe('ReferenceEditor', () => {
         fireEvent.focus(input)
         fireEvent.change(input, { target: { value: '10' } })
         fireEvent.blur(input)
-        expect(onChange).toHaveBeenCalledWith({
-            bookIndex: 43, bookName: 'John', chapter: 10, startVerse: 1, endVerse: 1,
-        })
+        // Blur commits without presenting (submit: false).
+        expect(onChange).toHaveBeenCalledWith(
+            { bookIndex: 43, bookName: 'John', chapter: 10, startVerse: 1, endVerse: 1 },
+            { submit: false, queue: false },
+        )
     })
 
-    it('lets you type a verse number directly and commits on Enter', () => {
+    it('lets you type a verse number directly and commits + presents on Enter', () => {
         const { onChange } = renderEditor()
         const input = screen.getByLabelText('Verse 16')
         fireEvent.focus(input)
         fireEvent.change(input, { target: { value: '5' } })
         fireEvent.keyDown(input, { key: 'Enter' })
-        expect(onChange).toHaveBeenCalledWith({
-            bookIndex: 43, bookName: 'John', chapter: 3, startVerse: 5, endVerse: 5,
-        })
+        // Enter submits (present live); Shift+Enter would set queue: true.
+        expect(onChange).toHaveBeenCalledWith(
+            { bookIndex: 43, bookName: 'John', chapter: 3, startVerse: 5, endVerse: 5 },
+            { submit: true, queue: false },
+        )
+    })
+
+    it('adds to queue on Shift+Enter', () => {
+        const { onChange } = renderEditor()
+        const input = screen.getByLabelText('Verse 16')
+        fireEvent.focus(input)
+        fireEvent.change(input, { target: { value: '5' } })
+        fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+        expect(onChange).toHaveBeenCalledWith(
+            { bookIndex: 43, bookName: 'John', chapter: 3, startVerse: 5, endVerse: 5 },
+            { submit: true, queue: true },
+        )
     })
 
     it('strips non-digit characters while typing', () => {

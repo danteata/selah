@@ -62,7 +62,13 @@ export function LiveSongNavigator() {
                     {artist && <span className="block text-[10px] text-[var(--text-muted)] truncate">{artist}</span>}
                 </div>
             </div>
-            <div className="max-h-80 overflow-y-auto px-2 pb-2 flex flex-col gap-1 custom-scrollbar">
+            {/* Responsive auto-fill grid: a single column in the narrow sidebar,
+                several columns in the wide center — so it uses the width instead
+                of stacking into a tall single column. */}
+            <div
+                className="max-h-52 overflow-y-auto px-2 pb-2 grid gap-1 custom-scrollbar"
+                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}
+            >
                 {verses.map((slide) => {
                     const isLive = liveSlideId === slide.id
                     return (
@@ -70,12 +76,12 @@ export function LiveSongNavigator() {
                             key={slide.id}
                             ref={isLive ? liveVerseRef : undefined}
                             onClick={() => goLive(slide.id)}
-                            className={`text-left p-2 rounded-lg border transition-colors ${isLive
+                            className={`text-left px-2 py-1.5 rounded-lg border transition-colors ${isLive
                                 ? 'border-red-500/40 bg-red-500/10'
                                 : 'border-transparent hover:bg-[var(--bg-tertiary)]/70'
                                 }`}
                         >
-                            <div className="flex items-center gap-2 mb-0.5">
+                            <div className="flex items-center gap-2">
                                 <span className={`text-[11px] font-semibold ${isLive ? 'text-red-500' : 'text-[var(--accent-teal)]'}`}>
                                     {slide.verseLabel || `Verse ${(slide.verseIndex ?? 0) + 1}`}
                                 </span>
@@ -86,7 +92,7 @@ export function LiveSongNavigator() {
                                 )}
                             </div>
                             <div
-                                className="text-[11px] text-[var(--text-secondary)] line-clamp-2 [&_*]:!text-[11px] [&_*]:!leading-snug"
+                                className="text-[11px] text-[var(--text-secondary)] line-clamp-1 [&_*]:!text-[11px] [&_*]:!leading-snug"
                                 dangerouslySetInnerHTML={{ __html: slide.contents[0] || '' }}
                             />
                         </button>

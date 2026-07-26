@@ -156,14 +156,17 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
         setSongToEdit(null)
     }, [])
 
-    const isLoading = songsLoading && songs.length === 0
+    // No early-return spinner here — the list body renders a skeleton while
+    // songs load (see below), which is steadier than a full-panel spinner.
 
-    if (isLoading) {
-        return (
-            <div className="h-full flex items-center justify-center">
-                <div className="animate-spin w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full" />
-            </div>
-        )
+    // Subtitle under the title: the author when known, otherwise a short lyrics
+    // preview (so many "Unknown" authors don't leave a useless line — you can
+    // decide from the first line whether to add / go live).
+    const songSubtitle = (song: Song): string => {
+        const artist = (song.artist || '').trim()
+        if (artist && artist.toLowerCase() !== 'unknown') return artist
+        const preview = (song.lyrics || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+        return preview || artist || 'Unknown'
     }
 
     return (
@@ -194,43 +197,38 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                     </div>
                 )}
 
-                {/* Search — hidden when a parent (unified MusicBrowser) owns it. */}
-                {!(hideSearch && !isInline) && (
+                {/* Search — hidden when a parent (unified MusicBrowser) owns it,
+                    which also owns the New-song action, so nothing renders here. */}
+                {!hideSearch && (
                     <div className="p-4 border-b border-gray-200 dark:border-gray-800">
                         <div className="flex items-center gap-2">
-                            {!hideSearch && (
-                                <div className="relative flex-1">
-                                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                                    <input
-                                        type="text"
-                                        value={voice.isListening ? voice.transcript : query}
-                                        onChange={(e) => setQuery(e.target.value)}
-                                        placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                                <input
+                                    type="text"
+                                    value={voice.isListening ? voice.transcript : query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    placeholder={voice.isListening ? 'Listening…' : 'Search songs…'}
                                     className="w-full pl-10 pr-10 py-2 border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                />
+                                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                                    <VoiceSearchButton
+                                        isListening={voice.isListening}
+                                        isSupported={voice.isSupported}
+                                        error={voice.error}
+                                        onClick={voice.isListening ? voice.stop : voice.start}
                                     />
-                                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                                        <VoiceSearchButton
-                                            isListening={voice.isListening}
-                                            isSupported={voice.isSupported}
-                                            error={voice.error}
-                                            onClick={voice.isListening ? voice.stop : voice.start}
-                                        />
-                                    </div>
                                 </div>
-                            )}
-                            {/* Inline mode hides the header, so surface a persistent
-                                New-song button here — otherwise, once the list loads,
-                                there's no way to create a song (the empty-state button
-                                vanishes as soon as any song appears). */}
+                            </div>
+                            {/* Compact New-song button, same height as the input. */}
                             {isInline && (
                                 <button
                                     onClick={() => setIsAddModalOpen(true)}
                                     title="New song"
                                     aria-label="New song"
-                                    className={`flex items-center gap-1 px-2.5 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm ${hideSearch ? 'w-full justify-center' : 'flex-shrink-0'}`}
+                                    className="flex-shrink-0 flex items-center justify-center w-10 h-10 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 transition-all shadow-sm"
                                 >
                                     <Plus className="w-4 h-4" />
-                                    <span className="text-sm font-medium">New Song</span>
                                 </button>
                             )}
                         </div>
@@ -240,7 +238,24 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                 {/* Songs List */}
                 {!selectedSong ? (
                     <div className="flex-1 overflow-y-auto">
-                        {filteredSongs.length === 0 ? (
+                        {songsLoading && filteredSongs.length === 0 ? (
+                            /* Skeleton while the library loads — avoids flashing the
+                               deceptive "No songs yet" state before songs arrive. */
+                            <div className="p-3 space-y-2.5">
+                                {Array.from({ length: 7 }).map((_, i) => (
+                                    <div key={i} className="flex items-center gap-2 px-1 py-1.5">
+                                        <div className="flex-1 min-w-0 space-y-1.5">
+                                            <div
+                                                className="h-3.5 rounded bg-gray-200 dark:bg-gray-800 animate-pulse"
+                                                style={{ width: `${66 - (i % 3) * 14}%` }}
+                                            />
+                                            <div className="h-2.5 w-1/4 rounded bg-gray-200/70 dark:bg-gray-800/70 animate-pulse" />
+                                        </div>
+                                        <div className="h-6 w-14 rounded-lg bg-gray-200 dark:bg-gray-800 animate-pulse flex-shrink-0" />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : filteredSongs.length === 0 ? (
                             <div className="p-8 text-center text-gray-500">
                                 <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
                                 <p className="font-medium">
@@ -272,12 +287,31 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                             onClick={() => setSelectedSong(song)}
                                             className="flex-1 text-left"
                                         >
-                                            <h3 className="font-medium text-gray-900 dark:text-white">
+                                            <h3 className="font-medium text-gray-900 dark:text-white truncate">
                                                 {song.title}
                                             </h3>
-                                            <p className="text-sm text-gray-500">{song.artist}</p>
+                                            <p className="text-sm text-gray-500 truncate">{songSubtitle(song)}</p>
                                         </button>
                                         <div className="flex items-center gap-1">
+                                            {/* Edit/delete are PREPENDED and reveal on
+                                                hover, so Add/Live stay pinned at the far
+                                                right (consistent with the results list). */}
+                                            <div className="hidden group-hover:flex items-center gap-1">
+                                                <button
+                                                    onClick={() => handleEditSong(song)}
+                                                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+                                                    title="Edit song"
+                                                >
+                                                    <Edit className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteConfirmId(song._id || song.id)}
+                                                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                                    title="Delete song"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                             {/* Quick actions — always visible so you can
                                                 go live in one click without the detail view. */}
                                             <button
@@ -298,22 +332,6 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                                     Live
                                                 </button>
                                             )}
-                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleEditSong(song)}
-                                                    className="p-2 text-gray-500 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
-                                                    title="Edit song"
-                                                >
-                                                    <Edit className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => setDeleteConfirmId(song._id || song.id)}
-                                                    className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
-                                                    title="Delete song"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
                                         </div>
                                     </div>
                                 ))}
