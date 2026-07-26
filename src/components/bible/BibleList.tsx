@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
-import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2 } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2, AlignJustify } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { generateSlideContent, calculateScreenFontSize, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
@@ -21,7 +21,7 @@ import { bibleBooks, bibleVersionObjects } from '../../types'
 import { parseBibleQuery, getRankedBookSuggestions, buildVerseRows as buildVerseRowsUtil, normalizeBibleReference, type BibleVerseLike, type ParsedBibleQuery } from '../../utils/bibleReference'
 import type { VerseRow as VerseRowType } from '../../utils/bibleReference'
 import { BookAutocomplete } from './BookAutocomplete'
-import { ReferenceEditor } from './ReferenceEditor'
+import { ReferenceEditor, type ReferenceEditorHandle } from './ReferenceEditor'
 
 const RECENT_VERSES_KEY = 'selah-recent-verses'
 const MAX_RECENT = 5
@@ -41,6 +41,18 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const [query, setQuery] = useState(initialQuery || biblePanelQuery || '')
     const [loading, setLoading] = useState(false)
     const [selectedVersion, setSelectedVersion] = useState<string>('')
+    const [showShortcuts, setShowShortcuts] = useState(false)
+    const [showRecent, setShowRecent] = useState(false)
+    // Imperative handle to the book/chapter/verse steppers, so Tab (from the
+    // search input) and the ` shortcut can jump straight into fast editing.
+    const refEditorRef = useRef<ReferenceEditorHandle | null>(null)
+    // Result density (comfortable = full verse text; compact = clamped rows),
+    // persisted like the slide-queue density.
+    const [density, setDensity] = useState<'comfortable' | 'compact'>(() =>
+        (typeof window !== 'undefined' && localStorage.getItem('selah-bible-density') === 'compact') ? 'compact' : 'comfortable'
+    )
+    useEffect(() => { localStorage.setItem('selah-bible-density', density) }, [density])
+    const compact = density === 'compact'
     const [showSuggestions, setShowSuggestions] = useState(false)
     const [suggestionIndex, setSuggestionIndex] = useState(0)
     const [currentBookIndex, setCurrentBookIndex] = useState<number | null>(null)
@@ -77,6 +89,10 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     // keyboard search would produce.
     const loadVerseWithNeighborsRef = useRef<
         ((bookIndex: number, chapter: number, verse: number) => Promise<void>) | null
+    >(null)
+    // Same pattern for `addToQueue` — Shift+Enter on the reference editor queues.
+    const addToQueueRef = useRef<
+        ((bookIndex: number, chapter: number, verse: number, preText?: string) => Promise<void>) | null
     >(null)
     const [recentVerses, setRecentVerses] = useState<string[]>(() => {
         try {
@@ -348,13 +364,12 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     useEffect(() => { setFocusedIndex(-1) }, [semanticResults, currentVerses, neighborVerses])
     useEffect(() => {
         const rows = buildVerseRows()
+        // Whenever result rows are on screen, focus one by default so Enter
+        // presents it and ↑/↓ navigate immediately — no throwaway "search"
+        // keystroke first. Prefer the looked-up verse when we have one.
         if (rows.length === 0 || focusedIndex !== -1) return
-        if (hasSearched) {
-            const currentIdx = rows.findIndex(r => r.isCurrent)
-            setFocusedIndex(currentIdx >= 0 ? currentIdx : 0)
-        } else if (semanticResults.length > 0) {
-            setFocusedIndex(0)
-        }
+        const currentIdx = rows.findIndex(r => r.isCurrent)
+        setFocusedIndex(currentIdx >= 0 ? currentIdx : 0)
     })
 
     // Only offer book autocomplete while the user is still typing the book
@@ -400,8 +415,18 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
     // Apply a reference produced by the inline stepper chips — reuses the
     // same single-verse load path as clicking a result row.
-    const applyEditedReference = useCallback((next: ParsedBibleQuery) => {
-        loadVerseWithNeighborsRef.current?.(next.bookIndex, next.chapter, next.startVerse)
+    const applyEditedReference = useCallback((next: ParsedBibleQuery, opts?: { submit?: boolean; queue?: boolean }) => {
+        // Mirror the search box: Enter presents live, Shift+Enter adds to queue,
+        // a plain edit just loads the verse into the view. (goLiveWithScripture
+        // reveals the verse itself; the queue path reveals it explicitly.)
+        if (opts?.submit && opts.queue) {
+            loadVerseWithNeighborsRef.current?.(next.bookIndex, next.chapter, next.startVerse)
+            void addToQueueRef.current?.(next.bookIndex, next.chapter, next.startVerse)
+        } else if (opts?.submit) {
+            void goLiveWithScriptureRef.current?.(next.bookIndex, next.chapter, next.startVerse)
+        } else {
+            loadVerseWithNeighborsRef.current?.(next.bookIndex, next.chapter, next.startVerse)
+        }
     }, [])
 
     const addRecentVerse = useCallback((ref: string) => {
@@ -593,6 +618,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             }
         }
     }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, addRecentVerse, isConnected, isStrict, addToSharedQueue])
+    addToQueueRef.current = addToQueue
 
     const loadVerseWithNeighbors = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
         navigatingRef.current = true
@@ -802,6 +828,17 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     }, [hasSearched, query, suggestionsOpen, hasEmbeddings])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+        // Backtick jumps straight into the book/chapter/verse steppers, even
+        // from inside the search box — no Bible query ever contains a `, so we
+        // swallow it here rather than making the operator escape the field first.
+        if (e.key === '`') {
+            e.preventDefault()
+            // Stop the event before the global ` listener also fires (it would
+            // see focus already inside the editor and cycle a second time).
+            e.stopPropagation()
+            if (refEditorRef.current) refEditorRef.current.cycle()
+            return
+        }
         // While the book autocomplete is open, ↑/↓/Tab/Enter drive the
         // suggestions (not the result rows or version cycling). Tab and
         // ArrowRight also accept the inline ghost completion.
@@ -826,8 +863,10 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
         if (e.key === 'Enter') {
             e.preventDefault()
-            if (focusedIndex >= 0 && verseRows.length > 0) {
-                const row = verseRows[focusedIndex]
+            if (verseRows.length > 0) {
+                // Act on the focused row, defaulting to the first when nothing has
+                // been explicitly focused yet (rows are shown with one highlighted).
+                const row = verseRows[focusedIndex >= 0 ? focusedIndex : 0]
                 // Contract: Enter = present now, Shift+Enter = add to queue.
                 // goLiveWithScripture already reveals the verse + neighbors, so
                 // a semantic row needs no separate load step here.
@@ -858,12 +897,30 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             } else {
                 onClose()
             }
-        } else if (e.key === 'Tab') {
-            e.preventDefault()
-            const ci = bibleVersionObjects.findIndex(v => v.id === selectedVersion)
-            setSelectedVersion(bibleVersionObjects[(ci + 1) % bibleVersionObjects.length].id)
         }
-    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, onClose, selectedVersion, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion, ghostCompletion])
+        // Tab is left to the browser's normal focus traversal — use the `
+        // backtick shortcut to jump into the book/chapter/verse steppers instead.
+    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, onClose, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion, ghostCompletion])
+
+    // Global ` shortcut — jump into the book/chapter/verse steppers, advancing
+    // book → chapter → verse on each press, even when the search box isn't focused
+    // (but not while typing in some OTHER field — the editor's own numeric steppers
+    // strip the char, so firing from inside them is safe). Version switching lives
+    // on the live verse navigator (v / ⇧V there) to avoid two owners of the key.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== '`' || e.metaKey || e.ctrlKey || e.altKey) return
+            const editor = refEditorRef.current
+            if (!editor) return
+            const t = e.target as (HTMLElement & Node) | null
+            const inEditor = editor.contains(t)
+            if (!inEditor && t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+            e.preventDefault()
+            editor.cycle()
+        }
+        document.addEventListener('keydown', onKey)
+        return () => document.removeEventListener('keydown', onKey)
+    }, [])
 
     const handleRecentVerseClick = useCallback((ref: string) => {
         setQuery(ref)
@@ -899,28 +956,54 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 </div>
             )}
 
-            {/* Recent Verses Strip */}
+            {/* Recent Verses — collapsed to a single toggle by default; expands
+                to a one-line scroll strip so it never wraps into several rows. */}
             {recentVerses.length > 0 && (
-                <div className="px-3 pt-3 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] shrink-0 mr-0.5">Recent</span>
-                    {recentVerses.map((ref) => (
-                        <button key={ref} onClick={() => handleRecentVerseClick(ref)} className="group relative px-2 py-0.5 text-[11px] font-medium bg-[var(--bg-tertiary)]/70 hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-full border border-[var(--border-subtle)] transition-colors">
-                            {ref}
-                            <span onClick={(e) => { e.stopPropagation(); handleRecentVerseGoLive(ref) }} className="ml-1 inline-flex text-[var(--accent-teal)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" title="Present">
-                                <Zap className="w-2.5 h-2.5" />
-                            </span>
-                        </button>
-                    ))}
-                    <button onClick={() => { setRecentVerses([]); try { localStorage.removeItem(RECENT_VERSES_KEY) } catch { } }} className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">clear</button>
+                <div className="px-3 pt-1.5 pb-0.5">
+                    <button
+                        onClick={() => setShowRecent((s) => !s)}
+                        aria-expanded={showRecent}
+                        className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                    >
+                        Recent ({recentVerses.length})
+                        <span className={`transition-transform ${showRecent ? 'rotate-90' : ''}`}>&rsaquo;</span>
+                    </button>
+                    {showRecent && (
+                        <div className="mt-1.5 flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1">
+                            {recentVerses.map((ref) => (
+                                <button key={ref} onClick={() => handleRecentVerseClick(ref)} className="group relative shrink-0 px-2 py-0.5 text-[11px] font-medium bg-[var(--bg-tertiary)]/70 hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-full border border-[var(--border-subtle)] transition-colors">
+                                    {ref}
+                                    <span onClick={(e) => { e.stopPropagation(); handleRecentVerseGoLive(ref) }} className="ml-1 inline-flex text-[var(--accent-teal)] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer" title="Present">
+                                        <Zap className="w-2.5 h-2.5" />
+                                    </span>
+                                </button>
+                            ))}
+                            <button onClick={() => { setRecentVerses([]); try { localStorage.removeItem(RECENT_VERSES_KEY) } catch { } }} className="shrink-0 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">clear</button>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* Search bar — always visible */}
             <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70">
-                <div className="relative flex items-center gap-2">
-                    <select value={selectedVersion} onChange={(e) => changeVersion(e.target.value)} className="shrink-0 px-2 py-2.5 text-xs font-medium rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none appearance-none cursor-pointer">
-                        {bibleVersionObjects.map((v) => (<option key={v.id} value={v.id}>{v.id}</option>))}
-                    </select>
+                <div className="relative flex items-stretch gap-2">
+                    {/* Version switcher with a small "shortcuts" toggle beneath it —
+                        together they match the input height without stealing its
+                        width; the help text collapses in/out below the row. */}
+                    <div className="shrink-0 flex flex-col justify-between">
+                        <select value={selectedVersion} onChange={(e) => changeVersion(e.target.value)} className="px-2 py-1.5 text-xs font-medium rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-default)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none appearance-none cursor-pointer">
+                            {bibleVersionObjects.map((v) => (<option key={v.id} value={v.id}>{v.id}</option>))}
+                        </select>
+                        <button
+                            type="button"
+                            onClick={() => setShowShortcuts((s) => !s)}
+                            aria-expanded={showShortcuts}
+                            className={`inline-flex items-center justify-center gap-0.5 text-[9px] font-bold uppercase tracking-[0.1em] transition-colors ${showShortcuts ? 'text-[var(--accent-teal)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+                        >
+                            shortcuts
+                            <span className={`transition-transform ${showShortcuts ? 'rotate-90' : ''}`}>&rsaquo;</span>
+                        </button>
+                    </div>
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--text-muted)] w-4 h-4" />
                         <input ref={inputRef} type="text" value={voice.isListening ? voice.transcript : query} onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true); setSuggestionIndex(0); if (hasSearched) { setHasSearched(false); setCurrentVerses([]); setNeighborVerses({ prev: [], next: [] }); setCurrentBookIndex(null); setCurrentChapter(null); setCurrentStartVerse(null); setCurrentEndVerse(null); setActiveVerseKey(null); lastSearchedRef.current = null } }} onKeyDown={handleKeyDown} onFocus={() => setShowSuggestions(true)} placeholder={voice.isListening ? 'Listening…' : 'e.g. John 3:16 or "God so loved"'} className="w-full pl-9 pr-20 py-2.5 border border-[var(--border-default)] rounded-lg focus:ring-2 focus:ring-[var(--accent-teal)]/30 outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] transition-all placeholder:text-[var(--text-muted)]" />
@@ -953,6 +1036,16 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                         </div>
                     </div>
                 </div>
+
+                {showShortcuts && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-[var(--text-muted)]">
+                        <span>Auto-searches as you type</span>
+                        <span>Enter = Present</span>
+                        <span>Shift+Enter = Add to queue</span>
+                        <span>↑↓ Navigate</span>
+                        <span>` = edit book·chapter·verse</span>
+                    </div>
+                )}
 
                 {suggestionsOpen && (
                     <div className="relative mt-2">
@@ -1000,6 +1093,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                             <button onClick={() => navigateVerse('prev')} title="Previous verses" className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronLeft className="w-4 h-4" /></button>
                             <button onClick={() => navigateVerse('next')} title="Next verses" className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-secondary)] transition-colors"><ChevronRight className="w-4 h-4" /></button>
                             <ReferenceEditor
+                                ref={refEditorRef}
                                 bookIndex={currentBookIndex}
                                 chapter={currentChapter}
                                 startVerse={currentStartVerse}
@@ -1014,18 +1108,6 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                     </div>
                 )}
 
-                <details className="group mt-2 text-[10px] text-[var(--text-muted)]">
-                    <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-md px-1 py-0.5 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]">
-                        Shortcuts
-                        <span className="transition-transform group-open:rotate-90">&gt;</span>
-                    </summary>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
-                        <span>Auto-searches as you type</span>
-                        <span>Enter = Present</span>
-                        <span>Shift+Enter = Add to queue</span>
-                        <span>↑↓ Navigate</span>
-                    </div>
-                </details>
             </div>
 
             {/* Detected Verses from Sermon Listener */}
@@ -1038,21 +1120,36 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 onMouseLeave={() => setFocusedIndex(-1)}
             >
                 {loading && (
-                    <div className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--text-muted)]">
-                        <Loader2 className="w-4 h-4 animate-spin text-[var(--accent-teal)]" /> Loading...
+                    /* Skeleton verse rows while a search / fetch runs — steadier
+                       than a spinner and matches the result rows' shape. */
+                    <div className="px-2 py-2 space-y-1.5">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                            <div key={i} className="px-1 py-1.5 space-y-1.5">
+                                <div className="h-3 rounded bg-[var(--bg-tertiary)] animate-pulse" style={{ width: `${28 + (i % 3) * 12}%` }} />
+                                <div className="h-2.5 rounded bg-[var(--bg-tertiary)]/70 animate-pulse" style={{ width: `${88 - (i % 4) * 9}%` }} />
+                            </div>
+                        ))}
                     </div>
                 )}
 
                 {verseRows.length > 0 && !loading && (
                     <div className="px-2 py-1 space-y-1">
-                        {hasSearched && (
-                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-teal)] px-1 py-1">
-                                {bibleBooks[currentBookIndex! - 1]} {currentChapter}
+                        <div className="flex items-center justify-between px-1 py-1">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-teal)]">
+                                {hasSearched ? `${bibleBooks[currentBookIndex! - 1]} ${currentChapter}` : 'Search Results'}
                             </div>
-                        )}
-                        {!hasSearched && (
-                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent-teal)] px-1 py-1">Search Results</div>
-                        )}
+                            <button
+                                onClick={() => setDensity((d) => (d === 'compact' ? 'comfortable' : 'compact'))}
+                                title={compact ? 'Comfortable rows' : 'Compact rows'}
+                                aria-label="Toggle result density"
+                                className={`p-1 rounded transition-colors ${compact
+                                    ? 'text-[var(--accent-teal)] bg-[var(--accent-teal)]/10'
+                                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+                                    }`}
+                            >
+                                <AlignJustify className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
                         {verseRows.map((row, index) => {
                             const verseKey = `${row.bookIndex}:${row.chapter}:${row.verse}`
                             const isActive = activeVerseKey === verseKey
@@ -1083,8 +1180,8 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                         onClick={handleRowClick}
                                         onMouseEnter={() => setFocusedIndex(index)}
                                     >
-                                        <div className="px-3 py-2.5">
-                                            <div className="flex items-start gap-2 mb-1">
+                                        <div className={compact ? 'px-2.5 py-1.5' : 'px-3 py-2.5'}>
+                                            <div className={`flex items-start gap-2 ${compact ? 'mb-0.5' : 'mb-1'}`}>
                                                 <span className={`text-sm font-bold shrink-0 leading-5 tabular-nums ${isActive || row.isCurrent ? 'text-[var(--accent-teal)]' : 'text-[var(--text-secondary)]'}`}>
                                                     {row.displayLabel}
                                                 </span>
@@ -1120,7 +1217,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                     </button>
                                                 </div>
                                             </div>
-                                            <p className={`text-xs leading-relaxed ${isActive || row.isCurrent ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)]'}`}>
+                                            <p className={`text-xs ${compact ? 'leading-snug line-clamp-2' : 'leading-relaxed'} ${isActive || row.isCurrent ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)]'}`}>
                                                 {row.scripture}
                                             </p>
                                         </div>

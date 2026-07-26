@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Loader2, Database, Search, RefreshCw, Trash2 } from 'lucide-react'
+import { Loader2, Database, Search, RefreshCw, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useScripture } from '../../hooks/useScripture'
 import type { BibleVersion } from '../../types'
@@ -41,8 +41,30 @@ export function BibleVersionSettings() {
 
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
+    const bibleVersionOrder = useAppStore((state) => state.settings.bibleVersionOrder)
+    const setBibleVersionOrder = useAppStore((state) => state.setBibleVersionOrder)
     const { downloadBibleVersion, isVersionDownloaded } = useScripture()
     const [statusesLoading, setStatusesLoading] = useState(true)
+    const [dragIndex, setDragIndex] = useState<number | null>(null)
+
+    // Downloaded versions in the operator's saved order (preferred ids first,
+    // then any remaining downloaded ones) — matches the live navigator's slots.
+    const orderedDownloaded = useMemo(() => {
+        const downloaded = bibleVersionOptions.filter(v => v.isDownloaded).map(v => v.id)
+        const pref = (bibleVersionOrder ?? []).filter(id => downloaded.includes(id))
+        const rest = downloaded.filter(id => !pref.includes(id))
+        return [...pref, ...rest]
+    }, [bibleVersionOptions, bibleVersionOrder])
+
+    const versionName = useCallback((id: string) => bibleVersionOptions.find(v => v.id === id)?.name ?? id, [bibleVersionOptions])
+
+    const moveVersion = useCallback((from: number, to: number) => {
+        if (from === to || from < 0 || to < 0) return
+        const next = [...orderedDownloaded]
+        const [moved] = next.splice(from, 1)
+        next.splice(to, 0, moved)
+        setBibleVersionOrder(next)
+    }, [orderedDownloaded, setBibleVersionOrder])
 
     useEffect(() => {
         if (bibleVersions && bibleVersions.length > 0) {
@@ -140,6 +162,59 @@ export function BibleVersionSettings() {
                     </select>
                 )}
             </div>
+
+            {orderedDownloaded.length > 1 && (
+                <div className="pb-4 border-b border-gray-200 dark:border-gray-700">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Version order
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                        Drag to arrange. The numbers are the quick-switch slots on the live verse
+                        navigator — press <kbd className="px-1 rounded bg-gray-200 dark:bg-gray-700">v</kbd> then the number to jump straight to that version. The first three also appear as chips.
+                    </p>
+                    <ul className="space-y-1">
+                        {orderedDownloaded.map((id, i) => (
+                            <li
+                                key={id}
+                                draggable
+                                onDragStart={(e) => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)) }}
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                                onDrop={(e) => { e.preventDefault(); const from = dragIndex ?? parseInt(e.dataTransfer.getData('text/plain'), 10); if (!Number.isNaN(from)) moveVersion(from, i); setDragIndex(null) }}
+                                onDragEnd={() => setDragIndex(null)}
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition-colors ${
+                                    dragIndex === i
+                                        ? 'border-primary-500 bg-primary-500/5 opacity-60'
+                                        : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-300 dark:hover:border-gray-600'
+                                }`}
+                            >
+                                <span className="w-5 text-center text-xs font-bold tabular-nums text-primary-600 dark:text-primary-400">{i + 1}</span>
+                                <GripVertical className="w-3.5 h-3.5 text-gray-400 shrink-0 cursor-grab active:cursor-grabbing" />
+                                <span className="text-sm font-medium text-gray-900 dark:text-white">{id}</span>
+                                <span className="flex-1 min-w-0 text-xs text-gray-500 dark:text-gray-400 truncate">{versionName(id)}</span>
+                                {/* Reliable fallback for environments where native drag is flaky. */}
+                                <button
+                                    type="button"
+                                    onClick={() => moveVersion(i, i - 1)}
+                                    disabled={i === 0}
+                                    title="Move up"
+                                    className="p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:pointer-events-none shrink-0"
+                                >
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => moveVersion(i, i + 1)}
+                                    disabled={i === orderedDownloaded.length - 1}
+                                    title="Move down"
+                                    className="p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:pointer-events-none shrink-0"
+                                >
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
 
             <div className="space-y-2">
                 <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">

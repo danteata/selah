@@ -326,13 +326,18 @@ export function getRankedBookSuggestions(query: string, limit = 6): RankedBookSu
     }
 
     // 1. Exact abbreviation (ignoring internal spaces, e.g. "1 jn" → 1 John).
-    const abbrHit = bookAbbreviations[lq.replace(/\s+/g, '')]
+    const lqNoSpace = lq.replace(/\s+/g, '')
+    const abbrHit = bookAbbreviations[lqNoSpace]
     if (abbrHit) push(abbrHit, 'abbrev')
 
-    // 2. Prefix matches, canonical order.
+    // 2. Prefix matches, canonical order. Space-insensitive on both sides so a
+    //    numbered book types cleanly as it's built — "1j", "1jo", "1john", and
+    //    "1 john" all prefix-match "1 John" (the space used to break them).
     for (const b of bibleBooks) {
         if (results.length >= limit) break
-        if (b.toLowerCase().startsWith(lq)) push(b, 'prefix', range(lq.length))
+        const bl = b.toLowerCase()
+        if (bl.startsWith(lq)) push(b, 'prefix', range(lq.length))
+        else if (bl.replace(/\s+/g, '').startsWith(lqNoSpace)) push(b, 'prefix')
     }
 
     // 3. Fuzzy fill for the remainder.

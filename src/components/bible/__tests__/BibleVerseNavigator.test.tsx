@@ -90,8 +90,9 @@ describe('BibleVerseNavigator', () => {
 
     it('shows verse range in navigation', async () => {
         render(<BibleVerseNavigator currentSlide={bibleSlide} onVerseSelect={vi.fn()} />)
+        // Compact navigator shows the range as "v16–18" (en-dash).
         await waitFor(() => {
-            expect(screen.getByText(/Verses 16-18/)).toBeInTheDocument()
+            expect(screen.getByText(/v16[–-]18/)).toBeInTheDocument()
         }, { timeout: 5000 })
     })
 
@@ -105,7 +106,7 @@ describe('BibleVerseNavigator', () => {
         }
         render(<BibleVerseNavigator currentSlide={singleVerseSlide} onVerseSelect={vi.fn()} />)
         await waitFor(() => {
-            expect(screen.getByText(/Verse 16/)).toBeInTheDocument()
+            expect(screen.getByText('v16')).toBeInTheDocument()
         }, { timeout: 5000 })
     })
 
@@ -178,9 +179,10 @@ describe('BibleVerseNavigator', () => {
         render(<BibleVerseNavigator currentSlide={bibleSlide} onVerseSelect={vi.fn()} />)
         await waitFor(() => {
             const allButtons = document.querySelectorAll('button')
-            const versionTexts = Array.from(allButtons).map(b => b.textContent?.trim())
-            expect(versionTexts).toContain('KJV')
-            expect(versionTexts).toContain('NIV')
+            // Chips carry a leading slot number (e.g. "1KJV"), so match on inclusion.
+            const versionTexts = Array.from(allButtons).map(b => b.textContent?.trim() ?? '')
+            expect(versionTexts.some(t => t.includes('KJV'))).toBe(true)
+            expect(versionTexts.some(t => t.includes('NIV'))).toBe(true)
         }, { timeout: 10000 })
     })
 
@@ -235,7 +237,7 @@ describe('BibleVerseNavigator', () => {
         }, { timeout: 5000 })
     })
 
-    it('renders each preview verse on its own line with verse number', async () => {
+    it('renders the verse-number strip with current and neighboring verses', async () => {
         const singleSlide: Slide = {
             ...bibleSlide,
             data: { version: 'KJV', labelShortFormat: '43:3:16' } as Scripture,
@@ -257,13 +259,16 @@ describe('BibleVerseNavigator', () => {
             return null
         })
 
-        const { container } = render(
+        render(
             <BibleVerseNavigator currentSlide={singleSlide} onVerseSelect={vi.fn()} />
         )
 
+        // The strip renders one clickable button per verse — the current verse
+        // (16) plus neighbors fetched on either side (e.g. 11 and 21).
         await waitFor(() => {
-            const previewSups = container.querySelectorAll('.max-h-32 sup.text-primary-500')
-            expect(previewSups.length).toBeGreaterThan(0)
+            expect(screen.getByRole('button', { name: '16' })).toBeInTheDocument()
+            expect(screen.getByRole('button', { name: '11' })).toBeInTheDocument()
+            expect(screen.getByRole('button', { name: '21' })).toBeInTheDocument()
         }, { timeout: 5000 })
     })
 })
