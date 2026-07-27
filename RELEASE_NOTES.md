@@ -1,32 +1,19 @@
-## Selah 0.1.5
+## Selah 0.1.7
 
-This release focuses on smoother live presenting, real mobile collaboration, and much better song, hymn, and Bible search. The app can now also update itself automatically.
+This release is all about the sermon listener: the slide queue no longer fills up with repeats, and the verse the preacher actually announced now stays on screen instead of losing it to a similar-sounding verse elsewhere in Scripture.
 
-### Live output
-- Fixed cases where the live output wouldn't stop when you pressed Stop, and where pressing Present again could open a second output window.
-- The live output now closes properly when you quit the app.
-- The live slide now stays centered in the slide list, so you can always see it and what's coming next.
+### Slide queue
+- One entry per passage instead of one per mention. A passage the preacher returns to reuses its slide rather than queueing a new copy each time.
+- A passage read in stages ("Proverbs 24" … "three through four") ends up as a single slide covering the full range, not one slide per width.
+- Switching Bible version rewrites the slide for that passage instead of adding a second copy of it.
 
-### Collaboration
-- Collaboration now works on your phone — start or join a session, change slides, suggest slides, and (as the operator) approve suggestions, all from mobile.
-- Controls now respect the session mode (view, suggest, or open) on every device.
-- Media you upload from your own device stays visible to you during a session; only other collaborators see the "local media" placeholder.
+### The verse on screen
+- Announcing a passage before anything is on screen now displays it. Previously the very first "Psalm 27 verse 1" of a session put nothing on the output at all.
+- Announced references appear in Detected Verses, so the list is a record of what was actually referenced.
+- A reference announced a minute ago can no longer be picked up again as if it were new and take over the live output mid-reading.
+- While you're reading an announced passage, a similar-sounding verse from elsewhere in Scripture stays in Detected Verses for you to choose instead of putting itself on screen. Scripture restates itself, and those matches are honestly earned but rarely what's being read.
+- Reading straight through an announced chapter keeps following the reading verse by verse.
 
-### Songs & hymns
-- One-click **Live** and **Add** buttons on every search result — put a song or hymn on screen without extra steps.
-- One search box now finds songs and hymns together, ranked by relevance.
-- Songs is now the first tab and selected by default.
-- When a song is live, jump between its verses right from the music panel.
-- The search box focuses automatically when you open the panel, and a **New Song** button is always available.
-
-### Bible search
-- "Search by meaning" is much sharper: exact quotes come first, and it now tolerates typos, punctuation, and wording differences.
-- Semantic search now works for **every** Bible version, not just KJV.
-- Voice search no longer breaks references by adding a full stop (e.g. "John 3:16.").
-- On the web app, meaning-search now runs locally in your browser — faster and available offline.
-
-### Sermon listener
-- Far fewer wrong songs being auto-detected and pushed to the live output.
-
-### Automatic updates
-- Selah can now update itself when a new version is released — no more manual downloads.
+### Detection accuracy
+- Reading an announced passage aloud now corroborates it rather than being discarded — the announcement itself counts as the reference signal.
+- The first thing said in a session is no longer dropped, and detection no longer trails the speaker by an utterance.
