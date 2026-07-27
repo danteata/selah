@@ -43,6 +43,15 @@ jobs:
           - platform: 'ubuntu-24.04'
             target: 'x86_64-unknown-linux-gnu'
             name: 'Linux'
+            # --verbose is load-bearing, not noise. tauri-bundler runs
+            # linuxdeploy through output_ok(), which logs every stdout/stderr
+            # line at log::debug! and then returns a bare
+            # `failed to run linuxdeploy` that DISCARDS the captured output. At
+            # default verbosity the AppImage step therefore fails with no
+            # diagnostics whatsoever — which is exactly how v0.1.5 and v0.1.6
+            # failed. Verbose is the only way linuxdeploy's actual error reaches
+            # the log.
+            tauri_args: '--verbose'
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
             name: 'Windows'
@@ -71,10 +80,14 @@ jobs:
           sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-noble.list https://packages.lunarg.com/vulkan/lunarg-vulkan-noble.list
           sudo apt-get update
           # libfuse2: the AppImage tooling (linuxdeploy + its plugins, which are
-          # themselves AppImages) mounts via FUSE 2. Ubuntu 24.04 no longer ships
-          # it by default, so without it the appimage bundle step dies with
-          # "failed to run linuxdeploy". Combined with APPIMAGE_EXTRACT_AND_RUN=1
-          # on the build step as a fallback for the FUSE-less runner sandbox.
+          # themselves AppImages) mounts via FUSE 2 unless told to extract
+          # instead. Kept as belt-and-braces, but note it is almost certainly NOT
+          # what the "failed to run linuxdeploy" failures were about: the bundler
+          # already passes --appimage-extract-and-run AND sets
+          # APPIMAGE_EXTRACT_AND_RUN=1 on the child env itself
+          # (crates/tauri-bundler/src/bundle/linux/appimage/linuxdeploy.rs), so
+          # the tooling never needs to mount anything. Don't spend another build
+          # on the FUSE theory without evidence from a --verbose log.
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev \
             libfuse2 \
             vulkan-sdk
@@ -90,6 +103,25 @@ jobs:
       - name: Allow unprivileged user namespaces for AppImage (Ubuntu only)
         if: startsWith(matrix.platform, 'ubuntu')
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      # The AppImage bundle is by far the most disk-hungry step, and it runs
+      # LAST — after the deb and rpm have already been written. src-tauri/assets
+      # bundles ~440 MB of models and embedding packs, and the AppImage path
+      # copies all of it twice more (bundle/appimage_deb/data, then
+      # Selah.AppDir/usr) before linuxdeploy writes the squashfs image on top.
+      # Together with the deb, the rpm and its build root, and a release target
+      # dir holding whisper.cpp + ONNX Runtime statics, the runner's free space
+      # is a live suspect for linuxdeploy dying instantly with no output. These
+      # removals are the standard runner-image reclaim (~25 GB) and cost seconds.
+      - name: Free disk space (Ubuntu only)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/local/share/powershell \
+            /usr/share/swift "$AGENT_TOOLSDIRECTORY" || true
+          echo "--- after reclaim ---"
+          df -h /
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -349,4 +381,15 @@ jobs:
           # TAURI_SIGNING_* secrets (set in the env above).
           includeUpdaterJson: true
           args: --target ${{ matrix.target }} ${{ matrix.tauri_args }}
+
+      # Runs even when the bundle step failed — that is the whole point. If the
+      # AppImage step died because the disk filled up, this is where it shows,
+      # and it settles the question without another 35-minute build.
+      - name: Report disk usage (Ubuntu only)
+        if: ${{ always() && startsWith(matrix.platform, 'ubuntu') }}
+        run: |
+          df -h /
+          echo "--- largest paths under the target dir ---"
+          du -sh src-tauri/target/${{ matrix.target }}/release/bundle/* 2>/dev/null | sort -h || true
+          du -sh src-tauri/target/${{ matrix.target }}/release 2>/dev/null || true
 
