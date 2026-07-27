@@ -4,26 +4,44 @@
  * Runs ONNX inference off the main thread so the UI stays responsive
  * while generating verse embeddings.
  *
- * Transformers.js is BUNDLED, not fetched from a CDN. The CDN import it
- * replaced cost a network round-trip before the first embedding could run,
- * broke first-run embedding offline, and — because a cross-origin script is
- * not loadable under COEP — blocked the cross-origin isolation that
- * multi-threaded ONNX needs (see `configureWasmBackend`).
+ * Transformers.js is loaded from a CDN at runtime.
+ *
+ * A static `import * as transformers from '@xenova/transformers'` was tried
+ * and REVERTED: it makes Vite pre-bundle onnxruntime-web's UMD build, which
+ * dies inside a module worker with
+ *   `Cannot read properties of undefined (reading 'registerBackend')`
+ * taking the whole embedding worker — and therefore all semantic detection —
+ * down with it. `vite build` succeeds, so this only shows up when the app
+ * actually runs; verify any future attempt against a running app, not a build.
+ *
+ * Bundling is still worth doing (it removes a network round-trip before the
+ * first embedding, works offline, and is a prerequisite for the cross-origin
+ * isolation that multi-threaded ONNX needs). It has to be done together with
+ * self-hosting the ORT wasm binaries and a Vite config that keeps ORT out of
+ * the UMD path — not as a one-line import swap.
  *
  * The first message sent to the worker may be a `{ setup }` payload from
  * `localEmbeddings.ts` that tells the worker to use a locally-bundled model
  * (via Tauri's `asset://` protocol) instead of the HuggingFace Hub. On web
- * we keep the Hub fallback so the experience is identical.
+ * we keep the CDN/Hub fallback so the experience is identical.
  */
 
-import * as transformers from '@xenova/transformers'
-
+const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1'
 const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let embedder: any = null
 let loadPromise: Promise<void> | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let transformersModule: any = null
 let localModelPath: string | null = null
+
+async function loadTransformers() {
+  if (transformersModule) return transformersModule
+  const moduleUrl = `${TRANSFORMERS_CDN}/dist/transformers.min.js`
+  transformersModule = await import(/* @vite-ignore */ moduleUrl)
+  return transformersModule
+}
 
 /**
  * Point ORT-WASM at every core we're allowed to use.
@@ -36,7 +54,8 @@ let localModelPath: string | null = null
  * simply leaves the single-threaded default in place, so this is safe to run
  * unconditionally.
  */
-function configureWasmBackend(): void {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function configureWasmBackend(transformers: any): void {
   const wasm = transformers.env?.backends?.onnx?.wasm
   if (!wasm) return
 
@@ -58,7 +77,8 @@ async function loadEmbedder(): Promise<void> {
   if (loadPromise) return loadPromise
 
   loadPromise = (async () => {
-    configureWasmBackend()
+    const transformers = await loadTransformers()
+    configureWasmBackend(transformers)
     if (localModelPath) {
       // Desktop: read the quantized ONNX + tokenizer from the bundled Tauri
       // resource via the asset protocol. No network round-trip at any point.
