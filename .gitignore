@@ -70,7 +70,11 @@ coverage/
 package-lock.json
 yarn.lock
 
-# Native GGUF Whisper model (fetched at build time by download-gguf-model.mjs)
+# Native bundled transcription model (fetched at build time by
+# download-gguf-model.mjs). `.gguf` is the current bundled format; `.bin` covers
+# the previously-bundled ggml whisper model. Only README.md is committed here —
+# it keeps the Tauri resource glob valid before the download has run.
+src-tauri/assets/whisper-models-gguf/*.gguf
 src-tauri/assets/whisper-models-gguf/*.bin
 
 # Homebrew ONNX Runtime staged for the Intel-mac CI build (system ort linking)

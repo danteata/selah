@@ -78,11 +78,24 @@ class NativeTranscriptionService {
             useAppStore.getState().settings.sermonListener?.whisperModel || DEFAULT_NATIVE_MODEL_ID
 
         try {
-            // Load the model if it isn't already the one loaded. The model must
-            // already be downloaded (via the model picker); load fails otherwise.
+            // Load the model if it isn't already the one loaded. A load fails when
+            // the model isn't on disk, which a saved selection can easily outlive:
+            // the user deleted it, or the setting names a model this install never
+            // downloaded (a synced profile, or a retired legacy entry). Rather than
+            // failing the whole session, fall back to the bundled default, which is
+            // always present.
             const loaded = await invoke<string | null>('get_loaded_native_model')
             if (loaded !== modelId) {
-                await invoke('load_native_model', { modelId })
+                try {
+                    await invoke('load_native_model', { modelId })
+                } catch (loadErr) {
+                    if (modelId === DEFAULT_NATIVE_MODEL_ID) throw loadErr
+                    console.warn(
+                        `[nativeTranscription] could not load "${modelId}" (${loadErr}); ` +
+                            `falling back to bundled "${DEFAULT_NATIVE_MODEL_ID}"`,
+                    )
+                    await invoke('load_native_model', { modelId: DEFAULT_NATIVE_MODEL_ID })
+                }
             }
 
             await invoke('set_native_transcription_config', {
