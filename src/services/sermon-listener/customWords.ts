@@ -20,6 +20,30 @@
 
 const MAX_CANDIDATE_LEN = 50
 
+/**
+ * Whether a normalised match key can go through the fuzzy matcher at all.
+ *
+ * The Levenshtein + Soundex fallback is only meaningful for ASCII alphanumerics.
+ * `soundex()` discards every non-`A-Z` character, so a non-ASCII word collapses
+ * to a short or empty code and then collides with unrelated vocabulary — e.g. Twi
+ * "ɛkɔm"/"ɔdɔ" or accented Spanish reduce to a couple of letters and start
+ * matching anything of similar length. Skipping them here leaves the word
+ * untouched (the correct outcome) instead of corrupting it. Such words are still
+ * useful as decoder-bias terms via the initial prompt; they just don't take part
+ * in this post-hoc correction pass.
+ *
+ * Ported from Handy's `is_supported_fuzzy_key` (added in its
+ * "prevent custom-word correction from losing transcriptions" fix).
+ */
+function isSupportedFuzzyKey(key: string): boolean {
+    return key.length > 0 && /^[a-z0-9]+$/.test(key)
+}
+
+/** Soundex is defined over letters only, so digits disqualify a key from it. */
+function supportsSoundex(key: string): boolean {
+    return key.length > 0 && /^[a-z]+$/.test(key)
+}
+
 /** Classic Soundex code for a word (American Soundex, 4 chars). */
 function soundex(word: string): string {
     const s = word.toUpperCase().replace(/[^A-Z]/g, '')
@@ -98,13 +122,18 @@ function findBestMatch(
     threshold: number,
     usePhonetic: boolean,
 ): { replacement: string; score: number } | null {
-    if (candidate.length === 0 || candidate.length > MAX_CANDIDATE_LEN) return null
+    // Non-ASCII candidates are left alone rather than fuzzily "corrected" into
+    // something unrelated — see isSupportedFuzzyKey.
+    if (!isSupportedFuzzyKey(candidate) || candidate.length > MAX_CANDIDATE_LEN) return null
 
     let bestMatch: string | null = null
     let bestScore = Number.MAX_VALUE
 
     for (let i = 0; i < customWordsNoSpace.length; i++) {
         const target = customWordsNoSpace[i]
+        // Same gate on the vocabulary side: a non-ASCII custom word can never be
+        // a trustworthy fuzzy target.
+        if (!isSupportedFuzzyKey(target)) continue
 
         // Length pre-filter: at most 25% difference (min 2 chars), prevents
         // n-grams from matching much shorter custom words.
@@ -121,7 +150,10 @@ function findBestMatch(
         // unrelated long words collide (e.g. "prophet"/"propitiation" both code
         // P613), so it is opt-out for always-on default vocabularies.
         const phoneticMatch =
-            usePhonetic && soundex(candidate) === soundex(target) && soundex(candidate) !== ''
+            usePhonetic &&
+            supportsSoundex(candidate) &&
+            supportsSoundex(target) &&
+            soundex(candidate) === soundex(target)
         const combinedScore = phoneticMatch ? levenshteinScore * 0.3 : levenshteinScore
 
         if (combinedScore < threshold && combinedScore < bestScore) {
@@ -191,28 +223,43 @@ export function applyCustomWords(
     let i = 0
 
     while (i < words.length) {
-        let matched = false
+        // Consider every n-gram width and take the CLOSEST match rather than the
+        // longest one that clears the threshold. Longest-first greedy matching
+        // swallows a following ordinary word whenever the two happen to share a
+        // Soundex code — "Charge B, che" matched "ChargeBee" and consumed the
+        // "che". Ported from Handy's "prevent custom-word correction from losing
+        // transcriptions" fix.
+        let best: { n: number; replacement: string; score: number } | null = null
 
-        // Greedy: try longest n-gram down to 1
         for (let n = maxNgram; n >= 1; n--) {
             if (i + n > words.length) continue
 
             const ngramWords = words.slice(i, i + n)
-            const ngram = buildNgram(ngramWords)
 
+            // Never consume across a punctuation boundary: in "Charge B, che" the
+            // comma closes the candidate at "B,", so the 3-gram is not a
+            // candidate at all. Only interior words are checked — a trailing
+            // suffix on the final word is kept and re-emitted below.
+            const crossesPunctuation = ngramWords
+                .slice(0, n - 1)
+                .some((w) => extractPunctuation(w)[1] !== '')
+            if (crossesPunctuation) continue
+
+            const ngram = buildNgram(ngramWords)
             const match = findBestMatch(ngram, customWords, customWordsNoSpace, threshold, usePhonetic)
-            if (match) {
-                const [prefix] = extractPunctuation(ngramWords[0])
-                const [, suffix] = extractPunctuation(ngramWords[n - 1])
-                const corrected = preserveCasePattern(ngramWords[0], match.replacement)
-                result.push(`${prefix}${corrected}${suffix}`)
-                i += n
-                matched = true
-                break
+            if (match && (best === null || match.score < best.score)) {
+                best = { n, replacement: match.replacement, score: match.score }
             }
         }
 
-        if (!matched) {
+        if (best !== null) {
+            const ngramWords = words.slice(i, i + best.n)
+            const [prefix] = extractPunctuation(ngramWords[0])
+            const [, suffix] = extractPunctuation(ngramWords[best.n - 1])
+            const corrected = preserveCasePattern(ngramWords[0], best.replacement)
+            result.push(`${prefix}${corrected}${suffix}`)
+            i += best.n
+        } else {
             result.push(words[i])
             i++
         }
