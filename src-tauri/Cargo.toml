@@ -61,8 +61,24 @@ wasapi = "0.22"  # WASAPI loopback for system audio capture
 windows = { version = "0.58", features = [
     "Win32_System_Com",
     "Win32_Foundation",
+    # IsWow64Process2 (resolved dynamically) for the emulated-on-ARM64 check in
+    # `platform::is_windows_x64_emulated_on_arm64`.
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
 ] }
-transcribe-rs = { version = "0.3", features = ["ort-directml"], optional = true }  # DirectML on Windows (ONNX)
+# ONNX Runtime on Windows is CPU-only, matching macOS/Linux — there is
+# deliberately no `ort-directml` here. The DirectML EP pulled in pyke's prebuilt
+# ONNX Runtime, which is compiled with a global /arch:AVX2 baseline and executes
+# BMI2/AVX instructions in a C++ static initializer — so it crashes at process
+# startup, before main(), on any pre-Haswell CPU (Sandy/Ivy Bridge, older AMD).
+# That is fatal for Selah specifically: `ort` is unified across transcribe-rs and
+# our own Silero VAD dependency, so the crash takes down the whole app rather
+# than just ONNX transcription, on exactly the aging hardware a church AV booth
+# tends to run. Dropping the feature means we link a baseline ONNX Runtime
+# dynamically (via ORT_LIB_LOCATION in build-desktop.yml) with proper runtime CPU
+# dispatch, so it runs everywhere and still uses AVX2/AVX-512 kernels when the
+# CPU has them. Base `transcribe-rs` (features = ["onnx"]) is inherited from
+# [dependencies], so the ONNX engines still run on CPU.
 transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Windows
 
 [target.'cfg(target_os = "linux")'.dependencies]

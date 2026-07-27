@@ -71,6 +71,9 @@ fn main() {
         }
     }
 
+    // Must run after the block above, which recreates `windows-runtime/` clean.
+    stage_onnxruntime_dll();
+
     // Embed a custom Windows app manifest (PerMonitorV2 DPI awareness,
     // asInvoker trust level, Common-Controls 6 for visual styles).
     //
@@ -108,6 +111,55 @@ fn main() {
 
     let attrs = tauri_build::Attributes::new().windows_attributes(windows_attrs);
     tauri_build::try_build(attrs).expect("failed to run tauri-build");
+}
+
+/// Windows: copy the dynamically-linked ONNX Runtime's `onnxruntime.dll` into the
+/// `windows-runtime/` staging dir so `tauri.windows.conf.json` bundles it beside
+/// `Selah.exe` (Windows resolves DLLs from the executable's own directory).
+///
+/// No-op unless `ORT_PREFER_DYNAMIC_LINK` + `ORT_LIB_LOCATION` are set for a
+/// Windows target — i.e. the CI dynamic-link path added alongside the removal of
+/// the `ort-directml` feature (see the Windows dependency table in Cargo.toml for
+/// why we no longer statically embed pyke's /arch:AVX2 build). A local `cargo
+/// build` with no env set skips this and keeps whatever ORT `ort-sys` picked.
+fn stage_onnxruntime_dll() {
+    // CARGO_CFG_TARGET_OS, not #[cfg(target_os)] — see the note in
+    // stage_linux_transcribe_runtime: a build script is compiled for the HOST.
+    use std::path::PathBuf;
+
+    println!("cargo:rerun-if-env-changed=ORT_LIB_LOCATION");
+    println!("cargo:rerun-if-env-changed=ORT_PREFER_DYNAMIC_LINK");
+
+    if std::env::var_os("ORT_PREFER_DYNAMIC_LINK").is_none() {
+        return;
+    }
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let Some(lib_location) = std::env::var_os("ORT_LIB_LOCATION") else {
+        return;
+    };
+
+    let src = PathBuf::from(&lib_location).join("onnxruntime.dll");
+    if !src.exists() {
+        // Hard failure, not a warning: ORT_PREFER_DYNAMIC_LINK means the exe has
+        // a NEEDED onnxruntime.dll with nothing to satisfy it, so shipping this
+        // bundle would produce an app that cannot start.
+        panic!(
+            "ORT_PREFER_DYNAMIC_LINK is set but {} does not exist; a dynamic ORT \
+             build must supply onnxruntime.dll to bundle",
+            src.display()
+        );
+    }
+
+    // The Windows block in main() already created (and cleaned) this dir, but
+    // create it defensively so this function is self-contained.
+    let dest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("windows-runtime");
+    std::fs::create_dir_all(&dest_dir).expect("create windows-runtime staging dir");
+    std::fs::copy(&src, dest_dir.join("onnxruntime.dll"))
+        .unwrap_or_else(|e| panic!("copy {}: {e}", src.display()));
+    println!("cargo:warning=selah build.rs: staged onnxruntime.dll for Windows bundling");
 }
 
 /// Linux: stage the transcribe-cpp shared libraries so the deb/rpm/AppImage can

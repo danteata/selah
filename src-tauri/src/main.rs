@@ -34,6 +34,7 @@ mod logging;
 mod multi_monitor;
 mod ndi_output;
 mod oauth_listener;
+mod platform;
 // Model catalog/downloader always compiles; the transcribe-rs engine inside is
 // gated behind the `native-transcription` feature.
 mod transcription;

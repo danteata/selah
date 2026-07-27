@@ -28,7 +28,8 @@ use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
 use transcribe_cpp::{
-    Model, ModelOptions, RunExtension, RunOptions, Session, StreamOptions, Task, WhisperRunOptions,
+    Backend, Model, ModelOptions, RunExtension, RunOptions, Session, StreamOptions, Task,
+    WhisperRunOptions,
 };
 use transcribe_rs::{
     onnx::{
@@ -374,7 +375,7 @@ impl TranscriptionManager {
 
         let loaded = match engine_type {
             EngineType::TranscribeCpp => {
-                let model = Model::load_with(&model_path, &ModelOptions::default()).map_err(|e| {
+                let model = Model::load_with(&model_path, &transcribe_cpp_model_options()).map_err(|e| {
                     let msg = format!("Failed to load model {}: {}", model_id, e);
                     self.emit_state("loading_failed", Some(model_id), Some(msg.clone()));
                     anyhow::anyhow!(msg)
@@ -970,8 +971,55 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-/// Apply Auto accelerator preferences (GPU when available, else CPU). Called on
-/// startup. Detailed per-device selection can be layered on later.
+/// Whether transcribe-cpp GPU backends must be refused on this host.
+///
+/// An x64 process emulated on a Windows ARM64 host enumerates a Vulkan device
+/// through the emulation layer that then misbehaves, so we force strict CPU
+/// there. Selah ships no Windows ARM64 target, so this is the configuration
+/// every Windows-on-ARM user actually runs.
+fn transcribe_gpu_disabled_for_host() -> bool {
+    crate::platform::is_windows_x64_emulated_on_arm64()
+}
+
+/// The `ModelOptions` every transcribe-cpp load uses.
+///
+/// `Backend::Auto` (the crate default) picks the best device with CPU fallback;
+/// on an emulated host we downgrade to `Backend::Cpu`, which is strict CPU with
+/// no GPU and no host accelerators.
+fn transcribe_cpp_model_options() -> ModelOptions {
+    let backend = if transcribe_gpu_disabled_for_host() {
+        Backend::Cpu
+    } else {
+        Backend::Auto
+    };
+    ModelOptions {
+        backend,
+        ..Default::default()
+    }
+}
+
+/// The compute devices transcribe-cpp may actually be bound to, filtering out
+/// GPU devices on a host where we refuse to use them — so startup logs never
+/// advertise an accelerator the load path will decline.
+fn transcribe_compute_devices() -> Vec<transcribe_cpp::Device> {
+    let devices = transcribe_cpp::devices();
+    if !transcribe_gpu_disabled_for_host() {
+        return devices;
+    }
+    devices
+        .into_iter()
+        .filter(|d| d.kind == "cpu" || d.kind == "accel")
+        .collect()
+}
+
+/// Apply Auto accelerator preferences for the ONNX (`transcribe-rs`) engines.
+/// Called on startup.
+///
+/// NOTE: this governs the ONNX engines only. Whisper-family and other GGUF
+/// models go through transcribe-cpp, whose backend is chosen per *model load*
+/// via `ModelOptions` — see [`transcribe_cpp_model_options`]. The
+/// `set_whisper_accelerator` call below is therefore inert for our GGUF path;
+/// it is kept because transcribe-rs still owns the ORT accelerator setting.
 pub fn apply_default_accelerators() {
     use transcribe_rs::accel;
     accel::set_whisper_accelerator(accel::WhisperAccelerator::Auto);
@@ -989,7 +1037,13 @@ pub fn init_transcribe_cpp_backend() {
     transcribe_cpp::init_logging();
     match transcribe_cpp::init_backends_default() {
         Ok(()) => {
-            let devices = transcribe_cpp::devices();
+            if transcribe_gpu_disabled_for_host() {
+                warn!(
+                    "[transcription] this Windows x64 build is running under emulation on an \
+                     ARM64 host; disabling transcribe-cpp GPU acceleration and using CPU"
+                );
+            }
+            let devices = transcribe_compute_devices();
             info!(
                 "[transcription] transcribe-cpp initialized with {} compute device(s): [{}]",
                 devices.len(),
