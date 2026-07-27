@@ -104,25 +104,6 @@ jobs:
         if: startsWith(matrix.platform, 'ubuntu')
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
-      # The AppImage bundle is by far the most disk-hungry step, and it runs
-      # LAST — after the deb and rpm have already been written. src-tauri/assets
-      # bundles ~440 MB of models and embedding packs, and the AppImage path
-      # copies all of it twice more (bundle/appimage_deb/data, then
-      # Selah.AppDir/usr) before linuxdeploy writes the squashfs image on top.
-      # Together with the deb, the rpm and its build root, and a release target
-      # dir holding whisper.cpp + ONNX Runtime statics, the runner's free space
-      # is a live suspect for linuxdeploy dying instantly with no output. These
-      # removals are the standard runner-image reclaim (~25 GB) and cost seconds.
-      - name: Free disk space (Ubuntu only)
-        if: startsWith(matrix.platform, 'ubuntu')
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/boost /usr/local/share/powershell \
-            /usr/share/swift "$AGENT_TOOLSDIRECTORY" || true
-          echo "--- after reclaim ---"
-          df -h /
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -382,9 +363,12 @@ jobs:
           includeUpdaterJson: true
           args: --target ${{ matrix.target }} ${{ matrix.tauri_args }}
 
-      # Runs even when the bundle step failed — that is the whole point. If the
-      # AppImage step died because the disk filled up, this is where it shows,
-      # and it settles the question without another 35-minute build.
+      # Runs even when the bundle step failed — that is the whole point. Kept
+      # because it is how "the AppImage step ran out of disk" was ruled out
+      # (106G available, 27% used) after the deb/rpm/AppDir copies of a ~440 MB
+      # resource payload made that look plausible. The real cause was a missing
+      # libtranscribe.so.0; see src-tauri/build.rs. If disk is ever suspected
+      # again, the answer is already in the log.
       - name: Report disk usage (Ubuntu only)
         if: ${{ always() && startsWith(matrix.platform, 'ubuntu') }}
         run: |
