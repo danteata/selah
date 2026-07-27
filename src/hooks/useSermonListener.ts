@@ -502,6 +502,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // if semantic results should become the "current" verse. Semantic results that
     // arrive after a newer regex detection should not overwrite the current verse.
     const regexVerseDetectionRef = useRef(0)
+    const lastSemanticGateLogRef = useRef(0)
 
     // Track recent command execution timestamps to avoid instant repeats while still
     // allowing the same command later in the sermon.
@@ -526,6 +527,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Active reference context for resolving bare "verse 6" from prior book+chapter
     const activeReferenceContextRef = useRef<ActiveReferenceContext | null>(null)
     const CONTEXT_TTL_MS = 120_000
+    // Rate limit for the semantic-gate diagnostic below: the gate is evaluated
+    // on every transcript chunk, so an unthrottled line would be the same kind
+    // of flood that buried the real signal before.
+    const SEMANTIC_GATE_LOG_MS = 5000
 
     // Real-time audio level analysis via Web Audio API AnalyserNode
     // Reuses the transcription service's media stream to avoid duplicate getUserMedia calls.
@@ -1855,10 +1860,40 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         //   audio (announcements, banter, worship) is exactly this. The
         //   buffer isn't lost when skipped; it just accumulates for the next
         //   check (see `addText`'s internal `lastProcessedLength` tracking).
+        // A live reading counts as scripture signal on its own.
+        //
+        // hasScriptureSignal looks for a book name or a marker phrase in the
+        // LATEST chunk, and continuous Scripture reading has neither: "Blessed
+        // is the man who takes refuge in him", "The angel of the Lord encamps
+        // around those who fear him". So the gate closed on exactly the text
+        // most worth embedding, and a whole sermon produced two searches. Once
+        // a reference has been announced, the prose that follows it is the
+        // reading — that is the premise the rest of the context work is built
+        // on, so it should open this gate too.
+        const inReadingContext = isContextValid(activeReferenceContextRef.current, CONTEXT_TTL_MS)
         const semanticReady = semanticDetectorRef.current
             && cleanText.length >= 30
             && !hasRegexVerses
-            && hasScriptureSignal(latestChunkForCommands || cleanText)
+            && (hasScriptureSignal(latestChunkForCommands || cleanText) || inReadingContext)
+
+        // Report why the embedding pass was skipped. This is the gate that
+        // actually decides — the tally inside `addText` never fired in a live
+        // session because this one rejected first. Rate-limited to one line
+        // per SEMANTIC_GATE_LOG_MS so it can't flood the log.
+        if (!semanticReady && semanticDetectorRef.current) {
+            const now = Date.now()
+            if (now - lastSemanticGateLogRef.current >= SEMANTIC_GATE_LOG_MS) {
+                lastSemanticGateLogRef.current = now
+                console.log(
+                    '[SemanticDetector] gate closed:',
+                    `len=${cleanText.length}/30`,
+                    `regexVerses=${hasRegexVerses}`,
+                    `signal=${hasScriptureSignal(latestChunkForCommands || cleanText)}`,
+                    `readingContext=${inReadingContext}`,
+                )
+            }
+        }
+
         if (semanticReady) {
             setIsSemanticSearching(true)
 
