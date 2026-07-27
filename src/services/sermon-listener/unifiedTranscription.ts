@@ -210,8 +210,11 @@ class UnifiedTranscriptionService {
             initialPrompt: this.options.initialPrompt,
             captureSource: this.options.captureSource,
             microphoneDeviceId: this.options.microphoneDeviceId,
-            onResult: (text, isFinal) => {
-                this.options.onResult?.(text, isFinal, undefined, undefined)
+            onResult: (text, isFinal, segments) => {
+                // The native engine reports no per-utterance confidence, but it
+                // does now supply session-absolute segment timings for models
+                // that produce alignment data.
+                this.options.onResult?.(text, isFinal, undefined, segments)
             },
             onError: (error) => {
                 this.error = error

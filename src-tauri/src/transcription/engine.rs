@@ -77,7 +77,12 @@ impl Default for UnloadTimeout {
     }
 }
 
-/// A transcription segment with timing (seconds), for verse-timing alignment.
+/// A transcription segment with timing, for verse-timing alignment.
+///
+/// Times are **seconds relative to the start of the transcribed audio** — i.e.
+/// relative to the single VAD utterance handed to [`TranscriptionManager::transcribe`],
+/// not to the recording session. The capture layer adds the utterance's
+/// `start_offset_ms` when it emits `transcription-result`.
 #[derive(Clone, Debug, Serialize)]
 pub struct TranscriptionSegment {
     pub start: f64,
@@ -89,7 +94,42 @@ pub struct TranscriptionSegment {
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct TranscriptionOutput {
     pub text: String,
+    /// Segment timings, empty when the model produces no alignment data (see
+    /// [`TranscriptionSegment`] for the time origin).
     pub segments: Vec<TranscriptionSegment>,
+}
+
+/// Convert transcribe-cpp segment rows into our own, dropping empty-text rows
+/// (some families emit padding/no-speech segments) and converting ms → seconds.
+fn convert_cpp_segments(segments: &[transcribe_cpp::Segment]) -> Vec<TranscriptionSegment> {
+    segments
+        .iter()
+        .filter(|s| !s.text.trim().is_empty())
+        .map(|s| TranscriptionSegment {
+            start: s.t0_ms as f64 / 1000.0,
+            end: s.t1_ms as f64 / 1000.0,
+            text: s.text.trim().to_string(),
+        })
+        .collect()
+}
+
+/// Convert the ONNX engines' segment rows into our own. `transcribe-rs` already
+/// reports seconds, and omits the vector entirely when the engine produced no
+/// alignment data.
+fn convert_rs_segments(
+    segments: &Option<Vec<transcribe_rs::TranscriptionSegment>>,
+) -> Vec<TranscriptionSegment> {
+    segments
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|s| !s.text.trim().is_empty())
+        .map(|s| TranscriptionSegment {
+            start: s.start as f64,
+            end: s.end as f64,
+            text: s.text.trim().to_string(),
+        })
+        .collect()
 }
 
 /// Event emitted on model lifecycle changes (loading/loaded/unloaded/failed).
@@ -766,9 +806,15 @@ impl TranscriptionManager {
                     let res = session
                         .run(&audio, &run_options)
                         .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
+                    // `RunOptions.timestamps` defaults to `TimestampKind::Auto`
+                    // ("richest the family supports"), so these rows were
+                    // already being produced and discarded. Whisper yields
+                    // segment-level rows; Parakeet/Nemotron yield token-level
+                    // ones which transcribe-cpp also groups into segments.
+                    let segments = convert_cpp_segments(&res.segments);
                     Ok(TranscriptionOutput {
                         text: res.text,
-                        segments: Vec::new(),
+                        segments,
                     })
                 }
                 LoadedEngine::Parakeet(parakeet) => {
@@ -779,19 +825,28 @@ impl TranscriptionManager {
                     let res = parakeet
                         .transcribe_with(&audio, &params)
                         .map_err(|e| anyhow::anyhow!("Parakeet transcription failed: {}", e))?;
-                    Ok(TranscriptionOutput { text: res.text, segments: Vec::new() })
+                    Ok(TranscriptionOutput {
+                        segments: convert_rs_segments(&res.segments),
+                        text: res.text,
+                    })
                 }
                 LoadedEngine::Moonshine(engine) => {
                     let res = engine
                         .transcribe(&audio, &TranscribeOptions::default())
                         .map_err(|e| anyhow::anyhow!("Moonshine transcription failed: {}", e))?;
-                    Ok(TranscriptionOutput { text: res.text, segments: Vec::new() })
+                    Ok(TranscriptionOutput {
+                        segments: convert_rs_segments(&res.segments),
+                        text: res.text,
+                    })
                 }
                 LoadedEngine::MoonshineStreaming(engine) => {
                     let res = engine
                         .transcribe(&audio, &TranscribeOptions::default())
                         .map_err(|e| anyhow::anyhow!("Moonshine streaming transcription failed: {}", e))?;
-                    Ok(TranscriptionOutput { text: res.text, segments: Vec::new() })
+                    Ok(TranscriptionOutput {
+                        segments: convert_rs_segments(&res.segments),
+                        text: res.text,
+                    })
                 }
                 LoadedEngine::SenseVoice(engine) => {
                     let language = match config.language.as_deref() {
@@ -806,13 +861,19 @@ impl TranscriptionManager {
                     let res = engine
                         .transcribe_with(&audio, &params)
                         .map_err(|e| anyhow::anyhow!("SenseVoice transcription failed: {}", e))?;
-                    Ok(TranscriptionOutput { text: res.text, segments: Vec::new() })
+                    Ok(TranscriptionOutput {
+                        segments: convert_rs_segments(&res.segments),
+                        text: res.text,
+                    })
                 }
                 LoadedEngine::GigaAM(engine) => {
                     let res = engine
                         .transcribe(&audio, &TranscribeOptions::default())
                         .map_err(|e| anyhow::anyhow!("GigaAM transcription failed: {}", e))?;
-                    Ok(TranscriptionOutput { text: res.text, segments: Vec::new() })
+                    Ok(TranscriptionOutput {
+                        segments: convert_rs_segments(&res.segments),
+                        text: res.text,
+                    })
                 }
                 LoadedEngine::Canary(engine) => {
                     let language = onnx_language(&config.language);
@@ -824,7 +885,10 @@ impl TranscriptionManager {
                     let res = engine
                         .transcribe(&audio, &options)
                         .map_err(|e| anyhow::anyhow!("Canary transcription failed: {}", e))?;
-                    Ok(TranscriptionOutput { text: res.text, segments: Vec::new() })
+                    Ok(TranscriptionOutput {
+                        segments: convert_rs_segments(&res.segments),
+                        text: res.text,
+                    })
                 }
                 LoadedEngine::Cohere(engine) => {
                     let language = onnx_language(&config.language);
@@ -832,7 +896,10 @@ impl TranscriptionManager {
                     let res = engine
                         .transcribe(&audio, &options)
                         .map_err(|e| anyhow::anyhow!("Cohere transcription failed: {}", e))?;
-                    Ok(TranscriptionOutput { text: res.text, segments: Vec::new() })
+                    Ok(TranscriptionOutput {
+                        segments: convert_rs_segments(&res.segments),
+                        text: res.text,
+                    })
                 }
             }
         }));

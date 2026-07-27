@@ -57,10 +57,12 @@ describe('nativeTranscriptionService', () => {
         // Simulate a transcription-result (final) event reaching the listener.
         const finalHandler = listenMock.mock.calls[0][1] as (e: { payload: { text: string } }) => void
         finalHandler({ payload: { text: 'For God so loved the world' } })
-        expect(onResult).toHaveBeenCalledWith('For God so loved the world', true)
+        // No segments in the payload → the segments argument is omitted rather
+        // than forwarded as an empty array.
+        expect(onResult).toHaveBeenCalledWith('For God so loved the world', true, undefined)
     })
 
-    it('forwards native-stream-text events as interim (isFinal=false) results', async () => {
+    it('forwards segment timings from transcription-result when the model supplies them', async () => {
         invokeMock.mockImplementation((cmd: string) => {
             if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
             return Promise.resolve(undefined)
@@ -69,11 +71,21 @@ describe('nativeTranscriptionService', () => {
         const onResult = vi.fn()
         await nativeTranscriptionService.start({ onResult, onError: vi.fn() })
 
-        const streamHandler = listenMock.mock.calls[1][1] as (e: {
-            payload: { committed: string; tentative: string }
-        }) => void
-        streamHandler({ payload: { committed: 'For God so ', tentative: 'loved' } })
-        expect(onResult).toHaveBeenCalledWith('For God so loved', false)
+        const finalHandler = listenMock.mock.calls[0][1] as (e: { payload: unknown }) => void
+        // Times are session-absolute seconds; Rust has already applied the
+        // utterance's start_offset_ms.
+        const segments = [
+            { start: 12.5, end: 14.0, text: 'For God so loved the world' },
+            { start: 14.0, end: 16.25, text: 'that he gave his only Son' },
+        ]
+        finalHandler({
+            payload: { text: 'For God so loved the world that he gave his only Son', segments },
+        })
+        expect(onResult).toHaveBeenCalledWith(
+            'For God so loved the world that he gave his only Son',
+            true,
+            segments,
+        )
     })
 
     it('skips reload when the model is already loaded', async () => {
