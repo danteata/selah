@@ -18,9 +18,11 @@ import {
     embedBatch,
     isEmbedderReady,
     getCachedVerseEmbeddings,
+    getLocalCachedVersions,
     hasCachedEmbeddings,
     prewarmSemanticSearch,
 } from './localEmbeddings'
+import { hasSemanticPack, loadSemanticPack, resolveSemanticPackVersion } from './semanticPack'
 import {
     loadFromCached as loadVerseStore,
     searchVerseEmbeddings,
@@ -224,13 +226,21 @@ export class SemanticVerseDetector {
                     // Prewarm failure is non-fatal — we'll try loading directly
                 }
 
-                // Check local embeddings (prewarm may have just loaded them)
+                // Check local embeddings (prewarm may have just loaded them).
+                // Generated rows for the active version win; otherwise the
+                // universal prebuilt pack serves it, which is the common case
+                // now that we don't make users embed each version themselves.
                 let hasLocalCache = false
                 if (this.config.version) {
                     hasLocalCache = await hasCachedEmbeddings(this.config.version)
                 }
                 if (!hasLocalCache) {
-                    hasLocalCache = await hasCachedEmbeddings('KJV')
+                    hasLocalCache = await hasSemanticPack()
+                }
+                if (!hasLocalCache) {
+                    // No pack — `searchLocally` still falls back to any other
+                    // version's generated rows, so count those as usable too.
+                    hasLocalCache = (await getLocalCachedVersions()).length > 0
                 }
 
                 if (!hasEmbeddings && !convexError) {
@@ -647,18 +657,19 @@ export class SemanticVerseDetector {
             }
         }
 
-        // If the worker already has a usable index (exact version, or KJV
-        // prebuilt pack that we can search as a fallback), search directly.
+        // If the worker already has a usable index (exact version, or the
+        // universal prebuilt pack that serves any version), search directly.
+        const packVersion = await resolveSemanticPackVersion()
         const workerHasExact = loaded && loaded.version === version
-        const workerHasKJV = loaded && loaded.version === 'KJV'
-        const needKJVFallback = !workerHasExact && workerHasKJV && version !== 'KJV'
+        const workerHasPack = !!packVersion && loaded?.version === packVersion
+        const needPackFallback = !workerHasExact && workerHasPack && version !== packVersion
 
-        if (needKJVFallback) {
+        if (needPackFallback) {
             // Confirm the requested version isn't cached locally before falling back
             const hasRequested = await hasCachedEmbeddings(version)
             if (!hasRequested) {
                 console.log(
-                    `[SemanticDetector] ${version} not cached; falling back to KJV prebuilt pack for search`,
+                    `[SemanticDetector] ${version} not cached; searching the ${packVersion} pack instead`,
                 )
                 const matches = await searchVerseEmbeddings(
                     embedding,
@@ -682,11 +693,32 @@ export class SemanticVerseDetector {
             let cached = await getCachedVerseEmbeddings(this.config.version)
 
             if (cached.length === 0) {
-                if (version !== 'ANY') {
-                    cached = await getCachedVerseEmbeddings('KJV')
-                    if (cached.length === 0) {
-                        cached = await getCachedVerseEmbeddings()
+                // Nothing generated for this version. Load the universal pack
+                // — it covers every version, so this is the normal path, not a
+                // degraded one. Only if there's no pack at all do we go
+                // rummaging for some other version's generated rows.
+                if (packVersion) {
+                    const { ok } = await loadSemanticPack()
+                    if (ok) {
+                        const packMatches = await searchVerseEmbeddings(
+                            embedding,
+                            threshold ?? 0.32,
+                            this.config.limit,
+                        )
+                        return packMatches.map((m) => ({
+                            reference: m.reference,
+                            book: m.book,
+                            chapter: m.chapter,
+                            verse: m.verse,
+                            text: m.text,
+                            score: m.score,
+                            detectionType: 'semantic' as const,
+                        }))
                     }
+                }
+
+                if (version !== 'ANY') {
+                    cached = await getCachedVerseEmbeddings()
                 }
 
                 if (cached.length === 0) {

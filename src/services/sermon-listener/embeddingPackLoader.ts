@@ -2,16 +2,21 @@
  * Embedding Pack Loader
  *
  * Loads a *prebuilt* verse embedding pack and hands the packed `Float32Array`
- * to the similarity worker, avoiding multi-minute first-run embedding
- * generation and — on web — avoiding per-query Convex vector-search cost.
+ * to the similarity worker. This is what replaces on-device embedding
+ * generation (which took the better part of an hour per version) and, in the
+ * browser, per-query Convex vector-search cost.
+ *
+ * `semanticPack.ts` decides WHICH pack loads. One pack serves every Bible
+ * version the user reads — see that file for why.
  *
  * Two pack shapes:
  *  - Desktop: `src-tauri/assets/embedding-packs/<VERSION>/` bundled as Tauri
  *    resources, read via `asset://`. Full verses + fragments, float32
- *    (`embeddings.f32`, ~250 MB) — fine inside a native app.
- *  - Web: `/embedding-packs/<VERSION>/` served as a static asset. Canonical
- *    verses only, int8-quantized (`embeddings.i8`, ~12 MB) so the browser can
- *    download it once, cache it in IndexedDB, and search locally & offline.
+ *    (`embeddings.f32`) — fine inside a native app. Fragments matter for
+ *    short-phrase / paraphrase hits during live transcription.
+ *  - Browser: `/embedding-packs/<VERSION>/` served as a static asset.
+ *    Canonical verses only, int8-quantized (`embeddings.i8`, ~11 MB) so it can
+ *    be downloaded once, cached in IndexedDB, and searched offline.
  *    Built by `scripts/build-web-embedding-pack.mjs`.
  *
  * manifest.json: { version, dim, count, quantization?: 'int8', scale?, ... }
@@ -112,8 +117,10 @@ async function idbPutPack(pack: CachedPack): Promise<void> {
 
 /**
  * Base URL where pack files live for a version, or null if none applies.
- * Desktop → the bundled Tauri asset dir. Web → the static `/embedding-packs`
- * path (only KJV ships a web pack today; other versions 404 → Convex fallback).
+ * Desktop → the bundled Tauri asset dir. Browser → the static
+ * `/embedding-packs` path. Only the universal packs listed in
+ * `semanticPack.SEMANTIC_PACK_PREFERENCE` ship; anything else 404s, which is
+ * how `hasEmbeddingPack` reports absence.
  */
 async function resolvePackBaseUrl(version: string): Promise<string | null> {
     if (typeof window === 'undefined') return null

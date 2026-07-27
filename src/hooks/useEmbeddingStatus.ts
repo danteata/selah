@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react'
 import { useSyncExternalStore } from 'react'
-import { embeddingSyncManager, type VersionSyncState } from '../services/sermon-listener/embeddingSyncManager'
+import { embeddingSyncManager, type EmbeddingSource, type VersionSyncState } from '../services/sermon-listener/embeddingSyncManager'
 
 type EmbeddingStatusLevel = 'ready' | 'loading' | 'error' | 'off'
 
@@ -11,6 +11,8 @@ export interface EmbeddingStatus {
     total: number
     hasEmbeddings: boolean
     hasFragments: boolean
+    /** Whether search here is served by the shared pack or a local build. */
+    source: EmbeddingSource
 }
 
 export interface EmbeddingStatusAPI {
@@ -26,6 +28,7 @@ export interface EmbeddingStatusAPI {
 }
 
 function getStatusFromState(state: VersionSyncState | undefined): EmbeddingStatus {
+    const source = state?.source ?? 'none'
     if (!state || state.stage === 'idle') {
         return {
             stage: state?.hasEmbeddings ? 'completed' : 'off',
@@ -34,15 +37,16 @@ function getStatusFromState(state: VersionSyncState | undefined): EmbeddingStatu
             total: 0,
             hasEmbeddings: state?.hasEmbeddings ?? false,
             hasFragments: state?.hasFragments ?? false,
+            source,
         }
     }
     if (state.stage === 'completed') {
-        return { stage: 'completed', level: 'ready', progress: state.progress, total: state.total, hasEmbeddings: true, hasFragments: state.hasFragments }
+        return { stage: 'completed', level: 'ready', progress: state.progress, total: state.total, hasEmbeddings: true, hasFragments: state.hasFragments, source }
     }
     if (state.stage === 'error') {
-        return { stage: 'error', level: 'error', progress: 0, total: 0, hasEmbeddings: state.hasEmbeddings, hasFragments: state.hasFragments }
+        return { stage: 'error', level: 'error', progress: 0, total: 0, hasEmbeddings: state.hasEmbeddings, hasFragments: state.hasFragments, source }
     }
-    return { stage: state.stage, level: 'loading', progress: state.progress, total: state.total, hasEmbeddings: state.hasEmbeddings, hasFragments: state.hasFragments }
+    return { stage: state.stage, level: 'loading', progress: state.progress, total: state.total, hasEmbeddings: state.hasEmbeddings, hasFragments: state.hasFragments, source }
 }
 
 let cachedSnapshot: Map<string, VersionSyncState> | null = null

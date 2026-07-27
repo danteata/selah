@@ -32,7 +32,7 @@ import {
     getLoadedIndex,
     searchVerseEmbeddings,
 } from '../services/sermon-listener/verseEmbeddingStore'
-import { hasEmbeddingPack, tryLoadEmbeddingPack } from '../services/sermon-listener/embeddingPackLoader'
+import { loadSemanticPack, resolveSemanticPackVersion } from '../services/sermon-listener/semanticPack'
 import { NUMBER_TO_BOOK } from '../services/sermon-listener/verseDetection'
 import { getEffectiveThreshold, validateSemanticMatch } from '../lib/semanticRetrievalPolicy'
 import { lexicalSearchVerses } from '../lib/bibleLexicalSearch'
@@ -97,12 +97,11 @@ const embeddingsAvailabilityCache = new Map<string, boolean>()
 // action reads one document per hit, so this bounds Convex cost per query.
 const REMOTE_DENSE_LIMIT = 12
 
-// The embedding pack that powers SEMANTIC search for every Bible version.
-// Meaning is ~translation-independent, so KJV embeddings find the right verse
-// references and we re-render them in the active version's (locally bundled)
-// text. This is why semantic search works for NIV/NLT/etc. with no per-version
-// pack. If a per-version pack is ever shipped, prefer it here.
-const SEMANTIC_PACK_VERSION = 'KJV'
+// Which prebuilt pack powers SEMANTIC search for every Bible version is
+// decided by `semanticPack` (WEB, else KJV). Meaning is ~translation-
+// independent, so one pack finds the right verse references and we re-render
+// them in the active version's (locally bundled) text — which is why semantic
+// search works for NIV/NLT/etc. with no per-version pack and no local sync.
 
 export function useSemanticVerseSearch(
     options: UseSemanticVerseSearchOptions = {}
@@ -135,6 +134,9 @@ export function useSemanticVerseSearch(
 
     // Track which version we will actually search against (may differ from requested version if fallback is needed)
     const effectiveVersionRef = useRef<string | undefined>(version)
+    // Resolved universal pack id, or null when this version has its own
+    // generated embeddings (or no pack is available at all).
+    const packVersionRef = useRef<string | null>(null)
 
     const debounceRef = useRef<NodeJS.Timeout | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
@@ -159,11 +161,20 @@ export function useSemanticVerseSearch(
                 return
             }
 
-            // Check if embeddings exist locally (cheap metadata check, not full load)
+            // Preference order, best match for the active version first:
+            //   1. embeddings generated for this exact version,
+            //   2. the universal prebuilt pack (covers every version),
+            //   3. some other version's generated rows,
+            //   4. Convex.
+            // (2) must beat (3): a pack built for retrieval is a better index
+            // for NIV than, say, leftover ASV rows the user happened to build.
             let hasLocal = await hasCachedEmbeddings(requestedVersion)
             let workingVersion = requestedVersion
 
-            if (!hasLocal) {
+            const packVersion = hasLocal ? null : await resolveSemanticPackVersion()
+            packVersionRef.current = packVersion
+
+            if (!hasLocal && !packVersion) {
                 const cachedVersions = await getLocalCachedVersions()
                 if (cachedVersions.length > 0) {
                     // Also check pre-warmed for fallback versions
@@ -185,19 +196,10 @@ export function useSemanticVerseSearch(
 
             effectiveVersionRef.current = workingVersion
 
-            if (hasLocal) {
-                // Don't load all embeddings into memory here — defer to first search.
-                // Just record that local embeddings are available.
-                setHasLocalEmbeddings(true)
-                setHasEmbeddings(true)
-                embeddingsAvailabilityCache.set(cacheKey, true)
-            } else if (await hasEmbeddingPack(SEMANTIC_PACK_VERSION)) {
-                // The KJV pack powers semantic search for ANY active version
-                // (bundled on desktop, or the small int8 web pack, cached in
-                // IndexedDB). Treat it as local so search runs in-browser —
-                // Convex stays a fallback only. Results are re-rendered in the
-                // active version's text. Heavy load deferred to first search.
-                effectiveVersionRef.current = requestedVersion
+            if (hasLocal || packVersion) {
+                // Either way search runs in-browser and Convex stays a fallback
+                // only. Don't load anything into memory here — the heavy load
+                // is deferred to the first actual search.
                 setHasLocalEmbeddings(true)
                 setHasEmbeddings(true)
                 embeddingsAvailabilityCache.set(cacheKey, true)
@@ -302,12 +304,13 @@ export function useSemanticVerseSearch(
                 if (featureFlags.isEnabled('hybridVerseSearchV2', true) !== false) {
                     // Display + lexical BM25 use the ACTIVE version (its text is
                     // bundled locally for every version). The dense/semantic half
-                    // uses the KJV embedding pack for ALL versions — searchVerses
-                    // re-renders each matched reference in the active version's
-                    // text — so "search by meaning" works even for versions with
-                    // no embedding pack (e.g. NIV on web).
+                    // uses whichever index we resolved above — this version's own
+                    // generated rows if it has them, else the universal pack.
+                    // searchVerses re-renders each matched reference in the active
+                    // version's text, so "search by meaning" works for versions
+                    // with no embeddings of their own (e.g. NIV on web).
                     const activeVersion = version || 'KJV'
-                    const embeddingVersion = SEMANTIC_PACK_VERSION
+                    const embeddingVersion = packVersionRef.current ?? workingVersion
                     const corpus = (await downloadBibleVersion(activeVersion)) ?? []
                     if (abortController.signal.aborted) return
 
@@ -333,10 +336,11 @@ export function useSemanticVerseSearch(
                                     loadVerseStore(embeddingVersion, rows); rows = []
                                 } else {
                                     // No in-IndexedDB rows — load the prebuilt pack
-                                    // (desktop asset, or the int8 web pack; cached in
-                                    // IndexedDB after first download). This is what
-                                    // keeps web search local instead of hitting Convex.
-                                    await tryLoadEmbeddingPack(embeddingVersion)
+                                    // (desktop asset, or the small int8 pack the
+                                    // browser caches in IndexedDB after the first
+                                    // download). This is what keeps search local
+                                    // in the browser instead of hitting Convex.
+                                    await loadSemanticPack()
                                 }
                             }
                         }
@@ -437,16 +441,20 @@ export function useSemanticVerseSearch(
                     // store on the first local search. The worker keeps the
                     // index; the main thread retains only metadata-light state.
                     if (preferLocal && hasLocalEmbeddings) {
+                        const indexVersion = packVersionRef.current ?? workingVersion
                         const loaded = getLoadedIndex()
-                        if (!loaded || loaded.version !== workingVersion) {
-                            let rows = getPrewarmedEmbeddings(workingVersion)
+                        if (!loaded || loaded.version !== indexVersion) {
+                            let rows = getPrewarmedEmbeddings(indexVersion)
                             if (!rows || rows.length === 0) {
-                                rows = await getCachedVerseEmbeddings(workingVersion)
+                                rows = await getCachedVerseEmbeddings(indexVersion)
                             }
                             if (rows && rows.length > 0) {
-                                loadVerseStore(workingVersion, rows)
+                                loadVerseStore(indexVersion, rows)
                                 // Release our reference; the worker owns it now.
                                 rows = []
+                            } else {
+                                // Pack-served version: no generated rows exist.
+                                await loadSemanticPack()
                             }
                         }
                     }

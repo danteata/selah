@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Loader2, Database, Search, RefreshCw, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
+import { Loader2, Database, Download, Search, RefreshCw, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useScripture } from '../../hooks/useScripture'
 import type { BibleVersion } from '../../types'
@@ -105,17 +105,30 @@ export function BibleVersionSettings() {
         if (!result.success && !result.cancelled) {
             // Error message is rendered from shared embedding status state
             console.error(`[EmbeddingSync] Failed for ${versionId}: ${result.error ?? 'Unknown error'}`)
-            return
         }
+        // NOTE: deliberately no auto-upgrade to fragments here. Fragments are
+        // ~4x the work of the verse pass, so kicking it off silently made a
+        // finished sync look like it had restarted and turned a long wait into
+        // a much longer one. It's an explicit button now.
+    }, [startSync, downloadBibleVersion, refreshDownloadStatuses])
 
-        // Auto-upgrade to fragments in the background after fast full-verse seed completes
-        if (result.success && !withFragments) {
-            // Small delay so the UI shows "Complete" briefly before switching to upgrading
-            setTimeout(() => {
-                upgradeToFragments(versionId, getBibleVerses)
-            }, 500)
+    // Just fetch the text. Smart search needs nothing further — the shared
+    // prebuilt index already answers queries for every version.
+    const handleDownload = useCallback(async (versionId: string) => {
+        const data = await downloadBibleVersion(versionId)
+        if (data) {
+            await refreshDownloadStatuses()
+            await checkAllStatuses([versionId])
         }
-    }, [startSync, upgradeToFragments, downloadBibleVersion, refreshDownloadStatuses])
+    }, [downloadBibleVersion, refreshDownloadStatuses, checkAllStatuses])
+
+    const handleUpgrade = useCallback(async (versionId: string) => {
+        await upgradeToFragments(versionId, async () => {
+            const data = await downloadBibleVersion(versionId)
+            if (data) await refreshDownloadStatuses()
+            return data
+        })
+    }, [upgradeToFragments, downloadBibleVersion, refreshDownloadStatuses])
 
     const handleClear = useCallback(async (versionId: string) => {
         await clearEmbeddings(versionId)
@@ -133,7 +146,8 @@ export function BibleVersionSettings() {
                     Bible Versions
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Download a Bible version and turn on smart search so you can find verses by typing what you remember.
+                    Download any version and start searching — smart search works straight
+                    away, so you can find verses by typing what you remember.
                 </p>
             </div>
 
@@ -241,6 +255,11 @@ export function BibleVersionSettings() {
                                 : false
                             const stage = embeddingStatus?.stage ?? 'idle'
                             const progressPct = embeddingStatus ? pct(embeddingStatus) : undefined
+                            // Search already works via the shared prebuilt index —
+                            // no download, no wait. Building this version's own
+                            // embeddings is an optional accuracy tweak, not setup.
+                            const isPackServed = embeddingStatus?.source === 'pack' && !isVersionSyncing
+                            const isGenerated = embeddingStatus?.source === 'generated'
 
                             return (
                                 <div key={version.id} className="relative py-4">
@@ -250,10 +269,16 @@ export function BibleVersionSettings() {
                                                 <span className="text-sm font-medium text-gray-900 dark:text-white">
                                                     {version.id}
                                                 </span>
-                                                {embeddingStatus?.hasEmbeddings && !isVersionSyncing && (
+                                                {isPackServed && (
                                                     <span className="flex items-center gap-1 text-xs text-[var(--accent-teal)]">
                                                         <Search className="w-3 h-3" />
-                                                        {embeddingStatus.hasFragments ? (
+                                                        Smart search ready
+                                                    </span>
+                                                )}
+                                                {isGenerated && !isVersionSyncing && (
+                                                    <span className="flex items-center gap-1 text-xs text-[var(--accent-teal)]">
+                                                        <Search className="w-3 h-3" />
+                                                        {embeddingStatus?.hasFragments ? (
                                                             <span className="text-[10px] px-1 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded font-medium">v2</span>
                                                         ) : (
                                                             <span className="text-[10px] px-1 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded font-medium">v1</span>
@@ -279,11 +304,11 @@ export function BibleVersionSettings() {
                                                 </div>
                                             ) : (
                                                 <>
-                                                    {embeddingStatus?.hasEmbeddings ? (
+                                                    {isGenerated ? (
                                                         <div className="flex items-center gap-1">
-                                                            {!embeddingStatus.hasFragments && (
+                                                            {!embeddingStatus?.hasFragments && (
                                                                 <button
-                                                                    onClick={() => handleEnableSearch(version.id, true)}
+                                                                    onClick={() => handleUpgrade(version.id)}
                                                                     disabled={isSyncing}
                                                                     className="flex items-center gap-1 px-2 py-1 text-xs border border-amber-400 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/30 disabled:opacity-50 font-medium"
                                                                     title="Improve how the app finds short verses"
@@ -296,7 +321,7 @@ export function BibleVersionSettings() {
                                                                 onClick={() => handleEnableSearch(version.id, embeddingStatus?.hasFragments ?? false)}
                                                                 disabled={isSyncing}
                                                                 className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-                                                                title="Refresh embeddings"
+                                                                title="Rebuild this version's index"
                                                             >
                                                                 <RefreshCw className="w-4 h-4" />
                                                             </button>
@@ -304,12 +329,34 @@ export function BibleVersionSettings() {
                                                                 onClick={() => handleClear(version.id)}
                                                                 disabled={isSyncing}
                                                                 className="p-1.5 text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
-                                                                title="Clear embeddings"
+                                                                title="Delete this version's index and go back to the shared one"
                                                             >
                                                                 <Trash2 className="w-4 h-4" />
                                                             </button>
                                                         </div>
-                                                    ) : version.isDownloaded ? (
+                                                    ) : !version.isDownloaded ? (
+                                                        <button
+                                                            onClick={() => handleDownload(version.id)}
+                                                            disabled={isSyncing}
+                                                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-primary-500 text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-50 transition-colors"
+                                                        >
+                                                            <Download className="w-3.5 h-3.5" />
+                                                            Download
+                                                        </button>
+                                                    ) : isPackServed ? (
+                                                        // Search already works. Offer the local build as a
+                                                        // quiet secondary action with its real cost stated,
+                                                        // instead of a primary "Enable Search" that implies
+                                                        // search is off until you sit through it.
+                                                        <button
+                                                            onClick={() => handleEnableSearch(version.id)}
+                                                            disabled={isSyncing}
+                                                            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline underline-offset-2 disabled:opacity-50"
+                                                            title={`Embed ${version.id} on this device for wording-exact matches. Takes a while and isn't required.`}
+                                                        >
+                                                            Tune for {version.id}
+                                                        </button>
+                                                    ) : (
                                                         <button
                                                             onClick={() => handleEnableSearch(version.id)}
                                                             disabled={isSyncing}
@@ -317,15 +364,6 @@ export function BibleVersionSettings() {
                                                         >
                                                             <Search className="w-3.5 h-3.5" />
                                                             Enable Search
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => handleEnableSearch(version.id)}
-                                                            disabled={isSyncing}
-                                                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-primary-500 text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/20 disabled:opacity-50 transition-colors"
-                                                        >
-                                                            <Search className="w-3.5 h-3.5" />
-                                                            Download & Enable Search
                                                         </button>
                                                     )}
                                                 </>
@@ -357,7 +395,7 @@ export function BibleVersionSettings() {
                                         </p>
                                     )}
 
-                                    {embeddingStatus?.hasEmbeddings && !embeddingStatus.hasFragments && !isVersionSyncing && (
+                                    {isGenerated && !embeddingStatus?.hasFragments && !isVersionSyncing && (
                                         <div className="mt-2 flex items-start gap-2 p-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
                                             <Database className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                                             <div>

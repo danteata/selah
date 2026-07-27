@@ -34,7 +34,6 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
         states: embeddingStatuses,
         checkAllStatuses,
         startSync,
-        upgradeToFragments,
         clearEmbeddings,
         isSyncing,
         modelLoading,
@@ -89,20 +88,15 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
                     with_fragments: withFragments,
                     elapsed_ms: Date.now() - startedAt,
                 })
-
-                // Auto-upgrade to fragments in the background after fast full-verse seed completes
-                if (!withFragments) {
-                    setTimeout(() => {
-                        upgradeToFragments(versionId, getBibleVerses)
-                    }, 500)
-                }
+                // No auto-upgrade to fragments — see BibleVersionSettings.
+                // The "Include short phrases" toggle above opts into it upfront.
             } else if (!result.cancelled) {
                 showNotification('Setup failed', `Could not prepare ${versionName} for search`)
             }
         } catch {
             showNotification('Setup failed', `Could not prepare ${versionName} for search`)
         }
-    }, [bibleVersions, startSync, upgradeToFragments, downloadBibleVersion, showNotification, trackEvent])
+    }, [bibleVersions, startSync, downloadBibleVersion, showNotification, trackEvent])
 
     const handleClear = useCallback(async (versionId: string) => {
         await clearEmbeddings(versionId)
