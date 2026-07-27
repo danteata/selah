@@ -5,6 +5,8 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{ndi_lib}");
     }
 
+    stage_linux_transcribe_runtime();
+
     // Windows: stage the transcribe-cpp shared-library DLLs so the installer
     // can ship them next to Selah.exe.
     //
@@ -106,4 +108,96 @@ fn main() {
 
     let attrs = tauri_build::Attributes::new().windows_attributes(windows_attrs);
     tauri_build::try_build(attrs).expect("failed to run tauri-build");
+}
+
+/// Linux: stage the transcribe-cpp shared libraries so the deb/rpm/AppImage can
+/// ship them, and give the executable an rpath that finds them.
+///
+/// Linux builds transcribe-cpp with `dynamic-backends` (=> `shared`), exactly
+/// like Windows, so `libtranscribe.so.0` is a NEEDED dependency of the binary
+/// plus a set of ggml backend modules loaded at runtime. transcribe-cpp-sys
+/// copies them next to cargo's build artifacts so `cargo run`/tests work, and
+/// nothing carried them any further: the AppImage bundle died with
+/// `ERROR: Could not find dependency: libtranscribe.so.0` (which is how every
+/// Linux release from v0.1.5 on failed), and the deb/rpm — which resolve no
+/// dependencies and so "built fine" — packaged a binary that would die at launch
+/// with `libtranscribe.so.0: cannot open shared object file`. Linux has never
+/// actually shipped an asset, so this is the missing half of the Windows fix
+/// above rather than a regression.
+///
+/// Tauri installs `bundle.resources` to `/usr/lib/<productName>/` on Linux
+/// (crates/tauri-bundler/src/bundle/linux/debian.rs) with the binary at
+/// `/usr/bin/<binary>`, and the AppImage mirrors that layout inside the AppDir —
+/// so one `$ORIGIN`-relative rpath covers all three bundle formats.
+fn stage_linux_transcribe_runtime() {
+    // CARGO_CFG_TARGET_OS, not #[cfg(target_os)]: a build script is compiled for
+    // the HOST, so a cfg here would silently skip staging (and the rpath) when
+    // Linux is cross-compiled, producing a bundle that only fails at launch.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
+        return;
+    }
+
+    use std::path::PathBuf;
+
+    // DT_RPATH, not DT_RUNPATH (that's what --disable-new-dtags buys). RUNPATH
+    // applies only to the executable's OWN direct dependencies, so
+    // libtranscribe.so.0 would be found but the ggml backend modules IT pulls in
+    // would not. DT_RPATH is honoured transitively down the whole chain.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib/Selah/linux-runtime");
+    println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags");
+
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let dest = PathBuf::from(&manifest_dir).join("linux-runtime");
+    // Recreate clean so a library renamed/removed upstream never lingers stale.
+    let _ = std::fs::remove_dir_all(&dest);
+    std::fs::create_dir_all(&dest).expect("create linux-runtime staging dir");
+    // tauri-build FAILS the whole build on a resource glob that matches nothing
+    // ("glob pattern linux-runtime/**/* path not found or didn't match any
+    // files"), so the directory must never be empty — including when this crate
+    // is built without native-transcription and there is nothing to stage.
+    // .gitkeep is committed for the same reason on macOS and Windows, where this
+    // function returns early.
+    let _ = std::fs::write(dest.join(".gitkeep"), b"");
+
+    let mut copied = 0usize;
+    for var in [
+        "DEP_TRANSCRIBE_CPP_RUNTIME_DIR",
+        "DEP_TRANSCRIBE_CPP_MODULE_DIR",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+        let Some(dir) = std::env::var_os(var) else {
+            continue;
+        };
+        let dir = PathBuf::from(dir);
+        println!("cargo:rerun-if-changed={}", dir.display());
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            // Match on the name, not the extension: the files that matter are
+            // soname-versioned (libtranscribe.so.0), so `extension()` is "0".
+            if !name.contains(".so") {
+                continue;
+            }
+            // fs::copy follows symlinks, so a `libtranscribe.so -> .so.0` pair
+            // lands as two real files. That costs a few MB and keeps both names
+            // resolvable without relying on the bundler preserving symlinks.
+            if std::fs::copy(&path, dest.join(name)).is_ok() {
+                copied += 1;
+            }
+        }
+    }
+
+    if copied == 0 {
+        println!(
+            "cargo:warning=selah build.rs: staged no transcribe-cpp shared libraries for \
+             the Linux bundle (DEP_TRANSCRIBE_CPP_RUNTIME_DIR unset or empty) — the \
+             AppImage bundle will fail with 'Could not find dependency: \
+             libtranscribe.so.0' and the deb/rpm will fail at launch"
+        );
+    }
 }

@@ -17,7 +17,8 @@
             "assets/*",
             "assets/whisper-models-gguf/**/*",
             "assets/embedding-models/**/*",
-            "assets/embedding-packs/**/*"
+            "assets/embedding-packs/**/*",
+            "linux-runtime/**/*"
         ],
         "icon": [
             "icons/32x32.png",

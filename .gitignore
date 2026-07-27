@@ -79,3 +79,13 @@ src-tauri/onnxruntime-libs/
 # Windows transcribe-cpp runtime DLLs, staged by src-tauri/build.rs at build
 # time and bundled next to the exe on Windows (see tauri.windows.conf.json).
 src-tauri/windows-runtime/
+
+# Linux transcribe-cpp shared libraries, staged by src-tauri/build.rs at build
+# time and installed to /usr/lib/Selah/linux-runtime/ (see the `linux-runtime`
+# entry in tauri.conf.json's bundle.resources, which the binary's $ORIGIN rpath
+# points at). .gitkeep is committed because tauri-build FAILS on a resource glob
+# that matches nothing — "glob pattern linux-runtime/**/* path not found or
+# didn't match any files" — which would break the macOS and Windows builds, and
+# any Linux build without the native-transcription feature.
+src-tauri/linux-runtime/*
+!src-tauri/linux-runtime/.gitkeep
