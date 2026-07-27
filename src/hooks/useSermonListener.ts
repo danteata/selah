@@ -43,8 +43,10 @@ import {
 import type { VoiceCommand } from '../services/sermon-listener/voiceCommandDetection'
 import type { DetectedVerse } from '../services/sermon-listener'
 import { collapseOverlappingVerses } from '../lib/collapseOverlappingVerses'
+import { findQueuedBibleSlide } from '../lib/findQueuedBibleSlide'
+import { canClaimLiveSlide } from '../lib/semanticRetrievalPolicy'
 import type { ActiveReferenceContext } from '../services/sermon-listener'
-import type { Scripture, BibleVersion } from '../types'
+import type { Scripture, BibleVersion, Slide } from '../types'
 import type { TranscriptSegment } from '../types/sermon-listener'
 import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
 import { filterFillers } from '../services/sermon-listener/fillerFilter'
@@ -384,6 +386,18 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Track transcript buffer for context
     const transcriptBufferRef = useRef('')
 
+    /**
+     * Append a finalized utterance to the transcript buffer and return the new
+     * full transcript. Callers assign the result to transcriptBufferRef
+     * themselves, synchronously, so the very next line can act on the text that
+     * just arrived — see the note at the call sites.
+     */
+    const appendToTranscriptBuffer = useCallback((chunk: string): string => {
+        const trimmed = chunk.trim()
+        if (!trimmed) return transcriptBufferRef.current
+        return `${transcriptBufferRef.current} ${trimmed}`.trim()
+    }, [])
+
     // Session-relative timer for segment timestamps
     const sessionStartTimeRef = useRef<number>(0)
     const chunkStartTimeRef = useRef<number>(0)
@@ -394,6 +408,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Track detected verse references to prevent duplicates in the list
     const detectedRefsRef = useRef<Set<string>>(new Set())
+
+    // References recorded from a bare "Book Chapter" announcement, which
+    // resolves to verse 1 as a placeholder. Superseded once the verse actually
+    // being announced arrives — see recordAnnouncedVerse. Keyed by reference and
+    // carrying its own book/chapter so the lookup never has to consult
+    // detectedVersesRef, which mirrors state an effect behind.
+    const announcedChapterDefaultsRef = useRef<Map<string, { book: string; chapter: number }>>(new Map())
 
     // Cooldown map for re-triggering already-detected verses (reference → last activated timestamp)
     const reactivationCooldownRef = useRef<Map<string, number>>(new Map())
@@ -997,19 +1018,69 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [fetchScripture])
 
     /**
+     * Put a scripture on the live output, reusing the slide already queued for
+     * that reference instead of appending a second one. Every detection path
+     * goes through here, so a passage mentioned three times occupies one queue
+     * entry — see findQueuedBibleSlide for why the queue duplicated where the
+     * detected list didn't.
+     *
+     * The queued copy is refreshed in place when its text is out of date — a
+     * different version, or a narrower span of the passage now being read. Its
+     * background and typography survive the refresh — the operator may have
+     * styled that slide.
+     */
+    const projectScriptureSlide = useCallback((scripture: Scripture, supersedesLabel?: string | null): string => {
+        const state = useAppStore.getState()
+        const match = findQueuedBibleSlide(state.activeSlides, scripture, state.liveOutputSlidesId, supersedesLabel)
+
+        if (!match) {
+            // Applies the default bible template and includes the verse reference
+            const slide = createAutoDetectBibleSlide(scripture)
+            appendActiveSlide(slide)
+            setLiveSlide(slide.id)
+            return slide.id
+        }
+
+        const { slide: queued, needsRefresh } = match
+        const versionChanged = (queued.data as Scripture | undefined)?.version !== scripture.version
+
+        if (needsRefresh || versionChanged) {
+            const refreshed = createAutoDetectBibleSlide(scripture)
+            const updated: Slide = {
+                ...queued,
+                data: refreshed.data,
+                contents: refreshed.contents,
+                displayVerseNumbers: refreshed.displayVerseNumbers,
+                title: refreshed.title,
+                name: refreshed.name,
+                slideStyle: {
+                    ...queued.slideStyle,
+                    fontSize: refreshed.slideStyle?.fontSize,
+                    bibleVersion: refreshed.slideStyle?.bibleVersion,
+                },
+            }
+            updateActiveSlide(updated)
+            setLiveSlide(queued.id)
+
+            // setLiveSlide is a no-op when this slide is already live, so the
+            // live window/multi-monitor needs the update pushed explicitly.
+            if (typeof window !== 'undefined' && '__TAURI__' in window) {
+                window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updated }))
+            }
+            return queued.id
+        }
+
+        setLiveSlide(queued.id)
+        return queued.id
+    }, [createAutoDetectBibleSlide, appendActiveSlide, updateActiveSlide, setLiveSlide])
+
+    /**
      * Display the current verse on live view
      */
     const displayCurrentVerse = useCallback(() => {
         if (!currentScripture) return
-
-        // Create a slide from the scripture using the proper function
-        // This applies the default bible verse template and includes the verse reference
-        const slide = createAutoDetectBibleSlide(currentScripture)
-
-        // Add slide to active slides and set as live
-        appendActiveSlide(slide)
-        setLiveSlide(slide.id)
-    }, [currentScripture, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide])
+        projectScriptureSlide(currentScripture)
+    }, [currentScripture, projectScriptureSlide])
 
     /**
      * Navigate to the next verse relative to the current verse
@@ -1104,14 +1175,12 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
             }
         } else if (!skipQueueAppend) {
-            // No existing bible slide — fall back to creating one (only for auto-detect, not voice nav)
-            const slide = createAutoDetectBibleSlide(scripture)
-            appendActiveSlide(slide)
-            setLiveSlide(slide.id)
+            // No existing bible slide — fall back to queueing one (only for auto-detect, not voice nav)
+            projectScriptureSlide(scripture)
         }
         // When skipQueueAppend=true and no existing bible slide, do nothing.
         // The user explicitly wants voice navigation to never spam the queue.
-    }, [createAutoDetectBibleSlide, updateActiveSlide, appendActiveSlide, setLiveSlide])
+    }, [createAutoDetectBibleSlide, updateActiveSlide, setLiveSlide, projectScriptureSlide])
 
     const applyBibleVersionChange = useCallback(async (requestedVersionId: string): Promise<boolean> => {
         const resolvedVersionId = resolveBibleVersionId(requestedVersionId) || requestedVersionId
@@ -1152,10 +1221,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             reference: scripture.label,
         })
 
-        // Force deterministic refresh by publishing a fresh Bible slide from the switched scripture.
-        const slide = createAutoDetectBibleSlide(scripture)
-        appendActiveSlide(slide)
-        setLiveSlide(slide.id)
+        // Force deterministic refresh from the switched scripture. Same
+        // reference as what's already queued, so this rewrites that slide's
+        // text in the new version rather than queueing a second copy.
+        projectScriptureSlide(scripture)
 
         console.log('[SermonListener] Version switch applied:', {
             requestedVersionId,
@@ -1164,7 +1233,82 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             scriptureVersion: scripture.version,
         })
         return true
-    }, [resolveBibleVersionId, lookupVerse, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide])
+    }, [resolveBibleVersionId, lookupVerse, projectScriptureSlide])
+
+    /**
+     * Record a reference the speaker announced as a voice command ("Psalm 27
+     * verse 1", "Joshua 24" then "verse 15") in the detected list.
+     *
+     * Nothing else records it, and two separate failures follow from that.
+     *
+     * The command text is stripped from the transcript before verse detection
+     * runs (see commandsForStripping) precisely so command words can't be
+     * re-read as references — so an unrecorded announcement exists nowhere: not
+     * in Detected Verses, not in detectedRefsRef, and so not protected by the
+     * chapter-dedup and already-detected guards the semantic path applies to
+     * everything it knows about. Live session: "Psalm 27 verse 1" was announced
+     * and read aloud, the list stayed empty, and a 2 Kings cross-reference took
+     * the screen unopposed.
+     *
+     * Worse, that stripping is not permanent. Commands are only matched in the
+     * last 300 characters of the transcript, while the regex pass scans the last
+     * 1500 — so once an announcement scrolls past 300 chars it stops being
+     * stripped, reappears in the scanned window, and is detected as a BRAND NEW
+     * reference. Live session: "Joshua 24 verse 15" was announced at ~160 chars
+     * and re-detected as new at ~471, a minute later, taking the live slide from
+     * the Psalms 34:7-8 being read at the time. Registering the reference here
+     * turns that into a re-activation, which needs 60s of genuine silence before
+     * it may re-display.
+     *
+     * Scored 1.0 like a regex hit — an explicit announcement is the strongest
+     * signal available, so no semantic sibling in the chapter should displace it.
+     *
+     * `isChapterDefault` marks the placeholder verse 1 that a bare "Book
+     * Chapter" announcement resolves to. When the verse actually being announced
+     * arrives a moment later ("Joshua 24" … "verse 15"), that placeholder is
+     * superseded rather than left in the list as a reference no one made. An
+     * explicit "verse 1" is not a placeholder and is never dropped.
+     *
+     * Returns the reference it superseded, if any, so the caller can hand it to
+     * projectScriptureSlide and have the placeholder's SLIDE rewritten too
+     * instead of leaving a stale verse-1 entry beside the real one.
+     */
+    const recordAnnouncedVerse = useCallback((verse: DetectedVerse, isChapterDefault = false): string | null => {
+        const now = Date.now()
+        const superseded = isChapterDefault
+            ? null
+            : Array.from(announcedChapterDefaultsRef.current.entries()).find(([reference, placeholder]) =>
+                placeholder.book === verse.book
+                && placeholder.chapter === verse.chapter
+                && reference !== verse.reference,
+            )?.[0]
+
+        if (superseded) {
+            announcedChapterDefaultsRef.current.delete(superseded)
+            detectedRefsRef.current.delete(superseded)
+            lastScoreByReferenceRef.current.delete(superseded)
+        }
+        if (isChapterDefault) {
+            announcedChapterDefaultsRef.current.set(verse.reference, { book: verse.book, chapter: verse.chapter })
+        }
+
+        detectedRefsRef.current.add(verse.reference)
+        reactivationCooldownRef.current.set(verse.reference, now)
+        lastMatchTimeRef.current.set(verse.reference, now)
+        lastScoreByReferenceRef.current.set(verse.reference, 1.0)
+        setDetectedVerses(prev => dedupeVerses([
+            ...prev.filter(v => v.reference !== superseded),
+            {
+                ...verse,
+                isBestMatch: true,
+                detectionType: 'regex' as const,
+                lastActivatedAt: now,
+                retriggerCount: 0,
+            },
+        ]))
+
+        return superseded ?? null
+    }, [dedupeVerses])
 
     /**
      * Activate verses surfaced by the optional LLM pass. Mirrors the regex
@@ -1242,15 +1386,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             lookupVerse(latest).then((scripture) => {
                 optionsRef.current.onVerseDetected?.(latest, scripture)
                 if (autoDisplay && scripture && latest.confidence !== 'low') {
-                    const slide = createAutoDetectBibleSlide(scripture)
-                    appendActiveSlide(slide)
-                    setLiveSlide(slide.id)
+                    projectScriptureSlide(scripture)
                 }
             })
         } else {
             optionsRef.current.onVerseDetected?.(latest, null)
         }
-    }, [dedupeVerses, lookupVerse, autoLookup, autoDisplay, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide, minConfidence])
+    }, [dedupeVerses, lookupVerse, autoLookup, autoDisplay, projectScriptureSlide, minConfidence])
 
     /**
      * Debounced, optional LLM extraction pass over the latest transcript text.
@@ -1309,7 +1451,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             for (const cmd of commands) {
                 const commandKey = (() => {
                     switch (cmd.type) {
-                        case 'go_to_reference': return `${cmd.type}:${cmd.book || ''}:${cmd.chapter || ''}`
+                        // The verse belongs in the key. Without it, a bare
+                        // "Joshua 24" and the "Joshua 24 verse 15" that follows
+                        // it a beat later collapse to one key, and the 1800ms
+                        // window swallows the specific reference — leaving verse
+                        // 1 on screen, and the real reference recorded nowhere,
+                        // free to be re-detected as new a minute later.
+                        case 'go_to_reference': return `${cmd.type}:${cmd.book || ''}:${cmd.chapter || ''}:${cmd.verse ?? ''}`
                         case 'go_to_verse': return `${cmd.type}::${cmd.targetVerse || ''}`
                         case 'change_version': return `${cmd.type}:${cmd.versionId || ''}:`
                         default: return `${cmd.type}::`
@@ -1420,6 +1568,15 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             activeReferenceContextRef.current = updateContextFromVerse(goto)
                             semanticDetectorRef.current?.setReadingContext(cur.book, cur.chapter, target)
                             navigationCooldownUntilRef.current = Date.now() + 3000
+                            // A spoken "verse N" names a reference as surely as
+                            // the full form does — it just borrows the book and
+                            // chapter from the announcement before it. Recording
+                            // it is what stops the same words being re-detected
+                            // as a new reference minutes later (see
+                            // recordAnnouncedVerse); "Joshua 24" + "verse 15"
+                            // resolves here, and that is the reference that
+                            // hijacked the screen for going unrecorded.
+                            recordAnnouncedVerse(goto)
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
@@ -1451,10 +1608,26 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             // Scripture doesn't outrank the verses on screen.
                             semanticDetectorRef.current?.setReadingContext(book, chapter, verse)
                             navigationCooldownUntilRef.current = Date.now() + 3000
+                            // verse == null is a bare "Book Chapter" mention,
+                            // whose verse 1 is a placeholder, not a reference
+                            // the speaker made.
+                            const supersedes = recordAnnouncedVerse(goto, verse == null)
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
                                     setCurrentScripture(scripture)
-                                    refreshLiveSlide(scripture, true)
+                                    // Not refreshLiveSlide: that only rewrites a
+                                    // bible slide that is ALREADY live, so an
+                                    // announcement made before anything is on
+                                    // screen — the first thing a preacher does —
+                                    // displayed nothing at all and queued
+                                    // nothing. A named passage deserves its own
+                                    // queue entry; projectScriptureSlide is
+                                    // idempotent per reference, so re-announcing
+                                    // it reuses that entry instead of stacking
+                                    // copies. Relative navigation (next verse,
+                                    // next chapter) still updates in place — it
+                                    // has no reference of its own to queue.
+                                    projectScriptureSlide(scripture, supersedes)
                                 }
                             })
                         }
@@ -1521,9 +1694,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     case 'display': {
                         const scripture = currentScriptureRef.current
                         if (scripture) {
-                            const slide = createAutoDetectBibleSlide(scripture)
-                            appendActiveSlide(slide)
-                            setLiveSlide(slide.id)
+                            projectScriptureSlide(scripture)
                         }
                         break
                     }
@@ -1759,12 +1930,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
                         // Auto-display if enabled
                         if (autoDisplay && scripture) {
-                            // Create a slide using the proper function to apply template
-                            const slide = createAutoDetectBibleSlide(scripture)
-
-                            // Add slide to active slides and set as live
-                            appendActiveSlide(slide)
-                            setLiveSlide(slide.id)
+                            projectScriptureSlide(scripture)
                         }
                     })
                 } else {
@@ -1814,9 +1980,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         lookupVerse(existing).then(scripture => {
                             optionsRef.current.onVerseDetected?.(existing, scripture)
                             if (autoDisplay && scripture) {
-                                const slide = createAutoDetectBibleSlide(scripture)
-                                appendActiveSlide(slide)
-                                setLiveSlide(slide.id)
+                                projectScriptureSlide(scripture)
                             }
                         })
                     }
@@ -1962,6 +2126,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         continue
                     }
 
+                    // Is this match inside the passage the speaker announced?
+                    // Used twice below: the marker floor and chapter dedup both
+                    // relax for the chapter being read.
+                    const isAnnouncedChapter = !!activeContext
+                        && activeContext.book === bookName
+                        && activeContext.chapter === match.chapter
+
                     // Scripture-marker check. If the matched query has no marker
                     // word (verse, chapter, scripture, etc.) and the score is
                     // below SCRIPTURE_MARKER_MIN_SCORE, it's likely an
@@ -1973,7 +2144,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // silently re-trigger an already-detected (and possibly
                     // long-stale) verse — reactivation must clear the same bar a
                     // brand-new match would.
-                    if (!SCRIPTURE_MARKER_RE.test(match.text) && match.score < SCRIPTURE_MARKER_MIN_SCORE) {
+                    //
+                    // The announced chapter is exempt: this floor compensates
+                    // for the ABSENCE of a reference signal, and an announcement
+                    // is that signal. Verse text carries no marker word of its
+                    // own, so reading an announced passage aloud is exactly the
+                    // case it wrongly rejected — "Psalm 27 verse 1" announced,
+                    // then read, scored Psalms 27:1 at 0.732 and dropped it,
+                    // leaving the screen free for a 0.782 match in 2 Kings.
+                    // minConfidence still applies, so a genuinely weak (<0.65)
+                    // in-chapter match is still refused.
+                    if (!isAnnouncedChapter && !SCRIPTURE_MARKER_RE.test(match.text) && match.score < SCRIPTURE_MARKER_MIN_SCORE) {
                         continue
                     }
 
@@ -2021,10 +2202,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // clear anchor + CHAPTER_DEDUP_DELTA. That's why announcing
                     // "Psalm 91" and reading on surfaced verse 1 and then
                     // nothing — one verse per chapter, by construction.
-                    const isAnnouncedChapter = !!activeContext
-                        && activeContext.book === bookName
-                        && activeContext.chapter === match.chapter
-
+                    // (isAnnouncedChapter is computed above, before the marker
+                    // floor, which relaxes for the same reason.)
                     const sameChapterExisting = isAnnouncedChapter
                         ? undefined
                         : detectedVersesRef.current.find(v =>
@@ -2056,38 +2235,45 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 }
 
                 // Sort by score (highest first) and limit to max per query.
-                // Within the same confidence tier, prefer a candidate in the
-                // sermon's current book/chapter context — this only re-orders
-                // among matches that already independently cleared the
-                // confidence/marker/dedup checks above, it never lets a
-                // weaker match through, so it targets exactly the "two
-                // similarly-scored verses, pick the contextually plausible
-                // one" case without loosening any acceptance threshold.
-                // `activeContext` is computed above the loop.
+                // Prefer a candidate in the sermon's current book/chapter
+                // context, then by confidence tier. This only re-orders among
+                // matches that already independently cleared the
+                // confidence/marker/dedup checks above — it never lets a weaker
+                // match through — so it targets exactly the "two plausible
+                // verses, pick the one being read" case without loosening any
+                // acceptance threshold. `activeContext` is computed above the loop.
+                //
+                // Context is compared BEFORE confidence, matching rankMatches in
+                // the detector. Confidence-first quietly undid that ranking: an
+                // out-of-context 'high' (score >= 0.78) sorted above the
+                // in-context 'medium' verse actually being read, and the top
+                // slot is what claims the screen.
                 semanticVerses.sort((a, b) => {
-                    const confOrder = { high: 3, medium: 2, low: 1 }
-                    const confDiff = confOrder[b.confidence] - confOrder[a.confidence]
-                    if (confDiff !== 0) return confDiff
                     if (activeContext) {
                         const aInContext = a.book === activeContext.book && a.chapter === activeContext.chapter ? 1 : 0
                         const bInContext = b.book === activeContext.book && b.chapter === activeContext.chapter ? 1 : 0
                         if (aInContext !== bInContext) return bInContext - aInContext
                     }
-                    return 0
+                    const confOrder = { high: 3, medium: 2, low: 1 }
+                    return confOrder[b.confidence] - confOrder[a.confidence]
                 })
                 const limitedSemanticVerses = semanticVerses.slice(0, MAX_DETECTED_VERSES_PER_QUERY)
 
-                // Mark the best semantic match as isBestMatch and add to ref
-                // Only add to detectedRefsRef if NOT stale — stale results should not
-                // block future detections of the same verse by a fresher semantic search
+                // May the top survivor take over the live screen on its own? The
+                // survivors all enter the detected list either way — the operator
+                // can pick any of them. See canClaimLiveSlide for the reasoning
+                // and the live sessions behind it.
+                let canClaimDisplay = false
                 if (limitedSemanticVerses.length > 0) {
-                    // Only claim the display when the top-ranked candidate wasn't
-                    // one we'd already detected. These survivors are all
-                    // lower-ranked than that one, so promoting the first of them
-                    // is how a cross-reference stole the live slide from the verse
-                    // actually being read. They still enter the detected list —
-                    // the operator can pick them — they just don't take over.
-                    limitedSemanticVerses[0].isBestMatch = !bestCandidateAlreadyDetected
+                    canClaimDisplay = canClaimLiveSlide(
+                        limitedSemanticVerses[0],
+                        activeContext,
+                        bestCandidateAlreadyDetected,
+                    )
+                    limitedSemanticVerses[0].isBestMatch = canClaimDisplay
+
+                    // Only add to detectedRefsRef if NOT stale — stale results should not
+                    // block future detections of the same verse by a fresher semantic search
                     if (!isStale) {
                         for (const v of limitedSemanticVerses) {
                             detectedRefsRef.current.add(v.reference)
@@ -2122,15 +2308,19 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     }
                     setDetectedVerses(prev => dedupeVerses([...prev, ...versesWithTimestamp]))
 
-                    // Only update current verse if no regex verses were found AND
-                    // no newer regex detection has happened since this search started.
+                    // Only update current verse if the top survivor is allowed to
+                    // claim the display (see canClaimDisplay above — this used to
+                    // be recorded on isBestMatch and then never consulted, so a
+                    // candidate explicitly denied the display took it anyway),
+                    // no regex verses were found, and no newer regex detection
+                    // has happened since this search started.
                     // Also guard against a same-book+chapter semantic match downgrading
                     // an already-live, more specific verse or range — semantic search
                     // can only ever score single verses (never a range), so a range
                     // already established by regex ("Psalms 34:7-8") must not collapse
                     // down to just its first verse the moment a debounced semantic pass
                     // resolves against partial text.
-                    if (!hasRegexVerses && !isStale && !isSpecificityDowngrade(currentVerseRef.current, versesWithTimestamp[0])) {
+                    if (canClaimDisplay && !hasRegexVerses && !isStale && !isSpecificityDowngrade(currentVerseRef.current, versesWithTimestamp[0])) {
                         const bestSemanticVerse = versesWithTimestamp[0]
                         setCurrentVerse(bestSemanticVerse)
 
@@ -2149,9 +2339,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 // 0.55-0.65 with only theological-common overlap) stay
                                 // in the detected list for operator review.
                                 if (autoDisplay && scripture && bestSemanticVerse.confidence !== 'low') {
-                                    const slide = createAutoDetectBibleSlide(scripture)
-                                    appendActiveSlide(slide)
-                                    setLiveSlide(slide.id)
+                                    projectScriptureSlide(scripture)
                                 }
                             })
                         } else {
@@ -2201,9 +2389,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                     // Gate on the fresh re-match's confidence, not
                                     // the verse's original (possibly stale) one.
                                     if (autoDisplay && scripture && freshConfidence !== 'low') {
-                                        const slide = createAutoDetectBibleSlide(scripture)
-                                        appendActiveSlide(slide)
-                                        setLiveSlide(slide.id)
+                                        projectScriptureSlide(scripture)
                                     }
                                 })
                             }
@@ -2240,7 +2426,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     setIsSemanticSearching(false)
                 })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, createAutoDetectBibleSlide, appendActiveSlide, setLiveSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, applyBibleVersionChange, scheduleLlmExtraction])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, projectScriptureSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, recordAnnouncedVerse, applyBibleVersionChange, scheduleLlmExtraction])
 
     /**
      * Set transcription provider
@@ -2504,13 +2690,21 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 }
                             }).filter(seg => seg.text.length > 0)
 
-                            setTranscriptSegments(prev => {
-                                const next = [...prev, ...newSegments]
-                                const fullText = next.map(s => s.text).join(' ').trim()
-                                transcriptBufferRef.current = fullText
-                                setTranscript(fullText)
-                                return next
-                            })
+                            // The buffer is advanced HERE, not inside the state
+                            // updater below. React runs updaters during the
+                            // render that follows this callback, so a buffer
+                            // written in there is still one utterance behind when
+                            // processTranscript reads it a few lines down — and
+                            // empty for the first utterance of a session, which
+                            // `if (!text) return` then dropped entirely. That is
+                            // why an opening "Psalm 27 verse 1" was never
+                            // detected and why every later detection trailed the
+                            // speaker by a chunk.
+                            transcriptBufferRef.current = appendToTranscriptBuffer(
+                                newSegments.map(s => s.text).join(' '),
+                            )
+                            setTranscript(transcriptBufferRef.current)
+                            setTranscriptSegments(prev => [...prev, ...newSegments])
                         } else {
                             // Web Speech or no segment timing — use wall-clock offsets.
                             // chunkStartTimeRef tracks when the current chunk started (set on first
@@ -2524,13 +2718,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                                 source: provider === 'native' ? 'whisper' : 'web-speech',
                             }
 
-                            setTranscriptSegments(prev => {
-                                const next = [...prev, segment]
-                                const fullText = next.map(s => s.text).join(' ').trim()
-                                transcriptBufferRef.current = fullText
-                                setTranscript(fullText)
-                                return next
-                            })
+                            // Advanced outside the updater — same reason as the
+                            // whisper-segment branch above.
+                            transcriptBufferRef.current = appendToTranscriptBuffer(segment.text)
+                            setTranscript(transcriptBufferRef.current)
+                            setTranscriptSegments(prev => [...prev, segment])
                         }
 
                         const newFullTranscript = `${transcriptBufferRef.current}`.trim()
@@ -2614,6 +2806,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         cleanRepeatedPhrases,
         isDuplicateText,
         stripOverlap,
+        appendToTranscriptBuffer,
         provider,
         sermonSettings?.captureSource,
         sermonSettings?.selectedMicrophoneId,
@@ -2743,6 +2936,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         transcriptBufferRef.current = ''
         recentChunksRef.current = []
         detectedRefsRef.current = new Set()
+        announcedChapterDefaultsRef.current = new Map()
         sessionStartTimeRef.current = 0
         chunkStartTimeRef.current = 0
         if (interimDebounceRef.current) {

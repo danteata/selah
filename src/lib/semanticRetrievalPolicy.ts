@@ -332,3 +332,38 @@ export function isAmbiguousMatch(best: ScoredVerseCandidate, candidates: ScoredV
     if (!runnerUp) return false
     return best.score - runnerUp.score < AMBIGUITY_MARGIN
 }
+
+/**
+ * May the top-ranked semantic survivor take over the live screen on its own?
+ *
+ * Admission to the detected list is a separate, looser question — everything
+ * that clears the thresholds lands there for the operator to pick. This decides
+ * only whether one candidate seizes the output, which is where being wrong is
+ * expensive: the congregation reads it.
+ *
+ * With an announced passage, the answer is simply "is this candidate inside it".
+ *   - Outside it, no. Scripture restates itself, so a reading honestly scores
+ *     near-identical verses elsewhere: reading Psalm 27 ("Whom shall I fear")
+ *     scored 2 Kings 17:39 at 0.782 and put it on screen; reading Deuteronomy
+ *     6:6-9 scored 11:19 at 0.984. Those scores are earned and the verses are
+ *     still wrong for what is being read. A cross-reference the preacher
+ *     actually NAMES arrives through the regex path, which claims the screen
+ *     directly and moves the announced context with it — so what this suppresses
+ *     is specifically the unnamed coincidence.
+ *   - Inside it, yes, even when the previously-read verse is already known.
+ *     Sequential verses ARE the reading, and treating them as redundant is what
+ *     made announcing "Psalm 91" surface verse 1 and then nothing.
+ *
+ * With no announced passage there is nothing to be outside of, so the older rule
+ * stands alone: don't promote a lower-ranked novel candidate when the top-ranked
+ * one was a verse already detected. That ranking put Deuteronomy 11:19 live over
+ * the 6:7 being read — novelty beating correctness.
+ */
+export function canClaimLiveSlide(
+    promoted: { book: string; chapter: number },
+    announced: { book: string; chapter: number } | null,
+    topRankedAlreadyDetected: boolean,
+): boolean {
+    if (!announced) return !topRankedAlreadyDetected
+    return promoted.book === announced.book && promoted.chapter === announced.chapter
+}

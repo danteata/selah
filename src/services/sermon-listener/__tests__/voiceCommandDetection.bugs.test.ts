@@ -139,10 +139,22 @@ describe('voiceCommandDetection — BUG HUNTING', () => {
         const references = cmds.filter(c => c.type === 'go_to_reference')
         // Every surviving go_to_reference for this utterance must carry the
         // actual spoken verse (4), never the bare-chapter default of 1.
+        expect(references.length).toBeGreaterThan(0)
         for (const ref of references) {
             expect(ref.verse).toBe(4)
         }
-        expect(cmds.some(c => c.type === 'go_to_verse' && c.targetVerse === 4)).toBe(true)
+        // The bare "verse 4" jump describes the same destination as the full
+        // reference above and is dropped as redundant — the two took different
+        // routes to the screen (queue a slide for the reference vs. rewrite the
+        // live slide in place) and raced to leave two entries for one passage.
+        expect(cmds.some(c => c.type === 'go_to_verse' && c.targetVerse === 4)).toBe(false)
+    })
+
+    it('keeps a "verse N" jump that no full reference in the utterance covers', () => {
+        const cmds = detectVoiceCommands('2 Corinthians chapter 4 verse 4, and then verse 7')
+        expect(cmds.some(c => c.type === 'go_to_reference' && c.verse === 4)).toBe(true)
+        expect(cmds.some(c => c.type === 'go_to_verse' && c.targetVerse === 7)).toBe(true)
+        expect(cmds.some(c => c.type === 'go_to_verse' && c.targetVerse === 4)).toBe(false)
     })
 
     it('a bare chapter-only reference still fires normally when no verse is mentioned', () => {

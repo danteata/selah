@@ -778,10 +778,25 @@ export function detectVoiceCommands(
         || bareVerseCommands.length > 0
     const effectiveReferenceCommands = hasMoreSpecificVerseCommand ? [] : referenceCommands
 
+    // "Joshua 24 verse 15" matches twice: as a full book+chapter+verse
+    // reference, and as a bare "verse 15" jump. They describe the same jump, so
+    // executing both is redundant — and the two take different routes to the
+    // screen (one queues a slide for the reference, the other rewrites the live
+    // slide in place), which raced to leave two entries for one passage. Keep
+    // the full form: it names its own book and chapter instead of borrowing
+    // them from whatever context happens to be active. A "verse N" that no full
+    // reference covers still stands on its own.
+    const fullyQualifiedVerses = new Set(
+        bookChapterVerseCommands.map(cmd => cmd.verse).filter((v): v is number => v != null),
+    )
+    const effectiveGoToVerseCommands = goToVerseCommands.filter(
+        cmd => cmd.targetVerse == null || !fullyQualifiedVerses.has(cmd.targetVerse),
+    )
+
     const allCommands: VoiceCommand[] = [
         ...detectVersionChangeCommands(recentText),
         ...detectNavigationCommands(recentText),
-        ...goToVerseCommands,
+        ...effectiveGoToVerseCommands,
         ...bareVerseCommands,
         ...bookChapterVerseCommands,
         ...effectiveReferenceCommands,
