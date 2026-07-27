@@ -394,6 +394,31 @@ export async function countCachedEmbeddings(version: string): Promise<number> {
     }
 }
 
+/**
+ * Memoized `hasCachedEmbeddings`. The live-transcription path asks this once
+ * per candidate window — dozens of times per utterance — and each miss was a
+ * fresh IndexedDB open plus an index cursor in the hot path. Generated rows
+ * only appear/disappear via the sync manager, which calls
+ * `invalidateCachedEmbeddingsLookup` when they do.
+ */
+const cachedEmbeddingsLookup = new Map<string, boolean>()
+
+export function invalidateCachedEmbeddingsLookup(version?: string): void {
+    if (version) {
+        cachedEmbeddingsLookup.delete(version)
+        return
+    }
+    cachedEmbeddingsLookup.clear()
+}
+
+export async function hasCachedEmbeddingsMemo(version: string): Promise<boolean> {
+    const known = cachedEmbeddingsLookup.get(version)
+    if (known !== undefined) return known
+    const result = await hasCachedEmbeddings(version)
+    cachedEmbeddingsLookup.set(version, result)
+    return result
+}
+
 export async function hasCachedEmbeddings(version: string): Promise<boolean> {
     try {
         const db = await openVerseCache()

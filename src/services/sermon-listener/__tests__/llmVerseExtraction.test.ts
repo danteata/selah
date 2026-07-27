@@ -55,6 +55,21 @@ describe('validateExtractedVerse', () => {
         expect(validateExtractedVerse({ book: 'Genesis', chapter: 51, verseStart: 1 })).toBeNull()
     })
 
+    it('clamps a range end past the end of the chapter', () => {
+        // Jude is a single 25-verse chapter. An invented end must not pass just
+        // because the start is valid — this is how two separate spoken
+        // references got fused into one impossible span.
+        const v = validateExtractedVerse({ book: 'Jude', chapter: 1, verseStart: 1, verseEnd: 40 })
+        expect(v?.verseEnd).toBe(25)
+        expect(v?.reference).toBe('Jude 1:1-25')
+    })
+
+    it('drops a range end that would clamp below the start', () => {
+        const v = validateExtractedVerse({ book: 'Jude', chapter: 1, verseStart: 25, verseEnd: 40 })
+        expect(v?.verseEnd).toBeUndefined()
+        expect(v?.reference).toBe('Jude 1:25')
+    })
+
     it('rejects malformed input', () => {
         expect(validateExtractedVerse(null)).toBeNull()
         expect(validateExtractedVerse({ chapter: 3 })).toBeNull()
@@ -88,6 +103,38 @@ describe('mergeNewVerses', () => {
         }).verses
         const result = mergeNewVerses(extracted, ['john 3:16'])
         expect(result.map((v) => v.reference)).toEqual(['Romans 8:28'])
+    })
+
+    // A passage read aloud gets re-extracted as the transcript grows. One live
+    // sermon emitted Isaiah 43:1, then 43:1-3, then 43:1-17 as separate cards.
+    it('drops a widened range over an already-detected verse', () => {
+        const extracted = parseExtraction({
+            verses: [{ book: 'Isaiah', chapter: 43, verseStart: 1, verseEnd: 17 }],
+        }).verses
+        expect(mergeNewVerses(extracted, ['Isaiah 43:1'])).toEqual([])
+    })
+
+    it('drops a range that overlaps an already-detected range', () => {
+        const extracted = parseExtraction({
+            verses: [{ book: 'Colossians', chapter: 3, verseStart: 12, verseEnd: 17 }],
+        }).verses
+        expect(mergeNewVerses(extracted, ['Colossians 3:12-13'])).toEqual([])
+    })
+
+    it('keeps a non-overlapping range in the same chapter', () => {
+        const extracted = parseExtraction({
+            verses: [{ book: 'Colossians', chapter: 3, verseStart: 18, verseEnd: 20 }],
+        }).verses
+        expect(mergeNewVerses(extracted, ['Colossians 3:12-17']).map((v) => v.reference))
+            .toEqual(['Colossians 3:18-20'])
+    })
+
+    it('keeps the same verse numbers in a different chapter', () => {
+        const extracted = parseExtraction({
+            verses: [{ book: 'Colossians', chapter: 4, verseStart: 12 }],
+        }).verses
+        expect(mergeNewVerses(extracted, ['Colossians 3:12']).map((v) => v.reference))
+            .toEqual(['Colossians 4:12'])
     })
 })
 

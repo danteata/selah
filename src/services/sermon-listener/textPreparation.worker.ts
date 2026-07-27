@@ -64,11 +64,32 @@ type PrepareResponse = PrepareSuccessResponse | PrepareErrorResponse
 // Text utilities (mirror of semanticVerseDetection.ts)
 // ---------------------------------------------------------------------------
 
-function containsExplicitVerseReference(text: string): boolean {
-    const bookVersePattern = new RegExp(`\\b(${BOOK_PATTERN})\\s+\\d{1,3}[:\\s]\\d{1,3}`, 'i')
-    const chapterVersePattern = /\bchapter\s+\d{1,3}\s+(?:verse\s+)?\d{1,3}/i
-    const bookChapterPattern = new RegExp(`\\b(${BOOK_PATTERN})\\s+(?:chapter\\s+)?\\d{1,3}`, 'i')
-    return bookVersePattern.test(text) || chapterVersePattern.test(text) || bookChapterPattern.test(text)
+/**
+ * Blank out any explicit reference *inside* a chunk, keeping the surrounding
+ * words.
+ *
+ * Dropping the whole chunk instead (which is what this replaced) is fine when
+ * ASR gives you punctuation. It isn't when it doesn't: a live transcript
+ * arrives as long unpunctuated runs, so one spoken "Psalm 91" poisoned the
+ * entire span around it — and that span is precisely the reading that follows
+ * the announcement, the text most worth matching. Explicit references are the
+ * regex detector's job, so removing just those words leaves the semantic pass
+ * the prose it should be working on.
+ */
+function blankExplicitReferences(text: string): string {
+    const patterns = [
+        new RegExp(`\\b(${BOOK_PATTERN})\\s+(?:chapter\\s+)?\\d{1,3}(?:\\s*[:,\\s]\\s*\\d{1,3})?(?:\\s*-\\s*\\d{1,3})?`, 'gi'),
+        /\bchapter\s+\d{1,3}(?:\s+(?:verse\s+)?\d{1,3})?/gi,
+        /\bverses?\s+\d{1,3}(?:\s*(?:-|through|to)\s*\d{1,3})?/gi,
+    ]
+    let result = text
+    for (const pattern of patterns) {
+        // Replace with spaces, not '' — the sentence splitter treats runs of
+        // 2+ spaces as a boundary, so this also stops a removed reference from
+        // fusing the clause before it to the clause after.
+        result = result.replace(pattern, (m) => ' '.repeat(m.length))
+    }
+    return result
 }
 
 function splitIntoSentences(text: string): string[] {
@@ -163,15 +184,19 @@ function excludeRangesFromText(text: string, ranges: Array<{ startIndex: number;
 self.onmessage = (event: MessageEvent<PrepareRequest>) => {
     const { id, text, excludedRanges } = event.data
     try {
-        const textWithoutReferences = excludeRangesFromText(text, excludedRanges)
+        // Two-stage reference removal: ranges the caller already resolved, then
+        // any reference still spelled out in the remaining text.
+        const textWithoutReferences = blankExplicitReferences(
+            excludeRangesFromText(text, excludedRanges),
+        )
         const sentences = splitIntoSentences(textWithoutReferences)
         const dedupedSentences = dedupeASRSentences(
             Array.from(new Set(sentences)).filter(
-                (sentence) => sentence.length >= MIN_SENTENCE_LENGTH && !containsExplicitVerseReference(sentence),
+                (sentence) => sentence.length >= MIN_SENTENCE_LENGTH,
             ),
         )
         const windows = generateSlidingWindows(textWithoutReferences).filter(
-            (window) => !containsExplicitVerseReference(window),
+            (window) => window.trim().length >= MIN_SENTENCE_LENGTH,
         )
         const response: PrepareSuccessResponse = { id, sentences, dedupedSentences, windows }
         self.postMessage(response)

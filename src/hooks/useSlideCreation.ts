@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
-import { resolveLocalUrl } from './useLocalBackground'
+import { resolveLocalUrl, stripEphemeralBackground } from './useLocalBackground'
 import type {
     Slide,
     Scripture,
@@ -37,6 +37,9 @@ function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, d
     } else if (typeof template.slideId === 'object' && template.slideId !== null) {
         templateSlide = template.slideId as Partial<Slide>
     }
+    // Templates saved by an earlier session may carry a dead blob: URL. Drop it
+    // so the fallbacks below apply instead of rendering an unresolvable URL.
+    templateSlide = stripEphemeralBackground(templateSlide)
 
     if (templateSlide) {
         tempSlide.background = resolveLocalUrl(templateSlide.background || defaultBg, templateSlide.localFilePath) || defaultBg

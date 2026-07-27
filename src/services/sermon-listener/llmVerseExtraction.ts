@@ -89,9 +89,18 @@ export function validateExtractedVerse(raw: unknown): DetectedVerse | null {
     const maxVerses = BOOK_MAX_VERSES[book]?.[chapter - 1] // array is 0-indexed, chapter is 1-indexed
     if (maxVerses && verseStart > maxVerses) return null
 
-    const verseEnd = verseEndRaw && Number.isFinite(verseEndRaw) && verseEndRaw > verseStart
+    // The end of a range needs the same bounds check as its start. Without
+    // this, a model that fuses two separate spoken references into one span
+    // (e.g. hearing "Isaiah 43 … one through three" and, later, "…12 through
+    // 17", then emitting "Isaiah 43:1-17") sails through, and so does an
+    // outright impossible range like "Jude 1:1-40". Clamp rather than reject:
+    // the start is usually right even when the end is invented.
+    let verseEnd = verseEndRaw && Number.isFinite(verseEndRaw) && verseEndRaw > verseStart
         ? verseEndRaw
         : undefined
+    if (verseEnd && maxVerses && verseEnd > maxVerses) {
+        verseEnd = maxVerses > verseStart ? maxVerses : undefined
+    }
 
     const reference = buildReference(book, chapter, verseStart, verseEnd)
     return {
@@ -124,14 +133,44 @@ export function parseExtraction(obj: RawExtraction): { cleanedText?: string; ver
     return { cleanedText, verses }
 }
 
+/** `"Isaiah 43:1-17"` → `{ base: 'isaiah 43', start: 1, end: 17 }`, else null. */
+function parseSpan(reference: string): { base: string; start: number; end: number } | null {
+    const m = /^(.*?)\s+(\d+):(\d+)(?:\s*-\s*(\d+))?$/.exec(reference.trim())
+    if (!m) return null
+    const start = Number(m[3])
+    const end = m[4] ? Number(m[4]) : start
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null
+    return { base: `${m[1].toLowerCase()} ${m[2]}`, start, end: Math.max(start, end) }
+}
+
 /**
- * Drop any extracted verses whose reference the local detector already found
- * (case-insensitive). Returns only the genuinely new ones.
+ * Drop any extracted verses the local detector already surfaced.
+ *
+ * Matching is by *overlap*, not string equality. A passage being read aloud
+ * gets re-extracted as the transcript grows — one live sermon produced
+ * "Isaiah 43:1", then "Isaiah 43:1-3", then "Isaiah 43:1-17", and separately
+ * "Colossians 3:12-13" then "Colossians 3:12-17". Exact-match dedupe treats
+ * all of those as new, so the operator gets a pile of near-identical cards for
+ * one reading. Any new span that touches an already-detected span in the same
+ * book and chapter is the same passage restated.
  */
 export function mergeNewVerses(extracted: DetectedVerse[], alreadyDetected: Iterable<string>): DetectedVerse[] {
     const existing = new Set<string>()
-    for (const ref of alreadyDetected) existing.add(ref.toLowerCase())
-    return extracted.filter((v) => !existing.has(v.reference.toLowerCase()))
+    const spans: Array<{ base: string; start: number; end: number }> = []
+    for (const ref of alreadyDetected) {
+        existing.add(ref.toLowerCase())
+        const span = parseSpan(ref)
+        if (span) spans.push(span)
+    }
+
+    return extracted.filter((v) => {
+        if (existing.has(v.reference.toLowerCase())) return false
+        const span = parseSpan(v.reference)
+        if (!span) return true
+        return !spans.some(
+            (s) => s.base === span.base && s.start <= span.end && span.start <= s.end,
+        )
+    })
 }
 
 /**

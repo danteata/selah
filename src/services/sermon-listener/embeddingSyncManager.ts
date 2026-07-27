@@ -12,6 +12,7 @@ import {
     saveSyncProgress,
     clearSyncProgress,
     disposeEmbedder,
+    invalidateCachedEmbeddingsLookup,
 } from './localEmbeddings'
 import { resolveSemanticPackVersion } from './semanticPack'
 import { extractVerseFragments } from '../../lib/extractVerseFragments'
@@ -487,6 +488,9 @@ class EmbeddingSyncManager {
             }
 
             await clearSyncProgress(versionId)
+            // This version now has generated rows — drop the memoized
+            // "is it cached?" answer the detector relies on.
+            invalidateCachedEmbeddingsLookup(versionId)
 
             this.updateState(versionId, {
                 stage: 'completed',
@@ -668,6 +672,9 @@ class EmbeddingSyncManager {
             }
 
             await clearSyncProgress(versionId)
+            // This version now has generated rows — drop the memoized
+            // "is it cached?" answer the detector relies on.
+            invalidateCachedEmbeddingsLookup(versionId)
 
             this.updateState(versionId, {
                 stage: 'completed',
@@ -720,6 +727,7 @@ class EmbeddingSyncManager {
     async clearEmbeddings(versionId: string) {
         await clearCachedEmbeddingsForVersion(versionId)
         await clearSyncProgress(versionId)
+        invalidateCachedEmbeddingsLookup(versionId)
         this.updateState(versionId, {
             hasEmbeddings: false,
             embeddingCount: 0,

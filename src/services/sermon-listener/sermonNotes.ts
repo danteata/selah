@@ -343,8 +343,12 @@ export async function summarizeText(
         return summaryToText(llmResult)
     }
 
-    // 2. Try local abstractive model (runs in browser via Web Worker)
-    if (isAbstractiveSummarizerReady()) {
+    // 2. Try local abstractive model (runs in browser via Web Worker).
+    // The model is NOT prewarmed at startup — it's a ~330 MB seq2seq whose
+    // ONNX graph load cost every launch, including the majority of sessions
+    // that never generate notes. Load it here, on first actual use.
+    const abstractiveReady = isAbstractiveSummarizerReady() || (await setupAbstractiveSummarizer())
+    if (abstractiveReady) {
         try {
             const result = await summarizeAbstractive(
                 text,

@@ -620,7 +620,16 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, addRecentVerse, isConnected, isStrict, addToSharedQueue])
     addToQueueRef.current = addToQueue
 
-    const loadVerseWithNeighbors = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
+    const loadVerseWithNeighbors = useCallback(async (bookIndex: number, chapter: number, verseArg: number) => {
+        // Callers reach this through refs, voice commands and row data whose
+        // `verse` is a string ("17") in the Bible JSON, so the declared
+        // `number` isn't enforced at every entry. Left uncoerced, the
+        // neighbour labels below do string concatenation instead of
+        // arithmetic: verse "17" + 1 built "51:3:171-173", the lookup missed,
+        // and a verse sent live during a service came back blank.
+        const verse = Number(verseArg)
+        if (!Number.isFinite(verse)) return
+
         navigatingRef.current = true
         lastSearchedRef.current = { bookIndex, chapter, startVerse: verse, endVerse: verse }
         setLoading(true)

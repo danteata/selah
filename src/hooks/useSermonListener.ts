@@ -1278,7 +1278,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const commandSource = latestChunkForCommands?.trim() || ''
             if (commandSource.length > 0) {
             const correctedCommands = correctAccentMishearings(commandSource)
-            const commands = detectVoiceCommands(correctedCommands)
+            const commands = detectVoiceCommands(correctedCommands, { debug: true })
             if (commands.length > 0) {
                 console.log('[SermonListener] Voice commands detected:', {
                     source: commandSource,
@@ -1400,6 +1400,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             }
                             setCurrentVerse(goto)
                             activeReferenceContextRef.current = updateContextFromVerse(goto)
+                            semanticDetectorRef.current?.setReadingContext(cur.book, cur.chapter)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
@@ -1427,6 +1428,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             }
                             setCurrentVerse(goto)
                             activeReferenceContextRef.current = updateContextFromVerse(goto)
+                            // Tell the semantic layer which passage is actually
+                            // being read, so near-identical wording elsewhere in
+                            // Scripture doesn't outrank the verses on screen.
+                            semanticDetectorRef.current?.setReadingContext(book, chapter)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
@@ -1873,6 +1878,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     return
                 }
 
+                // The chapter the speaker announced, if that announcement is
+                // still fresh. Computed before the loop because chapter-dedup
+                // below needs it; the sort further down reuses it.
+                const activeContext = isContextValid(activeReferenceContextRef.current, CONTEXT_TTL_MS)
+                    ? activeReferenceContextRef.current
+                    : null
+
                 // Convert semantic matches to DetectedVerse format
                 const semanticVerses: DetectedVerse[] = []
                 const semanticReActivatedRefs: Array<{ reference: string; confidence: DetectedVerse['confidence'] }> = []
@@ -1933,9 +1945,23 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // above threshold, and we only want to surface one verse per
                     // chapter (the strongest one) unless a later paraphrase is
                     // much stronger.
-                    const sameChapterExisting = detectedVersesRef.current.find(v =>
-                        v.book === bookName && v.chapter === match.chapter
-                    )
+                    // ...unless the speaker announced this very chapter and is
+                    // reading through it. Then sequential verses ARE the signal,
+                    // not embedding noise: the first verse to detect became the
+                    // anchor, and every later verse of the same chapter scores
+                    // in the same 0.70-0.85 band, so it can essentially never
+                    // clear anchor + CHAPTER_DEDUP_DELTA. That's why announcing
+                    // "Psalm 91" and reading on surfaced verse 1 and then
+                    // nothing — one verse per chapter, by construction.
+                    const isAnnouncedChapter = !!activeContext
+                        && activeContext.book === bookName
+                        && activeContext.chapter === match.chapter
+
+                    const sameChapterExisting = isAnnouncedChapter
+                        ? undefined
+                        : detectedVersesRef.current.find(v =>
+                            v.book === bookName && v.chapter === match.chapter
+                        )
                     if (sameChapterExisting) {
                         const existingScore = lastScoreByReferenceRef.current.get(sameChapterExisting.reference) ?? 0
                         if (match.score < existingScore + CHAPTER_DEDUP_DELTA) {
@@ -1969,9 +1995,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 // weaker match through, so it targets exactly the "two
                 // similarly-scored verses, pick the contextually plausible
                 // one" case without loosening any acceptance threshold.
-                const activeContext = isContextValid(activeReferenceContextRef.current, CONTEXT_TTL_MS)
-                    ? activeReferenceContextRef.current
-                    : null
+                // `activeContext` is computed above the loop.
                 semanticVerses.sort((a, b) => {
                     const confOrder = { high: 3, medium: 2, low: 1 }
                     const confDiff = confOrder[b.confidence] - confOrder[a.confidence]

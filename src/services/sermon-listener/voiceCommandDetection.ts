@@ -651,9 +651,28 @@ function hasCommandIntent(text: string): boolean {
         /\b(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i.test(text)
 }
 
-export function detectVoiceCommands(text: string): VoiceCommand[] {
+export interface DetectVoiceCommandsOptions {
+    /**
+     * Emit the per-call match/no-match diagnostics. Off by default.
+     *
+     * Only the call site that actually *executes* commands should turn this
+     * on. The transcript-stripping path calls this on every chunk over the
+     * whole accumulated transcript, and because matching runs on a trailing
+     * window a reference spoken once keeps re-matching for dozens of chunks —
+     * which buried the real command decisions under ~100 lines of noise per
+     * sermon. The repeats were never executed (execution is gated on the
+     * latest utterance plus a dedupe window), they were only logged.
+     */
+    debug?: boolean
+}
+
+export function detectVoiceCommands(
+    text: string,
+    options: DetectVoiceCommandsOptions = {},
+): VoiceCommand[] {
     if (!text || text.length < 3) return []
 
+    const debug = options.debug ?? false
     const recentText = text.slice(-300)
 
     // Standalone book+chapter references (e.g. "Matthew 8", "Psalm 23") are valid
@@ -673,7 +692,7 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
         referenceCommands.length === 0 &&
         bookChapterVerseCommands.length === 0
     ) {
-        console.log('[VoiceCommand] No command intent in:', recentText.slice(-80))
+        if (debug) console.log('[VoiceCommand] No command intent in:', recentText.slice(-80))
         return []
     }
 
@@ -699,10 +718,12 @@ export function detectVoiceCommands(text: string): VoiceCommand[] {
         ...detectControlCommands(recentText),
     ]
 
-    if (allCommands.length === 0) {
-        console.log('[VoiceCommand] Intent found but no command matched:', recentText.slice(-80))
-    } else {
-        console.log('[VoiceCommand] Matched:', allCommands.map(c => `${c.type}(${c.confidence})`))
+    if (debug) {
+        if (allCommands.length === 0) {
+            console.log('[VoiceCommand] Intent found but no command matched:', recentText.slice(-80))
+        } else {
+            console.log('[VoiceCommand] Matched:', allCommands.map(c => `${c.type}(${c.confidence})`))
+        }
     }
 
     const seen = new Set<string>()
