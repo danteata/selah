@@ -1278,7 +1278,15 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const commandSource = latestChunkForCommands?.trim() || ''
             if (commandSource.length > 0) {
             const correctedCommands = correctAccentMishearings(commandSource)
-            const commands = detectVoiceCommands(correctedCommands, { debug: true })
+            // A chapter announced within the TTL lets a chunk that is only a
+            // number ("24", "15 through 16") be read as a verse jump into it.
+            // Preachers routinely drop the word "verse" on that second
+            // utterance, and without the context there is nothing to attach a
+            // bare number to.
+            const commands = detectVoiceCommands(correctedCommands, {
+                debug: true,
+                hasFreshChapterContext: isContextValid(activeReferenceContextRef.current, CONTEXT_TTL_MS),
+            })
             if (commands.length > 0) {
                 console.log('[SermonListener] Voice commands detected:', {
                     source: commandSource,
@@ -1400,7 +1408,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             }
                             setCurrentVerse(goto)
                             activeReferenceContextRef.current = updateContextFromVerse(goto)
-                            semanticDetectorRef.current?.setReadingContext(cur.book, cur.chapter)
+                            semanticDetectorRef.current?.setReadingContext(cur.book, cur.chapter, target)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {
@@ -1431,7 +1439,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             // Tell the semantic layer which passage is actually
                             // being read, so near-identical wording elsewhere in
                             // Scripture doesn't outrank the verses on screen.
-                            semanticDetectorRef.current?.setReadingContext(book, chapter)
+                            semanticDetectorRef.current?.setReadingContext(book, chapter, verse)
                             navigationCooldownUntilRef.current = Date.now() + 3000
                             lookupVerse(goto).then(scripture => {
                                 if (scripture) {

@@ -170,8 +170,9 @@ export class SemanticVerseDetector {
     /** Version we've already announced the pack fallback for, so the message
      *  appears once instead of once per candidate window. */
     private loggedPackFallbackFor: string | null = null
-    /** Book + chapter the speaker last explicitly named, if any. */
-    private readingContext: { book: string; chapter: number } | null = null
+    /** Book + chapter (and verse, when one was named) the speaker last
+     *  explicitly announced. */
+    private readingContext: { book: string; chapter: number; verse?: number } | null = null
     /** Tally of why recent chunks didn't start a search — see `noteSkip`. */
     private skips = { shortBuffer: 0, throttled: 0, searchPending: 0 }
     private skipBufferLength = 0
@@ -671,9 +672,15 @@ export class SemanticVerseDetector {
      * semantic hits inside it are preferred. Pass null when the context is no
      * longer trustworthy (new topic, transcript reset).
      */
-    setReadingContext(book: string | null, chapter?: number): void {
+    setReadingContext(book: string | null, chapter?: number, verse?: number): void {
         this.readingContext =
-            book && Number.isFinite(chapter) ? { book, chapter: Number(chapter) } : null
+            book && Number.isFinite(chapter)
+                ? {
+                    book,
+                    chapter: Number(chapter),
+                    verse: Number.isFinite(verse) ? Number(verse) : undefined,
+                }
+                : null
     }
 
     /**
@@ -689,17 +696,36 @@ export class SemanticVerseDetector {
      * plausible matches elsewhere. This only reorders candidates that already
      * cleared the similarity threshold on their own merit — context never
      * promotes a verse into the results that wouldn't otherwise be there.
+     *
+     * Chapter membership alone isn't enough to break every tie. Announcing
+     * "Joshua 24 verse 15" and reading it surfaced Joshua 24:**24** at 0.845,
+     * because "we will serve the LORD our God" there is near-identical to
+     * verse 15's "we will serve the LORD" — and both sit in the announced
+     * chapter, so a chapter-level test scores them the same. When a verse was
+     * named too, distance from it is the tiebreaker.
      */
     private rankMatches(matches: SemanticVerseMatch[]): SemanticVerseMatch[] {
         const ctx = this.readingContext
         const inContext = (m: SemanticVerseMatch) =>
             !!ctx && m.book?.toLowerCase() === ctx.book.toLowerCase() && m.chapter === ctx.chapter
+        const distanceFromNamedVerse = (m: SemanticVerseMatch) =>
+            ctx?.verse != null && inContext(m) ? Math.abs(m.verse - ctx.verse) : null
 
         return [...matches]
             .sort((a, b) => {
                 if (ctx) {
                     const diff = Number(inContext(b)) - Number(inContext(a))
                     if (diff !== 0) return diff
+
+                    // Both in the announced chapter: prefer the one nearer the
+                    // verse actually named. Only applied when they're close in
+                    // score, so a decisively better match elsewhere in the
+                    // chapter still wins.
+                    const da = distanceFromNamedVerse(a)
+                    const db = distanceFromNamedVerse(b)
+                    if (da != null && db != null && da !== db && Math.abs(a.score - b.score) < 0.1) {
+                        return da - db
+                    }
                 }
                 return b.score - a.score
             })

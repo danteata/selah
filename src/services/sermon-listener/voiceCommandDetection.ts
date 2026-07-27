@@ -333,6 +333,53 @@ function parseVerseNumber(text: string): number | null {
     return null
 }
 
+/**
+ * A chunk that is *nothing but* a verse number or range, spoken right after a
+ * chapter was announced: "24", "15 through 16", "Three through four".
+ *
+ * Real-time ASR delivers the chapter and the verse as separate utterances, and
+ * preachers usually drop the word "verse" on the second one. Without this, six
+ * of nine chapter announcements in one sermon never resolved to a verse — the
+ * reference only turned up much later, when the regex pass finally matched the
+ * accumulated transcript, by which point the speaker had moved on two or three
+ * passages. The three that did work were exactly the three that happened to
+ * include the literal word "verse".
+ *
+ * Safety comes from two constraints, not from the pattern being clever:
+ *   - `hasFreshChapterContext` — the caller confirms a chapter reference is
+ *     live, so a stray number in an illustration has nothing to attach to.
+ *   - The chunk must match end-to-end. "24" qualifies; "24 people were there"
+ *     does not.
+ * Confidence is 'medium' rather than 'high': a bare number is genuinely more
+ * ambiguous than a spoken "verse 24", and medium still clears the navigation
+ * gate while losing to an explicit command in the same chunk.
+ */
+function detectBareVerseCommands(text: string, hasFreshChapterContext: boolean): VoiceCommand[] {
+    if (!hasFreshChapterContext) return []
+
+    const trimmed = text.trim().replace(/[.,;:!?]+$/, '')
+    if (!trimmed) return []
+
+    const num = `(\\d{1,3}|${SPOKEN_NUMBER_PHRASE})`
+    const range = new RegExp(`^${num}(?:\\s*(?:-|–|through|thru|to|and)\\s*${num})?$`, 'i')
+    const m = range.exec(trimmed)
+    if (!m) return []
+
+    const targetVerse = parseVerseNumber(m[1])
+    if (!targetVerse) return []
+
+    // A descending or absurd range is a mishearing, not a reference.
+    const endVerse = m[2] ? parseVerseNumber(m[2]) : undefined
+    if (endVerse && endVerse < targetVerse) return []
+
+    return [{
+        type: 'go_to_verse',
+        raw: trimmed,
+        confidence: 'medium',
+        targetVerse,
+    }]
+}
+
 function detectGoToVerseCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
     const lower = text.toLowerCase()
@@ -664,13 +711,24 @@ export interface DetectVoiceCommandsOptions {
      * latest utterance plus a dedupe window), they were only logged.
      */
     debug?: boolean
+    /**
+     * True when a chapter reference is live in the sermon context. Unlocks
+     * `detectBareVerseCommands`, which reads a chunk that is only a number or
+     * range as a verse jump into that chapter. The caller owns this because
+     * only it knows whether the context has expired.
+     */
+    hasFreshChapterContext?: boolean
 }
 
 export function detectVoiceCommands(
     text: string,
     options: DetectVoiceCommandsOptions = {},
 ): VoiceCommand[] {
-    if (!text || text.length < 3) return []
+    if (!text) return []
+    // The 3-char floor exists to skip fragments too short to be any command.
+    // A bare verse number is the exception — "24" is two characters and "7" is
+    // one, and after a chapter announcement those are the whole utterance.
+    if (text.trim().length < 3 && !options.hasFreshChapterContext) return []
 
     const debug = options.debug ?? false
     const recentText = text.slice(-300)
@@ -686,11 +744,20 @@ export function detectVoiceCommands(
     const bookChapterVerseCommands = detectBookChapterVerseCommands(recentText)
     const goToVerseCommands = detectGoToVerseCommands(recentText)
 
+    // A chunk that is only a verse number carries no keyword, so it must be
+    // matched on the raw chunk BEFORE the intent gate below rejects it, and
+    // against `text` rather than the trailing window (an end-to-end match is
+    // the safety constraint — a window slice would break it).
+    const bareVerseCommands = goToVerseCommands.length === 0
+        ? detectBareVerseCommands(text, options.hasFreshChapterContext ?? false)
+        : []
+
     const hasIntent = hasCommandIntent(recentText)
     if (
         !hasIntent &&
         referenceCommands.length === 0 &&
-        bookChapterVerseCommands.length === 0
+        bookChapterVerseCommands.length === 0 &&
+        bareVerseCommands.length === 0
     ) {
         if (debug) console.log('[VoiceCommand] No command intent in:', recentText.slice(-80))
         return []
@@ -706,13 +773,16 @@ export function detectVoiceCommands(
     // less-specific one jumping back to verse 1 — e.g. "2 Corinthians
     // chapter 4 verse 4" briefly displayed verse 1 before the semantic layer
     // corrected it moments later.
-    const hasMoreSpecificVerseCommand = goToVerseCommands.length > 0 || bookChapterVerseCommands.length > 0
+    const hasMoreSpecificVerseCommand = goToVerseCommands.length > 0
+        || bookChapterVerseCommands.length > 0
+        || bareVerseCommands.length > 0
     const effectiveReferenceCommands = hasMoreSpecificVerseCommand ? [] : referenceCommands
 
     const allCommands: VoiceCommand[] = [
         ...detectVersionChangeCommands(recentText),
         ...detectNavigationCommands(recentText),
         ...goToVerseCommands,
+        ...bareVerseCommands,
         ...bookChapterVerseCommands,
         ...effectiveReferenceCommands,
         ...detectControlCommands(recentText),
