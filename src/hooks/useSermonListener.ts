@@ -42,6 +42,7 @@ import {
 } from '../services/sermon-listener/voiceCommandDetection'
 import type { VoiceCommand } from '../services/sermon-listener/voiceCommandDetection'
 import type { DetectedVerse } from '../services/sermon-listener'
+import { collapseOverlappingVerses } from '../lib/collapseOverlappingVerses'
 import type { ActiveReferenceContext } from '../services/sermon-listener'
 import type { Scripture, BibleVersion } from '../types'
 import type { TranscriptSegment } from '../types/sermon-listener'
@@ -495,7 +496,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 map.set(verse.reference, { ...existing, ...verse, isBestMatch: existing.isBestMatch || verse.isBestMatch })
             }
         }
-        return Array.from(map.values())
+
+        // Collapse spans that describe the same passage — a regex range and
+        // the individual verses a semantic pass scores inside it are one
+        // passage said once. See collapseOverlappingVerses.
+        return collapseOverlappingVerses(Array.from(map.values()))
     }, [])
 
     // Counter that increments only when regex detects NEW verses — used to determine
@@ -1930,6 +1935,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
                 // Convert semantic matches to DetectedVerse format
                 const semanticVerses: DetectedVerse[] = []
+                // Set when the top-ranked candidate was already detected — see
+                // the reactivation branch below.
+                let bestCandidateAlreadyDetected = false
                 const semanticReActivatedRefs: Array<{ reference: string; confidence: DetectedVerse['confidence'] }> = []
                 for (const match of semanticMatches) {
                     let bookName = match.book
@@ -1977,6 +1985,23 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // score).
                     if (detectedRefsRef.current.has(properReference)) {
                         semanticReActivatedRefs.push({ reference: properReference, confidence })
+                        // The matches arrive already ranked, so the first one to
+                        // reach here is the best candidate this pass produced. If
+                        // that best candidate is one we've already seen, no LOWER-
+                        // ranked candidate should be allowed to take the display
+                        // just for being novel.
+                        //
+                        // That is what put the wrong verse live: reading
+                        // Deuteronomy 6:7, the pass returned it first (rankMatches
+                        // demoted the higher-scoring Deuteronomy 11:19 as
+                        // out-of-context), 6:7 was skipped here as already known,
+                        // and 11:19 — near-identical wording, wrong chapter — was
+                        // added, marked isBestMatch and pushed live. Novelty beat
+                        // correctness. Same mechanism surfaced Proverbs 3:24,
+                        // Job 7:4, 2 Chronicles 6:40 and 2 Kings 17:39.
+                        if (semanticVerses.length === 0) {
+                            bestCandidateAlreadyDetected = true
+                        }
                         continue
                     }
 
@@ -2056,7 +2081,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 // Only add to detectedRefsRef if NOT stale — stale results should not
                 // block future detections of the same verse by a fresher semantic search
                 if (limitedSemanticVerses.length > 0) {
-                    limitedSemanticVerses[0].isBestMatch = true
+                    // Only claim the display when the top-ranked candidate wasn't
+                    // one we'd already detected. These survivors are all
+                    // lower-ranked than that one, so promoting the first of them
+                    // is how a cross-reference stole the live slide from the verse
+                    // actually being read. They still enter the detected list —
+                    // the operator can pick them — they just don't take over.
+                    limitedSemanticVerses[0].isBestMatch = !bestCandidateAlreadyDetected
                     if (!isStale) {
                         for (const v of limitedSemanticVerses) {
                             detectedRefsRef.current.add(v.reference)
