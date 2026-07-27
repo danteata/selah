@@ -16,6 +16,10 @@ on:
 # "Resource not accessible by integration".
 permissions:
   contents: write
+  # The publish job reads this run's per-matrix-job conclusions back from the
+  # API. Naming any scope in this block drops every unnamed one to none, so
+  # `actions: read` has to be explicit.
+  actions: read
 
 jobs:
   build:
@@ -355,7 +359,21 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Selah v__VERSION__'
           releaseBody: ${{ steps.relnotes.outputs.body }}
-          releaseDraft: false
+          # Draft until every platform users run has uploaded — see the publish
+          # job. Publishing on the FIRST matrix job to finish meant latest.json
+          # advertised the new version while only the macOS assets existed, so
+          # for the ~20 minutes until Windows finished, a Windows app checking
+          # for updates failed with `None of the fallback platforms
+          # ["windows-x86_64-nsis", "windows-x86_64"] were found in the response
+          # platforms object`. Reproduced on 0.1.7. Drafts are invisible to
+          # releases/latest, so installed apps keep seeing the previous version
+          # until the whole release lands at once.
+          #
+          # tauri-action supports this across a matrix: with draft set it can't
+          # look the release up by tag (the API won't return drafts that way), so
+          # it lists all releases and matches on tag_name instead — see
+          # getOrCreateRelease in tauri-action's src/create-release.ts.
+          releaseDraft: true
           prerelease: false
           # Publishes latest.json + signed updater artifacts so installed apps
           # auto-update. Requires createUpdaterArtifacts in tauri.conf + the
@@ -377,3 +395,55 @@ jobs:
           du -sh src-tauri/target/${{ matrix.target }}/release/bundle/* 2>/dev/null | sort -h || true
           du -sh src-tauri/target/${{ matrix.target }}/release 2>/dev/null || true
 
+
+  # Flip the draft release to published once the platforms users actually run
+  # have uploaded their bundles. Until this runs, releases/latest still serves
+  # the previous version, so no installed app ever sees a manifest advertising
+  # assets that don't exist yet.
+  publish:
+    needs: build
+    # always(), because Linux is deliberately NOT required: it is the flakiest
+    # leg and a strict gate would mean no release publishes at all while it is
+    # broken. That also rules out `needs.build.result`, which is the aggregate
+    # over every matrix leg and can't say WHICH one failed — hence the API read
+    # below.
+    if: ${{ always() && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    name: Publish release
+    steps:
+      - name: Publish once macOS and Windows have uploaded
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          conclusions=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate \
+            --jq '.jobs[] | select(.name | startswith("Build ")) | "\(.name)=\(.conclusion)"')
+          echo "$conclusions"
+
+          missing=0
+          while IFS= read -r required; do
+            if ! printf '%s\n' "$conclusions" | grep -qxF "$required=success"; then
+              echo "::error::$required did not succeed — leaving the release a draft so the updater keeps serving the previous version"
+              missing=1
+            fi
+          done <<'REQUIRED'
+          Build macOS (Apple Silicon)
+          Build macOS (Intel)
+          Build Windows
+          REQUIRED
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+          # Linux is reported but never blocks. When its job starts passing its
+          # bundles are already attached to this same release by then.
+          if ! printf '%s\n' "$conclusions" | grep -qxF 'Build Linux=success'; then
+            echo "::warning::Linux did not produce bundles — publishing without them"
+          fi
+
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+          echo "Published $TAG"
