@@ -20,10 +20,22 @@
 ; then poll until the binary is genuinely writable. By the time the template's
 ; own check runs there is nothing left running for it to find.
 ;
-; The poll is the operation that was failing — opening the file for writing — so
+; The poll is the operation that was failing - opening the file for writing - so
 ; it answers the real question rather than a proxy for it.
 
+; Keep this file ASCII-only. makensis assumes the system code page for a source
+; file with no BOM, so a UTF-8 dash or ellipsis reaches the installer UI as
+; mojibake.
+
 !macro NSIS_HOOK_PREINSTALL
+  ; NSIS registers are global and shared with the rest of the section, so borrow
+  ; and return the three this uses. Every exit path below funnels through
+  ; selah_preinstall_done, so the stack always balances -- except Abort, which
+  ; tears down the install anyway.
+  Push $0
+  Push $1
+  Push $2
+
   ; First install: nothing to close, nothing to wait for.
   IfFileExists "$INSTDIR\${MAINBINARYNAME}.exe" 0 selah_preinstall_done
 
@@ -50,11 +62,11 @@
       "Selah is running and has to close before it can be updated.$\n$\nAnything on the live output will go dark until Selah reopens." \
       IDOK selah_close_app IDCANCEL selah_cancel
     selah_cancel:
-      Abort "Update cancelled — Selah is still running."
+      Abort "Update cancelled - Selah is still running."
   ${EndIf}
 
   selah_close_app:
-    DetailPrint "Closing Selah…"
+    DetailPrint "Closing Selah..."
     !if "${INSTALLMODE}" == "currentUser"
       nsis_tauri_utils::KillProcessCurrentUser "${MAINBINARYNAME}.exe"
     !else
@@ -69,7 +81,7 @@
 
   selah_wait_loop:
     ClearErrors
-    ; Append mode neither truncates nor creates the file — it only answers
+    ; Append mode neither truncates nor creates the file - it only answers
     ; "is this writable yet?".
     FileOpen $2 "$INSTDIR\${MAINBINARYNAME}.exe" a
     ${IfNot} ${Errors}
@@ -86,4 +98,7 @@
     Goto selah_wait_loop
 
   selah_preinstall_done:
+    Pop $2
+    Pop $1
+    Pop $0
 !macroend
