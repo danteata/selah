@@ -53,6 +53,7 @@ export function QuickActions() {
     const page = useAppStore((state) => state.quickActionsPage)
     const setQuickActionsPage = useAppStore((state) => state.setQuickActionsPage)
     const openModal = useAppStore((state) => state.openModal)
+    const toggleDarkMode = useAppStore((state) => state.toggleDarkMode)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
@@ -221,7 +222,7 @@ export function QuickActions() {
             return
         }
         if (action.action === appWideActions.toggleDarkMode) {
-            document.documentElement.classList.toggle('dark')
+            toggleDarkMode()
             return
         }
 
@@ -275,7 +276,7 @@ export function QuickActions() {
             openModal('editor')
             return
         }
-    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule])
+    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule, toggleDarkMode])
 
     // Handle keyboard navigation
     const handleInputKeydown = useCallback((e: React.KeyboardEvent) => {

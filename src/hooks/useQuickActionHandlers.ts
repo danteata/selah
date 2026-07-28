@@ -66,10 +66,12 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
 
         // Toggle Dark Mode
         unsubs.push(on(appWideActions.toggleDarkMode, () => {
-            trackEvent(AnalyticsEventType.THEME_CHANGED, {
-                theme: document.documentElement.classList.contains('dark') ? 'light' : 'dark',
-            })
-            setDarkMode(!document.documentElement.classList.contains('dark'))
+            // Read the next value off the store, not the document: the class is
+            // a view of this state, and reading it back made the DOM the source
+            // of truth for a decision the store owns.
+            const nextIsDark = !useAppStore.getState().isDarkMode
+            trackEvent(AnalyticsEventType.THEME_CHANGED, { theme: nextIsDark ? 'dark' : 'light' })
+            setDarkMode(nextIsDark)
         }))
 
         // Open Template Browser

@@ -517,8 +517,6 @@ export interface AppSettings {
     }
     /** Default collaboration mode for live sessions */
     defaultCollaborationMode?: 'strict' | 'moderated' | 'open'
-    /** Dark mode preference */
-    isDarkMode?: boolean
 }
 
 // ==================== App State Types ====================

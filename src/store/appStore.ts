@@ -17,6 +17,7 @@ import type {
 import { bibleVersionObjects } from '../types'
 import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
 import type { NavSection, SplitPanelMode } from '../types/studio'
+import { readStoredTheme, storeTheme } from '../utils/theme'
 
 // UI State types
 export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'dictionary' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
@@ -189,7 +190,6 @@ const defaultSettings: AppSettings = {
     transitionInterval: 0.7,
     alertLimit: 5,
     defaultCollaborationMode: 'moderated',
-    isDarkMode: false,
 }
 
 const initialModalState: ModalState = {
@@ -236,7 +236,9 @@ const initialState: AppState = {
     modals: initialModalState,
     quickActionsPage: '',
     editingSlide: null,
-    isDarkMode: false,
+    // Seeded from the same source main.tsx paints with, so state and document
+    // agree from the first render.
+    isDarkMode: readStoredTheme(),
     bulkSelectMode: false,
     selectedSlideIds: [],
     // Studio Mode layout state
@@ -1156,31 +1158,20 @@ export const useAppStore = create<AppStore>()(
                 set({ editingSlide: slide })
             },
 
+            // Neither setter touches the DOM: App.tsx owns the `dark` class and
+            // follows this value. Five places used to write that class and the
+            // last one to run won, which is how the theme flipped on its own.
             toggleDarkMode: () => {
                 set((state) => {
                     const newIsDark = !state.isDarkMode
-                    // Persist to localStorage
-                    localStorage.setItem('theme', newIsDark ? 'dark' : 'light')
-                    // Toggle document class
-                    if (newIsDark) {
-                        document.documentElement.classList.add('dark')
-                    } else {
-                        document.documentElement.classList.remove('dark')
-                    }
+                    storeTheme(newIsDark)
                     return { isDarkMode: newIsDark }
                 })
             },
 
             setDarkMode: (isDark) => {
-                set((state) => {
-                    localStorage.setItem('theme', isDark ? 'dark' : 'light')
-                    if (isDark) {
-                        document.documentElement.classList.add('dark')
-                    } else {
-                        document.documentElement.classList.remove('dark')
-                    }
-                    return { isDarkMode: isDark }
-                })
+                storeTheme(isDark)
+                set({ isDarkMode: isDark })
             },
 
             toggleBulkSelectMode: () => {

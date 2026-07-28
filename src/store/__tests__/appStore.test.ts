@@ -281,6 +281,37 @@ describe('appStore', () => {
         })
     })
 
+    describe('theme', () => {
+        it('persists a toggle so the next launch starts in it', () => {
+            const before = useAppStore.getState().isDarkMode
+
+            act(() => useAppStore.getState().toggleDarkMode())
+
+            expect(useAppStore.getState().isDarkMode).toBe(!before)
+            expect(localStorage.getItem('theme')).toBe(!before ? 'dark' : 'light')
+        })
+
+        it('sets an explicit value', () => {
+            act(() => useAppStore.getState().setDarkMode(true))
+            expect(useAppStore.getState().isDarkMode).toBe(true)
+            expect(localStorage.getItem('theme')).toBe('dark')
+
+            act(() => useAppStore.getState().setDarkMode(false))
+            expect(useAppStore.getState().isDarkMode).toBe(false)
+            expect(localStorage.getItem('theme')).toBe('light')
+        })
+
+        it('leaves the document alone — App.tsx owns the class', () => {
+            // The setters used to write the class themselves, which is how five
+            // writers ended up racing each other.
+            document.documentElement.classList.remove('dark')
+
+            act(() => useAppStore.getState().setDarkMode(true))
+
+            expect(document.documentElement.classList.contains('dark')).toBe(false)
+        })
+    })
+
     describe('shared queue', () => {
         it('preserves order and duplicate entries when adding queue items', () => {
             const store = useAppStore.getState()
