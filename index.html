@@ -12,10 +12,148 @@
     it themselves. The workers' own caching layer handles repeat loads.
   -->
   <title>Selah</title>
+
+  <!--
+    Theme, resolved before the first paint.
+
+    The stylesheet and the app bundle both arrive later, so without this the
+    window shows browser-default white for as long as that takes — most
+    noticeable in the desktop app, where the webview appears the instant the
+    process starts. Same storage key and fallback as src/utils/theme.ts.
+  -->
+  <script>
+    (function () {
+      try {
+        var stored = localStorage.getItem('theme')
+        var isDark = stored === 'dark' || (stored !== 'light' &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (isDark) document.documentElement.classList.add('dark')
+      } catch (e) {
+        /* Storage unavailable — fall through to the light default. */
+      }
+    })()
+  </script>
+
+  <!--
+    Boot splash, inline so it paints on the first frame with no stylesheet and no
+    JavaScript. The colours are the same tokens index.css defines; they are
+    repeated here because that file has not loaded at this point.
+  -->
+  <style>
+    html { background: #fafaf9; }
+    html.dark { background: #0c0a09; }
+
+    #boot-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.25rem;
+      background: #fafaf9;
+      font-family: Georgia, 'Times New Roman', serif;
+      /* Fades out once React has mounted; see main.tsx. */
+      transition: opacity 320ms ease, visibility 320ms ease;
+    }
+
+    html.dark #boot-splash { background: #0c0a09; }
+
+    #boot-splash[data-ready='true'] {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .boot-wordmark {
+      position: relative;
+      font-size: 2.25rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      color: #1c1917;
+    }
+
+    html.dark .boot-wordmark { color: #fafaf9; }
+
+    /* The accent dot from the app's own wordmark. */
+    .boot-wordmark::before {
+      content: '';
+      position: absolute;
+      left: -0.07em;
+      top: -0.02em;
+      width: 0.16em;
+      height: 0.16em;
+      border-radius: 9999px;
+      background: #0d9488;
+      animation: boot-pulse 1.8s ease-in-out infinite;
+    }
+
+    .boot-track {
+      position: relative;
+      width: 8rem;
+      height: 2px;
+      overflow: hidden;
+      border-radius: 9999px;
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    html.dark .boot-track { background: rgba(255, 255, 255, 0.08); }
+
+    /* A travelling sweep rather than a percentage: startup is a sequence of
+       steps of unknown length (auth, Convex, Bible cache, embedding pack), so a
+       progress bar here would be inventing a number. */
+    .boot-track::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, transparent, #0d9488, transparent);
+      animation: boot-sweep 1.4s ease-in-out infinite;
+    }
+
+    @keyframes boot-sweep {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    @keyframes boot-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.85); }
+    }
+
+    .boot-sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0;
+    }
+
+    /* Respect the OS setting — a pulsing dot is exactly what this covers. */
+    @media (prefers-reduced-motion: reduce) {
+      .boot-wordmark::before,
+      .boot-track::after { animation: none; }
+      .boot-track::after { transform: none; opacity: 0.5; }
+    }
+  </style>
 </head>
 
 <body>
   <div id="root"></div>
+
+  <!-- Sibling of #root, not a child: React replaces #root's contents on mount. -->
+  <div id="boot-splash" role="status" aria-live="polite">
+    <div class="boot-wordmark">Selah</div>
+    <div class="boot-track"></div>
+    <span class="boot-sr-only">Loading Selah</span>
+  </div>
+
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

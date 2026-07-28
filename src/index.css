@@ -455,6 +455,27 @@ h6 {
     animation: pulse-soft 4s ease-in-out infinite;
 }
 
+/* The sweep under the wordmark on the loading screens. Mirrors the inline
+   #boot-splash animation in index.html so a launch and an in-app load look like
+   the same moment continuing. */
+.app-loading-sweep {
+    background: linear-gradient(90deg, transparent, var(--accent-teal), transparent);
+    animation: app-loading-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes app-loading-sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-loading-sweep {
+        animation: none;
+        transform: none;
+        opacity: 0.5;
+    }
+}
+
 /* Audio waveform animation for sermon listener */
 @keyframes waveform {
     0% {

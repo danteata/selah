@@ -18,6 +18,7 @@ import { notifySongsChanged } from './hooks/useSongs'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
 import { applyThemeClass } from './utils/theme'
+import { AppLoading } from './components/common/AppLoading'
 // Lazy-load all route components so the initial JS chunk stays small.
 // Each route's bundle is fetched only when the user navigates to it, which
 // matters most on desktop where the operator hits Dashboard immediately but
@@ -41,11 +42,7 @@ const DesktopOAuthCallback = lazy(() => import('./pages/auth/DesktopOAuthCallbac
 const DesktopOAuthDone = lazy(() => import('./pages/auth/DesktopOAuthDone'))
 
 function RouteFallback() {
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-            <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-    )
+    return <AppLoading />
 }
 
 /**
@@ -83,14 +80,7 @@ function OfflineApp() {
     const { isSignedIn, isLoaded } = useAuth()
 
     if (!isLoaded) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-                <div className="text-center">
-                    <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-gray-600 dark:text-gray-400">Loading...</p>
-                </div>
-            </div>
-        )
+        return <AppLoading label="Signing you in" />
     }
 
     if (isSignedIn) {

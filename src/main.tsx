@@ -71,3 +71,21 @@ createRoot(document.getElementById('root')!).render(
         <App />
     </StrictMode>,
 )
+
+/**
+ * Retire the boot splash from index.html.
+ *
+ * Two frames after render so the app has actually painted underneath — hiding it
+ * in the same frame swaps one blank screen for another. `data-ready` drives a CSS
+ * fade; the node is removed after it, so it can't sit invisibly over the app
+ * swallowing clicks if the transition never fires.
+ */
+requestAnimationFrame(() => requestAnimationFrame(() => {
+    const splash = document.getElementById('boot-splash')
+    if (!splash) return
+    splash.dataset.ready = 'true'
+    splash.addEventListener('transitionend', () => splash.remove(), { once: true })
+    // Belt and braces: transitionend never fires when the tab is hidden or
+    // motion is reduced to none.
+    setTimeout(() => splash.remove(), 1000)
+}))
