@@ -30,7 +30,10 @@
         "windows": {
             "certificateThumbprint": null,
             "digestAlgorithm": "sha256",
-            "timestampUrl": ""
+            "timestampUrl": "",
+            "nsis": {
+                "installerHooks": "installer-hooks.nsh"
+            }
         },
         "macOS": {
             "frameworks": [],
@@ -81,7 +84,10 @@
                 "https://github.com/danteata/selah/releases/latest/download/latest.json"
             ],
             "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVGOEM2MjYyODNDOEEwQUUKUldTdW9NaURZbUtNNy9WRFAwUkROWWErYWgzWVY5blpucUZxc1RXeFNtcGJubG85MG9oQ0o4QU0K",
-            "dangerousInsecureTransportProtocol": true
+            "dangerousInsecureTransportProtocol": true,
+            "windows": {
+                "installMode": "passive"
+            }
         },
         "shell": {
             "open": true
