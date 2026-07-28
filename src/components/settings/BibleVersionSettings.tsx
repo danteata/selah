@@ -6,6 +6,7 @@ import type { BibleVersion } from '../../types'
 import { useQuery } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useEmbeddingStatus } from '../../hooks/useEmbeddingStatus'
+import { usePointerReorder } from '../../hooks/usePointerReorder'
 import type { SyncStage } from '../../services/sermon-listener/embeddingSyncManager'
 
 const STAGE_LABELS: Record<SyncStage, string> = {
@@ -45,7 +46,7 @@ export function BibleVersionSettings() {
     const setBibleVersionOrder = useAppStore((state) => state.setBibleVersionOrder)
     const { downloadBibleVersion, isVersionDownloaded } = useScripture()
     const [statusesLoading, setStatusesLoading] = useState(true)
-    const [dragIndex, setDragIndex] = useState<number | null>(null)
+
 
     // Downloaded versions in the operator's saved order (preferred ids first,
     // then any remaining downloaded ones) — matches the live navigator's slots.
@@ -65,6 +66,11 @@ export function BibleVersionSettings() {
         next.splice(to, 0, moved)
         setBibleVersionOrder(next)
     }, [orderedDownloaded, setBibleVersionOrder])
+
+    // Pointer-driven, not HTML5 drag-and-drop: Tauri's file-drop handler eats
+    // drag events inside the desktop webview, which is why dragging here did
+    // nothing while the arrows worked. Same mechanism as the slide queue.
+    const reorder = usePointerReorder({ onReorder: moveVersion })
 
     useEffect(() => {
         if (bibleVersions && bibleVersions.length > 0) {
@@ -186,26 +192,26 @@ export function BibleVersionSettings() {
                         Drag to arrange. The numbers are the quick-switch slots on the live verse
                         navigator — press <kbd className="px-1 rounded bg-gray-200 dark:bg-gray-700">v</kbd> then the number to jump straight to that version. The first three also appear as chips.
                     </p>
-                    <ul className="space-y-1">
+                    <ul className="space-y-1" {...reorder.containerProps}>
                         {orderedDownloaded.map((id, i) => (
                             <li
                                 key={id}
-                                draggable
-                                onDragStart={(e) => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)) }}
-                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
-                                onDrop={(e) => { e.preventDefault(); const from = dragIndex ?? parseInt(e.dataTransfer.getData('text/plain'), 10); if (!Number.isNaN(from)) moveVersion(from, i); setDragIndex(null) }}
-                                onDragEnd={() => setDragIndex(null)}
+                                {...reorder.itemProps(i)}
                                 className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border transition-colors ${
-                                    dragIndex === i
+                                    reorder.draggingIndex === i
                                         ? 'border-primary-500 bg-primary-500/5 opacity-60'
-                                        : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-300 dark:hover:border-gray-600'
+                                        : reorder.dragOverIndex === i
+                                            ? 'border-primary-500 bg-primary-500/10'
+                                            : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 hover:border-gray-300 dark:hover:border-gray-600'
                                 }`}
                             >
                                 <span className="w-5 text-center text-xs font-bold tabular-nums text-primary-600 dark:text-primary-400">{i + 1}</span>
-                                <GripVertical className="w-3.5 h-3.5 text-gray-400 shrink-0 cursor-grab active:cursor-grabbing" />
+                                <span {...reorder.handleProps(i)} title="Drag to reorder" aria-label={`Reorder ${id}`}>
+                                    <GripVertical className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                                </span>
                                 <span className="text-sm font-medium text-gray-900 dark:text-white">{id}</span>
                                 <span className="flex-1 min-w-0 text-xs text-gray-500 dark:text-gray-400 truncate">{versionName(id)}</span>
-                                {/* Reliable fallback for environments where native drag is flaky. */}
+                                {/* Keyboard-reachable equivalent of the drag handle. */}
                                 <button
                                     type="button"
                                     onClick={() => moveVersion(i, i - 1)}
