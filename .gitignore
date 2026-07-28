@@ -45,6 +45,10 @@ src-tauri/assets/embedding-models/
 src-tauri/assets/embedding-packs/
 !src-tauri/assets/embedding-packs/.gitkeep
 
+# Raw dictionary sources downloaded by scripts/build-dictionary-packs.mjs.
+# The built packs under public/dictionaries/ are committed; these are not.
+.cache/
+
 # IDE / tool internals
 .kilo/
 .openclaude/
