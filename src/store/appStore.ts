@@ -19,7 +19,7 @@ import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
 import type { NavSection, SplitPanelMode } from '../types/studio'
 
 // UI State types
-export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
+export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'dictionary' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
 
 export interface ModalState {
     settings: boolean

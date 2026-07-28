@@ -15,6 +15,7 @@ import { ActionCard } from './ActionCard'
 import { SlideChip } from '../slides/SlideChip'
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
+import { DictionaryPanel } from '../dictionary/DictionaryPanel'
 import { SongList } from '../songs/SongList'
 
 // Group actions into categories for better visual organisation
@@ -165,6 +166,10 @@ export function QuickActions() {
         }
         if (action.action === appWideActions.newHymn) {
             setQuickActionsPage('hymn')
+            return
+        }
+        if (action.action === appWideActions.newDictionary) {
+            setQuickActionsPage('dictionary')
             return
         }
         if (action.action === appWideActions.newSong || action.action === appWideActions.addSong) {
@@ -385,6 +390,8 @@ export function QuickActions() {
                 <BibleList onClose={handleClosePage} />
             ) : page === 'hymn' ? (
                 <HymnList onClose={handleClosePage} />
+            ) : page === 'dictionary' ? (
+                <DictionaryPanel onClose={handleClosePage} isInline />
             ) : page === 'song' ? (
                 <SongList onClose={handleClosePage} />
             ) : (
