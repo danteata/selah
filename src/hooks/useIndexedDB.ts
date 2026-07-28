@@ -70,6 +70,21 @@ export interface LocalMediaBlob {
     blob: Blob
 }
 
+/**
+ * One cached dictionary file — either a pack's headword index
+ * (`easton:index`) or a definition shard (`easton:a`). Stored parsed so a
+ * lookup during a service costs no JSON parse and no network.
+ */
+export interface CachedDictionaryFile {
+    id: string
+    packId: string
+    /** The parsed file contents; shape depends on which file this is. */
+    data: unknown
+    /** Pack format version this was cached under — a mismatch invalidates it. */
+    format: number
+    cachedAt: string
+}
+
 export interface CachedSetting {
     id: string
     data: any
@@ -154,6 +169,7 @@ class SelahDatabase extends Dexie {
     templateBlobs!: Table<CachedTemplateBlob, string>
     localMedia!: Table<LocalMediaItem, string>
     localMediaBlobs!: Table<LocalMediaBlob, string>
+    dictionaries!: Table<CachedDictionaryFile, string>
 
     constructor() {
         super('SelahDatabase')
@@ -206,6 +222,9 @@ class SelahDatabase extends Dexie {
         this.version(8).stores({
             localMedia: 'id,type,createdAt,syncedMediaId',
             localMediaBlobs: 'id'
+        })
+        this.version(9).stores({
+            dictionaries: 'id,packId,cachedAt'
         })
     }
 }
