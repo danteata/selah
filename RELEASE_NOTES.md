@@ -1,3 +1,19 @@
+## Selah 0.1.9
+
+A dictionary you can put on screen — Bible names and places, Greek and Hebrew, or plain English — and a command palette that answers the keyboard again.
+
+### Dictionary
+- New: look a word up mid-service and project the definition. It's the 📖A icon in the left rail, below Media, and it's also in the command palette (Ctrl/Cmd + K) as "Define a Word".
+- Five dictionaries are included and all of them work with no internet: Easton's and Smith's Bible dictionaries, Strong's Greek and Hebrew, and Webster's — about 125,000 entries in total. Nothing to download or set up.
+- Search across all of them at once, or narrow to one. Bible dictionaries come first in the results, so "Aaron" gives you the priest before anything else. Greek and Hebrew entries are found by how they sound — type "agape" — or by their Strong's number.
+- A Bible dictionary entry lists the passages it cites, and each one is a button: click to add that passage to your queue in your church's own Bible version, or shift-click to put it straight on screen.
+- Long entries are split across several slides at sentence boundaries rather than crammed onto one unreadable slide, and an entry with several meanings lets you project just the one being preached.
+- Definitions pick up your scripture background and template, so a definition looks like the verses either side of it.
+
+### Command palette
+- Arrow keys and Enter work again. The palette had become mouse-only: after you typed a search, Enter did nothing at all, and moving the mouse over a row stopped the keyboard responding.
+- Home and End jump to the first and last command, and the highlighted row now scrolls into view instead of moving out of sight.
+
 ## Selah 0.1.8
 
 Two crashes fixed on Windows, a fully refreshed set of transcription models, and live transcription now works the moment you install.
