@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { useQuery, useMutation } from 'convex/react'
+import { useQuery, useMutation, useConvexAuth } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import type { Id } from '../../convex/_generated/dataModel'
 import { useUserRole } from './useUserRole'
@@ -41,6 +41,12 @@ export function usePresence(
 ): UsePresenceReturn {
     const { isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
+    // The authoritative "will a Convex function see an identity" signal.
+    // `currentUser` is not that: it can come from the cached IndexedDB session,
+    // so it stays truthy across a reconnect while the token is still being
+    // re-minted — and every heartbeat in that window came back as a logged
+    // "Not authenticated" server error.
+    const { isAuthenticated } = useConvexAuth()
 
     const heartbeatMutation = useMutation(api.presence.heartbeat)
     const leavePresenceMutation = useMutation(api.presence.leavePresence)
@@ -64,7 +70,7 @@ export function usePresence(
         sessionRole?: 'operator' | 'contributor' | 'viewer',
         selectedSlideId?: string,
     ) => {
-        if (isOffline || !currentUser) return
+        if (isOffline || !currentUser || !isAuthenticated) return
 
         try {
             await heartbeatMutation({
@@ -75,22 +81,24 @@ export function usePresence(
                 selectedSlideId,
             })
         } catch (err) {
+            // Presence is best-effort: a missed ping just means someone's dot
+            // lingers for a few seconds. Never escalate it.
             console.warn('[usePresence] Heartbeat failed:', err)
         }
-    }, [isOffline, currentUser, heartbeatMutation])
+    }, [isOffline, currentUser, isAuthenticated, heartbeatMutation])
 
     const cleanup = useCallback(async () => {
-        if (isOffline) return
+        if (isOffline || !isAuthenticated) return
 
         try {
             await leavePresenceMutation()
         } catch (err) {
             console.warn('[usePresence] Leave presence failed:', err)
         }
-    }, [isOffline, leavePresenceMutation])
+    }, [isOffline, isAuthenticated, leavePresenceMutation])
 
     useEffect(() => {
-        if (isOffline || !currentUser || !churchId) return
+        if (isOffline || !currentUser || !churchId || !isAuthenticated) return
 
         heartbeat(
             liveSessionId ? 'live' : 'dashboard',
@@ -114,7 +122,7 @@ export function usePresence(
                 heartbeatTimerRef.current = null
             }
         }
-    }, [isOffline, currentUser, churchId, liveSessionId, sessionRole, heartbeat])
+    }, [isOffline, currentUser, churchId, liveSessionId, sessionRole, isAuthenticated, heartbeat])
 
     useEffect(() => {
         const handleBeforeUnload = () => {

@@ -20,6 +20,32 @@ async function getAuthenticatedUser(ctx: any) {
     return user;
 }
 
+/**
+ * The same lookup, but returning null instead of throwing when the caller has no
+ * identity yet.
+ *
+ * Presence is a heartbeat: it fires every 15 seconds whether or not the auth
+ * token happens to be mid-refresh. Throwing made Convex log an uncaught
+ * "Not authenticated" error with a full stack trace on every tick during a
+ * reconnect — pages of noise in the console that would bury a real error
+ * mid-service, for something whose only consequence is a presence dot lingering
+ * a few seconds longer.
+ *
+ * Only the presence pings use this. Everything that reads or writes real data
+ * still goes through `getAuthenticatedUser` and still throws.
+ */
+async function getUserOrNull(ctx: any) {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+        return null;
+    }
+
+    return await ctx.db
+        .query("users")
+        .withIndex("by_email", (q: any) => q.eq("email", identity.email!))
+        .unique();
+}
+
 export const getPresenceByChurch = query({
     args: {
         churchId: v.string(),
@@ -110,7 +136,9 @@ export const heartbeat = mutation({
         selectedSlideId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        // Silently skip rather than throw — see getUserOrNull.
+        const user = await getUserOrNull(ctx);
+        if (!user) return null;
 
         const existingPresence = await ctx.db
             .query("presence")
@@ -146,7 +174,10 @@ export const heartbeat = mutation({
 export const leavePresence = mutation({
     args: {},
     handler: async (ctx) => {
-        const user = await getAuthenticatedUser(ctx);
+        // Fires on unload, when the token may already be gone. Nothing to clean
+        // up without an identity, so don't make it an error.
+        const user = await getUserOrNull(ctx);
+        if (!user) return null;
 
         const presenceEntry = await ctx.db
             .query("presence")
