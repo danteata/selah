@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-    BookOpen, Music, Image, Layout, Clock, AlertCircle,
+    BookOpen, BookA, Music, Image, Layout, Clock, AlertCircle,
     Archive, Calendar, Mic, Settings, Zap
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
@@ -10,6 +10,7 @@ import type { NavSection } from '../../types/studio'
 
 const NAV_ICON_MAP: Record<NavSection, React.ElementType> = {
     bible: BookOpen,
+    dictionary: BookA,
     music: Music,
     media: Image,
     templates: Layout,
@@ -23,6 +24,7 @@ const NAV_ICON_MAP: Record<NavSection, React.ElementType> = {
 
 const NAV_LABELS: Record<NavSection, string> = {
     bible: 'Bible',
+    dictionary: 'Dictionary',
     music: 'Music',
     media: 'Media',
     templates: 'Templates',
@@ -35,7 +37,9 @@ const NAV_LABELS: Record<NavSection, string> = {
 }
 
 const NAV_GROUPS: { items: NavSection[] }[] = [
-    { items: ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'library'] },
+    // Dictionary sits after Media: Bible, songs and media are reached far more
+    // often, and the rail is ordered by reach frequency rather than by kinship.
+    { items: ['bible', 'music', 'media', 'dictionary', 'templates', 'countdown', 'alerts', 'library'] },
     { items: ['schedule', 'sermon'] },
     { items: ['settings'] },
 ]

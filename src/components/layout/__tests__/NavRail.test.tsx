@@ -37,6 +37,8 @@ describe('NavRail', () => {
     it('renders all navigation sections', () => {
         render(<NavRail />)
         expect(screen.getByLabelText('Bible')).toBeInTheDocument()
+        // Dictionary sits beside Bible — the Studio shell is the only way in.
+        expect(screen.getByLabelText('Dictionary')).toBeInTheDocument()
         expect(screen.getByLabelText('Music')).toBeInTheDocument()
         expect(screen.getByLabelText('Media')).toBeInTheDocument()
         expect(screen.getByLabelText('Sermon')).toBeInTheDocument()

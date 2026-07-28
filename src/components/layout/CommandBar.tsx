@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-    Search, Command, Zap, Play, Eye, Book, 
+    Search, Command, Zap, Play, Eye, Book, BookA,
     Music, Image, Settings, HelpCircle, ArrowRight,
     Layout, Clock, AlertCircle
 } from 'lucide-react'
@@ -79,6 +79,14 @@ export function CommandBar() {
             icon: Image,
             category: 'navigation',
             action: () => { setActiveNavSection('media'); handleClose() }
+        },
+        {
+            id: 'go-dictionary',
+            title: 'Define a Word',
+            description: 'Bible, Greek/Hebrew and English dictionaries',
+            icon: BookA,
+            category: 'navigation',
+            action: () => { setActiveNavSection('dictionary'); handleClose() }
         },
         {
             id: 'go-templates',

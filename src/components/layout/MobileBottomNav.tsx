@@ -12,7 +12,7 @@
 import { useCallback, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-    BookOpen, Music, Layout, Mic, Settings, Zap, X, Image,
+    BookOpen, BookA, Music, Layout, Mic, Settings, Zap, X, Image,
     Clock, AlertCircle, Archive, Calendar
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
@@ -20,10 +20,11 @@ import { useSermonListenerContext } from '../sermon-listener/SermonListenerConte
 import type { NavSection } from '../../types/studio'
 
 const PRIMARY_ITEMS: NavSection[] = ['bible', 'music', 'templates', 'sermon']
-const MORE_ITEMS: NavSection[] = ['media', 'countdown', 'alerts', 'library', 'schedule', 'settings']
+const MORE_ITEMS: NavSection[] = ['media', 'dictionary', 'countdown', 'alerts', 'library', 'schedule', 'settings']
 
 const ICON: Record<NavSection, React.ElementType> = {
     bible: BookOpen,
+    dictionary: BookA,
     music: Music,
     media: Image,
     templates: Layout,
@@ -37,6 +38,7 @@ const ICON: Record<NavSection, React.ElementType> = {
 
 const LABELS: Record<NavSection, string> = {
     bible: 'Bible',
+    dictionary: 'Dictionary',
     music: 'Music',
     media: 'Media',
     templates: 'Templates',

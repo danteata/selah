@@ -8,6 +8,7 @@ import { QuickBibleBar } from '../bible/QuickBibleBar'
 import { SermonListenerProvider } from '../sermon-listener/SermonListenerContext'
 import { SongTrackerBridge } from '../sermon-listener/SongTrackerBridge'
 import { useAppStore } from '../../store/appStore'
+import { isInlineNavSection } from '../../types/studio'
 import type { Schedule } from '../../types'
 
 interface AppShellProps {
@@ -58,9 +59,7 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
     }, [toggleQuickBibleBar])
 
     // Determine if context panel is actually showing inline content
-    const INLINE_SECTIONS = ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'sermon']
-    const showInline = activeNavSection && INLINE_SECTIONS.includes(activeNavSection)
-    const panelVisible = contextPanelOpen && showInline
+    const panelVisible = contextPanelOpen && isInlineNavSection(activeNavSection)
 
     return (
         <SermonListenerProvider>
