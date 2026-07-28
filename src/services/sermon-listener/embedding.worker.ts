@@ -2,8 +2,23 @@
  * Embedding Web Worker
  *
  * Runs ONNX inference off the main thread so the UI stays responsive
- * while generating verse embeddings. Uses Transformers.js loaded from
- * the same CDN the main thread uses.
+ * while generating verse embeddings.
+ *
+ * Transformers.js is loaded from a CDN at runtime.
+ *
+ * A static `import * as transformers from '@xenova/transformers'` was tried
+ * and REVERTED: it makes Vite pre-bundle onnxruntime-web's UMD build, which
+ * dies inside a module worker with
+ *   `Cannot read properties of undefined (reading 'registerBackend')`
+ * taking the whole embedding worker — and therefore all semantic detection —
+ * down with it. `vite build` succeeds, so this only shows up when the app
+ * actually runs; verify any future attempt against a running app, not a build.
+ *
+ * Bundling is still worth doing (it removes a network round-trip before the
+ * first embedding, works offline, and is a prerequisite for the cross-origin
+ * isolation that multi-threaded ONNX needs). It has to be done together with
+ * self-hosting the ORT wasm binaries and a Vite config that keeps ORT out of
+ * the UMD path — not as a one-line import swap.
  *
  * The first message sent to the worker may be a `{ setup }` payload from
  * `localEmbeddings.ts` that tells the worker to use a locally-bundled model
@@ -28,12 +43,42 @@ async function loadTransformers() {
   return transformersModule
 }
 
+/**
+ * Point ORT-WASM at every core we're allowed to use.
+ *
+ * The default is a single thread, and MiniLM inference is the whole cost of
+ * the semantic path — sentence pass and sliding-window fallback both. Threads
+ * require SharedArrayBuffer, which the browser only exposes when the document
+ * is cross-origin isolated (COOP: same-origin + COEP: require-corp). We set
+ * those headers for the desktop webview; where they're absent the check below
+ * simply leaves the single-threaded default in place, so this is safe to run
+ * unconditionally.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function configureWasmBackend(transformers: any): void {
+  const wasm = transformers.env?.backends?.onnx?.wasm
+  if (!wasm) return
+
+  const isolated = typeof self !== 'undefined' && (self as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated
+  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined
+
+  if (isolated && cores && cores > 1) {
+    // Leave a core for the UI thread and the similarity worker; ORT gains
+    // little past ~4 threads on a model this small.
+    wasm.numThreads = Math.max(1, Math.min(4, cores - 1))
+  } else {
+    wasm.numThreads = 1
+  }
+  wasm.simd = true
+}
+
 async function loadEmbedder(): Promise<void> {
   if (embedder) return
   if (loadPromise) return loadPromise
 
   loadPromise = (async () => {
     const transformers = await loadTransformers()
+    configureWasmBackend(transformers)
     if (localModelPath) {
       // Desktop: read the quantized ONNX + tokenizer from the bundled Tauri
       // resource via the asset protocol. No network round-trip at any point.

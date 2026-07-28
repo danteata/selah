@@ -21,11 +21,21 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { isDesktop } from '@/platform'
 import { useAppStore } from '../../store/appStore'
 import { DEFAULT_NATIVE_MODEL_ID } from './nativeModelManager'
+// Type-only, so this does not create a runtime cycle with unifiedTranscription
+// (which imports this module).
+import type { WhisperSegmentTiming } from './unifiedTranscription'
 
 interface TranscriptionResultEvent {
     text: string
     duration_ms: number
     start_offset_ms: number
+    /**
+     * Segment timings in seconds from the start of the recording session (the
+     * Rust side has already applied `start_offset_ms`). Empty when the model
+     * produces no alignment data, and for results that came from the streaming
+     * path — `finalize_stream` returns text only.
+     */
+    segments: WhisperSegmentTiming[]
 }
 
 /** Mirrors Rust `StreamTextEvent` (the `native-stream-text` payload). */
@@ -39,7 +49,7 @@ export interface NativeTranscriptionStartOptions {
     initialPrompt?: string
     captureSource?: 'microphone' | 'system'
     microphoneDeviceId?: string
-    onResult: (text: string, isFinal: boolean) => void
+    onResult: (text: string, isFinal: boolean, segments?: WhisperSegmentTiming[]) => void
     onError: (error: string) => void
 }
 
@@ -68,11 +78,24 @@ class NativeTranscriptionService {
             useAppStore.getState().settings.sermonListener?.whisperModel || DEFAULT_NATIVE_MODEL_ID
 
         try {
-            // Load the model if it isn't already the one loaded. The model must
-            // already be downloaded (via the model picker); load fails otherwise.
+            // Load the model if it isn't already the one loaded. A load fails when
+            // the model isn't on disk, which a saved selection can easily outlive:
+            // the user deleted it, or the setting names a model this install never
+            // downloaded (a synced profile, or a retired legacy entry). Rather than
+            // failing the whole session, fall back to the bundled default, which is
+            // always present.
             const loaded = await invoke<string | null>('get_loaded_native_model')
             if (loaded !== modelId) {
-                await invoke('load_native_model', { modelId })
+                try {
+                    await invoke('load_native_model', { modelId })
+                } catch (loadErr) {
+                    if (modelId === DEFAULT_NATIVE_MODEL_ID) throw loadErr
+                    console.warn(
+                        `[nativeTranscription] could not load "${modelId}" (${loadErr}); ` +
+                            `falling back to bundled "${DEFAULT_NATIVE_MODEL_ID}"`,
+                    )
+                    await invoke('load_native_model', { modelId: DEFAULT_NATIVE_MODEL_ID })
+                }
             }
 
             await invoke('set_native_transcription_config', {
@@ -83,7 +106,8 @@ class NativeTranscriptionService {
 
             this.unlisten = await listen<TranscriptionResultEvent>('transcription-result', (event) => {
                 if (this.isRunning && event.payload.text) {
-                    options.onResult(event.payload.text, true)
+                    const { text, segments } = event.payload
+                    options.onResult(text, true, segments?.length ? segments : undefined)
                 }
             })
 

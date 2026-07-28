@@ -1,32 +1,22 @@
-## Selah 0.1.5
+## Selah 0.1.11
 
-This release focuses on smoother live presenting, real mobile collaboration, and much better song, hymn, and Bible search. The app can now also update itself automatically.
-
-### Live output
-- Fixed cases where the live output wouldn't stop when you pressed Stop, and where pressing Present again could open a second output window.
-- The live output now closes properly when you quit the app.
-- The live slide now stays centered in the slide list, so you can always see it and what's coming next.
-
-### Collaboration
-- Collaboration now works on your phone — start or join a session, change slides, suggest slides, and (as the operator) approve suggestions, all from mobile.
-- Controls now respect the session mode (view, suggest, or open) on every device.
-- Media you upload from your own device stays visible to you during a session; only other collaborators see the "local media" placeholder.
-
-### Songs & hymns
-- One-click **Live** and **Add** buttons on every search result — put a song or hymn on screen without extra steps.
-- One search box now finds songs and hymns together, ranked by relevance.
-- Songs is now the first tab and selected by default.
-- When a song is live, jump between its verses right from the music panel.
-- The search box focuses automatically when you open the panel, and a **New Song** button is always available.
+Six fixes from a week of use: the wrong verse going live when you type fast, the theme flipping to light on its own, and a proper start-up screen.
 
 ### Bible search
-- "Search by meaning" is much sharper: exact quotes come first, and it now tolerates typos, punctuation, and wording differences.
-- Semantic search now works for **every** Bible version, not just KJV.
-- Voice search no longer breaks references by adding a full stop (e.g. "John 3:16.").
-- On the web app, meaning-search now runs locally in your browser — faster and available offline.
+- Typing a reference and pressing Enter before the results appear now shows the verse you typed. Previously it could present something unrelated — a different book, chapter and verse — and then fill the search box with that reference, so it looked like Selah was completing references you'd never typed. It was picking one of the meaning-based matches still on screen from the partial reference.
+- Typing a reference into an empty panel and pressing Enter now presents it straight away, instead of needing a second Enter.
+- Arrowing to a neighbouring verse and pressing Enter still presents that verse, and searching by meaning still works the same way.
 
-### Sermon listener
-- Far fewer wrong songs being auto-detected and pushed to the live output.
+### Appearance
+- The app no longer switches itself from dark to light. It happened after a network blip, when signing back in reloaded part of the app and the theme was reset by whichever piece of code got there last. Your choice is now honoured in one place and can't be overwritten.
+- Verse numbers are no longer cut off at the top in the live preview. The larger the preview panel, the more of the number you lost.
 
-### Automatic updates
-- Selah can now update itself when a new version is released — no more manual downloads.
+### Starting up
+- Launching now shows the Selah name on your chosen background instead of a blank white page with a small spinner — including in dark mode, where the white flash was hard to miss.
+
+### Settings
+- Dragging Bible versions into your preferred order works. Only the up/down arrows did before; the arrows are still there for keyboard use.
+
+### Quieter logs
+- The app no longer fills its log with authentication errors while reconnecting after a network change. Nothing was broken by them, but they made real problems harder to spot.
+

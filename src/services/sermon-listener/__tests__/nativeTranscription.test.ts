@@ -57,7 +57,57 @@ describe('nativeTranscriptionService', () => {
         // Simulate a transcription-result (final) event reaching the listener.
         const finalHandler = listenMock.mock.calls[0][1] as (e: { payload: { text: string } }) => void
         finalHandler({ payload: { text: 'For God so loved the world' } })
-        expect(onResult).toHaveBeenCalledWith('For God so loved the world', true)
+        // No segments in the payload → the segments argument is omitted rather
+        // than forwarded as an empty array.
+        expect(onResult).toHaveBeenCalledWith('For God so loved the world', true, undefined)
+    })
+
+    it('forwards segment timings from transcription-result when the model supplies them', async () => {
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
+            return Promise.resolve(undefined)
+        })
+
+        const onResult = vi.fn()
+        await nativeTranscriptionService.start({ onResult, onError: vi.fn() })
+
+        const finalHandler = listenMock.mock.calls[0][1] as (e: { payload: unknown }) => void
+        // Times are session-absolute seconds; Rust has already applied the
+        // utterance's start_offset_ms.
+        const segments = [
+            { start: 12.5, end: 14.0, text: 'For God so loved the world' },
+            { start: 14.0, end: 16.25, text: 'that he gave his only Son' },
+        ]
+        finalHandler({
+            payload: { text: 'For God so loved the world that he gave his only Son', segments },
+        })
+        expect(onResult).toHaveBeenCalledWith(
+            'For God so loved the world that he gave his only Son',
+            true,
+            segments,
+        )
+    })
+
+    it('falls back to the bundled model when the selected one cannot be loaded', async () => {
+        // A saved selection can outlive the model on disk (deleted, or a synced
+        // profile naming a model this install never downloaded). That must not
+        // fail the session.
+        invokeMock.mockImplementation((cmd: string, args?: { modelId?: string }) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
+            if (cmd === 'load_native_model' && args?.modelId === 'whisper-small.en') {
+                return Promise.reject(new Error('model not downloaded'))
+            }
+            return Promise.resolve(undefined)
+        })
+
+        const onError = vi.fn()
+        const started = await nativeTranscriptionService.start({ onResult: vi.fn(), onError })
+
+        expect(started).toBe(true)
+        expect(onError).not.toHaveBeenCalled()
+        expect(invokeMock).toHaveBeenCalledWith('load_native_model', {
+            modelId: 'moonshine-streaming-small',
+        })
     })
 
     it('forwards native-stream-text events as interim (isFinal=false) results', async () => {
@@ -86,6 +136,8 @@ describe('nativeTranscriptionService', () => {
     })
 
     it('reports errors and does not start', async () => {
+        // Every load fails here — including the bundled fallback — so there is
+        // nothing left to fall back to and the error must surface.
         invokeMock.mockImplementation((cmd: string) => {
             if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
             if (cmd === 'load_native_model') return Promise.reject(new Error('model not downloaded'))

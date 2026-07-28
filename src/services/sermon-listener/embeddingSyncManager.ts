@@ -12,7 +12,9 @@ import {
     saveSyncProgress,
     clearSyncProgress,
     disposeEmbedder,
+    invalidateCachedEmbeddingsLookup,
 } from './localEmbeddings'
+import { resolveSemanticPackVersion } from './semanticPack'
 import { extractVerseFragments } from '../../lib/extractVerseFragments'
 import type { BibleVerse } from '../../types'
 
@@ -61,6 +63,17 @@ export type SyncStage =
     | 'completed'
     | 'error'
 
+/**
+ * Where this version's semantic search comes from.
+ *   'pack'      — served by the universal prebuilt pack (see `semanticPack`).
+ *                 Nothing was generated on this device and nothing needs to be.
+ *   'generated' — this version has its own embeddings in IndexedDB, built by
+ *                 `startSync`. Higher fidelity for that translation's wording.
+ *   'none'      — no pack and no generated rows; semantic search is unavailable
+ *                 (lexical search still works everywhere).
+ */
+export type EmbeddingSource = 'pack' | 'generated' | 'none'
+
 export interface VersionSyncState {
     versionId: string
     stage: SyncStage
@@ -72,6 +85,10 @@ export interface VersionSyncState {
     hasEmbeddings: boolean
     hasFragments: boolean
     embeddingCount: number
+    /** What's backing search for this version right now. */
+    source: EmbeddingSource
+    /** Pack id serving this version when `source === 'pack'`, else null. */
+    packVersion: string | null
 }
 
 export type SyncListener = (states: Map<string, VersionSyncState>) => void
@@ -122,6 +139,8 @@ class EmbeddingSyncManager {
             hasEmbeddings: false,
             hasFragments: false,
             embeddingCount: 0,
+            source: 'none',
+            packVersion: null,
             ...existing,
             ...patch,
         }
@@ -246,13 +265,20 @@ class EmbeddingSyncManager {
     }
 
     async checkStatus(versionId: string): Promise<VersionSyncState> {
-        const [hasEmb, hasFrags, count] = await Promise.all([
+        const [hasEmb, hasFrags, count, packVersion] = await Promise.all([
             hasCachedEmbeddings(versionId),
             hasFragmentEmbeddings(versionId),
             countCachedEmbeddings(versionId),
+            resolveSemanticPackVersion(),
         ])
         const existing = this.states.get(versionId)
         const isMidSync = existing && existing.stage !== 'idle' && existing.stage !== 'completed' && existing.stage !== 'error'
+
+        // Generated rows for this exact version beat the universal pack — they
+        // match the translation's own wording. But the pack alone is enough to
+        // report search as ready, which is the whole point: downloading a
+        // version must not oblige the user to sit through a local sync.
+        const source: EmbeddingSource = hasEmb ? 'generated' : packVersion ? 'pack' : 'none'
 
         const state: VersionSyncState = {
             versionId,
@@ -262,9 +288,11 @@ class EmbeddingSyncManager {
             startedAt: isMidSync ? existing.startedAt : null,
             eta: isMidSync ? existing.eta : null,
             error: isMidSync ? existing.error : null,
-            hasEmbeddings: hasEmb,
+            hasEmbeddings: hasEmb || source === 'pack',
             hasFragments: hasFrags,
             embeddingCount: count,
+            source,
+            packVersion: source === 'pack' ? packVersion : null,
         }
         this.states.set(versionId, state)
         this.notify()
@@ -460,6 +488,9 @@ class EmbeddingSyncManager {
             }
 
             await clearSyncProgress(versionId)
+            // This version now has generated rows — drop the memoized
+            // "is it cached?" answer the detector relies on.
+            invalidateCachedEmbeddingsLookup(versionId)
 
             this.updateState(versionId, {
                 stage: 'completed',
@@ -468,6 +499,8 @@ class EmbeddingSyncManager {
                 hasEmbeddings: true,
                 hasFragments: withFragments,
                 embeddingCount: totalEmbedded,
+                source: 'generated',
+                packVersion: null,
                 startedAt: null,
                 eta: null,
                 error: null,
@@ -639,6 +672,9 @@ class EmbeddingSyncManager {
             }
 
             await clearSyncProgress(versionId)
+            // This version now has generated rows — drop the memoized
+            // "is it cached?" answer the detector relies on.
+            invalidateCachedEmbeddingsLookup(versionId)
 
             this.updateState(versionId, {
                 stage: 'completed',
@@ -647,6 +683,8 @@ class EmbeddingSyncManager {
                 hasEmbeddings: true,
                 hasFragments: true,
                 embeddingCount: totalEmbedded,
+                source: 'generated',
+                packVersion: null,
                 startedAt: null,
                 eta: null,
                 error: null,
@@ -689,16 +727,22 @@ class EmbeddingSyncManager {
     async clearEmbeddings(versionId: string) {
         await clearCachedEmbeddingsForVersion(versionId)
         await clearSyncProgress(versionId)
+        invalidateCachedEmbeddingsLookup(versionId)
         this.updateState(versionId, {
             hasEmbeddings: false,
             embeddingCount: 0,
             hasFragments: false,
+            source: 'none',
+            packVersion: null,
             stage: 'idle',
             progress: 0,
             total: 0,
             eta: null,
             error: null,
         })
+        // Re-derive: dropping this version's generated rows usually just hands
+        // it back to the universal pack rather than leaving it with no search.
+        await this.checkStatus(versionId)
     }
 
     getModelLoading(): boolean {

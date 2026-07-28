@@ -1,20 +1,21 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-    X, BookOpen, Music, Image, Layout, Clock,
+    X, BookOpen, BookA, Music, Image, Layout, Clock,
     AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin, Search, Zap, Plus, Edit, Trash2
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSongs, useSong, useHymn, useSlideCreation } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
-import type { NavSection } from '../../types/studio'
+import { isInlineNavSection, type NavSection } from '../../types/studio'
 import type { Slide, ExternalVideo, Song, Hymn } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { resolveLocalUrl } from '../../hooks/useLocalBackground'
 import { generateObjectId } from '../../hooks/useSlideCreation'
 
 import { BibleList } from '../bible/BibleList'
+import { DictionaryPanel } from '../dictionary/DictionaryPanel'
 import { HymnList } from '../hymns/HymnList'
 import { SongList } from '../songs/SongList'
 import { AddSongModal } from '../songs/AddSongModal'
@@ -28,6 +29,7 @@ import { AddAlertModal } from '../alerts/AddAlertModal'
 
 const SECTION_META: Record<NavSection, { icon: React.ElementType; title: string }> = {
     bible: { icon: BookOpen, title: 'Bible' },
+    dictionary: { icon: BookA, title: 'Dictionary' },
     music: { icon: Music, title: 'Songs & Hymns' },
     media: { icon: Image, title: 'Media' },
     templates: { icon: Layout, title: 'Templates' },
@@ -132,10 +134,7 @@ export function ContextPanel() {
         setPanelMode('docked')
     }, [setPanelMode])
 
-    const INLINE_SECTIONS: NavSection[] = ['bible', 'music', 'media', 'templates', 'countdown', 'alerts', 'sermon']
-    const showInline = activeNavSection && INLINE_SECTIONS.includes(activeNavSection)
-
-    if (!contextPanelOpen || !showInline || !activeNavSection) return null
+    if (!contextPanelOpen || !isInlineNavSection(activeNavSection) || !activeNavSection) return null
 
     const meta = SECTION_META[activeNavSection]
     const SectionIcon = meta.icon
@@ -366,6 +365,11 @@ export function ContextSectionContent({
                 {section === 'bible' && (
                     <div className="h-full">
                         <BibleList isInline onClose={onClose} />
+                    </div>
+                )}
+                {section === 'dictionary' && (
+                    <div className="h-full">
+                        <DictionaryPanel isInline onClose={onClose} />
                     </div>
                 )}
                 {section === 'music' && (

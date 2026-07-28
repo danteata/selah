@@ -23,9 +23,9 @@
  *
  * Usage:
  *   node scripts/build-web-embedding-pack.mjs \
- *     [--version KJV] \
- *     [--in src-tauri/assets/embedding-packs/KJV] \
- *     [--out public/embedding-packs/KJV]
+ *     [--version WEB] \
+ *     [--in src-tauri/assets/embedding-packs/WEB] \
+ *     [--out public/embedding-packs/WEB]
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
@@ -38,7 +38,7 @@ const REPO_ROOT = join(__dirname, '..')
 
 const { values } = parseArgs({
     options: {
-        version: { type: 'string', default: 'KJV' },
+        version: { type: 'string', default: 'WEB' },
         in: { type: 'string' },
         out: { type: 'string' },
     },

@@ -24,6 +24,8 @@ export type NativeEngineType =
     | 'canary'
     | 'cohere'
 export type NativeModelFormat = 'file' | 'directory'
+/** Mirrors Rust `TimestampSupport`. */
+export type NativeTimestampSupport = 'none' | 'segment' | 'word' | 'token'
 
 /** Mirrors Rust `ModelStatus` (catalog entry + runtime state). */
 export interface NativeModelStatus {
@@ -44,6 +46,14 @@ export interface NativeModelStatus {
     recommended: boolean
     bundled: boolean
     supports_streaming: boolean
+    /** Finest timestamp granularity the model emits, for verse-timing alignment. */
+    timestamps: NativeTimestampSupport
+    /**
+     * A superseded entry, retained only so an existing download keeps working.
+     * Rust already filters these out of `list_native_models` unless they are on
+     * disk, so anything reaching the UI with `legacy: true` is installed.
+     */
+    legacy: boolean
     is_downloaded: boolean
     is_downloading: boolean
 }
@@ -57,8 +67,12 @@ export interface NativeDownloadProgress {
     error: string | null
 }
 
-/** The bundled, offline-capable default. */
-export const DEFAULT_NATIVE_MODEL_ID = 'whisper-base.en'
+/**
+ * The bundled, offline-capable default — a streaming model, so live transcription
+ * works with no downloads on a fresh install. Must match the `bundled: true`
+ * entry in `src-tauri/src/transcription/models.rs`.
+ */
+export const DEFAULT_NATIVE_MODEL_ID = 'moonshine-streaming-small'
 
 /** List the model catalog with per-model downloaded/downloading state. */
 export async function listNativeModels(): Promise<NativeModelStatus[]> {

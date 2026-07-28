@@ -2,17 +2,20 @@ import { useCallback } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
-import { resolveLocalUrl } from './useLocalBackground'
+import { resolveLocalUrl, stripEphemeralBackground } from './useLocalBackground'
 import type {
     Slide,
     Scripture,
     Hymn,
     Song,
     Countdown,
+    DictionaryEntry,
+    DictionaryPack,
     ExtendedFileT,
     ExternalVideo,
     SlideStyle
 } from '../types'
+import { formatHeadword } from '../lib/search/dictionarySearch'
 import {
     slideTypes,
     slideLayoutTypes,
@@ -37,6 +40,9 @@ function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, d
     } else if (typeof template.slideId === 'object' && template.slideId !== null) {
         templateSlide = template.slideId as Partial<Slide>
     }
+    // Templates saved by an earlier session may carry a dead blob: URL. Drop it
+    // so the fallbacks below apply instead of rendering an unresolvable URL.
+    templateSlide = stripEphemeralBackground(templateSlide)
 
     if (templateSlide) {
         tempSlide.background = resolveLocalUrl(templateSlide.background || defaultBg, templateSlide.localFilePath) || defaultBg
@@ -74,6 +80,109 @@ export function generateObjectId(): string {
 export function firstVerseOnly(scripture: Scripture): number[] | undefined {
     if (!Array.isArray(scripture.content) || scripture.content.length <= 1) return undefined
     return [Number(scripture.content[0].verse)]
+}
+
+/**
+ * How much definition text goes on one slide before it stops being readable
+ * from the back row. Easton's entries run to 2,000+ characters — a single
+ * slide would render them at ~14px on a projector.
+ */
+export const DEFINITION_CHARS_PER_SLIDE = 320
+
+/**
+ * Split a definition into projectable chunks at sentence boundaries.
+ *
+ * Sentences are kept whole wherever possible — a definition broken mid-clause
+ * reads as a mistake on screen. A sentence longer than the budget on its own
+ * (Webster's has a few) is split at the last comma or space before the limit
+ * rather than mid-word.
+ */
+export function chunkDefinitionText(text: string, maxChars = DEFINITION_CHARS_PER_SLIDE): string[] {
+    const normalized = text.replace(/\s+/g, ' ').trim()
+    if (!normalized) return []
+    if (normalized.length <= maxChars) return [normalized]
+
+    // Keep the delimiter with the sentence it ends.
+    const sentences = normalized.match(/[^.!?;]+[.!?;]*\s*/g)?.map((s) => s.trim()).filter(Boolean)
+        ?? [normalized]
+
+    const chunks: string[] = []
+    let current = ''
+
+    const flush = () => {
+        if (current) chunks.push(current)
+        current = ''
+    }
+
+    for (const sentence of sentences) {
+        if (sentence.length > maxChars) {
+            flush()
+            chunks.push(...splitOversizedSentence(sentence, maxChars))
+            continue
+        }
+        if (!current) {
+            current = sentence
+        } else if (current.length + 1 + sentence.length <= maxChars) {
+            current = `${current} ${sentence}`
+        } else {
+            flush()
+            current = sentence
+        }
+    }
+    flush()
+
+    return chunks
+}
+
+/** Break a single over-long sentence at the last comma, else the last space. */
+function splitOversizedSentence(sentence: string, maxChars: number): string[] {
+    const parts: string[] = []
+    let rest = sentence
+
+    while (rest.length > maxChars) {
+        const window = rest.slice(0, maxChars)
+        const breakAt = Math.max(window.lastIndexOf(', '), window.lastIndexOf('; '))
+        const cut = breakAt > maxChars * 0.5
+            ? breakAt + 1
+            : window.lastIndexOf(' ') > 0 ? window.lastIndexOf(' ') : maxChars
+        parts.push(rest.slice(0, cut).trim())
+        rest = rest.slice(cut).trim()
+    }
+    if (rest) parts.push(rest)
+
+    return parts
+}
+
+/**
+ * The label under a definition: the headword, its original-language forms for
+ * a lexicon entry, and the pack it came from — the same role the reference
+ * label plays on a Bible slide, and rendered in the same caption zone.
+ */
+export function buildDictionaryLabel(entry: DictionaryEntry, pack?: DictionaryPack | null): string {
+    const parts: string[] = [`<b>${formatHeadword(entry.word)}</b>`]
+
+    // The lemma is already the display word for lexicon entries, so only the
+    // transliteration adds anything.
+    if (entry.transliteration && entry.transliteration !== entry.word) {
+        parts.push(`<span class="dictionary-translit">${entry.transliteration}</span>`)
+    }
+
+    const source = [pack?.shortName, entry.strongs].filter(Boolean).join(' ')
+    const suffix = source ? ` · <span class="dictionary-source">${source}</span>` : ''
+
+    return `<p class="dictionary-label">${parts.join(' ')}${suffix}</p>`
+}
+
+/** The two-part contents of a dictionary slide: definition body, then label. */
+export function buildDictionaryContents(
+    entry: DictionaryEntry,
+    text: string,
+    pack?: DictionaryPack | null,
+): string[] {
+    return [
+        `<p class="dictionary-definition">${text}</p>`,
+        buildDictionaryLabel(entry, pack),
+    ]
 }
 
 // Calculate font size based on screen and content
@@ -154,6 +263,8 @@ export function generateSlideName(slide: Slide): string {
     switch (slide.type) {
         case slideTypes.bible:
             return slide.title || 'Bible Slide'
+        case slideTypes.dictionary:
+            return slide.title ? `Define: ${slide.title}` : 'Definition'
         case slideTypes.hymn:
             return slide.title ? `Hymn: ${slide.title}` : 'Hymn Slide'
         case slideTypes.song:
@@ -321,6 +432,108 @@ export function useSlideCreation() {
 
         return tempSlide
     }, [preSlideCreation, settings, templates, trackEvent])
+
+    /**
+     * One slide showing one chunk of a dictionary definition.
+     *
+     * Styled off the scripture defaults rather than the plain-text ones: a
+     * definition sits in the same part of a service as a verse (it goes up
+     * while the preacher is teaching), and operators expect it to match.
+     */
+    const createDictionarySlide = useCallback((
+        entry: DictionaryEntry,
+        text: string,
+        options?: {
+            pack?: DictionaryPack | null
+            template?: TemplateItem | null
+            /** 0-based position within the definition, for the "Part 2 of 3" label. */
+            partIndex?: number
+            totalParts?: number
+        }
+    ): Slide => {
+        const tempSlide = preSlideCreation()
+        tempSlide.layout = slideLayoutTypes.bible
+        tempSlide.type = slideTypes.dictionary
+
+        let templateToUse: TemplateItem | null = null
+        if (options?.template) {
+            templateToUse = options.template
+        } else if (settings.defaultTemplates?.dictionary && templates) {
+            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.dictionary) || null
+        } else if (settings.defaultTemplates?.scripture && templates) {
+            // No dictionary-specific default set — fall back to the scripture
+            // template so definitions match the verses they sit beside.
+            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.scripture) || null
+        }
+
+        applyTemplateToSlide(
+            tempSlide,
+            templateToUse,
+            settings.defaultBackground.default?.background || settings.defaultBackground.bible?.background,
+            settings.defaultBackground.default?.backgroundType || settings.defaultBackground.bible?.backgroundType,
+            settings.defaultBackground.default?.backgroundVideoKey ?? settings.defaultBackground.bible?.backgroundVideoKey ?? undefined,
+        )
+
+        const headword = formatHeadword(entry.word)
+        const totalParts = options?.totalParts ?? 1
+        const partIndex = options?.partIndex ?? 0
+
+        tempSlide.title = headword
+        tempSlide.name = totalParts > 1
+            ? `Define: ${headword} (${partIndex + 1}/${totalParts})`
+            : `Define: ${headword}`
+
+        if (totalParts > 1) {
+            tempSlide.verseIndex = partIndex
+            tempSlide.totalVerses = totalParts
+            tempSlide.verseLabel = `Part ${partIndex + 1} of ${totalParts}`
+        }
+
+        tempSlide.slideStyle = {
+            ...tempSlide.slideStyle,
+            fontSize: Number(calculateScreenFontSize(text)),
+        }
+        tempSlide.data = entry
+        tempSlide.contents = buildDictionaryContents(entry, text, options?.pack)
+
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: 'dictionary',
+            source: 'dictionary_panel',
+            pack: entry.packId,
+            has_template: !!templateToUse,
+        })
+
+        return tempSlide
+    }, [preSlideCreation, settings, templates, trackEvent])
+
+    /**
+     * A whole entry as slides — one per sense, further split when a sense is
+     * too long to project. `senseIndex` narrows it to a single sense, which is
+     * what the panel's per-sense Add/Live buttons use.
+     */
+    const createDictionarySlides = useCallback((
+        entry: DictionaryEntry,
+        options?: {
+            pack?: DictionaryPack | null
+            template?: TemplateItem | null
+            senseIndex?: number
+            maxCharsPerSlide?: number
+        }
+    ): Slide[] => {
+        const senses = typeof options?.senseIndex === 'number'
+            ? entry.senses.slice(options.senseIndex, options.senseIndex + 1)
+            : entry.senses
+
+        const chunks = senses.flatMap((sense) =>
+            chunkDefinitionText(sense.text, options?.maxCharsPerSlide))
+
+        return chunks.map((text, index) => createDictionarySlide(entry, text, {
+            pack: options?.pack,
+            template: options?.template,
+            partIndex: index,
+            totalParts: chunks.length,
+        }))
+    }, [createDictionarySlide])
 
     const createHymnSlide = useCallback((hymn: Hymn, verseIndex?: number, options?: { template?: TemplateItem | null }): Slide => {
         const tempSlide = preSlideCreation()
@@ -643,6 +856,8 @@ export function useSlideCreation() {
         preSlideCreation,
         createTextSlide,
         createBibleSlide,
+        createDictionarySlide,
+        createDictionarySlides,
         createHymnSlide,
         createHymnSlides,
         createSongSlide,

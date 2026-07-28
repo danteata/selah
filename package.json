@@ -1,7 +1,7 @@
 {
   "name": "selah",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.11",
   "type": "module",
   "trustedDependencies": [
     "esbuild",
@@ -22,10 +22,13 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "desktop:prebuild": "node scripts/download-gguf-model.mjs && node scripts/download-embedding-model.mjs && node scripts/build-embedding-pack.mjs --fragments",
+    "desktop:prebuild": "node scripts/download-gguf-model.mjs && node scripts/download-embedding-model.mjs && npm run build-semantic-pack",
     "download-gguf-model": "node scripts/download-gguf-model.mjs",
     "download-embedding-model": "node scripts/download-embedding-model.mjs",
     "build-embedding-pack": "node scripts/build-embedding-pack.mjs",
+    "build-dictionary-packs": "node scripts/build-dictionary-packs.mjs",
+    "build-semantic-pack": "node scripts/build-embedding-pack.mjs --version WEB --file public/bibles/web.json --fragments",
+    "build-semantic-pack:browser": "node scripts/build-embedding-pack.mjs --version WEB --file public/bibles/web.json && node scripts/build-web-embedding-pack.mjs --version WEB",
     "desktop:dev": "npm run desktop:prebuild && tauri dev",
     "desktop:dev:ndi": "npm run desktop:prebuild && tauri dev -- --features ndi",
     "desktop:build": "tauri build",

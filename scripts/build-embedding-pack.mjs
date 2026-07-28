@@ -17,15 +17,17 @@
  *
  * Usage
  * -----
- *   node scripts/build-embedding-pack.mjs --version KJV \
- *     [--url https://example.com/bibles/kjv.json] \
- *     [--out src-tauri/assets/embedding-packs/KJV] \
+ *   node scripts/build-embedding-pack.mjs --version WEB \
+ *     [--file public/bibles/web.json] \
+ *     [--url https://example.com/bibles/web.json] \
+ *     [--out src-tauri/assets/embedding-packs/WEB] \
  *     [--batch 64] \
  *     [--fragments]
  *
- * If `--url` is omitted the script tries common public sources in order
- * (see `KNOWN_SOURCES` below). The KJV source is committed as the
- * canonical reference; for new versions, supply `--url` explicitly.
+ * Source resolution: `--file` (a local Bible JSON, e.g. one of the
+ * `public/bibles/*.json` the app already ships) beats `--url`, which beats
+ * the `KNOWN_SOURCES` table below. Prefer `--file` — the pack's verse text
+ * then matches what the client renders exactly.
  *
  * Pass `--fragments` to embed clause + sliding-window fragments alongside
  * full verses (~3-4× more rows, ~90-120k for KJV). This dramatically improves
@@ -56,6 +58,7 @@ const { values: args } = parseArgs({
     options: {
         version: { type: 'string', default: 'KJV' },
         url: { type: 'string' },
+        file: { type: 'string' },
         out: { type: 'string' },
         batch: { type: 'string', default: '64' },
         model: { type: 'string', default: 'Xenova/all-MiniLM-L6-v2' },
@@ -128,19 +131,33 @@ const KNOWN_SOURCES = {
     ],
 }
 
-async function fetchVerses(versionId, explicitUrl) {
+/** Normalise the `{ book, chapter, verse, scripture }` rows the app already
+ *  ships under `public/bibles/*.json` (book is a 1-66 numeric string there). */
+function normaliseCanonicalRows(raw) {
+    if (!Array.isArray(raw)) throw new Error('Expected JSON array')
+    return raw.map((r) => ({
+        book: r.book_name ?? r.book,
+        chapter: String(r.chapter),
+        verse: String(r.verse),
+        scripture: r.text ?? r.scripture,
+    }))
+}
+
+async function fetchVerses(versionId, explicitUrl, localFile) {
+    // A local Bible JSON — e.g. `public/bibles/web.json`, which the app already
+    // bundles. Preferred over --url: no network, and the text is byte-identical
+    // to what the client renders, so pack references always resolve.
+    if (localFile) {
+        const path = localFile.startsWith('/') ? localFile : join(REPO_ROOT, localFile)
+        console.log(`[read] ${path}`)
+        if (!existsSync(path)) throw new Error(`No such file: ${path}`)
+        return normaliseCanonicalRows(JSON.parse(readFileSync(path, 'utf8')))
+    }
     if (explicitUrl) {
         console.log(`[fetch] ${explicitUrl}`)
         const res = await fetch(explicitUrl)
         if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${explicitUrl}`)
-        const raw = await res.json()
-        if (!Array.isArray(raw)) throw new Error('Expected JSON array')
-        return raw.map((r) => ({
-            book: r.book_name ?? r.book,
-            chapter: String(r.chapter),
-            verse: String(r.verse),
-            scripture: r.text ?? r.scripture,
-        }))
+        return normaliseCanonicalRows(await res.json())
     }
     const candidates = KNOWN_SOURCES[versionId] || []
     if (candidates.length === 0) {
@@ -372,7 +389,7 @@ async function main() {
         }
     }
 
-    const verses = await fetchVerses(VERSION, args.url)
+    const verses = await fetchVerses(VERSION, args.url, args.file)
     console.log(`[fetch] got ${verses.length} verses`)
 
     const embedder = await loadEmbedder()

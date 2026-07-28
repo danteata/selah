@@ -17,6 +17,8 @@ import { seedLocalSongs } from './services/songLibrary/localSongSeeder'
 import { notifySongsChanged } from './hooks/useSongs'
 import { invoke } from '@tauri-apps/api/core'
 import { getVersion } from '@tauri-apps/api/app'
+import { applyThemeClass } from './utils/theme'
+import { AppLoading } from './components/common/AppLoading'
 // Lazy-load all route components so the initial JS chunk stays small.
 // Each route's bundle is fetched only when the user navigates to it, which
 // matters most on desktop where the operator hits Dashboard immediately but
@@ -40,21 +42,22 @@ const DesktopOAuthCallback = lazy(() => import('./pages/auth/DesktopOAuthCallbac
 const DesktopOAuthDone = lazy(() => import('./pages/auth/DesktopOAuthDone'))
 
 function RouteFallback() {
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-            <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-    )
+    return <AppLoading />
 }
 
+/**
+ * The only place the `dark` class is written after boot.
+ *
+ * It used to watch `settings.isDarkMode`, which nothing ever assigned — so it
+ * read `false` forever and this effect *removed* the class every time it ran.
+ * On a fresh load Dashboard's own mount effect happened to put it back; on a
+ * re-mount without that (an auth refresh after a network change, for one) the
+ * app just went light. It now follows the store value the theme setters write.
+ */
 function useDarkModeSync() {
-    const isDarkMode = useAppStore((s) => s.settings.isDarkMode)
+    const isDarkMode = useAppStore((s) => s.isDarkMode)
     useEffect(() => {
-        if (isDarkMode) {
-            document.documentElement.classList.add('dark')
-        } else {
-            document.documentElement.classList.remove('dark')
-        }
+        applyThemeClass(isDarkMode)
     }, [isDarkMode])
 }
 
@@ -77,14 +80,7 @@ function OfflineApp() {
     const { isSignedIn, isLoaded } = useAuth()
 
     if (!isLoaded) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-                <div className="text-center">
-                    <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-gray-600 dark:text-gray-400">Loading...</p>
-                </div>
-            </div>
-        )
+        return <AppLoading label="Signing you in" />
     }
 
     if (isSignedIn) {

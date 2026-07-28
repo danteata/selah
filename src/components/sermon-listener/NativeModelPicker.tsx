@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Check, Download, Loader2, X, Cpu, Globe, Languages, Trash2, Star, Zap } from 'lucide-react'
+import { Check, Download, Loader2, X, Cpu, Globe, Languages, Trash2, Star, Zap, Clock, Archive } from 'lucide-react'
 import {
     listNativeModels,
     downloadNativeModel,
@@ -107,9 +107,15 @@ export function NativeModelPicker({ selectedId, onSelect }: NativeModelPickerPro
         )
     }
 
-    // Downloaded first, then by accuracy.
+    // Superseded models last — they only appear at all because they're already
+    // installed, so the plain "downloaded first" rule would float them to the top
+    // and bury the current catalog. Then downloaded (usable right now) first,
+    // recommended ahead of the rest, and finally most accurate first.
     const sorted = [...models].sort((a, b) =>
-        Number(b.is_downloaded) - Number(a.is_downloaded) || b.accuracy - a.accuracy,
+        Number(a.legacy) - Number(b.legacy) ||
+        Number(b.is_downloaded) - Number(a.is_downloaded) ||
+        Number(b.recommended) - Number(a.recommended) ||
+        b.accuracy - a.accuracy,
     )
 
     return (
@@ -155,6 +161,22 @@ export function NativeModelPicker({ selectedId, onSelect }: NativeModelPickerPro
                                     {m.supports_streaming && (
                                         <span className="text-[10px] text-[var(--accent-teal)] flex items-center gap-0.5" title="See text as you speak">
                                             <Zap className="w-3 h-3" /> live
+                                        </span>
+                                    )}
+                                    {m.timestamps !== 'none' && (
+                                        <span
+                                            className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-0.5"
+                                            title={`Reports ${m.timestamps}-level timings, so detected verses can be matched to a moment in the recording`}
+                                        >
+                                            <Clock className="w-3 h-3" /> timing
+                                        </span>
+                                    )}
+                                    {m.legacy && (
+                                        <span
+                                            className="text-[10px] text-amber-600 dark:text-amber-500 flex items-center gap-0.5"
+                                            title="Superseded by a newer model. Kept because it's already installed — it won't be offered on a new install."
+                                        >
+                                            <Archive className="w-3 h-3" /> superseded
                                         </span>
                                     )}
                                     <span className="text-[10px] text-gray-400 dark:text-gray-500">{formatModelSize(m.size_bytes)}</span>

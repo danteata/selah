@@ -87,11 +87,6 @@ export default function Dashboard() {
         }
     }, [])
 
-    const [isDark, setIsDark] = useState(() => {
-        if (typeof window === 'undefined') return false
-        return document.documentElement.classList.contains('dark')
-    })
-
 
     // Save as template modal state
     const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false)
@@ -128,33 +123,15 @@ export default function Dashboard() {
         }
     }, [currentUser, isSuperadmin, identify])
 
-    const toggleTheme = useCallback(() => {
-        const newIsDark = !isDark
-        setIsDark(newIsDark)
-        if (newIsDark) {
-            document.documentElement.classList.add('dark')
-            localStorage.setItem('theme', 'dark')
-        } else {
-            document.documentElement.classList.remove('dark')
-            localStorage.setItem('theme', 'light')
-        }
-    }, [isDark])
+    // The store owns the theme and App.tsx applies it; this just asks for the
+    // flip. Dashboard used to keep its own `isDark` seeded off the DOM class,
+    // which went stale the moment anything else changed the theme.
+    const isDark = useAppStore((s) => s.isDarkMode)
+    const toggleTheme = useAppStore((s) => s.toggleDarkMode)
 
     // Initialize global emitter
     useEffect(() => {
         initGlobalEmitter()
-    }, [])
-
-    // Initialize theme from localStorage
-    useEffect(() => {
-        const savedTheme = localStorage.getItem('theme')
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-
-        if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-            document.documentElement.classList.add('dark')
-        } else {
-            document.documentElement.classList.remove('dark')
-        }
     }, [])
 
     // Quick action handlers - sets up event listeners

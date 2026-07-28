@@ -394,6 +394,31 @@ export async function countCachedEmbeddings(version: string): Promise<number> {
     }
 }
 
+/**
+ * Memoized `hasCachedEmbeddings`. The live-transcription path asks this once
+ * per candidate window — dozens of times per utterance — and each miss was a
+ * fresh IndexedDB open plus an index cursor in the hot path. Generated rows
+ * only appear/disappear via the sync manager, which calls
+ * `invalidateCachedEmbeddingsLookup` when they do.
+ */
+const cachedEmbeddingsLookup = new Map<string, boolean>()
+
+export function invalidateCachedEmbeddingsLookup(version?: string): void {
+    if (version) {
+        cachedEmbeddingsLookup.delete(version)
+        return
+    }
+    cachedEmbeddingsLookup.clear()
+}
+
+export async function hasCachedEmbeddingsMemo(version: string): Promise<boolean> {
+    const known = cachedEmbeddingsLookup.get(version)
+    if (known !== undefined) return known
+    const result = await hasCachedEmbeddings(version)
+    cachedEmbeddingsLookup.set(version, result)
+    return result
+}
+
 export async function hasCachedEmbeddings(version: string): Promise<boolean> {
     try {
         const db = await openVerseCache()
@@ -554,14 +579,6 @@ export async function clearSyncProgress(versionId: string): Promise<void> {
 let prewarmPromise: Promise<void> | null = null
 const prewarmedEmbeddings = new Map<string, CachedVerseEmbedding[]>()
 
-/**
- * Versions for which the runtime pack loader will attempt to load a
- * prebuilt pack from disk before falling back to IndexedDB. KJV is the
- * canonical one we ship; operators with extra versions can extend this
- * list (or call `tryLoadEmbeddingPack` directly).
- */
-const PACK_PRELOAD_VERSIONS = ['KJV'] as const
-
 export function prewarmSemanticSearch(): Promise<void> {
     if (prewarmPromise) return prewarmPromise
     prewarmPromise = (async () => {
@@ -569,21 +586,21 @@ export function prewarmSemanticSearch(): Promise<void> {
             // Kick off model load + cached-version probe in parallel.
             const [, versions] = await Promise.all([initializeEmbedder(), getLocalCachedVersions()])
 
-            // Try the prebuilt pack first — on desktop this is an O(load-time)
-            // memory-map of a Float32Array, which is much faster than
-            // walking IndexedDB row-by-row and rebuilding number[] buffers.
+            // Try the universal prebuilt pack first — on desktop this is an
+            // O(load-time) memory-map of a Float32Array, which is much faster
+            // than walking IndexedDB row-by-row and rebuilding number[]
+            // buffers. `semanticPack` picks which pack (WEB, else KJV); it
+            // serves every version, so there's nothing to preload per-version.
             // Failure to load the pack is silent; we always have the IDB path.
-            for (const version of PACK_PRELOAD_VERSIONS) {
-                try {
-                    const { tryLoadEmbeddingPack } = await import('./embeddingPackLoader')
-                    const result = await tryLoadEmbeddingPack(version)
-                    if (result.ok) {
-                        console.log(`[Embeddings] Loaded prebuilt pack for ${version} (${result.count} verses)`)
-                        return // Pack is now in the worker; no need to read IDB.
-                    }
-                } catch {
-                    // Pack loader is best-effort.
+            try {
+                const { loadSemanticPack } = await import('./semanticPack')
+                const result = await loadSemanticPack()
+                if (result.ok) {
+                    console.log(`[Embeddings] Loaded prebuilt ${result.version} pack for semantic search`)
+                    return // Pack is now in the worker; no need to read IDB.
                 }
+            } catch {
+                // Pack loader is best-effort.
             }
 
             if (versions.length > 0) {

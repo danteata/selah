@@ -97,6 +97,32 @@ export function formatVerseGroups(verseNumbers: number[]): string {
     return runs.join(', ')
 }
 
+/**
+ * In-memory Bible cache, shared across every hook instance.
+ *
+ * Without this, each `downloadBibleVersion` call is a Dexie read plus a
+ * structured clone of a ~31k-entry array (~5 MB). That happens per verse
+ * render, per semantic search, and per detection — during a live sermon it
+ * fired 60+ times in a single session. Bible text is immutable once
+ * downloaded, so caching it for the session is free correctness-wise.
+ *
+ * `inFlight` collapses concurrent first-loads of the same version (settings
+ * opening loads every version at once) into one read.
+ */
+const bibleMemoryCache = new Map<string, BibleVerse[]>()
+const bibleInFlight = new Map<string, Promise<BibleVerse[] | null>>()
+
+/** Drop cached text for a version (or all). Call after a re-download. */
+export function invalidateBibleMemoryCache(version?: string): void {
+    if (version) {
+        bibleMemoryCache.delete(version)
+        bibleInFlight.delete(version)
+        return
+    }
+    bibleMemoryCache.clear()
+    bibleInFlight.clear()
+}
+
 export function useScripture() {
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
     const setDefaultBibleVersion = useAppStore((state) => state.setDefaultBibleVersion)
@@ -164,7 +190,10 @@ export function useScripture() {
         const cached = await db.bibleAndHymns.get(version)
 
         if (cached?.data) {
-            console.log(`Found ${version} in IndexedDB cache, entries:`, (cached.data as any[]).length, 'first entry keys:', cached.data && (cached.data as any[])[0] ? Object.keys((cached.data as any[])[0]).join(',') : 'none')
+            // One line per actual IndexedDB read. Repeat calls are served from
+            // `bibleMemoryCache` and never reach here, so this staying quiet is
+            // the signal that the memory cache is doing its job.
+            console.log(`Loaded ${version} from IndexedDB (${(cached.data as unknown[]).length} entries)`)
             return cached.data as unknown as BibleVerse[]
         }
 
@@ -175,35 +204,62 @@ export function useScripture() {
     // Convex is intentionally NOT in this chain. The Bible files stored in
     // Convex storage are cold backup only — the client never reads them.
     const downloadBibleVersion = useCallback(async (version: string): Promise<BibleVerse[] | null> => {
-        // 1. Check IndexedDB cache first
-        const cached = await getFromIndexedDB(version)
-        if (cached) {
-            return cached
-        }
+        // 0. Session memory — avoids re-reading and re-cloning 31k verses out
+        //    of IndexedDB on every render/search/detection.
+        const inMemory = bibleMemoryCache.get(version)
+        if (inMemory) return inMemory
 
-        // 2. Try the bundled static asset (served with the app, HTTP-cached)
-        const bundledData = await fetchFromBundled(version)
-        if (bundledData) {
-            await cacheInIndexedDB(version, bundledData)
-            return bundledData
-        }
+        const pending = bibleInFlight.get(version)
+        if (pending) return pending
 
-        // 3. Last-resort fallback: public CDN
-        const cdnData = await fetchFromCdn(version)
-        if (cdnData) {
-            await cacheInIndexedDB(version, cdnData)
-            return cdnData
-        }
+        const load = (async (): Promise<BibleVerse[] | null> => {
+            // 1. Check IndexedDB cache first
+            const cached = await getFromIndexedDB(version)
+            if (cached) {
+                return cached
+            }
 
-        console.error(`Failed to fetch Bible version ${version} from any source`)
-        return null
+            // 2. Try the bundled static asset (served with the app, HTTP-cached)
+            const bundledData = await fetchFromBundled(version)
+            if (bundledData) {
+                await cacheInIndexedDB(version, bundledData)
+                return bundledData
+            }
+
+            // 3. Last-resort fallback: public CDN
+            const cdnData = await fetchFromCdn(version)
+            if (cdnData) {
+                await cacheInIndexedDB(version, cdnData)
+                return cdnData
+            }
+
+            console.error(`Failed to fetch Bible version ${version} from any source`)
+            return null
+        })()
+
+        bibleInFlight.set(version, load)
+        try {
+            const data = await load
+            if (data) bibleMemoryCache.set(version, data)
+            return data
+        } finally {
+            bibleInFlight.delete(version)
+        }
     }, [getFromIndexedDB, fetchFromBundled, fetchFromCdn, cacheInIndexedDB])
 
-    // Check if a bible version is downloaded (in IndexedDB)
+    // Check if a bible version is downloaded (in IndexedDB). Counts keys rather
+    // than fetching the record — the settings screen asks this for every
+    // version on every render, and pulling 31k verses back just to test for
+    // existence is what made opening Settings stutter.
     const isVersionDownloaded = useCallback(async (version: string): Promise<boolean> => {
-        const cached = await getFromIndexedDB(version)
-        return cached !== null
-    }, [getFromIndexedDB])
+        if (bibleMemoryCache.has(version)) return true
+        try {
+            const db = getIndexedDB()
+            return (await db.bibleAndHymns.where(':id').equals(version).count()) > 0
+        } catch {
+            return false
+        }
+    }, [])
 
     // Get detailed status of a Bible version
     const getVersionStatus = useCallback(async (version: string): Promise<BibleVersionStatus> => {
@@ -294,10 +350,11 @@ export function useScripture() {
             // label.
             const firstOutOfRangeIdx = selectedVerses.findIndex((s) => !belongsToChapter(s, book, chapter, bookName))
             if (firstOutOfRangeIdx !== -1) {
-                console.warn(
-                    `Requested verse range spilled past ${bookName} ${chapter} — clamping`,
-                    { requestedCount: verses.length, availableCount: firstOutOfRangeIdx },
-                )
+                // Deliberately not a warning. The verse navigator always asks
+                // for the next 5 verses, so every chapter-end view hits this by
+                // design — and console.warn in that render path produced a
+                // stack trace per update. Clamping is the expected outcome, not
+                // a fault.
                 selectedVerses = selectedVerses.slice(0, firstOutOfRangeIdx)
             }
             if (selectedVerses.length === 0) {
@@ -329,7 +386,7 @@ export function useScripture() {
             console.error('Error fetching scripture:', error)
             return null
         }
-    }, [defaultBibleVersion, setDefaultBibleVersion, isVersionDownloaded, downloadBibleVersion])
+    }, [defaultBibleVersion, setDefaultBibleVersion, downloadBibleVersion])
 
     // Fetch an explicit, possibly non-contiguous set of verse numbers (e.g.
     // from shift-click/drag selection in the verse picker) and merge them

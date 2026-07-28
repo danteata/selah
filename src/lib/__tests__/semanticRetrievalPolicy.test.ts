@@ -6,6 +6,7 @@ import {
     getContentWords,
     removeStopWords,
     isAmbiguousMatch,
+    canClaimLiveSlide,
 } from '../semanticRetrievalPolicy'
 
 describe('semanticRetrievalPolicy', () => {
@@ -288,6 +289,43 @@ describe('semanticRetrievalPolicy', () => {
             const best = { score: 0.80, book: 'John', chapter: 3 }
             const runnerUp = { score: 0.75, book: 'Romans', chapter: 8 }
             expect(isAmbiguousMatch(best, [best, runnerUp])).toBe(false)
+        })
+    })
+
+    // -----------------------------------------------------------------------
+    // Claiming the live slide
+    // -----------------------------------------------------------------------
+    describe('canClaimLiveSlide', () => {
+        const psalm27 = { book: 'Psalms', chapter: 27 }
+
+        it('lets a match inside the announced passage claim the screen', () => {
+            expect(canClaimLiveSlide({ book: 'Psalms', chapter: 27 }, psalm27, false)).toBe(true)
+        })
+
+        it('keeps a match outside the announced passage off the screen', () => {
+            // Reading Psalm 27 aloud scored 2 Kings 17:39 at 0.782 and it took
+            // the live slide from the passage being read.
+            expect(canClaimLiveSlide({ book: '2 Kings', chapter: 17 }, psalm27, false)).toBe(false)
+        })
+
+        it('still lets the next verse of an announced chapter claim the screen', () => {
+            // Sequential reading: verse 1 is already detected, verse 2 is what
+            // is being read now. Redundancy here is what made announcing a
+            // chapter surface verse 1 and then nothing.
+            expect(canClaimLiveSlide({ book: 'Psalms', chapter: 27 }, psalm27, true)).toBe(true)
+        })
+
+        it('keeps an out-of-context match off the screen even when it is novel', () => {
+            expect(canClaimLiveSlide({ book: 'Leviticus', chapter: 25 }, psalm27, true)).toBe(false)
+        })
+
+        it('distinguishes another chapter of the announced book', () => {
+            expect(canClaimLiveSlide({ book: 'Psalms', chapter: 34 }, psalm27, false)).toBe(false)
+        })
+
+        it('falls back to the novelty rule when nothing was announced', () => {
+            expect(canClaimLiveSlide({ book: '2 Kings', chapter: 17 }, null, false)).toBe(true)
+            expect(canClaimLiveSlide({ book: '2 Kings', chapter: 17 }, null, true)).toBe(false)
         })
     })
 })

@@ -469,6 +469,22 @@ struct TranscriptionResultEvent {
     text: String,
     duration_ms: u32,
     start_offset_ms: u32,
+    /// Segment timings in **seconds from the start of the recording session**
+    /// (the engine's utterance-relative times plus `start_offset_ms`), so a
+    /// detected verse can be mapped back to a moment in the recording.
+    ///
+    /// Empty when the model emits no alignment data, and also for the streaming
+    /// path — `finalize_stream` returns text only.
+    segments: Vec<TranscriptionResultSegment>,
+}
+
+/// One `TranscriptionResultEvent` segment row; times are session-absolute
+/// seconds. Mirrored by `WhisperSegmentTiming` in the frontend.
+#[derive(Clone, serde::Serialize)]
+struct TranscriptionResultSegment {
+    start: f64,
+    end: f64,
+    text: String,
 }
 
 /// Continuous audio-feature event for the audio-reactive visualizer + level
@@ -570,9 +586,26 @@ fn handle_speech_segment(
                     Ok(out) => {
                         let text = out.text.trim().to_string();
                         if !text.is_empty() {
+                            // Engine times are relative to this utterance; shift
+                            // them onto the session timeline before emitting.
+                            let offset_secs = start_offset_ms as f64 / 1000.0;
+                            let segments = out
+                                .segments
+                                .iter()
+                                .map(|s| TranscriptionResultSegment {
+                                    start: s.start + offset_secs,
+                                    end: s.end + offset_secs,
+                                    text: s.text.clone(),
+                                })
+                                .collect();
                             let _ = app.emit(
                                 "transcription-result",
-                                TranscriptionResultEvent { text, duration_ms, start_offset_ms },
+                                TranscriptionResultEvent {
+                                    text,
+                                    duration_ms,
+                                    start_offset_ms,
+                                    segments,
+                                },
                             );
                         }
                     }

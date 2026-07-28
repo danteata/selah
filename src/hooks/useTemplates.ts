@@ -3,6 +3,7 @@ import { useConvex, useQuery, useMutation } from 'convex/react'
 import type { ConvexReactClient } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
+import { stripEphemeralBackground } from './useLocalBackground'
 import {
     saveLocalTemplate,
     getLocalTemplates,
@@ -14,13 +15,14 @@ import {
     type LocalTemplate,
 } from './useIndexedDB'
 
-export type SlideType = 'bible' | 'song' | 'hymn' | 'text' | 'media' | 'announcement' | 'sermon' | 'prayer' | 'countdown' | 'any'
+export type SlideType = 'bible' | 'song' | 'hymn' | 'dictionary' | 'text' | 'media' | 'announcement' | 'sermon' | 'prayer' | 'countdown' | 'any'
 type TemplateAppliesTo = Exclude<SlideType, 'sermon' | 'prayer'>
 
 const TEMPLATE_APPLIES_TO_VALUES = new Set<TemplateAppliesTo>([
     'bible',
     'song',
     'hymn',
+    'dictionary',
     'text',
     'media',
     'announcement',
@@ -153,6 +155,31 @@ async function fetchSignedUrlFromConvex(
     return promise
 }
 
+/**
+ * Keep process-scoped `blob:` URLs out of a persisted slide snapshot.
+ *
+ * A template is saved from a live slide, whose background may currently be an
+ * object URL resolved from the blob cache. That URL dies with the process, so
+ * storing it guarantees a broken background on every later run — see
+ * `stripEphemeralBackground`. Handles both snapshot shapes this API accepts:
+ * an already-stringified slide, or the object itself.
+ */
+function sanitizeSlideSnapshot(slideId: string | unknown): string | unknown {
+    if (typeof slideId === 'string') {
+        try {
+            const parsed = JSON.parse(slideId)
+            const cleaned = stripEphemeralBackground(parsed)
+            // stripEphemeralBackground returns the same reference when there
+            // was nothing to strip, so this avoids a pointless re-stringify.
+            return cleaned === parsed ? slideId : JSON.stringify(cleaned)
+        } catch {
+            // Not JSON — nothing to inspect, pass through untouched.
+            return slideId
+        }
+    }
+    return stripEphemeralBackground(slideId)
+}
+
 async function backgroundCacheBlob(storageId: string, signedUrl: string) {
     try {
         const response = await fetch(signedUrl)
@@ -166,10 +193,33 @@ async function backgroundCacheBlob(storageId: string, signedUrl: string) {
     }
 }
 
+/**
+ * Object URLs for cached template blobs, keyed by storageId and shared by
+ * every consumer for the lifetime of the session.
+ *
+ * These URLs escape the hook that mints them: a template resolved here gets
+ * baked into a slide that is pushed live and keeps rendering long after the
+ * component unmounts. When each consumer owned its own URL and revoked it on
+ * unmount or template switch, the live slide's background died with it —
+ * `net::ERR_FILE_NOT_FOUND` on a blob: URL immediately after `slide_created`.
+ *
+ * One URL per distinct template, never revoked mid-session. The blob is
+ * already held in IndexedDB, so this costs a mapping, not a second copy, and
+ * it's bounded by how many templates the operator actually uses.
+ */
+const templateObjectUrls = new Map<string, string>()
+
+function getTemplateObjectUrl(storageId: string, blob: Blob): string {
+    const existing = templateObjectUrls.get(storageId)
+    if (existing) return existing
+    const objectUrl = URL.createObjectURL(blob)
+    templateObjectUrls.set(storageId, objectUrl)
+    return objectUrl
+}
+
 export function useFileUrl(storageId: string | null) {
     const convex = useConvex()
     const [url, setUrl] = useState<string | null>(null)
-    const objectUrlRef = useRef<string | null>(null)
     // Tracks the storageId the in-flight resolver is operating on so we
     // ignore stale resolutions when storageId changes mid-fetch.
     const resolvingForRef = useRef<string | null>(null)
@@ -188,11 +238,9 @@ export function useFileUrl(storageId: string | null) {
         let cancelled = false
         resolvingForRef.current = sid
 
-        // Revoke any previously-created object URL — the storageId changed.
-        if (objectUrlRef.current) {
-            URL.revokeObjectURL(objectUrlRef.current)
-            objectUrlRef.current = null
-        }
+        // A previously-resolved object URL is deliberately NOT revoked here.
+        // It is shared via `templateObjectUrls` and may still be backing a
+        // slide that is live on the output screen right now.
 
         async function resolve() {
             // 1. In-memory signed-URL cache
@@ -206,9 +254,7 @@ export function useFileUrl(storageId: string | null) {
             const blob = await getCachedTemplateBlob(sid)
             if (cancelled || resolvingForRef.current !== sid) return
             if (blob) {
-                const objectUrl = URL.createObjectURL(blob)
-                objectUrlRef.current = objectUrl
-                setUrl(objectUrl)
+                setUrl(getTemplateObjectUrl(sid, blob))
                 return
             }
 
@@ -238,15 +284,8 @@ export function useFileUrl(storageId: string | null) {
         }
     }, [storageId, convex])
 
-    // Cleanup the object URL when the consumer unmounts entirely
-    useEffect(() => {
-        return () => {
-            if (objectUrlRef.current) {
-                URL.revokeObjectURL(objectUrlRef.current)
-                objectUrlRef.current = null
-            }
-        }
-    }, [])
+    // No unmount cleanup: the URL is shared and may outlive this component on
+    // a live slide. See `templateObjectUrls`.
 
     return url
 }
@@ -314,6 +353,7 @@ export function useTemplates(): UseTemplatesReturn {
         thumbnail?: string
         backgroundStorageId?: string
     }): Promise<string> => {
+        const slideSnapshot = sanitizeSlideSnapshot(data.slideId)
         if (isOffline) {
             const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
             const now = new Date().toISOString()
@@ -321,7 +361,7 @@ export function useTemplates(): UseTemplatesReturn {
                 id,
                 name: data.name,
                 description: data.description,
-                slideId: typeof data.slideId === 'string' ? data.slideId : JSON.stringify(data.slideId),
+                slideId: typeof slideSnapshot === 'string' ? slideSnapshot : JSON.stringify(slideSnapshot),
                 category: data.category,
                 appliesTo: data.appliesTo,
                 thumbnail: data.thumbnail,
@@ -340,7 +380,7 @@ export function useTemplates(): UseTemplatesReturn {
         const serverId = await createTemplateMutation({
             name: data.name,
             description: data.description,
-            slideId: data.slideId,
+            slideId: slideSnapshot,
             category: data.category,
             appliesTo: normalizeAppliesTo(data.appliesTo),
             thumbnail: data.thumbnail,
@@ -353,7 +393,7 @@ export function useTemplates(): UseTemplatesReturn {
             id: serverId,
             name: data.name,
             description: data.description,
-            slideId: typeof data.slideId === 'string' ? data.slideId : JSON.stringify(data.slideId),
+            slideId: typeof slideSnapshot === 'string' ? slideSnapshot : JSON.stringify(slideSnapshot),
             category: data.category,
             appliesTo: data.appliesTo,
             thumbnail: data.thumbnail,
@@ -378,6 +418,9 @@ export function useTemplates(): UseTemplatesReturn {
         backgroundStorageId?: string
     }): Promise<string> => {
         const isLocal = templateId.startsWith('local_')
+        const slideSnapshot = updates.slideId !== undefined
+            ? sanitizeSlideSnapshot(updates.slideId)
+            : undefined
 
         // Optimistic update: update local state immediately so UI feels snappy
         setLocalTemplates(prev => prev.map(t =>
@@ -386,7 +429,7 @@ export function useTemplates(): UseTemplatesReturn {
                     ...t,
                     name: updates.name ?? t.name,
                     description: updates.description ?? t.description,
-                    slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : t.slideId,
+                    slideId: typeof slideSnapshot === 'string' ? slideSnapshot : slideSnapshot ? JSON.stringify(slideSnapshot) : t.slideId,
                     category: updates.category ?? t.category,
                     appliesTo: updates.appliesTo as string[] ?? t.appliesTo,
                     thumbnail: updates.thumbnail ?? t.thumbnail,
@@ -400,7 +443,7 @@ export function useTemplates(): UseTemplatesReturn {
         await updateLocalTemplateFromDB(templateId, {
             name: updates.name,
             description: updates.description,
-            slideId: typeof updates.slideId === 'string' ? updates.slideId : updates.slideId ? JSON.stringify(updates.slideId) : undefined,
+            slideId: typeof slideSnapshot === 'string' ? slideSnapshot : slideSnapshot ? JSON.stringify(slideSnapshot) : undefined,
             category: updates.category,
             appliesTo: updates.appliesTo,
             thumbnail: updates.thumbnail,
@@ -412,11 +455,15 @@ export function useTemplates(): UseTemplatesReturn {
             return templateId
         }
 
-        // Online server update
+        // Online server update. `slideId` is overridden with the sanitized
+        // snapshot rather than taken from the `...updates` spread, and only
+        // when the caller actually supplied one — spreading an explicit
+        // `slideId: undefined` is not the same as omitting the field.
         await updateTemplateMutation({
             templateId,
             updates: {
                 ...updates,
+                ...(slideSnapshot !== undefined ? { slideId: slideSnapshot } : {}),
                 appliesTo: normalizeAppliesTo(updates.appliesTo),
             },
         })

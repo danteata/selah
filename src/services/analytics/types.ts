@@ -118,6 +118,11 @@ export const AnalyticsEventType = {
     SONG_SEARCHED: 'song_searched',
     HYMN_VIEWED: 'hymn_viewed',
 
+    // Dictionary
+    DICTIONARY_ENTRY_VIEWED: 'dictionary_entry_viewed',
+    DICTIONARY_SLIDE_CREATED: 'dictionary_slide_created',
+    DICTIONARY_REFERENCE_USED: 'dictionary_reference_used',
+
     // Media
     MEDIA_UPLOADED: 'media_uploaded',
     MEDIA_SELECTED: 'media_selected',
@@ -165,6 +170,7 @@ export const AnalyticsEventType = {
     // Desktop
     DESKTOP_UPDATE_CHECKED: 'desktop_update_checked',
     DESKTOP_UPDATE_INSTALLED: 'desktop_update_installed',
+    DESKTOP_UPDATE_DISMISSED: 'desktop_update_dismissed',
 
     // Performance / Errors
     ERROR_OCCURRED: 'error_occurred',

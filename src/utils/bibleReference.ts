@@ -267,6 +267,143 @@ export function parseBibleQuery(q: string): ParsedBibleQuery | null {
     return null
 }
 
+/**
+ * Parse a fully written-out reference such as "Exodus 4:14",
+ * "1 Samuel 2:3-5", "Song of Solomon 2:1" or "Leviticus 8".
+ *
+ * `parseBibleQuery` is tuned for what an operator types into a search box, so
+ * its book pattern is one word with an optional leading digit — which is every
+ * book except "Song of Solomon". This is for references quoted in prose, as
+ * dictionary entries cite them: split the trailing numbers off first, then
+ * resolve whatever precedes them as a book name, however many words that takes.
+ *
+ * Two shapes that only show up in cited references:
+ *   "Leviticus 8"        — a whole chapter, resolved to its first verse, the
+ *                          same convention the Bible panel uses for a bare
+ *                          chapter.
+ *   "Judges 8:33-9:6"    — a span crossing a chapter boundary. Selah's
+ *                          Scripture model holds one chapter, so this resolves
+ *                          to the opening verse. Showing 8:33 alone is right;
+ *                          showing 8:33-8:6 or spilling into the next chapter
+ *                          would put wrong text under a correct-looking label.
+ */
+export function parseFullBibleReference(reference: string): ParsedBibleQuery | null {
+    const trimmed = reference.trim().replace(/[.,;!?]+$/, '')
+    if (!trimmed) return null
+
+    const direct = parseBibleQuery(trimmed)
+    if (direct) return direct
+
+    const crossChapter = trimmed.match(/^(.+?)\s+(\d+):(\d+)\s*-\s*\d+:\d+$/)
+    if (crossChapter) {
+        const resolved = resolveBookName(crossChapter[1])
+        if (!resolved) return null
+        const startVerse = parseInt(crossChapter[3])
+        return { ...resolved, chapter: parseInt(crossChapter[2]), startVerse, endVerse: startVerse }
+    }
+
+    const withVerse = trimmed.match(/^(.+?)\s+(\d+):(\d+)(?:\s*-\s*(\d+))?$/)
+    if (withVerse) {
+        const resolved = resolveBookName(withVerse[1])
+        if (!resolved) return null
+        const startVerse = parseInt(withVerse[3])
+        return {
+            ...resolved,
+            chapter: parseInt(withVerse[2]),
+            startVerse,
+            endVerse: withVerse[4] ? parseInt(withVerse[4]) : startVerse,
+        }
+    }
+
+    const chapterOnly = trimmed.match(/^(.+?)\s+(\d+)$/)
+    if (chapterOnly) {
+        const resolved = resolveBookName(chapterOnly[1])
+        if (!resolved) return null
+        return { ...resolved, chapter: parseInt(chapterOnly[2]), startVerse: 1, endVerse: 1 }
+    }
+
+    return null
+}
+
+/**
+ * What pressing Enter in the Bible panel should do.
+ *
+ * The panel keeps its result rows on screen while you type — that is what makes
+ * the arrow keys and the verse stepper work — and its lookup is debounced by
+ * 500ms. Put together, a fast typer can press Enter while the rows still belong
+ * to an earlier prefix of the query: entering "John 11:35" quickly used to
+ * present whatever "John 1" had loaded.
+ *
+ * The decision is here rather than in the keydown handler so it can be tested
+ * directly; the component only maps the result onto its present/queue/search
+ * calls.
+ *
+ * - `typed`  the query names a reference the rows don't belong to, so act on
+ *            what was typed and ignore the rows. This covers two ways the rows
+ *            can be wrong: they were fetched for an earlier prefix of the query,
+ *            or they are semantic matches for a partial query and no reference
+ *            has been fetched at all.
+ * - `row`    the rows are current, so act on the highlighted one. This is what
+ *            keeps a deliberate arrow-key selection working: the operator can
+ *            arrow to a neighbouring verse and Enter presents *that* verse,
+ *            because the rows still match what's typed.
+ * - `search` the query isn't a reference and nothing is on screen — run the
+ *            search rather than guessing.
+ * - `none`   nothing to act on.
+ */
+export type BibleEnterAction =
+    | { kind: 'typed'; reference: ParsedBibleQuery }
+    | { kind: 'row'; index: number }
+    | { kind: 'search' }
+    | { kind: 'none' }
+
+export interface BibleEnterInput {
+    /** Current contents of the search box. */
+    query: string
+    /** The reference the visible rows were fetched for, if any. */
+    loadedAnchor: { bookIndex: number; chapter: number; startVerse: number } | null
+    /** How many result rows are on screen. */
+    rowCount: number
+    /** Highlighted row, or -1 when none has been focused. */
+    focusedIndex: number
+    /** Whether a search has already run for this query. */
+    hasSearched: boolean
+}
+
+export function resolveEnterAction({
+    query,
+    loadedAnchor,
+    rowCount,
+    focusedIndex,
+    hasSearched,
+}: BibleEnterInput): BibleEnterAction {
+    const parsed = parseBibleQuery(normalizeBibleReference(query))
+
+    if (parsed) {
+        // No rows have been fetched for a reference yet, so whatever is on screen
+        // is a semantic (meaning) match for a partial query — those persist while
+        // a reference is being typed, and presenting one puts a verse on the
+        // screen that was never asked for.
+        if (!loadedAnchor) return { kind: 'typed', reference: parsed }
+
+        const rowsMatchQuery =
+            loadedAnchor.bookIndex === parsed.bookIndex &&
+            loadedAnchor.chapter === parsed.chapter &&
+            loadedAnchor.startVerse === parsed.startVerse
+        if (!rowsMatchQuery) return { kind: 'typed', reference: parsed }
+    }
+
+    if (rowCount > 0) {
+        // Rows are shown with one highlighted, so an unfocused list acts on the
+        // first — no throwaway keystroke needed to select it.
+        return { kind: 'row', index: focusedIndex >= 0 ? focusedIndex : 0 }
+    }
+
+    if (!hasSearched) return { kind: 'search' }
+
+    return { kind: 'none' }
+}
+
 export function getBookSuggestions(query: string): string[] {
     if (!query || query.includes(':')) return []
     const lq = query.toLowerCase().trim()

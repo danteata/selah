@@ -37,6 +37,23 @@ interface AutoFitTextProps {
  * Container must have a deterministic width AND height (flex-1, fixed px, aspect-ratio,
  * etc.). Auto-fit cannot work against an auto-sized parent — it would feed back into
  * itself and oscillate.
+ *
+ * Blind spot to design around: the fit is decided by `scrollHeight`/`scrollWidth`, which
+ * only describe overflow below and to the right of the content origin. Ink that spills
+ * *above* the first line box — a raised superscript, an accent on a capital, a tight
+ * line-height against a tall ascender — is invisible here, so nothing stops the search
+ * choosing a size whose top then gets shaved by `overflow: hidden`.
+ *
+ * This is not hypothetical. At line-height 1.0 a fitted block's ink runs ~0.1em taller
+ * than its measured height, so the centred block ends up with only a few pixels above
+ * it: measured in the live-output preview at 132px text, 543px available against 542px
+ * measured — 7.5px of slack — while the scripture verse number rose 28px above its
+ * paragraph box and lost its top to the container. Bigger panel, bigger text, more of it
+ * gone.
+ *
+ * Content that rises above its line box therefore has to reserve headroom in em, which
+ * lands in scrollHeight where this search can see it. `.scripture-content` in index.css
+ * is the worked example.
  */
 export function AutoFitText({
     html,

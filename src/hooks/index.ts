@@ -7,10 +7,15 @@ export {
     generateSlideName,
     generateSlideContent,
     calculateScreenFontSize,
+    chunkDefinitionText,
+    buildDictionaryContents,
+    buildDictionaryLabel,
+    DEFINITION_CHARS_PER_SLIDE,
     firstVerseOnly
 } from './useSlideCreation'
 export { useScripture, formatVerseGroups } from './useScripture'
 export { useHymn } from './useHymn'
+export { useDictionary, useDictionaryPacks, invalidateDictionaryCache, expandDictionaryEntry } from './useDictionary'
 export { useSong } from './useSong'
 export { useSongs } from './useSongs'
 export { useChurch } from './useChurch'

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
     parseBibleQuery,
+    parseFullBibleReference,
+    resolveEnterAction,
     resolveBookName,
     getBookSuggestions,
     getRankedBookSuggestions,
@@ -612,5 +614,187 @@ describe('normalizeBibleReference', () => {
     it('handles voice transcript: "John three sixteen" stays as text', () => {
         // "three sixteen" is parsed by parseSpokenNumber upstream, not here.
         expect(normalizeBibleReference('John three sixteen')).toBe('John three sixteen')
+    })
+})
+// Dictionary entries cite references in full prose form ("Song of Solomon 2:1"),
+// which the search-box parser cannot handle — its book pattern is one word.
+describe('parseFullBibleReference', () => {
+    it('parses a plain reference the same way parseBibleQuery does', () => {
+        expect(parseFullBibleReference('Exodus 4:14')).toEqual({
+            bookIndex: 2,
+            bookName: 'Exodus',
+            chapter: 4,
+            startVerse: 14,
+            endVerse: 14,
+        })
+    })
+
+    it('parses a numbered book', () => {
+        expect(parseFullBibleReference('1 Samuel 2:3')?.bookName).toBe('1 Samuel')
+    })
+
+    it('parses a multi-word book name', () => {
+        expect(parseFullBibleReference('Song of Solomon 2:1')).toEqual({
+            bookIndex: 22,
+            bookName: 'Song of Solomon',
+            chapter: 2,
+            startVerse: 1,
+            endVerse: 1,
+        })
+    })
+
+    it('parses a verse range', () => {
+        const parsed = parseFullBibleReference('Hebrews 12:1-2')
+        expect(parsed?.startVerse).toBe(1)
+        expect(parsed?.endVerse).toBe(2)
+    })
+
+    it('tolerates trailing punctuation and spaced ranges', () => {
+        expect(parseFullBibleReference('Revelation 1:8.')?.chapter).toBe(1)
+        expect(parseFullBibleReference('Isaiah 41:4 - 6')?.endVerse).toBe(6)
+    })
+
+    it('resolves a whole-chapter citation to its first verse', () => {
+        // Easton's cites ~1,100 references as a bare chapter ("Leviticus 8").
+        expect(parseFullBibleReference('Leviticus 8')).toEqual({
+            bookIndex: 3,
+            bookName: 'Leviticus',
+            chapter: 8,
+            startVerse: 1,
+            endVerse: 1,
+        })
+        expect(parseFullBibleReference('1 Samuel 17')?.chapter).toBe(17)
+    })
+
+    it('resolves a span crossing a chapter boundary to its opening verse', () => {
+        // One chapter is all a Scripture can hold; the alternative is wrong
+        // text under a correct-looking label.
+        expect(parseFullBibleReference('Judges 8:33-9:6')).toEqual({
+            bookIndex: 7,
+            bookName: 'Judges',
+            chapter: 8,
+            startVerse: 33,
+            endVerse: 33,
+        })
+        expect(parseFullBibleReference('1 Corinthians 12:31-13:13')?.startVerse).toBe(31)
+    })
+
+    it('rejects text that is not a reference', () => {
+        expect(parseFullBibleReference('')).toBeNull()
+        expect(parseFullBibleReference('the eldest son of Amram')).toBeNull()
+        expect(parseFullBibleReference('Nowhere 3:16')).toBeNull()
+        expect(parseFullBibleReference('Nowhere 3')).toBeNull()
+    })
+})
+
+// The panel keeps its rows while you type and debounces its lookup by 500ms, so
+// Enter could land on rows belonging to an earlier prefix: entering "John 11:35"
+// quickly presented whatever "John 1" had loaded.
+describe('resolveEnterAction', () => {
+    const johnOneOne = { bookIndex: 43, chapter: 1, startVerse: 1 }
+    const base = { rowCount: 6, focusedIndex: 5, hasSearched: true }
+
+    it('acts on what was typed when the rows belong to an earlier prefix', () => {
+        // The reported case: rows are John 1:1 + neighbours, focus has landed on
+        // the sixth row (John 1:6), and the operator has typed John 11:35.
+        const action = resolveEnterAction({ ...base, query: 'John 11:35', loadedAnchor: johnOneOne })
+
+        expect(action).toEqual({
+            kind: 'typed',
+            reference: { bookIndex: 43, bookName: 'John', chapter: 11, startVerse: 35, endVerse: 35 },
+        })
+    })
+
+    it('acts on what was typed when only the verse has moved on', () => {
+        const action = resolveEnterAction({
+            ...base, query: 'John 11:35', loadedAnchor: { bookIndex: 43, chapter: 11, startVerse: 3 },
+        })
+        expect(action.kind === 'typed' && action.reference.startVerse).toBe(35)
+    })
+
+    it('acts on what was typed when the book has moved on', () => {
+        const action = resolveEnterAction({ ...base, query: 'Mark 11:35', loadedAnchor: johnOneOne })
+        expect(action.kind === 'typed' && action.reference.bookIndex).toBe(41)
+    })
+
+    it('uses the highlighted row when the rows match the query', () => {
+        // This is what keeps arrow-key selection working: the operator arrowed
+        // down to a neighbour of the verse they typed, and Enter must present
+        // that neighbour rather than snapping back.
+        const action = resolveEnterAction({
+            ...base, focusedIndex: 3, query: 'John 11:35',
+            loadedAnchor: { bookIndex: 43, chapter: 11, startVerse: 35 },
+        })
+        expect(action).toEqual({ kind: 'row', index: 3 })
+    })
+
+    it('defaults to the first row when none is highlighted', () => {
+        const action = resolveEnterAction({
+            ...base, focusedIndex: -1, query: 'John 11:35',
+            loadedAnchor: { bookIndex: 43, chapter: 11, startVerse: 35 },
+        })
+        expect(action).toEqual({ kind: 'row', index: 0 })
+    })
+
+    it('uses the highlighted row for a semantic query, which names no reference', () => {
+        const action = resolveEnterAction({ ...base, focusedIndex: 2, query: 'jesus wept', loadedAnchor: johnOneOne })
+        expect(action).toEqual({ kind: 'row', index: 2 })
+    })
+
+    it('acts on the typed reference on a fresh panel, without a throwaway search first', () => {
+        const action = resolveEnterAction({
+            query: 'John 11:35', loadedAnchor: null, rowCount: 0, focusedIndex: -1, hasSearched: false,
+        })
+        expect(action.kind === 'typed' && action.reference.chapter).toBe(11)
+    })
+
+    it('ignores semantic matches when a reference has been typed', () => {
+        // The reported case. Semantic (meaning) results for a partial query stay
+        // on screen while a reference is typed — deliberately, so both can be
+        // shown — and no reference has been fetched, so there is no anchor. The
+        // rows are verses the operator never typed or opened, and presenting one
+        // also rewrote the search box to it.
+        const action = resolveEnterAction({
+            query: 'John 11:35', loadedAnchor: null, rowCount: 8, focusedIndex: 0, hasSearched: false,
+        })
+        expect(action).toEqual({
+            kind: 'typed',
+            reference: { bookIndex: 43, bookName: 'John', chapter: 11, startVerse: 35, endVerse: 35 },
+        })
+    })
+
+    it('still lets a semantic result be chosen when the query is not a reference', () => {
+        // Typing meaning text and picking a match must keep working.
+        const action = resolveEnterAction({
+            query: 'jesus wept', loadedAnchor: null, rowCount: 8, focusedIndex: 3, hasSearched: false,
+        })
+        expect(action).toEqual({ kind: 'row', index: 3 })
+    })
+
+    it('searches when the query is not a reference and nothing is on screen', () => {
+        const action = resolveEnterAction({
+            query: 'love one another', loadedAnchor: null, rowCount: 0, focusedIndex: -1, hasSearched: false,
+        })
+        expect(action).toEqual({ kind: 'search' })
+    })
+
+    it('does nothing when a search has already run and found nothing', () => {
+        const action = resolveEnterAction({
+            query: 'zzzz', loadedAnchor: null, rowCount: 0, focusedIndex: -1, hasSearched: true,
+        })
+        expect(action).toEqual({ kind: 'none' })
+    })
+
+    it('normalises the query the same way the search does', () => {
+        const spaced = resolveEnterAction({ ...base, query: 'John 11 35', loadedAnchor: johnOneOne })
+        expect(spaced.kind === 'typed' && spaced.reference.startVerse).toBe(35)
+
+        const abbreviated = resolveEnterAction({ ...base, query: 'jn 11:35', loadedAnchor: johnOneOne })
+        expect(abbreviated.kind === 'typed' && abbreviated.reference.chapter).toBe(11)
+    })
+
+    it('carries a verse range through', () => {
+        const action = resolveEnterAction({ ...base, query: 'John 11:35-36', loadedAnchor: johnOneOne })
+        expect(action.kind === 'typed' && action.reference.endVerse).toBe(36)
     })
 })

@@ -10,6 +10,7 @@ A modern, real-time worship presentation application built with React, TypeScrip
 - **Song Management** — Create, edit, and organize worship songs with verse/chorus structure
 - **Bible Display** — Search and display Bible verses with multiple translation support; upload your own Bible versions via CSV
 - **Hymn Library** — Access a comprehensive hymn library with full lyrics
+- **Dictionary** — Define a word on screen from bundled offline dictionaries: Easton's and Smith's Bible dictionaries, Strong's Greek/Hebrew lexicons, and Webster's 1913. Entries link their scripture citations straight to Bible slides. See [docs/DICTIONARY.md](./docs/DICTIONARY.md)
 - **Media Integration** — Display images, videos, and external content (YouTube, Vimeo)
 - **Countdown Timers** — Create pre-service countdown timers
 - **Alerts & Announcements** — Display priority announcements during services
@@ -91,6 +92,7 @@ selah/
 │   │   ├── bible/              # BibleVerseNavigator, BibleVersionSelect
 │   │   ├── countdown/          # AddCountdownModal
 │   │   ├── dashboard/          # DashboardLayout, DashboardHeader, DraggablePanel
+│   │   ├── dictionary/         # DictionaryPanel, DictionaryEntryView
 │   │   ├── editor/             # TipTap slide editor + toolbar
 │   │   ├── hymns/              # HymnList
 │   │   ├── layout/             # ChurchContext provider
@@ -146,12 +148,14 @@ selah/
 │       ├── Dockerfile
 │       └── fly.toml            # Fly.io config for whisper sidecar
 ├── docs/
+│   ├── DICTIONARY.md           # Dictionary packs, search ranking, slides
 │   ├── SERMON_LISTENER.md      # Sermon Listener architecture docs
 │   └── whisper-deployment.md   # Whisper.cpp deployment guide
 ├── plan/
 │   ├── feature-parity.md       # Feature roadmap / parity tracking
 │   └── bible-data-hybrid-storage.md
 ├── scripts/
+│   ├── build-dictionary-packs.mjs # Fetch + shard the bundled dictionaries
 │   └── start-whisper-cpp.sh    # Helper: build & start whisper.cpp via Docker
 ├── fly.toml                    # Fly.io config for main app
 └── Dockerfile                  # Production container for main app
@@ -228,6 +232,7 @@ selah/
 | `test` | Run all tests once |
 | `test:watch` | Run tests in watch mode |
 | `download-gguf-model` | Download the bundled GGUF Whisper model for native transcription |
+| `build-dictionary-packs` | Rebuild the bundled dictionary packs in `public/dictionaries/` |
 | `desktop:dev` | Download assets, then start the Tauri desktop app in dev mode |
 | `desktop:build` | Build the Tauri desktop app for production |
 

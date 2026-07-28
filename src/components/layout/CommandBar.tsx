@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-    Search, Command, Zap, Play, Eye, Book, 
+    Search, Command, Zap, Play, Eye, Book, BookA,
     Music, Image, Settings, HelpCircle, ArrowRight,
     Layout, Clock, AlertCircle
 } from 'lucide-react'
@@ -29,6 +29,7 @@ export function CommandBar() {
     const [query, setQuery] = useState('')
     const [selectedIndex, setSelectedIndex] = useState(0)
     const inputRef = useRef<HTMLInputElement>(null)
+    const listRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         if (commandBarOpen) {
@@ -37,19 +38,6 @@ export function CommandBar() {
             setSelectedIndex(0)
         }
     }, [commandBarOpen])
-
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault()
-                setCommandBarOpen(!commandBarOpen)
-            } else if (e.key === 'Escape' && commandBarOpen) {
-                setCommandBarOpen(false)
-            }
-        }
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [commandBarOpen, setCommandBarOpen])
 
     const handleClose = useCallback(() => {
         setCommandBarOpen(false)
@@ -79,6 +67,14 @@ export function CommandBar() {
             icon: Image,
             category: 'navigation',
             action: () => { setActiveNavSection('media'); handleClose() }
+        },
+        {
+            id: 'go-dictionary',
+            title: 'Define a Word',
+            description: 'Bible, Greek/Hebrew and English dictionaries',
+            icon: BookA,
+            category: 'navigation',
+            action: () => { setActiveNavSection('dictionary'); handleClose() }
         },
         {
             id: 'go-templates',
@@ -136,20 +132,94 @@ export function CommandBar() {
             action: () => { setLiveSlide(s.id); handleClose() }
         })) : []
 
-    const filteredCommands = [...dynamicCommands, ...staticCommands.filter(c => 
-        c.title.toLowerCase().includes(query.toLowerCase()) || 
+    const filteredCommands = [...dynamicCommands, ...staticCommands.filter(c =>
+        c.title.toLowerCase().includes(query.toLowerCase()) ||
         c.description?.toLowerCase().includes(query.toLowerCase())
     )]
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'ArrowDown') {
-            setSelectedIndex(prev => (prev + 1) % filteredCommands.length)
-        } else if (e.key === 'ArrowUp') {
-            setSelectedIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length)
-        } else if (e.key === 'Enter') {
-            filteredCommands[selectedIndex]?.action()
+    const commandCount = filteredCommands.length
+
+    // Typing shrinks the list, so a stored index left over from a hover or an
+    // earlier query can point past its end — and then Enter silently does
+    // nothing while the mouse still works. Derived rather than clamped in an
+    // effect, so there's no render where the highlight sits out of range.
+    const activeIndex = commandCount === 0 ? 0 : Math.min(selectedIndex, commandCount - 1)
+
+    // The key handler is registered once per open, so it reads the current list
+    // and selection through refs instead of taking them as effect deps — the
+    // command array is rebuilt every render, which would otherwise tear the
+    // listener down and rebuild it on every keystroke.
+    const commandsRef = useRef<CommandItem[]>(filteredCommands)
+    const activeIndexRef = useRef(activeIndex)
+    useEffect(() => {
+        commandsRef.current = filteredCommands
+        activeIndexRef.current = activeIndex
+    })
+
+    // Key handling lives on the window rather than the input's onKeyDown so it
+    // works whether or not focus is in the search box — a click on a row, or
+    // anything else that takes focus, used to leave the palette mouse-only.
+    useEffect(() => {
+        if (!commandBarOpen) return
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            const count = commandsRef.current.length
+
+            switch (event.key) {
+                case 'ArrowDown':
+                    // preventDefault stops the caret jumping to the end of the
+                    // query and stops the global slide-queue Arrow shortcuts
+                    // firing behind the palette.
+                    event.preventDefault()
+                    if (count > 0) setSelectedIndex((activeIndexRef.current + 1) % count)
+                    break
+                case 'ArrowUp':
+                    event.preventDefault()
+                    if (count > 0) setSelectedIndex((activeIndexRef.current - 1 + count) % count)
+                    break
+                case 'Home':
+                    event.preventDefault()
+                    setSelectedIndex(0)
+                    break
+                case 'End':
+                    event.preventDefault()
+                    setSelectedIndex(Math.max(0, count - 1))
+                    break
+                case 'Enter': {
+                    const command = commandsRef.current[activeIndexRef.current]
+                    if (!command) return
+                    event.preventDefault()
+                    command.action()
+                    break
+                }
+            }
         }
-    }
+
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [commandBarOpen])
+
+    // Open/close keys stay separate: ⌘K has to work when the palette is closed,
+    // which the effect above deliberately doesn't run for.
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault()
+                setCommandBarOpen(!commandBarOpen)
+            } else if (e.key === 'Escape' && commandBarOpen) {
+                setCommandBarOpen(false)
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [commandBarOpen, setCommandBarOpen])
+
+    // Keep the highlighted row on screen — the list scrolls past ~6 items, and
+    // arrowing into an off-screen selection looks like nothing happened.
+    useEffect(() => {
+        const selected = listRef.current?.querySelector(`[data-command-index="${activeIndex}"]`)
+        selected?.scrollIntoView({ block: 'nearest' })
+    }, [activeIndex])
 
     return (
         <AnimatePresence>
@@ -176,8 +246,8 @@ export function CommandBar() {
                                 type="text"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                onKeyDown={handleKeyDown}
                                 placeholder="Type a command or search..."
+                                aria-label="Search commands"
                                 className="flex-1 bg-transparent border-none text-white text-lg focus:outline-none focus:ring-0 placeholder-gray-600"
                             />
                             <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-md border border-white/10">
@@ -186,37 +256,38 @@ export function CommandBar() {
                             </div>
                         </div>
 
-                        <div className="flex-1 max-h-[60vh] overflow-y-auto p-2 custom-scrollbar">
+                        <div ref={listRef} className="flex-1 max-h-[60vh] overflow-y-auto p-2 custom-scrollbar">
                             {filteredCommands.length > 0 ? (
                                 <div className="space-y-1">
                                     {filteredCommands.map((command, index) => (
                                         <button
                                             key={command.id}
-                                            onClick={command.action}
+                                            data-command-index={index}
+                                            onClick={() => command.action()}
                                             onMouseEnter={() => setSelectedIndex(index)}
                                             className={`w-full flex items-center gap-4 px-3 py-3 rounded-xl transition-all group ${
-                                                selectedIndex === index 
+                                                activeIndex === index 
                                                     ? 'bg-[var(--accent-teal)] text-white shadow-lg shadow-[var(--accent-teal)]/20' 
                                                     : 'text-gray-400 hover:bg-white/5'
                                             }`}
                                         >
-                                            <div className={`p-2 rounded-lg ${selectedIndex === index ? 'bg-white/20' : 'bg-white/5 group-hover:bg-white/10'}`}>
+                                            <div className={`p-2 rounded-lg ${activeIndex === index ? 'bg-white/20' : 'bg-white/5 group-hover:bg-white/10'}`}>
                                                 <command.icon className="w-5 h-5" />
                                             </div>
                                             <div className="flex-1 text-left">
-                                                <div className={`font-bold text-sm ${selectedIndex === index ? 'text-white' : 'text-gray-200'}`}>
+                                                <div className={`font-bold text-sm ${activeIndex === index ? 'text-white' : 'text-gray-200'}`}>
                                                     {command.title}
                                                 </div>
-                                                <div className={`text-xs ${selectedIndex === index ? 'text-white/80' : 'text-gray-500'}`}>
+                                                <div className={`text-xs ${activeIndex === index ? 'text-white/80' : 'text-gray-500'}`}>
                                                     {command.description}
                                                 </div>
                                             </div>
                                             {command.shortcut && (
-                                                <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${selectedIndex === index ? 'bg-white/20' : 'bg-white/5'}`}>
+                                                <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${activeIndex === index ? 'bg-white/20' : 'bg-white/5'}`}>
                                                     {command.shortcut}
                                                 </div>
                                             )}
-                                            {selectedIndex === index && (
+                                            {activeIndex === index && (
                                                 <ArrowRight className="w-4 h-4 text-white/50" />
                                             )}
                                         </button>

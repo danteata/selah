@@ -21,6 +21,7 @@ import { useMemo, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Play, Mic, FileText, Lightbulb, Check, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
+import { slideCaptionHtml } from '../../utils/slideCaption'
 import { useLiveSession } from '../../hooks/useLiveSession'
 import { useUserRole } from '../../hooks/useUserRole'
 import { AutoFitText } from '../live/AutoFitText'
@@ -136,9 +137,9 @@ export function MobileStudioWorkspace() {
     }, [openModal])
 
     const liveBodyHtml = effectiveLiveSlide?.contents[0] ?? ''
-    const liveRefHtml = effectiveLiveSlide?.type === 'bible' ? (effectiveLiveSlide.contents[1] ?? '') : ''
+    const liveRefHtml = slideCaptionHtml(effectiveLiveSlide)
     const nextBodyHtml = effectiveNextSlide?.contents[0] ?? ''
-    const nextRefHtml = effectiveNextSlide?.type === 'bible' ? (effectiveNextSlide.contents[1] ?? '') : ''
+    const nextRefHtml = slideCaptionHtml(effectiveNextSlide)
 
     const liveBg = effectiveLiveSlide?.background || SLIDE_PREVIEW_BG
     const isLiveVideo = effectiveLiveSlide?.backgroundType === 'video'

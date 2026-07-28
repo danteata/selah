@@ -1284,7 +1284,7 @@ function ShortcutsSettings() {
 // Updates panel — desktop app only.  Tells the user what version they're
 // running, lets them check on demand, and surfaces any update errors.
 function UpdatesSettings() {
-    const { state, message, runCheck } = useAppUpdater()
+    const { state, message, available, install, runCheck } = useAppUpdater()
 
     const isDesktop = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
@@ -1310,18 +1310,18 @@ function UpdatesSettings() {
 
     const buttonLabel =
         state === 'checking' ? 'Checking\u2026'
-        : state === 'downloading' ? 'Downloading\u2026'
-        : state === 'restarting' ? 'Restarting\u2026'
+        : state === 'installing' ? 'Installing\u2026'
         : 'Check for updates'
 
-    const isBusy = state === 'checking' || state === 'downloading' || state === 'restarting'
+    const isBusy = state === 'checking' || state === 'installing'
 
     return (
         <div className="space-y-4">
             <div>
                 <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1">App Updates</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Selah checks for new versions automatically on launch. You can also trigger a manual check below.
+                    Selah checks for new versions on launch and every few hours, and shows a
+                    prompt in the top bar when one is ready. Nothing installs until you ask it to.
                 </p>
             </div>
 
@@ -1347,9 +1347,23 @@ function UpdatesSettings() {
                 </div>
             )}
 
-            {state === 'restarting' && (
-                <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
-                    <span>Update downloaded. Restarting Selah\u2026</span>
+            {available && (
+                <div className="flex items-start justify-between gap-3 p-3 bg-[var(--accent-teal)]/10 border border-[var(--accent-teal)]/30 rounded-lg">
+                    <div className="min-w-0">
+                        <div className="text-sm font-medium text-[var(--text-primary)]">
+                            Selah {available.version} is available
+                        </div>
+                        <div className="text-xs text-[var(--text-muted)] mt-0.5">
+                            Selah closes while it installs, then reopens. Not during a service.
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => void install()}
+                        disabled={isBusy}
+                        className="flex-shrink-0 px-3 py-1.5 text-sm font-semibold text-white bg-[var(--accent-teal)] rounded-lg hover:brightness-110 disabled:opacity-50"
+                    >
+                        {state === 'installing' ? 'Installing\u2026' : 'Install and restart'}
+                    </button>
                 </div>
             )}
 

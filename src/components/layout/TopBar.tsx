@@ -8,6 +8,7 @@ import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { useSchedules } from '../../hooks/useSchedules'
 import { api } from '../../../convex/_generated/api'
 import { LiveSessionControls } from '../live/LiveSessionControls'
+import { UpdatePrompt } from '../updates/UpdatePrompt'
 import { PresenceAvatars } from '../live/PresenceAvatars'
 import type { Schedule } from '../../types'
 
@@ -235,6 +236,10 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                         <LiveSessionControls churchId={churchId} />
                     </div>
                 )}
+
+                {/* Update available — sits in the always-visible chrome because
+                    Settings was the only place an update could be discovered. */}
+                <UpdatePrompt />
 
                 {/* Workspace Mode Toggle */}
                 <button

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, Copy, LayoutGrid, BookOpen, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, type LucideIcon } from 'lucide-react'
+import { Trash2, Copy, LayoutGrid, BookOpen, BookA, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, type LucideIcon } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
@@ -528,6 +528,7 @@ export function PreviewContent() {
     const compactTypeIcon = (type: string): LucideIcon => {
         switch (type) {
             case 'bible': return BookOpen
+            case 'dictionary': return BookA
             case 'song':
             case 'hymn': return Music
             case 'countdown': return Clock

@@ -20,6 +20,7 @@ import { audioFeatures } from '../services/visualizer/audioFeatures'
 import { useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { getVerseRefStyle } from '../utils/verseRefStyle'
+import { isCaptionedSlideType, slideCaptionHtml } from '../utils/slideCaption'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -496,9 +497,9 @@ export default function LiveView() {
             ) : slide.layout === 'lower-third' ? (
                 /* Lower Third Layout — strip anchored to the bottom; body auto-fits, caption stays small */
                 (() => {
-                    const isBible = slide.type === 'bible'
+                    const isBible = isCaptionedSlideType(slide.type)
                     const bodyHtml = slide.contents[0] || ''
-                    const captionHtml = isBible ? (slide.contents[1] || '') : ''
+                    const captionHtml = slideCaptionHtml(slide)
                     const subtitle = slide.slideStyle?.lowerThirdSubtitle || ''
                     // Per-slide setting wins, then global default from settings, then 'bottom'.
                     const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? settings.verseRefPosition ?? 'bottom'

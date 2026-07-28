@@ -1,4 +1,4 @@
-import { BookOpen, Music, Church, Image, Bell, Clock, FileText, Library, Plus, Search, Settings, Users, Keyboard, Moon, Trash2 } from 'lucide-react'
+import { BookOpen, BookA, Music, Church, Image, Bell, Clock, FileText, Library, Plus, Search, Settings, Users, Keyboard, Moon, Trash2 } from 'lucide-react'
 import type { QuickAction } from '../../types'
 
 interface ActionCardProps {
@@ -13,6 +13,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
     'i-bx-bible': BookOpen,
     'i-bx-search': Search,
     'i-bx-church': Church,
+    'i-lucide-book-a': BookA,
     'i-lucide-music-2': Music,
     'i-bx-library': Library,
     'i-bx-music': Music,

@@ -7,6 +7,7 @@ import { slideTypes, quickActionsArr, bibleBooks, appWideActions, type QuickActi
 import { SlideChip } from '../slides/SlideChip'
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
+import { DictionaryPanel } from '../dictionary/DictionaryPanel'
 import { SongList } from '../songs/SongList'
 
 // Icon mapping for actions
@@ -257,6 +258,10 @@ export function QuickActionsSidebar() {
         }
         if (actionStr === appWideActions.newHymn) {
             setQuickActionsPage('hymn')
+            return
+        }
+        if (actionStr === appWideActions.newDictionary) {
+            setQuickActionsPage('dictionary')
             return
         }
         if (actionStr === appWideActions.newSong || actionStr === appWideActions.addSong) {
@@ -686,6 +691,7 @@ export function QuickActionsSidebar() {
                     <div className="flex-1 overflow-y-auto">
                         {page === 'bible' && <BibleList onClose={() => setQuickActionsPage('')} />}
                         {page === 'hymn' && <HymnList onClose={() => setQuickActionsPage('')} />}
+                        {page === 'dictionary' && <DictionaryPanel onClose={() => setQuickActionsPage('')} isInline />}
                         {page === 'song' && <SongList onClose={() => setQuickActionsPage('')} />}
                     </div>
                 </div>

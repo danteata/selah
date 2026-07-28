@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     getSyncProgress: vi.fn(async () => null),
     saveSyncProgress: vi.fn(async () => {}),
     clearSyncProgress: vi.fn(async () => {}),
+    invalidateCachedEmbeddingsLookup: vi.fn(),
 }))
 
 vi.mock('../localEmbeddings', () => mocks)

@@ -15,6 +15,7 @@ import { ActionCard } from './ActionCard'
 import { SlideChip } from '../slides/SlideChip'
 import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
+import { DictionaryPanel } from '../dictionary/DictionaryPanel'
 import { SongList } from '../songs/SongList'
 
 // Group actions into categories for better visual organisation
@@ -52,6 +53,7 @@ export function QuickActions() {
     const page = useAppStore((state) => state.quickActionsPage)
     const setQuickActionsPage = useAppStore((state) => state.setQuickActionsPage)
     const openModal = useAppStore((state) => state.openModal)
+    const toggleDarkMode = useAppStore((state) => state.toggleDarkMode)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
@@ -167,6 +169,10 @@ export function QuickActions() {
             setQuickActionsPage('hymn')
             return
         }
+        if (action.action === appWideActions.newDictionary) {
+            setQuickActionsPage('dictionary')
+            return
+        }
         if (action.action === appWideActions.newSong || action.action === appWideActions.addSong) {
             setQuickActionsPage('song')
             return
@@ -216,7 +222,7 @@ export function QuickActions() {
             return
         }
         if (action.action === appWideActions.toggleDarkMode) {
-            document.documentElement.classList.toggle('dark')
+            toggleDarkMode()
             return
         }
 
@@ -270,7 +276,7 @@ export function QuickActions() {
             openModal('editor')
             return
         }
-    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule])
+    }, [setQuickActionsPage, openModal, fetchScripture, createBibleSlide, appendActiveSlide, getHymnByNumber, createHymnSlides, bibleChapterAndVerse, setEditingSlide, activeSchedule, toggleDarkMode])
 
     // Handle keyboard navigation
     const handleInputKeydown = useCallback((e: React.KeyboardEvent) => {
@@ -385,6 +391,8 @@ export function QuickActions() {
                 <BibleList onClose={handleClosePage} />
             ) : page === 'hymn' ? (
                 <HymnList onClose={handleClosePage} />
+            ) : page === 'dictionary' ? (
+                <DictionaryPanel onClose={handleClosePage} isInline />
             ) : page === 'song' ? (
                 <SongList onClose={handleClosePage} />
             ) : (

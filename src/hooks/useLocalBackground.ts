@@ -44,6 +44,29 @@ if (typeof window !== 'undefined') {
     }
 }
 
+/**
+ * Strip a process-scoped `blob:` background out of a slide snapshot.
+ *
+ * `URL.createObjectURL` handles are only meaningful inside the process that
+ * minted them. Persisting one into a template means every later session — and
+ * every restart — reloads a slide pointing at a URL that no longer resolves,
+ * which showed up as `net::ERR_FILE_NOT_FOUND` on a blob: URL immediately
+ * after the slide went live, with the *same* UUID recurring across runs.
+ *
+ * `backgroundStorageId` is the durable handle and is left intact, so dropping
+ * the URL lets the background be re-resolved from storage (or fall back to the
+ * default) instead of rendering nothing. Applied both when writing a template
+ * and when reading one, so templates already saved with a dead URL recover.
+ */
+export function stripEphemeralBackground<T>(slide: T): T {
+    if (!slide || typeof slide !== 'object') return slide
+    const candidate = slide as { background?: unknown }
+    if (typeof candidate.background === 'string' && candidate.background.startsWith('blob:')) {
+        return { ...(slide as object), background: '' } as T
+    }
+    return slide
+}
+
 export function isLocalFilePath(url: string): boolean {
     if (!url) return false
     if (ASSET_PROTOCOL_RE.test(url)) return true

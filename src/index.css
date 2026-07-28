@@ -267,6 +267,23 @@ h6 {
 .tiptap .scripture-content,
 .tiptap-preview .scripture-content {
     font-weight: 500;
+    /* Measured headroom for the raised verse number — see the sup rule below for
+       the other half of this fix.
+
+       AutoFitText grows the text until `scrollHeight` fills the container, and
+       scrollHeight counts line boxes, not ink. At the line-height of 1.0 the
+       slide renderers use, a fitted block's ink is ~0.1em taller than its
+       measured height, so the vertically-centred block has only a few pixels of
+       margin above it — measured at 132px text in the live-output preview: 543px
+       available, 542px measured, 7.5px of slack. The verse number rises further
+       than that, so it crossed the container's top edge and `overflow: hidden`
+       cut it off. Bigger panel, bigger text, more of the number lost.
+
+       Padding here lands in scrollHeight, so the fitter accounts for it. With
+       the bounded raise below, 0.18em clears every case measured across five
+       fonts, six panel sizes and both a short and a long verse, and costs under
+       2% of the fitted size. */
+    padding-top: 0.18em;
 }
 
 .tiptap .scripture-content sup,
@@ -275,7 +292,21 @@ h6 {
     font-weight: 600;
     margin-right: 0.15em;
     font-size: 0.5em;
-    vertical-align: super;
+    /* A bounded raise, not `super`.
+
+       `vertical-align: super` raises by an amount the *font* chooses, and at the
+       line-height of 1.0 the slide renderers use, that lands the verse number
+       flush against the top of its line box — measured across ten fonts it had
+       between 0.7% and 4.7% of the font size to spare, and in Prata and DM Serif
+       Display it escaped the line box altogether. Anything above the line box is
+       fair game for an ancestor's `overflow: hidden`, which is what sliced the
+       top off "36" in the live-output preview whenever the auto-fitted text
+       landed flush with the top of its container.
+
+       A percentage is relative to this element's own line-height (0.5em of the
+       parent here), so 45% is a 0.225em raise that no font can inflate. Worst
+       case across those same ten fonts: 8.5% of the font size still to spare. */
+    vertical-align: 45%;
     line-height: 1;
 }
 
@@ -289,6 +320,46 @@ h6 {
 .tiptap .scripture-label b,
 .tiptap-preview .scripture-label b {
     font-weight: 600;
+}
+
+/* Dictionary Slide Styles — the definition is the body, the headword is the
+   caption, so they mirror the scripture pair above. The headword is the thing
+   the congregation reads first, hence the size bump over a verse reference. */
+.tiptap .dictionary-definition,
+.tiptap-preview .dictionary-definition {
+    font-weight: 400;
+}
+
+.tiptap .dictionary-label,
+.tiptap-preview .dictionary-label {
+    margin-top: 0.8em;
+    font-size: 0.7em;
+    text-align: center;
+}
+
+.tiptap .dictionary-label b,
+.tiptap-preview .dictionary-label b {
+    font-weight: 700;
+}
+
+/* The pack credit ("Easton's 1897") rides along with the headword but must
+   not compete with it. */
+.tiptap .dictionary-label .dictionary-source,
+.tiptap-preview .dictionary-label .dictionary-source {
+    opacity: 0.7;
+    font-weight: 400;
+}
+
+/* Original-language forms on a lexicon slide. */
+.tiptap .dictionary-lemma,
+.tiptap-preview .dictionary-lemma {
+    font-weight: 600;
+}
+
+.tiptap .dictionary-translit,
+.tiptap-preview .dictionary-translit {
+    font-style: italic;
+    opacity: 0.85;
 }
 
 /* Preview styles for tiptap content */
@@ -382,6 +453,27 @@ h6 {
 
 .animate-pulse-soft {
     animation: pulse-soft 4s ease-in-out infinite;
+}
+
+/* The sweep under the wordmark on the loading screens. Mirrors the inline
+   #boot-splash animation in index.html so a launch and an in-app load look like
+   the same moment continuing. */
+.app-loading-sweep {
+    background: linear-gradient(90deg, transparent, var(--accent-teal), transparent);
+    animation: app-loading-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes app-loading-sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-loading-sweep {
+        animation: none;
+        transform: none;
+        opacity: 0.5;
+    }
 }
 
 /* Audio waveform animation for sermon listener */

@@ -3,16 +3,11 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { prewarmSemanticSearch } from './services/sermon-listener/localEmbeddings'
-import { setupSummarizer } from './services/sermon-listener/sermonNotes'
+import { applyThemeClass, readStoredTheme } from './utils/theme'
 
-const savedTheme = localStorage.getItem('theme')
-const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-
-if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-    document.documentElement.classList.add('dark')
-} else {
-    document.documentElement.classList.remove('dark')
-}
+// Before React mounts, so the first paint is already in the right theme. The
+// store initialises from the same function, so the two can't disagree.
+applyThemeClass(readStoredTheme())
 
 function isConvexError(error: unknown): boolean {
     if (!(error instanceof Error)) return false
@@ -47,19 +42,18 @@ window.addEventListener('error', (event: ErrorEvent) => {
 // Pre-warm semantic search lazily after the UI is idle, not before React mounts.
 // This prevents the 22MB ONNX model download and large IndexedDB reads from
 // blocking the initial render and making the app unresponsive.
+// NOTE: the abstractive summarization model is deliberately NOT prewarmed
+// here. It's a ~330 MB seq2seq, and loading its ONNX graph cost seconds of
+// worker time on every launch even though most sessions never generate sermon
+// notes. `summarizeText` now loads it on first use instead.
 const schedulePrewarm = () => {
     if (typeof requestIdleCallback === 'function') {
         requestIdleCallback(() => {
             prewarmSemanticSearch()
-            // Pre-warm the abstractive summarization model in the background.
-            // Downloads ~330MB on first use, then caches. Runs in a Web Worker
-            // so it doesn't block the UI thread.
-            setupSummarizer()
         }, { timeout: 5000 })
     } else {
         setTimeout(() => {
             prewarmSemanticSearch()
-            setupSummarizer()
         }, 3000)
     }
 }
@@ -77,3 +71,21 @@ createRoot(document.getElementById('root')!).render(
         <App />
     </StrictMode>,
 )
+
+/**
+ * Retire the boot splash from index.html.
+ *
+ * Two frames after render so the app has actually painted underneath — hiding it
+ * in the same frame swaps one blank screen for another. `data-ready` drives a CSS
+ * fade; the node is removed after it, so it can't sit invisibly over the app
+ * swallowing clicks if the transition never fires.
+ */
+requestAnimationFrame(() => requestAnimationFrame(() => {
+    const splash = document.getElementById('boot-splash')
+    if (!splash) return
+    splash.dataset.ready = 'true'
+    splash.addEventListener('transitionend', () => splash.remove(), { once: true })
+    // Belt and braces: transitionend never fires when the tab is hidden or
+    // motion is reduced to none.
+    setTimeout(() => splash.remove(), 1000)
+}))

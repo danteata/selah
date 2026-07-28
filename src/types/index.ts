@@ -103,7 +103,7 @@ export interface Slide {
     title?: string
     songId?: string
     hasChorus?: boolean
-    data?: Song | Scripture | Hymn | Countdown | ExtendedFileT | ExternalVideo
+    data?: Song | Scripture | Hymn | DictionaryEntry | Countdown | ExtendedFileT | ExternalVideo
     slideStyle?: SlideStyle
     saved?: boolean
     lockedBy?: string
@@ -226,6 +226,66 @@ export interface Hymn {
     author: string
     source: string
     meta: string
+}
+
+// ==================== Dictionary ====================
+
+/** What a pack is for — drives grouping and the panel's filter chips. */
+export type DictionaryPackKind = 'bible' | 'lexicon' | 'english'
+
+/**
+ * A bundled dictionary, as described by `public/dictionaries/manifest.json`.
+ * Built by `scripts/build-dictionary-packs.mjs`.
+ */
+export interface DictionaryPack {
+    id: string
+    name: string
+    /** Short label for filter chips and slide labels ("Easton's", "Greek"). */
+    shortName: string
+    kind: DictionaryPackKind
+    /** Publication year of the source work, shown alongside the name. */
+    year?: string
+    entryCount: number
+    /** Shard file basenames present for this pack, e.g. ["a","b",…,"_"]. */
+    shards: string[]
+    license: string
+    /** Credit line the panel must show — some packs are CC BY / CC BY-SA. */
+    attribution: string
+    sourceUrl?: string
+}
+
+export interface DictionaryManifest {
+    format: number
+    builtAt?: string
+    packs: DictionaryPack[]
+}
+
+/** One numbered meaning within an entry. */
+export interface DictionarySense {
+    text: string
+    /** "KJV usage", "Derivation" — absent for a plain definition. */
+    label?: string
+}
+
+/**
+ * A single dictionary entry, expanded from the compact on-disk form (see the
+ * key legend in scripts/build-dictionary-packs.mjs).
+ */
+export interface DictionaryEntry {
+    /** Normalised lookup key — uppercase, unaccented ("AARON", "G26"). */
+    key: string
+    /** Headword as it should be displayed and projected. */
+    word: string
+    packId: string
+    senses: DictionarySense[]
+    /** Scripture references cited by the entry, e.g. ["Exodus 4:14"]. */
+    refs?: string[]
+    /** Transliteration for lexicon entries ("agápē"). */
+    transliteration?: string
+    /** Lemma in the original script ("ἀγάπη"). */
+    lemma?: string
+    /** Strong's number ("G26"). */
+    strongs?: string
 }
 
 /**
@@ -409,6 +469,7 @@ export interface AppSettings {
         scripture?: string | null
         hymn?: string | null
         song?: string | null
+        dictionary?: string | null
         text?: string | null
         sermon?: string | null
         announcement?: string | null
@@ -456,8 +517,6 @@ export interface AppSettings {
     }
     /** Default collaboration mode for live sessions */
     defaultCollaborationMode?: 'strict' | 'moderated' | 'open'
-    /** Dark mode preference */
-    isDarkMode?: boolean
 }
 
 // ==================== App State Types ====================
@@ -492,6 +551,7 @@ export const slideTypes = {
     song: 'song',
     hymn: 'hymn',
     bible: 'bible',
+    dictionary: 'dictionary',
     text: 'text',
     media: 'media',
     countdown: 'countdown',
@@ -507,6 +567,7 @@ export const slideLayoutTypes = {
     full_text: 'full-text',
     two_column: 'two-column',
     bible: 'bible',
+    dictionary: 'dictionary',
     countdown: 'countdown',
     empty: 'empty',
     lower_third: 'lower-third',
@@ -533,6 +594,7 @@ export const appWideActions = {
     newText: 'new-text',
     newBible: 'new-bible',
     newHymn: 'new-hymn',
+    newDictionary: 'new-dictionary',
     newSong: 'new-song',
     newSlide: 'new-slide',
     newMedia: 'new-media',
@@ -718,6 +780,15 @@ export const quickActionsArr: QuickAction[] = [
         action: appWideActions.newHymn,
         meta: '',
         type: slideTypes.hymn,
+        tier: 'free',
+    },
+    {
+        icon: 'i-lucide-book-a',
+        name: 'Dictionary',
+        desc: 'Define a word, name or place on screen',
+        action: appWideActions.newDictionary,
+        meta: 'dictionary define definition meaning lexicon greek hebrew strongs easton smith webster word study',
+        type: slideTypes.dictionary,
         tier: 'free',
     },
     {

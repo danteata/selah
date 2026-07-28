@@ -1,0 +1,11 @@
+{
+  "version": "WEB",
+  "dim": 384,
+  "count": 31100,
+  "quantization": "int8",
+  "scale": 127,
+  "hasFragments": false,
+  "modelName": "Xenova/all-MiniLM-L6-v2",
+  "builtAt": "2026-07-27T10:10:34.076Z",
+  "source": "build-web-embedding-pack"
+}

@@ -18,9 +18,12 @@ import {
     embedBatch,
     isEmbedderReady,
     getCachedVerseEmbeddings,
+    getLocalCachedVersions,
     hasCachedEmbeddings,
+    hasCachedEmbeddingsMemo,
     prewarmSemanticSearch,
 } from './localEmbeddings'
+import { hasSemanticPack, loadSemanticPack, resolveSemanticPackVersion } from './semanticPack'
 import {
     loadFromCached as loadVerseStore,
     searchVerseEmbeddings,
@@ -109,6 +112,10 @@ const MAX_TEXT_LENGTH = 500 // Maximum characters to embed (truncated)
 // so this doesn't need to be large to avoid runaway concurrent searches --
 // it just paces back-to-back cycles once one finishes.
 const THROTTLE_MS = 500
+// How often the gate tally reports itself while no search is running. Long
+// enough to stay quiet in normal operation, short enough that a silent stretch
+// is visible within one spoken sentence or two.
+const SKIP_REPORT_INTERVAL_MS = 5000
 
 export interface SemanticVerseMatch {
     reference: string
@@ -160,6 +167,16 @@ export class SemanticVerseDetector {
     private textBuffer = ''
     private initialized = false
     private useLocalFallback = false
+    /** Version we've already announced the pack fallback for, so the message
+     *  appears once instead of once per candidate window. */
+    private loggedPackFallbackFor: string | null = null
+    /** Book + chapter (and verse, when one was named) the speaker last
+     *  explicitly announced. */
+    private readingContext: { book: string; chapter: number; verse?: number } | null = null
+    /** Tally of why recent chunks didn't start a search — see `noteSkip`. */
+    private skips = { shortBuffer: 0, throttled: 0, searchPending: 0 }
+    private skipBufferLength = 0
+    private lastSkipReportAt = 0
     private lastProcessedLength = 0
     private initializingPromise: Promise<unknown> | null = null
     // The sliding-window fallback (slow, only runs when the fast sentence
@@ -224,19 +241,30 @@ export class SemanticVerseDetector {
                     // Prewarm failure is non-fatal — we'll try loading directly
                 }
 
-                // Check local embeddings (prewarm may have just loaded them)
+                // Check local embeddings (prewarm may have just loaded them).
+                // Generated rows for the active version win; otherwise the
+                // universal prebuilt pack serves it, which is the common case
+                // now that we don't make users embed each version themselves.
                 let hasLocalCache = false
                 if (this.config.version) {
                     hasLocalCache = await hasCachedEmbeddings(this.config.version)
                 }
                 if (!hasLocalCache) {
-                    hasLocalCache = await hasCachedEmbeddings('KJV')
+                    hasLocalCache = await hasSemanticPack()
+                }
+                if (!hasLocalCache) {
+                    // No pack — `searchLocally` still falls back to any other
+                    // version's generated rows, so count those as usable too.
+                    hasLocalCache = (await getLocalCachedVersions()).length > 0
                 }
 
-                if (!hasEmbeddings && !convexError) {
+                // Convex having no embeddings is only worth mentioning if
+                // nothing local can serve search either — with a prebuilt pack
+                // loaded (the normal case) it's expected, not a problem.
+                if (!hasEmbeddings && !convexError && !hasLocalCache) {
                     console.warn(
-                        '[SemanticDetector] No verse embeddings found in database. ' +
-                            'Run seeding first or use local fallback.',
+                        '[SemanticDetector] No verse embeddings in Convex and no local pack. ' +
+                            'Semantic detection will be unavailable.',
                     )
                 }
 
@@ -311,15 +339,56 @@ export class SemanticVerseDetector {
         const timeSinceLastSearch = now - this.lastSearchTime
         const bufferLongEnough = this.textBuffer.length >= this.config.minTextLength
 
-        if (!bufferLongEnough || timeSinceLastSearch < this.config.throttleMs) {
+        if (!bufferLongEnough) {
+            this.noteSkip('shortBuffer', now)
+            return null
+        }
+
+        if (timeSinceLastSearch < this.config.throttleMs) {
+            this.noteSkip('throttled', now)
             return null
         }
 
         if (this.pendingSearch) {
+            this.noteSkip('searchPending', now)
             return null
         }
 
+        this.reportSkips('search starting', now)
         return this.triggerSearch(excludedRanges, onUpgrade)
+    }
+
+    /**
+     * Record why a chunk didn't start a search.
+     *
+     * Deliberately tallied rather than logged per chunk — interim ASR results
+     * arrive several times a second and every one of them legitimately hits a
+     * gate, so a line each would be exactly the kind of noise that hid the real
+     * signal before. The tally is flushed when a search finally runs, and on a
+     * timer so a stretch where NO search runs still reports itself.
+     */
+    private noteSkip(reason: 'shortBuffer' | 'throttled' | 'searchPending', now: number): void {
+        this.skips[reason]++
+        this.skipBufferLength = this.textBuffer.length
+        if (now - this.lastSkipReportAt >= SKIP_REPORT_INTERVAL_MS) {
+            this.reportSkips('no search yet', now)
+        }
+    }
+
+    private reportSkips(context: string, now: number): void {
+        const { shortBuffer, throttled, searchPending } = this.skips
+        const total = shortBuffer + throttled + searchPending
+        if (total > 0) {
+            console.log(
+                `[SemanticDetector] gate (${context}):`,
+                `skipped ${total} chunk(s) —`,
+                `shortBuffer=${shortBuffer} throttled=${throttled} searchPending=${searchPending};`,
+                `buffer=${this.skipBufferLength}/${this.config.minTextLength} chars,`,
+                `${now - this.lastSearchTime}ms since last search`,
+            )
+        }
+        this.skips = { shortBuffer: 0, throttled: 0, searchPending: 0 }
+        this.lastSkipReportAt = now
     }
 
     async searchNow(onUpgrade?: (matches: SemanticVerseMatch[]) => void): Promise<SemanticVerseMatch[]> {
@@ -488,9 +557,7 @@ export class SemanticVerseDetector {
             }
         }
 
-        const results = allMatches
-            .sort((a, b) => b.score - a.score)
-            .slice(0, this.config.limit)
+        const results = this.rankMatches(allMatches)
 
         if (results.length > 0) {
             console.log(
@@ -579,17 +646,90 @@ export class SemanticVerseDetector {
         // no results yet to base that decision on). Without this, buffered
         // text that already produced a match here would linger and get
         // redundantly re-embedded on the next cycle.
+        //
+        // Logged because this runs in the background: it can clear text that
+        // arrived *while* the fallback was in flight, which then shows up as
+        // `shortBuffer` skips in the gate tally. If the two correlate, this
+        // clear is starving the next search rather than tidying up after it.
+        if (this.textBuffer.length > 0) {
+            console.log(
+                `[SemanticDetector] window fallback cleared buffer (${this.textBuffer.length} chars)`,
+            )
+        }
         this.textBuffer = ''
 
-        const merged = [...priorMatches, ...newMatches]
-            .sort((a, b) => b.score - a.score)
-            .slice(0, this.config.limit)
+        const merged = this.rankMatches([...priorMatches, ...newMatches])
 
         console.log(
             '[SemanticDetector] Background fallback upgrade:',
             merged.map((m) => `${m.reference} (${m.score.toFixed(3)})`).join(', '),
         )
         onUpgrade?.(merged)
+    }
+
+    /**
+     * Tell the detector which passage the speaker actually announced, so
+     * semantic hits inside it are preferred. Pass null when the context is no
+     * longer trustworthy (new topic, transcript reset).
+     */
+    setReadingContext(book: string | null, chapter?: number, verse?: number): void {
+        this.readingContext =
+            book && Number.isFinite(chapter)
+                ? {
+                    book,
+                    chapter: Number(chapter),
+                    verse: Number.isFinite(verse) ? Number(verse) : undefined,
+                }
+                : null
+    }
+
+    /**
+     * Order candidates and take the top N.
+     *
+     * Scripture repeats itself, so the highest cosine is not always the verse
+     * being read. During a Colossians 3 reading this detector surfaced
+     * Ephesians 4:2 — "with all humility and gentleness, with patience,
+     * bearing with one another" is near-identical to Colossians 3:12-13, so
+     * the score was honestly earned and simply wrong for what was on screen.
+     *
+     * When the speaker has named a passage, its verses sort ahead of equally
+     * plausible matches elsewhere. This only reorders candidates that already
+     * cleared the similarity threshold on their own merit — context never
+     * promotes a verse into the results that wouldn't otherwise be there.
+     *
+     * Chapter membership alone isn't enough to break every tie. Announcing
+     * "Joshua 24 verse 15" and reading it surfaced Joshua 24:**24** at 0.845,
+     * because "we will serve the LORD our God" there is near-identical to
+     * verse 15's "we will serve the LORD" — and both sit in the announced
+     * chapter, so a chapter-level test scores them the same. When a verse was
+     * named too, distance from it is the tiebreaker.
+     */
+    private rankMatches(matches: SemanticVerseMatch[]): SemanticVerseMatch[] {
+        const ctx = this.readingContext
+        const inContext = (m: SemanticVerseMatch) =>
+            !!ctx && m.book?.toLowerCase() === ctx.book.toLowerCase() && m.chapter === ctx.chapter
+        const distanceFromNamedVerse = (m: SemanticVerseMatch) =>
+            ctx?.verse != null && inContext(m) ? Math.abs(m.verse - ctx.verse) : null
+
+        return [...matches]
+            .sort((a, b) => {
+                if (ctx) {
+                    const diff = Number(inContext(b)) - Number(inContext(a))
+                    if (diff !== 0) return diff
+
+                    // Both in the announced chapter: prefer the one nearer the
+                    // verse actually named. Only applied when they're close in
+                    // score, so a decisively better match elsewhere in the
+                    // chapter still wins.
+                    const da = distanceFromNamedVerse(a)
+                    const db = distanceFromNamedVerse(b)
+                    if (da != null && db != null && da !== db && Math.abs(a.score - b.score) < 0.1) {
+                        return da - db
+                    }
+                }
+                return b.score - a.score
+            })
+            .slice(0, this.config.limit)
     }
 
     /**
@@ -647,19 +787,25 @@ export class SemanticVerseDetector {
             }
         }
 
-        // If the worker already has a usable index (exact version, or KJV
-        // prebuilt pack that we can search as a fallback), search directly.
+        // If the worker already has a usable index (exact version, or the
+        // universal prebuilt pack that serves any version), search directly.
+        const packVersion = await resolveSemanticPackVersion()
         const workerHasExact = loaded && loaded.version === version
-        const workerHasKJV = loaded && loaded.version === 'KJV'
-        const needKJVFallback = !workerHasExact && workerHasKJV && version !== 'KJV'
+        const workerHasPack = !!packVersion && loaded?.version === packVersion
+        const needPackFallback = !workerHasExact && workerHasPack && version !== packVersion
 
-        if (needKJVFallback) {
-            // Confirm the requested version isn't cached locally before falling back
-            const hasRequested = await hasCachedEmbeddings(version)
+        if (needPackFallback) {
+            // Confirm the requested version isn't cached locally before falling
+            // back. Memoized — this runs once per candidate window during live
+            // transcription, so an IndexedDB round-trip here is not free.
+            const hasRequested = await hasCachedEmbeddingsMemo(version)
             if (!hasRequested) {
-                console.log(
-                    `[SemanticDetector] ${version} not cached; falling back to KJV prebuilt pack for search`,
-                )
+                if (this.loggedPackFallbackFor !== version) {
+                    this.loggedPackFallbackFor = version
+                    console.log(
+                        `[SemanticDetector] ${version} not cached; searching the ${packVersion} pack instead`,
+                    )
+                }
                 const matches = await searchVerseEmbeddings(
                     embedding,
                     threshold ?? 0.32,
@@ -682,11 +828,32 @@ export class SemanticVerseDetector {
             let cached = await getCachedVerseEmbeddings(this.config.version)
 
             if (cached.length === 0) {
-                if (version !== 'ANY') {
-                    cached = await getCachedVerseEmbeddings('KJV')
-                    if (cached.length === 0) {
-                        cached = await getCachedVerseEmbeddings()
+                // Nothing generated for this version. Load the universal pack
+                // — it covers every version, so this is the normal path, not a
+                // degraded one. Only if there's no pack at all do we go
+                // rummaging for some other version's generated rows.
+                if (packVersion) {
+                    const { ok } = await loadSemanticPack()
+                    if (ok) {
+                        const packMatches = await searchVerseEmbeddings(
+                            embedding,
+                            threshold ?? 0.32,
+                            this.config.limit,
+                        )
+                        return packMatches.map((m) => ({
+                            reference: m.reference,
+                            book: m.book,
+                            chapter: m.chapter,
+                            verse: m.verse,
+                            text: m.text,
+                            score: m.score,
+                            detectionType: 'semantic' as const,
+                        }))
                     }
+                }
+
+                if (version !== 'ANY') {
+                    cached = await getCachedVerseEmbeddings()
                 }
 
                 if (cached.length === 0) {
