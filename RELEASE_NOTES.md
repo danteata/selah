@@ -1,61 +1,11 @@
-## Selah 0.1.9
+## Selah 0.1.10
 
-A dictionary you can put on screen — Bible names and places, Greek and Hebrew, or plain English — and a command palette that answers the keyboard again.
+Fixes updating on Windows, and Selah now tells you when an update is ready instead of waiting to be asked.
 
-### Dictionary
-- New: look a word up mid-service and project the definition. It's the 📖A icon in the left rail, below Media, and it's also in the command palette (Ctrl/Cmd + K) as "Define a Word".
-- Five dictionaries are included and all of them work with no internet: Easton's and Smith's Bible dictionaries, Strong's Greek and Hebrew, and Webster's — about 125,000 entries in total. Nothing to download or set up.
-- Search across all of them at once, or narrow to one. Bible dictionaries come first in the results, so "Aaron" gives you the priest before anything else. Greek and Hebrew entries are found by how they sound — type "agape" — or by their Strong's number.
-- A Bible dictionary entry lists the passages it cites, and each one is a button: click to add that passage to your queue in your church's own Bible version, or shift-click to put it straight on screen.
-- Long entries are split across several slides at sentence boundaries rather than crammed onto one unreadable slide, and an entry with several meanings lets you project just the one being preached.
-- Definitions pick up your scripture background and template, so a definition looks like the verses either side of it.
+### Updating
+- Windows updates no longer fail with "Error opening file for writing: selah.exe". The installer was starting to copy files before Windows had finished releasing the running program; it now waits for it properly.
+- A new version now announces itself with a button in the top bar, next to the layout switcher. Previously the only way to find out was to open Settings and check manually, so it was easy to stay on an old version for months.
+- Clicking it shows what's in the release and what updating costs — Selah closes and reopens, so anything on the live output goes dark — and then installs only if you say so. Nothing installs on its own any more. Earlier versions could download and restart by themselves shortly after launch, which was possible mid-service.
+- "Skip this version" hides the prompt for that release only; the next one asks again.
+- If you run the installer by hand while Selah is open, it now asks before closing it rather than failing partway through.
 
-### Command palette
-- Arrow keys and Enter work again. The palette had become mouse-only: after you typed a search, Enter did nothing at all, and moving the mouse over a row stopped the keyboard responding.
-- Home and End jump to the first and last command, and the highlighted row now scrolls into view instead of moving out of sight.
-
-## Selah 0.1.8
-
-Two crashes fixed on Windows, a fully refreshed set of transcription models, and live transcription now works the moment you install.
-
-### Windows
-- Selah no longer crashes on launch on older processors. Anything from before roughly 2013 — and plenty of budget machines since — could fail to start at all, before the window ever appeared. If Selah wouldn't open on a machine in your booth, try this release.
-- On Windows-on-ARM laptops, Selah now uses the processor for transcription instead of a graphics driver that misreports what it can do.
-
-### Transcription models
-- Every model has been replaced with a newer, faster and more accurate version, and there are new ones to choose from. They now download from a public, verified source, and Selah checks each download's fingerprint before using it, so a partial or corrupted file is caught rather than producing gibberish.
-- The accuracy and speed bars in the model picker are now measured figures rather than estimates. Several models were previously rated well below or above what they actually deliver, so the comparison is worth a fresh look.
-- The best English option is noticeably more accurate than anything previously available, and there is now a model trained for overlapping speakers — useful when the congregation responds while the preacher is still talking.
-- New: a model that labels who was speaking, for reviewing a recording after the service.
-- Models you had already downloaded keep working and stay selectable. They're marked "superseded" and sorted to the bottom, and new installs aren't offered them.
-
-### Live transcription out of the box
-- Selah now ships with a model that transcribes as the preacher speaks, so live text works on a fresh install with nothing to download first. Previously the bundled model couldn't do this, and text only appeared once each sentence finished.
-- If the model you had selected is missing — deleted, or never downloaded on this machine — Selah falls back to the bundled one instead of refusing to start the session.
-
-### Verse timing
-- Detected verses now record when they were said, so a verse can be traced back to the moment it was cited in the recording. The timing data was being calculated and discarded before.
-
-### Sermon listener
-- Custom words no longer swallow the word that follows them. A name like "ChargeBee" spoken as "Charge B" could take the next word with it and drop it from the transcript.
-- Words in languages that use letters outside plain English — Twi, or accented Spanish — are left as spoken instead of being "corrected" into an unrelated English word.
-
-## Selah 0.1.7
-
-This release is all about the sermon listener: the slide queue no longer fills up with repeats, and the verse the preacher actually announced now stays on screen instead of losing it to a similar-sounding verse elsewhere in Scripture.
-
-### Slide queue
-- One entry per passage instead of one per mention. A passage the preacher returns to reuses its slide rather than queueing a new copy each time.
-- A passage read in stages ("Proverbs 24" … "three through four") ends up as a single slide covering the full range, not one slide per width.
-- Switching Bible version rewrites the slide for that passage instead of adding a second copy of it.
-
-### The verse on screen
-- Announcing a passage before anything is on screen now displays it. Previously the very first "Psalm 27 verse 1" of a session put nothing on the output at all.
-- Announced references appear in Detected Verses, so the list is a record of what was actually referenced.
-- A reference announced a minute ago can no longer be picked up again as if it were new and take over the live output mid-reading.
-- While you're reading an announced passage, a similar-sounding verse from elsewhere in Scripture stays in Detected Verses for you to choose instead of putting itself on screen. Scripture restates itself, and those matches are honestly earned but rarely what's being read.
-- Reading straight through an announced chapter keeps following the reading verse by verse.
-
-### Detection accuracy
-- Reading an announced passage aloud now corroborates it rather than being discarded — the announcement itself counts as the reference signal.
-- The first thing said in a session is no longer dropped, and detection no longer trails the speaker by an utterance.
