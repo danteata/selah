@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
     parseBibleQuery,
     parseFullBibleReference,
+    resolveEnterAction,
     resolveBookName,
     getBookSuggestions,
     getRankedBookSuggestions,
@@ -683,5 +684,117 @@ describe('parseFullBibleReference', () => {
         expect(parseFullBibleReference('the eldest son of Amram')).toBeNull()
         expect(parseFullBibleReference('Nowhere 3:16')).toBeNull()
         expect(parseFullBibleReference('Nowhere 3')).toBeNull()
+    })
+})
+
+// The panel keeps its rows while you type and debounces its lookup by 500ms, so
+// Enter could land on rows belonging to an earlier prefix: entering "John 11:35"
+// quickly presented whatever "John 1" had loaded.
+describe('resolveEnterAction', () => {
+    const johnOneOne = { bookIndex: 43, chapter: 1, startVerse: 1 }
+    const base = { rowCount: 6, focusedIndex: 5, hasSearched: true }
+
+    it('acts on what was typed when the rows belong to an earlier prefix', () => {
+        // The reported case: rows are John 1:1 + neighbours, focus has landed on
+        // the sixth row (John 1:6), and the operator has typed John 11:35.
+        const action = resolveEnterAction({ ...base, query: 'John 11:35', loadedAnchor: johnOneOne })
+
+        expect(action).toEqual({
+            kind: 'typed',
+            reference: { bookIndex: 43, bookName: 'John', chapter: 11, startVerse: 35, endVerse: 35 },
+        })
+    })
+
+    it('acts on what was typed when only the verse has moved on', () => {
+        const action = resolveEnterAction({
+            ...base, query: 'John 11:35', loadedAnchor: { bookIndex: 43, chapter: 11, startVerse: 3 },
+        })
+        expect(action.kind === 'typed' && action.reference.startVerse).toBe(35)
+    })
+
+    it('acts on what was typed when the book has moved on', () => {
+        const action = resolveEnterAction({ ...base, query: 'Mark 11:35', loadedAnchor: johnOneOne })
+        expect(action.kind === 'typed' && action.reference.bookIndex).toBe(41)
+    })
+
+    it('uses the highlighted row when the rows match the query', () => {
+        // This is what keeps arrow-key selection working: the operator arrowed
+        // down to a neighbour of the verse they typed, and Enter must present
+        // that neighbour rather than snapping back.
+        const action = resolveEnterAction({
+            ...base, focusedIndex: 3, query: 'John 11:35',
+            loadedAnchor: { bookIndex: 43, chapter: 11, startVerse: 35 },
+        })
+        expect(action).toEqual({ kind: 'row', index: 3 })
+    })
+
+    it('defaults to the first row when none is highlighted', () => {
+        const action = resolveEnterAction({
+            ...base, focusedIndex: -1, query: 'John 11:35',
+            loadedAnchor: { bookIndex: 43, chapter: 11, startVerse: 35 },
+        })
+        expect(action).toEqual({ kind: 'row', index: 0 })
+    })
+
+    it('uses the highlighted row for a semantic query, which names no reference', () => {
+        const action = resolveEnterAction({ ...base, focusedIndex: 2, query: 'jesus wept', loadedAnchor: johnOneOne })
+        expect(action).toEqual({ kind: 'row', index: 2 })
+    })
+
+    it('acts on the typed reference on a fresh panel, without a throwaway search first', () => {
+        const action = resolveEnterAction({
+            query: 'John 11:35', loadedAnchor: null, rowCount: 0, focusedIndex: -1, hasSearched: false,
+        })
+        expect(action.kind === 'typed' && action.reference.chapter).toBe(11)
+    })
+
+    it('ignores semantic matches when a reference has been typed', () => {
+        // The reported case. Semantic (meaning) results for a partial query stay
+        // on screen while a reference is typed — deliberately, so both can be
+        // shown — and no reference has been fetched, so there is no anchor. The
+        // rows are verses the operator never typed or opened, and presenting one
+        // also rewrote the search box to it.
+        const action = resolveEnterAction({
+            query: 'John 11:35', loadedAnchor: null, rowCount: 8, focusedIndex: 0, hasSearched: false,
+        })
+        expect(action).toEqual({
+            kind: 'typed',
+            reference: { bookIndex: 43, bookName: 'John', chapter: 11, startVerse: 35, endVerse: 35 },
+        })
+    })
+
+    it('still lets a semantic result be chosen when the query is not a reference', () => {
+        // Typing meaning text and picking a match must keep working.
+        const action = resolveEnterAction({
+            query: 'jesus wept', loadedAnchor: null, rowCount: 8, focusedIndex: 3, hasSearched: false,
+        })
+        expect(action).toEqual({ kind: 'row', index: 3 })
+    })
+
+    it('searches when the query is not a reference and nothing is on screen', () => {
+        const action = resolveEnterAction({
+            query: 'love one another', loadedAnchor: null, rowCount: 0, focusedIndex: -1, hasSearched: false,
+        })
+        expect(action).toEqual({ kind: 'search' })
+    })
+
+    it('does nothing when a search has already run and found nothing', () => {
+        const action = resolveEnterAction({
+            query: 'zzzz', loadedAnchor: null, rowCount: 0, focusedIndex: -1, hasSearched: true,
+        })
+        expect(action).toEqual({ kind: 'none' })
+    })
+
+    it('normalises the query the same way the search does', () => {
+        const spaced = resolveEnterAction({ ...base, query: 'John 11 35', loadedAnchor: johnOneOne })
+        expect(spaced.kind === 'typed' && spaced.reference.startVerse).toBe(35)
+
+        const abbreviated = resolveEnterAction({ ...base, query: 'jn 11:35', loadedAnchor: johnOneOne })
+        expect(abbreviated.kind === 'typed' && abbreviated.reference.chapter).toBe(11)
+    })
+
+    it('carries a verse range through', () => {
+        const action = resolveEnterAction({ ...base, query: 'John 11:35-36', loadedAnchor: johnOneOne })
+        expect(action.kind === 'typed' && action.reference.endVerse).toBe(36)
     })
 })

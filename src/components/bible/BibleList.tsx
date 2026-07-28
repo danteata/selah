@@ -18,7 +18,7 @@ import {
 import type { Scripture, BibleVerse } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
-import { parseBibleQuery, getRankedBookSuggestions, buildVerseRows as buildVerseRowsUtil, normalizeBibleReference, type BibleVerseLike, type ParsedBibleQuery } from '../../utils/bibleReference'
+import { parseBibleQuery, getRankedBookSuggestions, buildVerseRows as buildVerseRowsUtil, normalizeBibleReference, resolveEnterAction, type BibleVerseLike, type ParsedBibleQuery } from '../../utils/bibleReference'
 import type { VerseRow as VerseRowType } from '../../utils/bibleReference'
 import { BookAutocomplete } from './BookAutocomplete'
 import { ReferenceEditor, type ReferenceEditorHandle } from './ReferenceEditor'
@@ -872,19 +872,36 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
         if (e.key === 'Enter') {
             e.preventDefault()
-            if (verseRows.length > 0) {
-                // Act on the focused row, defaulting to the first when nothing has
-                // been explicitly focused yet (rows are shown with one highlighted).
-                const row = verseRows[focusedIndex >= 0 ? focusedIndex : 0]
-                // Contract: Enter = present now, Shift+Enter = add to queue.
+
+            // Contract: Enter = present now, Shift+Enter = add to queue.
+            // Which reference that applies to is decided by resolveEnterAction —
+            // notably, a query typed faster than the 500ms search debounce beats
+            // the rows still on screen from an earlier prefix of it.
+            const queue = e.shiftKey
+            const action = resolveEnterAction({
+                query,
+                loadedAnchor: currentBookIndex && currentChapter && currentStartVerse
+                    ? { bookIndex: currentBookIndex, chapter: currentChapter, startVerse: currentStartVerse }
+                    : null,
+                rowCount: verseRows.length,
+                focusedIndex,
+                hasSearched,
+            })
+
+            if (action.kind === 'typed') {
+                // The pending search would fetch this same reference a moment
+                // later; we're doing it now, so drop it.
+                if (autoSearchTimerRef.current) clearTimeout(autoSearchTimerRef.current)
+                const { bookIndex, chapter, startVerse } = action.reference
+                if (queue) void addToQueue(bookIndex, chapter, startVerse)
+                else void goLiveWithScripture(bookIndex, chapter, startVerse)
+            } else if (action.kind === 'row') {
                 // goLiveWithScripture already reveals the verse + neighbors, so
                 // a semantic row needs no separate load step here.
-                if (e.shiftKey) {
-                    addToQueue(row.bookIndex, row.chapter, row.verse, row.scripture)
-                } else {
-                    goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
-                }
-            } else if (!hasSearched) {
+                const row = verseRows[action.index]
+                if (queue) addToQueue(row.bookIndex, row.chapter, row.verse, row.scripture)
+                else goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
+            } else if (action.kind === 'search') {
                 handleSearch()
             }
         } else if (e.key === 'ArrowDown') {
