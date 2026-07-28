@@ -138,31 +138,69 @@ use transcription::commands::{
 use transcription::ModelManager;
 
 
-/// Check for an app update, and if one is available, download and install it
-/// then restart the app. The two closures passed to `download_and_install`
-/// are progress callbacks (downloaded-bytes, content-length). They are no-ops
-/// here; the frontend can listen for `tauri://update-available` /
-/// `tauri://update-download-progress` / `tauri://update-installed` events
-/// directly to drive a progress bar.
+/// What an available update is, as far as the UI needs to know.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    /// The version on offer, e.g. "0.1.10".
+    version: String,
+    /// The version currently running.
+    current_version: String,
+    /// Release notes from the update manifest, if the release supplied any.
+    notes: Option<String>,
+    /// Publish date, ISO 8601.
+    date: Option<String>,
+}
+
+/// Check whether an update exists, and report it — without installing anything.
 ///
-/// Errors are returned as strings so the frontend `try/catch` around
-/// `invoke("check_update")` is enough.
+/// Checking and installing used to be one command: it downloaded, installed and
+/// restarted the moment it found a new version. That made an update impossible
+/// to announce (there was nothing to announce it *before*) and meant the silent
+/// check five seconds after launch could restart the app on its own — including
+/// in the middle of a service. Installing is now `install_update`, called only
+/// when the operator asks for it.
+///
+/// Errors are returned as strings so a frontend `try/catch` is enough.
 #[tauri::command]
-async fn check_update(app: tauri::AppHandle) -> Result<String, String> {
+async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
     let updater = app.updater().map_err(|e| e.to_string())?;
-    match updater.check().await.map_err(|e| e.to_string())? {
-        Some(update) => {
-            update
-                .download_and_install(|_, _| {}, || {})
-                .await
-                .map_err(|e| e.to_string())?;
-            // `app.restart()` (from `tauri-plugin-process`) replaces the
-            // running process with the newly installed binary. It does
-            // not return on success.
-            app.restart();
-        }
-        None => Ok("up to date".into()),
-    }
+    let update = updater.check().await.map_err(|e| e.to_string())?;
+
+    Ok(update.map(|update| UpdateInfo {
+        version: update.version.clone(),
+        current_version: update.current_version.clone(),
+        notes: update.body.clone(),
+        date: update.date.map(|date| date.to_string()),
+    }))
+}
+
+/// Download and install the available update, then restart into it.
+///
+/// The two closures passed to `download_and_install` are progress callbacks
+/// (downloaded-bytes, content-length). They are no-ops here; the frontend
+/// listens for `tauri://update-download-progress` to drive its progress bar.
+///
+/// Re-checks rather than taking an `Update` from the caller, because the check
+/// result isn't `Send` across the command boundary and the manifest fetch is
+/// cheap next to the download.
+///
+/// On Windows the updater spawns the installer and calls `exit(0)` itself, so
+/// nothing after `download_and_install` runs there. Elsewhere `app.restart()`
+/// replaces the running process with the new binary; it never returns.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err("No update is available.".into());
+    };
+
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+
+    app.restart()
 }
 
 /// Bring the main window to the foreground (used by the tray).
@@ -286,6 +324,7 @@ pub fn run() {
             get_logs,
             check_previous_crash,
             check_update,
+            install_update,
             start_oauth_listener,
             list_native_models,
             download_native_model,

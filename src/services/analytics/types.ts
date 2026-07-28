@@ -170,6 +170,7 @@ export const AnalyticsEventType = {
     // Desktop
     DESKTOP_UPDATE_CHECKED: 'desktop_update_checked',
     DESKTOP_UPDATE_INSTALLED: 'desktop_update_installed',
+    DESKTOP_UPDATE_DISMISSED: 'desktop_update_dismissed',
 
     // Performance / Errors
     ERROR_OCCURRED: 'error_occurred',
