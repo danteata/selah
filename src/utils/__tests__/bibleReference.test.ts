@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
     parseBibleQuery,
+    parseFullBibleReference,
     resolveBookName,
     getBookSuggestions,
     getRankedBookSuggestions,
@@ -612,5 +613,75 @@ describe('normalizeBibleReference', () => {
     it('handles voice transcript: "John three sixteen" stays as text', () => {
         // "three sixteen" is parsed by parseSpokenNumber upstream, not here.
         expect(normalizeBibleReference('John three sixteen')).toBe('John three sixteen')
+    })
+})
+// Dictionary entries cite references in full prose form ("Song of Solomon 2:1"),
+// which the search-box parser cannot handle — its book pattern is one word.
+describe('parseFullBibleReference', () => {
+    it('parses a plain reference the same way parseBibleQuery does', () => {
+        expect(parseFullBibleReference('Exodus 4:14')).toEqual({
+            bookIndex: 2,
+            bookName: 'Exodus',
+            chapter: 4,
+            startVerse: 14,
+            endVerse: 14,
+        })
+    })
+
+    it('parses a numbered book', () => {
+        expect(parseFullBibleReference('1 Samuel 2:3')?.bookName).toBe('1 Samuel')
+    })
+
+    it('parses a multi-word book name', () => {
+        expect(parseFullBibleReference('Song of Solomon 2:1')).toEqual({
+            bookIndex: 22,
+            bookName: 'Song of Solomon',
+            chapter: 2,
+            startVerse: 1,
+            endVerse: 1,
+        })
+    })
+
+    it('parses a verse range', () => {
+        const parsed = parseFullBibleReference('Hebrews 12:1-2')
+        expect(parsed?.startVerse).toBe(1)
+        expect(parsed?.endVerse).toBe(2)
+    })
+
+    it('tolerates trailing punctuation and spaced ranges', () => {
+        expect(parseFullBibleReference('Revelation 1:8.')?.chapter).toBe(1)
+        expect(parseFullBibleReference('Isaiah 41:4 - 6')?.endVerse).toBe(6)
+    })
+
+    it('resolves a whole-chapter citation to its first verse', () => {
+        // Easton's cites ~1,100 references as a bare chapter ("Leviticus 8").
+        expect(parseFullBibleReference('Leviticus 8')).toEqual({
+            bookIndex: 3,
+            bookName: 'Leviticus',
+            chapter: 8,
+            startVerse: 1,
+            endVerse: 1,
+        })
+        expect(parseFullBibleReference('1 Samuel 17')?.chapter).toBe(17)
+    })
+
+    it('resolves a span crossing a chapter boundary to its opening verse', () => {
+        // One chapter is all a Scripture can hold; the alternative is wrong
+        // text under a correct-looking label.
+        expect(parseFullBibleReference('Judges 8:33-9:6')).toEqual({
+            bookIndex: 7,
+            bookName: 'Judges',
+            chapter: 8,
+            startVerse: 33,
+            endVerse: 33,
+        })
+        expect(parseFullBibleReference('1 Corinthians 12:31-13:13')?.startVerse).toBe(31)
+    })
+
+    it('rejects text that is not a reference', () => {
+        expect(parseFullBibleReference('')).toBeNull()
+        expect(parseFullBibleReference('the eldest son of Amram')).toBeNull()
+        expect(parseFullBibleReference('Nowhere 3:16')).toBeNull()
+        expect(parseFullBibleReference('Nowhere 3')).toBeNull()
     })
 })

@@ -15,13 +15,14 @@ import {
     type LocalTemplate,
 } from './useIndexedDB'
 
-export type SlideType = 'bible' | 'song' | 'hymn' | 'text' | 'media' | 'announcement' | 'sermon' | 'prayer' | 'countdown' | 'any'
+export type SlideType = 'bible' | 'song' | 'hymn' | 'dictionary' | 'text' | 'media' | 'announcement' | 'sermon' | 'prayer' | 'countdown' | 'any'
 type TemplateAppliesTo = Exclude<SlideType, 'sermon' | 'prayer'>
 
 const TEMPLATE_APPLIES_TO_VALUES = new Set<TemplateAppliesTo>([
     'bible',
     'song',
     'hymn',
+    'dictionary',
     'text',
     'media',
     'announcement',

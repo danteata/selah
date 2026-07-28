@@ -243,6 +243,22 @@ export default defineSchema({
                 source: v.string(),
                 meta: v.string(),
             }),
+            // Dictionary entry (see DictionaryEntry in src/types) — kept on the
+            // slide so a definition split across several slides can be
+            // re-chunked or re-labelled without another lookup.
+            v.object({
+                key: v.string(),
+                word: v.string(),
+                packId: v.string(),
+                senses: v.array(v.object({
+                    text: v.string(),
+                    label: v.optional(v.string()),
+                })),
+                refs: v.optional(v.array(v.string())),
+                transliteration: v.optional(v.string()),
+                lemma: v.optional(v.string()),
+                strongs: v.optional(v.string()),
+            }),
             v.object({
                 _id: v.optional(v.string()),
                 id: v.string(),
@@ -372,6 +388,7 @@ export default defineSchema({
             v.literal("bible"),
             v.literal("song"),
             v.literal("hymn"),
+            v.literal("dictionary"),
             v.literal("sermon"),
             v.literal("prayer"),
             v.literal("text"),

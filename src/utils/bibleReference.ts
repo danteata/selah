@@ -267,6 +267,64 @@ export function parseBibleQuery(q: string): ParsedBibleQuery | null {
     return null
 }
 
+/**
+ * Parse a fully written-out reference such as "Exodus 4:14",
+ * "1 Samuel 2:3-5", "Song of Solomon 2:1" or "Leviticus 8".
+ *
+ * `parseBibleQuery` is tuned for what an operator types into a search box, so
+ * its book pattern is one word with an optional leading digit — which is every
+ * book except "Song of Solomon". This is for references quoted in prose, as
+ * dictionary entries cite them: split the trailing numbers off first, then
+ * resolve whatever precedes them as a book name, however many words that takes.
+ *
+ * Two shapes that only show up in cited references:
+ *   "Leviticus 8"        — a whole chapter, resolved to its first verse, the
+ *                          same convention the Bible panel uses for a bare
+ *                          chapter.
+ *   "Judges 8:33-9:6"    — a span crossing a chapter boundary. Selah's
+ *                          Scripture model holds one chapter, so this resolves
+ *                          to the opening verse. Showing 8:33 alone is right;
+ *                          showing 8:33-8:6 or spilling into the next chapter
+ *                          would put wrong text under a correct-looking label.
+ */
+export function parseFullBibleReference(reference: string): ParsedBibleQuery | null {
+    const trimmed = reference.trim().replace(/[.,;!?]+$/, '')
+    if (!trimmed) return null
+
+    const direct = parseBibleQuery(trimmed)
+    if (direct) return direct
+
+    const crossChapter = trimmed.match(/^(.+?)\s+(\d+):(\d+)\s*-\s*\d+:\d+$/)
+    if (crossChapter) {
+        const resolved = resolveBookName(crossChapter[1])
+        if (!resolved) return null
+        const startVerse = parseInt(crossChapter[3])
+        return { ...resolved, chapter: parseInt(crossChapter[2]), startVerse, endVerse: startVerse }
+    }
+
+    const withVerse = trimmed.match(/^(.+?)\s+(\d+):(\d+)(?:\s*-\s*(\d+))?$/)
+    if (withVerse) {
+        const resolved = resolveBookName(withVerse[1])
+        if (!resolved) return null
+        const startVerse = parseInt(withVerse[3])
+        return {
+            ...resolved,
+            chapter: parseInt(withVerse[2]),
+            startVerse,
+            endVerse: withVerse[4] ? parseInt(withVerse[4]) : startVerse,
+        }
+    }
+
+    const chapterOnly = trimmed.match(/^(.+?)\s+(\d+)$/)
+    if (chapterOnly) {
+        const resolved = resolveBookName(chapterOnly[1])
+        if (!resolved) return null
+        return { ...resolved, chapter: parseInt(chapterOnly[2]), startVerse: 1, endVerse: 1 }
+    }
+
+    return null
+}
+
 export function getBookSuggestions(query: string): string[] {
     if (!query || query.includes(':')) return []
     const lq = query.toLowerCase().trim()

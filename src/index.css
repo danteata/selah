@@ -291,6 +291,46 @@ h6 {
     font-weight: 600;
 }
 
+/* Dictionary Slide Styles — the definition is the body, the headword is the
+   caption, so they mirror the scripture pair above. The headword is the thing
+   the congregation reads first, hence the size bump over a verse reference. */
+.tiptap .dictionary-definition,
+.tiptap-preview .dictionary-definition {
+    font-weight: 400;
+}
+
+.tiptap .dictionary-label,
+.tiptap-preview .dictionary-label {
+    margin-top: 0.8em;
+    font-size: 0.7em;
+    text-align: center;
+}
+
+.tiptap .dictionary-label b,
+.tiptap-preview .dictionary-label b {
+    font-weight: 700;
+}
+
+/* The pack credit ("Easton's 1897") rides along with the headword but must
+   not compete with it. */
+.tiptap .dictionary-label .dictionary-source,
+.tiptap-preview .dictionary-label .dictionary-source {
+    opacity: 0.7;
+    font-weight: 400;
+}
+
+/* Original-language forms on a lexicon slide. */
+.tiptap .dictionary-lemma,
+.tiptap-preview .dictionary-lemma {
+    font-weight: 600;
+}
+
+.tiptap .dictionary-translit,
+.tiptap-preview .dictionary-translit {
+    font-style: italic;
+    opacity: 0.85;
+}
+
 /* Preview styles for tiptap content */
 .tiptap-preview {
     line-height: 1.5;

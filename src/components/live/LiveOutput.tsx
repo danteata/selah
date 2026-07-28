@@ -28,6 +28,7 @@ import { MediaContent, type MediaProgress } from './MediaContent'
 import { AudioReactiveBackground } from './AudioReactiveBackground'
 import { Play, Pause, Volume2, VolumeX, RotateCcw, Repeat } from 'lucide-react'
 import { getVerseRefStyle } from '../../utils/verseRefStyle'
+import { slideCaptionHtml } from '../../utils/slideCaption'
 
 // Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
 function parseTimeStringToSeconds(timeStr: string): number {
@@ -261,11 +262,12 @@ export function LiveOutput() {
     const isNextSlideVideo = nextSlide?.backgroundType === 'video' && nextSlideBackground
 
     // Split slide HTML into body + reference for two-zone layout (matches LiveView).
-    // For bible slides contents[1] is the "Book Chapter:Verse · Version" label.
+    // For bible slides contents[1] is the "Book Chapter:Verse · Version" label;
+    // for dictionary slides it is the "Headword · Pack" label.
     const liveBodyHtml = liveSlide?.contents[0] || ''
-    const liveRefHtml = liveSlide?.type === 'bible' ? (liveSlide.contents[1] || '') : ''
+    const liveRefHtml = slideCaptionHtml(liveSlide)
     const nextUpBodyHtml = nextSlide?.contents[0] || ''
-    const nextUpRefHtml = nextSlide?.type === 'bible' ? (nextSlide.contents[1] || '') : ''
+    const nextUpRefHtml = slideCaptionHtml(nextSlide)
 
     // Blank the live output to a plain black screen without touching
     // liveSlideId, so the queue position/selected slide is preserved and
@@ -1228,7 +1230,7 @@ export function LiveOutput() {
                                         <>
                                             <div className="text-[10px] text-white/70 truncate">{entry.slide.name}</div>
                                             <div className="text-[8px] text-blue-400 mt-0.5">
-                                                {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : 'Slide'}
+                                                {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : entry.slide.type === 'dictionary' ? 'Definition' : 'Slide'}
                                             </div>
                                         </>
                                     ) : (

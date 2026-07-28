@@ -8,6 +8,7 @@ import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
 import { getObjectFit, getBackgroundSize } from '../../utils/mediaFit'
+import { slideCaptionHtml } from '../../utils/slideCaption'
 import { useAppStore } from '../../store/appStore'
 
 interface SlideCardProps {
@@ -72,14 +73,14 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     // Check if this is a video background
     const isVideoBackground = slide.backgroundType === 'video' && backgroundUrl
 
-    // Bible slides have a separate reference label (contents[1]) that can sit above or below the body.
-    const isBibleWithRef = slide.type === 'bible' && !!slide.contents[1]
+    // Bible and dictionary slides have a separate caption (contents[1]) that can sit above or below the body.
+    const previewRefHtml = slideCaptionHtml(slide)
+    const hasCaption = !!previewRefHtml
     const globalVerseRefPosition = useAppStore((state) => state.settings.slideStyles?.verseRefPosition)
     const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom'
-    const refOnTop = isBibleWithRef && effectiveRefPos === 'top'
+    const refOnTop = hasCaption && effectiveRefPos === 'top'
 
     const previewBodyHtml = slide.contents[0] || ''
-    const previewRefHtml = isBibleWithRef ? (slide.contents[1] || '') : ''
 
     const cardFontSize = (() => {
         const measuringText = previewBodyHtml + previewRefHtml
