@@ -68,12 +68,12 @@ describe('UpdatePrompt', () => {
             expect(invoke).not.toHaveBeenCalled()
         })
 
-        it('explains the cost before installing', () => {
+        it('shows what the update is before installing anything', () => {
             fireEvent.click(screen.getByText('Update to 0.1.10'))
 
             expect(screen.getByRole('dialog', { name: 'Update Selah' })).toBeInTheDocument()
-            expect(screen.getByText(/live output goes dark/)).toBeInTheDocument()
             expect(screen.getByText(/Adds a dictionary you can project/)).toBeInTheDocument()
+            expect(screen.getByText('Selah closes and reopens to install.')).toBeInTheDocument()
             expect(invoke).not.toHaveBeenCalled()
         })
 

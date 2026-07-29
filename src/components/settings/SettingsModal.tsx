@@ -1319,10 +1319,7 @@ function UpdatesSettings() {
         <div className="space-y-4">
             <div>
                 <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1">App Updates</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Selah checks for new versions on launch and every few hours, and shows a
-                    prompt in the top bar when one is ready. Nothing installs until you ask it to.
-                </p>
+
             </div>
 
             <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
@@ -1354,7 +1351,7 @@ function UpdatesSettings() {
                             Selah {available.version} is available
                         </div>
                         <div className="text-xs text-[var(--text-muted)] mt-0.5">
-                            Selah closes while it installs, then reopens. Not during a service.
+                            Selah closes and reopens to install.
                         </div>
                     </div>
                     <button
