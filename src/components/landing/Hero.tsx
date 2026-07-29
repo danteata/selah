@@ -75,12 +75,12 @@ export function Hero({ started }: { started: boolean }) {
         <h1 ref={h1} className="text-5xl sm:text-7xl lg:text-[5.5rem] text-white leading-[1.02] tracking-tight" style={{ fontFamily: "Crimson Pro, serif", fontWeight: 600 }}>
           <span className="hero-line block">Preach the sermon.</span>
           <span className="hero-line block">
-            <span className="italic" style={{ background: 'linear-gradient(135deg, #5eead4 0%, #fcd34d 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>We&rsquo;ll find the verse.</span>
+            <span className="italic" style={{ background: 'linear-gradient(135deg, #5eead4 0%, #fcd34d 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Selah finds the verse.</span>
           </span>
         </h1>
 
         <p className="hero-sub mt-7 text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-          Selah listens to your sermon, catches every scripture reference, and puts the right verse on screen &mdash; <span className="text-zinc-200">automatically, offline, in real time.</span>
+          It hears the reference as you say it and puts the verse on screen &mdash; <span className="text-zinc-200">no typing, no internet.</span>
         </p>
 
         <div className="mt-9 flex flex-wrap justify-center gap-4">

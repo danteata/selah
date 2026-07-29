@@ -74,8 +74,8 @@ export function SermonListener() {
             You're preaching.
           </h2>
           <p className="mt-6 text-zinc-400 max-w-md">
-            Your scroll wheel is the sermon. Watch Selah transcribe, understand context, and catch the verse — all
-            offline, all in real time.
+            Your scroll wheel is the sermon. Watch Selah transcribe it, follow the context, and find the
+            verse — offline, as it's spoken.
           </p>
         </div>
 

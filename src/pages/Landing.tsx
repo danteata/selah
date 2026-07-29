@@ -37,17 +37,17 @@ import { FeaturesRail } from '@/components/landing/FeaturesRail'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const aiFeatures = [
-    { icon: Mic, title: 'Listens as You Preach', description: 'Selah quietly listens through your microphone and follows your sermon in real time, with no manual input required.' },
-    { icon: Brain, title: 'Understands Context', description: "Even when no verse is named, Selah reads between the lines and suggests scriptures that match what's being preached." },
-    { icon: FileText, title: 'Catches Every Reference', description: 'Say “John chapter 3 verse 16” naturally and Selah finds it instantly, ready to display on screen.' },
-    { icon: WifiOff, title: 'Works Without the Internet', description: 'Patchy church wifi? Selah keeps running so your service never misses a beat.' },
+    { icon: Mic, title: 'Listens as you preach', description: 'Selah follows the sermon through your microphone. Nothing to type, nothing to cue.' },
+    { icon: Brain, title: 'Follows the context', description: "When no reference is spoken, Selah suggests verses that match what's being preached." },
+    { icon: FileText, title: 'Hears spoken references', description: 'Say “John chapter three, verse sixteen” and the verse is queued, ready to send to the screen.' },
+    { icon: WifiOff, title: 'Works without the internet', description: 'Transcription, Bible text and slides are all on your machine. Church wifi is optional.' },
 ]
 
 const dashboardFeatures = [
-    { icon: LayoutDashboard, title: 'Drag-and-Drop Layout', description: 'Move panels wherever you like. Selah remembers your setup so every volunteer sees it their way.' },
-    { icon: Layers, title: 'Service Order', description: 'Plan your entire service in advance. Switch between items during the service with a single click.' },
-    { icon: Type, title: 'Rich Text Editor', description: 'Change fonts, colours, and layout on any slide. No design experience needed.' },
-    { icon: Palette, title: 'Reusable Templates', description: 'Save your favourite slide designs and reuse them week after week with one click.' },
+    { icon: LayoutDashboard, title: 'Drag-and-drop layout', description: 'Move panels wherever you like. Selah remembers your setup so every volunteer sees it their way.' },
+    { icon: Layers, title: 'Service order', description: 'Plan your entire service in advance. Switch between items during the service with a single click.' },
+    { icon: Type, title: 'Rich text editor', description: 'Change fonts, colours, and layout on any slide. No design experience needed.' },
+    { icon: Palette, title: 'Reusable templates', description: 'Save your favourite slide designs and reuse them week after week with one click.' },
 ]
 
 const collabModes = [
@@ -58,9 +58,9 @@ const collabModes = [
 
 const betaPerks = [
     { title: '14-day free trial', description: 'Full Pro access for two weeks — no credit card required.' },
-    { title: 'Direct line to the team', description: 'Your feedback lands in our build queue, not a support ticket.' },
+    { title: 'Direct line to the team', description: 'Report a problem and hear back from the people building Selah.' },
     { title: 'Free plan after your trial', description: 'Keep running Selah on the Free plan, or upgrade to Pro anytime.' },
-    { title: 'Onboard with us, not a tutorial', description: 'We will personally help your first service go live.' },
+    { title: 'Set-up help', description: 'We will walk your team through the first service on a call.' },
 ]
 
 // Mock dashboard panels
@@ -899,17 +899,18 @@ const PRO_PRICE = { currency: 'GHS', amount: 120, interval: 'mo' }
 
 const freePlanFeatures = [
     { label: 'Sermon transcription — 40 min / session', included: true },
-    { label: 'Up to 2 team members', included: true },
+    { label: 'One user account', included: true },
     { label: 'Slides, songs & service order', included: true },
     { label: 'Works fully offline', included: true },
     { label: 'NDI network output', included: false },
-    { label: 'Unlimited recording & team', included: false },
+    { label: 'Unlimited sermon recording', included: false },
+    { label: 'Up to 5 team members', included: false },
 ]
 
 const proPlanFeatures = [
     { label: 'Everything in Free', included: true },
     { label: 'Unlimited sermon recording', included: true },
-    { label: 'Unlimited team members', included: true },
+    { label: 'Up to 5 team members', included: true },
     { label: 'NDI network output', included: true },
     { label: 'Multi-monitor pro output', included: true },
     { label: 'Priority support', included: true },
