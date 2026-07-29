@@ -249,7 +249,7 @@ export function Hero({ started }: { started: boolean }) {
           style={{ background: 'rgba(15,18,22,0.95)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)' }}
         >
           <svg className="w-3.5 h-3.5 text-teal-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>
-          <span style={{ color: 'rgba(255,255,255,0.85)' }}>Pushed to every screen instantly</span>
+          <span style={{ color: 'rgba(255,255,255,0.85)' }}>On screen in one keystroke</span>
         </div>
       </div>
     </section>

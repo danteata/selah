@@ -487,9 +487,8 @@ function StandoutSection() {
                         className="text-lg max-w-2xl mx-auto"
                         style={{ color: 'rgba(228,228,231,0.6)' }}
                     >
-                        Features your volunteers will actually thank you for. Built for
-                        the realities of running a service with a team — not just a
-                        single operator at a desk.
+                        Built for a team running a service together, not one operator
+                        at a desk.
                     </p>
                 </div>
 
@@ -874,9 +873,9 @@ function StandoutSection() {
                                 className="text-sm leading-relaxed"
                                 style={{ color: 'rgba(228,228,231,0.6)' }}
                             >
-                                Stream to any screen, projector, or NDI receiver on your
-                                network. Professional-grade video distribution for
-                                sanctuaries of any size — no extra hardware required.
+                                Send the output to a screen, a projector, or any NDI
+                                receiver on your network — no capture card, no splitter,
+                                no cable run.
                             </p>
                         </div>
                     </article>
@@ -1009,14 +1008,14 @@ function PricingSection() {
                     <PlanCard
                         name="Free"
                         price={`${PRO_PRICE.currency} 0`}
-                        tagline="For small teams getting started."
+                        tagline="For one operator getting started."
                         features={freePlanFeatures}
                         cta="Get started"
                     />
                     <PlanCard
                         name="Pro"
                         price={`${PRO_PRICE.currency} ${PRO_PRICE.amount}/${PRO_PRICE.interval}`}
-                        tagline="Unlimited everything for your whole team."
+                        tagline="For a church running a volunteer team."
                         features={proPlanFeatures}
                         highlight
                         cta="Start free trial"

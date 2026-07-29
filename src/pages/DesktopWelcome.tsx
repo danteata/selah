@@ -702,7 +702,7 @@ function ChurchForm({
                         className="w-full px-4 py-4 text-center uppercase tracking-[0.25em] font-bold rounded-xl transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 bg-zinc-900/60 border border-zinc-800 text-teal-300"
                     />
                     <p className="mt-3 text-xs text-center text-zinc-500">
-                        Obtain this code from your church administrator
+                        Get this code from your church administrator
                     </p>
                 </div>
             )}
@@ -784,7 +784,7 @@ function RightPanel() {
                     pause &middot; reflect
                 </h1>
                 <p style={{ color: '#a8a29e', fontSize: '0.9rem' }}>
-                    Welcome back to your worship studio.
+                    Church presentation software.
                 </p>
             </div>
 
@@ -795,7 +795,7 @@ function RightPanel() {
                         Welcome back
                     </h2>
                     <p className="text-zinc-400 font-medium">
-                        Sign in to continue to your studio
+                        Sign in to continue
                     </p>
                 </div>
             )}
@@ -914,7 +914,7 @@ function RightPanel() {
             <div className="mt-12 pt-8 border-t border-zinc-800 text-center">
                 <p className="text-xs text-zinc-500 flex items-center justify-center gap-2">
                     <Lock className="w-3 h-3" />
-                    Secure &middot; offline-first &middot; private
+                    Works offline &middot; syncs when you&rsquo;re online
                 </p>
             </div>
         </div>

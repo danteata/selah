@@ -958,7 +958,7 @@ function RequirementsSection() {
                         What you'll need
                     </h2>
                     <p className="text-base max-w-xl mx-auto" style={{ color: 'rgba(228,228,231,0.6)' }}>
-                        Selah is light. If you can run a modern web browser, you can run Selah.
+                        Nothing exotic. Here's what each platform needs.
                     </p>
                 </div>
 
