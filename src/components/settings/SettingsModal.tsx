@@ -255,6 +255,7 @@ function DisplaySettings({
     } = useNativeMultiMonitor()
     const {
         isAvailable: ndiAvailable,
+        isSupported: ndiSupported,
         isRunning: ndiRunning,
         isLoading: ndiLoading,
         startOutput: ndiStart,
@@ -522,16 +523,23 @@ function DisplaySettings({
                 </div>
                 {!ndiAvailable && (
                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400">
-                        {isDesktop ? (
+                        {!isDesktop ? (
+                            <p>NDI output is only available in the desktop app.</p>
+                        ) : !ndiSupported ? (
+                            // Installing NDI Tools cannot help here, so don't ask
+                            // for it: this build has NDI compiled out.
                             <>
-                                <p>NDI SDK not detected on this system.</p>
-                                <p className="mt-1">Install <a href="https://ndi.video/type/developer/" target="_blank" rel="noreferrer" className="text-[var(--accent-teal)] hover:underline">NDI Tools</a> (includes the SDK runtime) and restart the app.</p>
-                                {!(window as any).__TAURI_INTERNALS__ && (
-                                    <p className="mt-1">Rebuild with <code className="px-1 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-[10px]">cargo build --features ndi</code> to enable NDI support.</p>
-                                )}
+                                <p>This build of Selah was made without NDI support.</p>
+                                <p className="mt-1">
+                                    NDI needs the SDK present when Selah is compiled, so it isn't in
+                                    the standard download yet.
+                                </p>
                             </>
                         ) : (
-                            <p>NDI output is only available in the desktop app.</p>
+                            <>
+                                <p>NDI runtime not found.</p>
+                                <p className="mt-1">Install <a href="https://ndi.video/tools/" target="_blank" rel="noreferrer" className="text-[var(--accent-teal)] hover:underline">NDI Tools</a> and restart Selah.</p>
+                            </>
                         )}
                     </div>
                 )}

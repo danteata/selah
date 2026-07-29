@@ -6,7 +6,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { ndiOutputService, type NdiOutputState, type NdiOutputConfig, type NdiSourceInfo } from '../services/ndi-output'
 
 interface UseNdiOutputReturn {
+    /** NDI runtime found and initialised. */
     isAvailable: boolean
+    /** This build has NDI compiled in (the `ndi` Cargo feature). */
+    isSupported: boolean
     isRunning: boolean
     state: NdiOutputState | null
     sources: NdiSourceInfo[]
@@ -19,6 +22,7 @@ interface UseNdiOutputReturn {
 
 export function useNdiOutput(): UseNdiOutputReturn {
     const [isAvailable, setIsAvailable] = useState(false)
+    const [isSupported, setIsSupported] = useState(false)
     const [state, setState] = useState<NdiOutputState | null>(null)
     const [sources, setSources] = useState<NdiSourceInfo[]>([])
     const [isLoading, setIsLoading] = useState(false)
@@ -26,8 +30,12 @@ export function useNdiOutput(): UseNdiOutputReturn {
 
     useEffect(() => {
         const init = async () => {
-            const available = await ndiOutputService.isAvailable()
+            const [available, supported] = await Promise.all([
+                ndiOutputService.isAvailable(),
+                ndiOutputService.isSupported(),
+            ])
             setIsAvailable(available)
+            setIsSupported(supported)
             if (available) {
                 const s = await ndiOutputService.getState()
                 setState(s)
@@ -86,6 +94,7 @@ export function useNdiOutput(): UseNdiOutputReturn {
 
     return {
         isAvailable,
+        isSupported,
         isRunning: state?.isRunning ?? false,
         state,
         sources,

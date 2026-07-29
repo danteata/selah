@@ -18,6 +18,14 @@ pub async fn ndi_is_available(
     Ok(state.is_available())
 }
 
+/// Whether this build can do NDI at all — see NdiManager::is_supported.
+#[tauri::command]
+pub async fn ndi_is_supported(
+    state: State<'_, Arc<NdiManager>>,
+) -> Result<bool, String> {
+    Ok(state.is_supported())
+}
+
 #[tauri::command]
 pub async fn ndi_get_state(
     state: State<'_, Arc<NdiManager>>,
