@@ -428,6 +428,176 @@ function DisplaySettings({
                 )}
             </div>
 
+            {/* Alternate Output Display — sits with the main output, since it is the
+                same kind of setting. */}
+            {ndiAvailable && (
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                                <Layers className="w-4 h-4" />
+                                Alternate Output Display
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                A second output alongside the main one — on its own monitor, or on the
+                                network as an NDI source
+                            </p>
+                        </div>
+                        {alternate.config.enabled ? (
+                            <button
+                                onClick={() => void alternate.disable()}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-indigo)] text-white rounded-lg hover:brightness-110"
+                            >
+                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                Stop
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleAlternateStart}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-indigo)] text-[var(--accent-indigo)] rounded-lg hover:bg-[var(--accent-indigo)]/10"
+                            >
+                                <Layers className="w-3.5 h-3.5" />
+                                Enable
+                                {!isPro && (
+                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
+                                        Pro
+                                    </span>
+                                )}
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="space-y-3">
+                        {/* Destination — monitors and NDI are peers here, the way
+                            other presentation software treats them. */}
+                        <div className="flex items-center justify-between gap-3">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">Output to</label>
+                            <select
+                                value={alternate.config.destination.kind === 'ndi'
+                                    ? 'ndi'
+                                    : `monitor:${alternate.config.destination.monitorId}`}
+                                onChange={(e) => {
+                                    const value = e.target.value
+                                    alternate.update(value === 'ndi'
+                                        ? { destination: { kind: 'ndi' } }
+                                        : { destination: { kind: 'monitor', monitorId: value.slice('monitor:'.length) } })
+                                }}
+                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                            >
+                                <option value="ndi">NDI stream</option>
+                                {monitors.map((monitor, index) => (
+                                    <option key={monitor.id} value={`monitor:${monitor.id}`}>
+                                        {monitor.name || `Monitor ${index + 1}`}
+                                        {monitor.is_primary ? ' (primary)' : ''}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {alternate.config.destination.kind === 'ndi' && (
+                            <>
+                                <div className="flex items-center justify-between gap-3">
+                                    <label className="text-sm text-gray-600 dark:text-gray-400">Output format</label>
+                                    <select
+                                        value={formatLabel(alternate.config.format)}
+                                        onChange={(e) => {
+                                            const chosen = OUTPUT_FORMATS.find((f) => formatLabel(f) === e.target.value)
+                                            if (chosen) alternate.update({ format: chosen })
+                                        }}
+                                        className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                                    >
+                                        {OUTPUT_FORMATS.map((format) => (
+                                            <option key={formatLabel(format)} value={formatLabel(format)}>
+                                                {formatLabel(format)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <label className="text-sm text-gray-600 dark:text-gray-400">Alpha channel</label>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            Keep transparency so a switcher can key this over video
+                                        </p>
+                                    </div>
+                                    <select
+                                        value={alternate.config.alpha ? 'enabled' : 'disabled'}
+                                        onChange={(e) => alternate.update({ alpha: e.target.value === 'enabled' })}
+                                        className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                                    >
+                                        <option value="enabled">Enabled</option>
+                                        <option value="disabled">Disabled</option>
+                                    </select>
+                                </div>
+                            </>
+                        )}
+
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <label className="text-sm text-gray-600 dark:text-gray-400">Content</label>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {alternate.config.contentSource === 'follow'
+                                        ? 'Shows whatever is live on the main output'
+                                        : 'Shows only what you send to it, so the two outputs can differ'}
+                                </p>
+                            </div>
+                            <select
+                                value={alternate.config.contentSource}
+                                onChange={(e) => alternate.update({ contentSource: e.target.value as 'follow' | 'independent' })}
+                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                            >
+                                <option value="follow">Follow main output</option>
+                                <option value="independent">Its own content</option>
+                            </select>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">NDI source name</label>
+                            <input
+                                value={alternate.config.sourceName}
+                                onChange={(e) => alternate.update({ sourceName: e.target.value })}
+                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] font-mono"
+                            />
+                        </div>
+
+                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                            <div className="flex items-center justify-between">
+                                <span>Showing</span>
+                                <span className={alternate.slide ? 'text-gray-700 dark:text-gray-300' : ''}>
+                                    {alternate.slide ? (alternate.slide.title || 'Untitled slide') : 'Nothing'}
+                                </span>
+                            </div>
+                            {alternate.config.enabled && (
+                                <div className="flex items-center justify-between">
+                                    <span>Frames sent</span>
+                                    <span className={alternate.framesSent > 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-amber-600 dark:text-amber-400'}>
+                                        {alternate.framesSent.toLocaleString()}
+                                    </span>
+                                </div>
+                            )}
+                            {alternate.textOnly && (
+                                <p className="text-amber-600 dark:text-amber-400">
+                                    Text only: this slide's image or video background isn't drawn on this
+                                    feed. Usually what you want for a keyed feed — the switcher supplies
+                                    the background. Sending to a monitor will carry it.
+                                </p>
+                            )}
+                            {alternate.error && (
+                                <div className="text-red-600 dark:text-red-400">{alternate.error}</div>
+                            )}
+                            {alternate.config.contentSource === 'independent' && (
+                                <p className="pt-1">
+                                    Send a slide to this output with the layers button on any slide.
+                                </p>
+                            )}
+                            <p className="pt-1">
+                                Sending to a monitor isn't wired up yet; NDI works today.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Font Selection */}
             <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -592,174 +762,6 @@ function DisplaySettings({
                 )}
             </div>
 
-            {/* Alternate Output — a second, configurable output. */}
-            {ndiAvailable && (
-                <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center justify-between mb-3">
-                        <div>
-                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                                <Layers className="w-4 h-4" />
-                                Alternate Output
-                            </label>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                A second output alongside the main one — on its own monitor, or on the
-                                network as an NDI source
-                            </p>
-                        </div>
-                        {alternate.config.enabled ? (
-                            <button
-                                onClick={() => void alternate.disable()}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-indigo)] text-white rounded-lg hover:brightness-110"
-                            >
-                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                                Stop
-                            </button>
-                        ) : (
-                            <button
-                                onClick={handleAlternateStart}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-indigo)] text-[var(--accent-indigo)] rounded-lg hover:bg-[var(--accent-indigo)]/10"
-                            >
-                                <Layers className="w-3.5 h-3.5" />
-                                Enable
-                                {!isPro && (
-                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
-                                        Pro
-                                    </span>
-                                )}
-                            </button>
-                        )}
-                    </div>
-
-                    <div className="space-y-3">
-                        {/* Destination — monitors and NDI are peers here, the way
-                            other presentation software treats them. */}
-                        <div className="flex items-center justify-between gap-3">
-                            <label className="text-sm text-gray-600 dark:text-gray-400">Output to</label>
-                            <select
-                                value={alternate.config.destination.kind === 'ndi'
-                                    ? 'ndi'
-                                    : `monitor:${alternate.config.destination.monitorId}`}
-                                onChange={(e) => {
-                                    const value = e.target.value
-                                    alternate.update(value === 'ndi'
-                                        ? { destination: { kind: 'ndi' } }
-                                        : { destination: { kind: 'monitor', monitorId: value.slice('monitor:'.length) } })
-                                }}
-                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                            >
-                                <option value="ndi">NDI stream</option>
-                                {monitors.map((monitor, index) => (
-                                    <option key={monitor.id} value={`monitor:${monitor.id}`}>
-                                        {monitor.name || `Monitor ${index + 1}`}
-                                        {monitor.is_primary ? ' (primary)' : ''}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {alternate.config.destination.kind === 'ndi' && (
-                            <>
-                                <div className="flex items-center justify-between gap-3">
-                                    <label className="text-sm text-gray-600 dark:text-gray-400">Output format</label>
-                                    <select
-                                        value={formatLabel(alternate.config.format)}
-                                        onChange={(e) => {
-                                            const chosen = OUTPUT_FORMATS.find((f) => formatLabel(f) === e.target.value)
-                                            if (chosen) alternate.update({ format: chosen })
-                                        }}
-                                        className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                                    >
-                                        {OUTPUT_FORMATS.map((format) => (
-                                            <option key={formatLabel(format)} value={formatLabel(format)}>
-                                                {formatLabel(format)}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                        <label className="text-sm text-gray-600 dark:text-gray-400">Alpha channel</label>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                                            Keep transparency so a switcher can key this over video
-                                        </p>
-                                    </div>
-                                    <select
-                                        value={alternate.config.alpha ? 'enabled' : 'disabled'}
-                                        onChange={(e) => alternate.update({ alpha: e.target.value === 'enabled' })}
-                                        className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                                    >
-                                        <option value="enabled">Enabled</option>
-                                        <option value="disabled">Disabled</option>
-                                    </select>
-                                </div>
-                            </>
-                        )}
-
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <label className="text-sm text-gray-600 dark:text-gray-400">Content</label>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">
-                                    {alternate.config.contentSource === 'follow'
-                                        ? 'Shows whatever is live on the main output'
-                                        : 'Shows only what you send to it, so the two outputs can differ'}
-                                </p>
-                            </div>
-                            <select
-                                value={alternate.config.contentSource}
-                                onChange={(e) => alternate.update({ contentSource: e.target.value as 'follow' | 'independent' })}
-                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
-                            >
-                                <option value="follow">Follow main output</option>
-                                <option value="independent">Its own content</option>
-                            </select>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-3">
-                            <label className="text-sm text-gray-600 dark:text-gray-400">NDI source name</label>
-                            <input
-                                value={alternate.config.sourceName}
-                                onChange={(e) => alternate.update({ sourceName: e.target.value })}
-                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] font-mono"
-                            />
-                        </div>
-
-                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
-                            <div className="flex items-center justify-between">
-                                <span>Showing</span>
-                                <span className={alternate.slide ? 'text-gray-700 dark:text-gray-300' : ''}>
-                                    {alternate.slide ? (alternate.slide.title || 'Untitled slide') : 'Nothing'}
-                                </span>
-                            </div>
-                            {alternate.config.enabled && (
-                                <div className="flex items-center justify-between">
-                                    <span>Frames sent</span>
-                                    <span className={alternate.framesSent > 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-amber-600 dark:text-amber-400'}>
-                                        {alternate.framesSent.toLocaleString()}
-                                    </span>
-                                </div>
-                            )}
-                            {alternate.unsupportedContent && (
-                                <p className="text-amber-600 dark:text-amber-400">
-                                    This slide has an image or video background, which this output can't
-                                    draw yet — it needs the monitor destination.
-                                </p>
-                            )}
-                            {alternate.error && (
-                                <div className="text-red-600 dark:text-red-400">{alternate.error}</div>
-                            )}
-                            {alternate.config.contentSource === 'independent' && (
-                                <p className="pt-1">
-                                    Send a slide to this output with the layers button on any slide.
-                                </p>
-                            )}
-                            <p className="pt-1">
-                                Sending to a monitor isn't wired up yet; NDI works today.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     )
 }

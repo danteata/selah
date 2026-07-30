@@ -11,9 +11,10 @@ import type { Slide } from '../types'
  *
  * The NDI destination renders frames here, on a canvas, rather than capturing a
  * window — which is what lets the feed keep its alpha for keying, and means it
- * needs no spare monitor. The trade-off is that the canvas renderer only draws
- * text content; `unsupportedContent` reports when the current slide needs the
- * window path instead of quietly sending a frame with its background missing.
+ * needs no spare monitor. The trade-off is that the canvas renderer draws text,
+ * not image or video backgrounds: such a slide still goes out, as its text alone,
+ * with `textOnly` set so the UI can say so. For a keyed feed that is usually the
+ * desired result anyway, since the switcher supplies the background.
  */
 
 /** Channel id for the alternate output's NDI source. */
@@ -33,9 +34,10 @@ interface UseAlternateOutputReturn {
     /** Frames NDI has accepted — 0 while announced but silent. */
     framesSent: number
     error: string | null
-    /** Set when the resolved slide can't be drawn on canvas (media, or an image
-     *  or video background) and so needs the window destination. */
-    unsupportedContent: boolean
+    /** Set when the slide has a background this output can't draw, so the feed
+     *  carries its text only. Not a failure — for a keyed feed it's often what
+     *  you want, since the switcher supplies the background. */
+    textOnly: boolean
     enable: () => Promise<string | null>
     disable: () => Promise<void>
     /** Draw the current content into a visible canvas — for the in-app preview
@@ -65,7 +67,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         return activeSlides.find((candidate) => candidate.id === liveSlideId) ?? null
     }, [config.contentSource, independentSlide, activeSlides, liveSlideId])
 
-    const unsupportedContent = config.destination.kind === 'ndi' && !canRenderOnCanvas(slide)
+    const textOnly = config.destination.kind === 'ndi' && !canRenderOnCanvas(slide)
 
     const renderOptions = useMemo(() => ({
         width: config.format.width,
@@ -100,7 +102,11 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (!ctx) return
 
-        renderSlideToCanvas(ctx, unsupportedContent ? null : slide, renderOptions)
+        // Draw the slide even when its background can't be reproduced. Blanking
+        // the frame instead meant "Follow main output" sent black for any slide
+        // with an image behind it — which is nearly all of them — and looked
+        // broken rather than partial.
+        renderSlideToCanvas(ctx, slide, renderOptions)
 
         // getImageData is RGBA with straight alpha, which is NDI's RGBA format —
         // no swizzle, no premultiply correction.
@@ -119,7 +125,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         } finally {
             sendingRef.current = false
         }
-    }, [getCanvas, slide, renderOptions, unsupportedContent])
+    }, [getCanvas, slide, renderOptions])
 
     const enable = useCallback(async (): Promise<string | null> => {
         if (config.destination.kind === 'monitor') {
@@ -169,7 +175,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         setSlide,
         framesSent,
         error,
-        unsupportedContent,
+        textOnly,
         enable,
         disable,
         paintInto,

@@ -2,12 +2,12 @@
  * Draws a slide onto a canvas for the alternate output.
  *
  * The alternate output is generic — it carries whatever slide it is given — but
- * the canvas path can only draw what it knows how to draw. Today that is text:
- * lyrics, scripture, announcements and lower thirds, which is most of what an
- * alternate feed shows. Image and video backgrounds are NOT drawn here; those
- * need the window path (a real `LiveView` rendering the DOM), and
- * `canRenderOnCanvas` says so up front rather than quietly sending a frame with
- * the background missing.
+ * the canvas path draws text: lyrics, scripture, announcements and lower thirds,
+ * which is most of what an alternate feed shows. Image and video backgrounds are
+ * NOT drawn; a slide with one still goes out as its text, and
+ * `canRenderOnCanvas` reports the difference so the UI can say "text only"
+ * rather than leaving the operator to wonder. Carrying backgrounds needs the
+ * window path (a real `LiveView` rendering the DOM).
  *
  * Everything drawn here starts from a transparent frame, so an output with its
  * alpha channel enabled keys cleanly over video.
@@ -32,8 +32,8 @@ const TEXT_MARGIN = 0.08
 const CAPTION_GAP = 0.03
 
 /**
- * Whether the canvas path can faithfully draw this slide. A media slide, or one
- * with an image or video background, needs the window path.
+ * Whether the canvas path can draw this slide *in full*. False means the text
+ * will be drawn but its background won't — see the module comment.
  */
 export function canRenderOnCanvas(slide: Slide | null): boolean {
     if (!slide) return true

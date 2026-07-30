@@ -763,18 +763,18 @@ export function LiveOutput() {
                     )}
                     {alternate.config.enabled && (
                         <span
-                            title={alternate.unsupportedContent
-                                ? 'This slide has a background the alternate output can\'t draw yet — sending an empty frame'
+                            title={alternate.textOnly
+                                ? `Alternate output: text only — this slide's background isn't drawn on this feed (${alternate.framesSent.toLocaleString()} frames sent)`
                                 : alternate.slide
                                     ? `Alternate output: ${alternate.framesSent.toLocaleString()} frames sent`
                                     : 'Alternate output is on with nothing on it'}
                             className={`flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border ${
-                                alternate.framesSent > 0 && !alternate.unsupportedContent
+                                alternate.framesSent > 0
                                     ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)] border-[var(--accent-indigo)]/20'
                                     : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
                             }`}
                         >
-                            {alternate.unsupportedContent ? 'ALT — CAN\'T DRAW' : alternate.slide ? 'ALT LIVE' : 'ALT EMPTY'}
+                            {alternate.slide ? (alternate.textOnly ? 'ALT — TEXT ONLY' : 'ALT LIVE') : 'ALT EMPTY'}
                         </span>
                     )}
                 </div>
