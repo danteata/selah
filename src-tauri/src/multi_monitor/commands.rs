@@ -55,6 +55,52 @@ pub async fn open_live_window(
     Ok(())
 }
 
+/// Open the alternate output on a monitor.
+///
+/// Runs the same view as the live output in its own window, so it renders
+/// everything the projector does — backgrounds and media included — while
+/// receiving its own content, addressed by window label.
+#[tauri::command]
+pub async fn open_alternate_window(
+    state: State<'_, Arc<MultiMonitorState>>,
+    monitor_id: Option<String>,
+) -> Result<(), MultiMonitorError> {
+    let dev_url = if cfg!(debug_assertions) {
+        Some("http://localhost:3000")
+    } else {
+        None
+    };
+
+    state.create_alternate_window(monitor_id.as_deref(), dev_url)?;
+
+    Ok(())
+}
+
+/// Close the alternate output window
+#[tauri::command]
+pub async fn close_alternate_window(
+    state: State<'_, Arc<MultiMonitorState>>,
+) -> Result<(), MultiMonitorError> {
+    state.close_alternate_window()
+}
+
+#[tauri::command]
+pub async fn is_alternate_window_open(
+    state: State<'_, Arc<MultiMonitorState>>,
+) -> Result<bool, MultiMonitorError> {
+    Ok(state.is_alternate_window_open())
+}
+
+/// Send an event — a slide, a settings change — to the alternate output window.
+#[tauri::command]
+pub async fn emit_to_alternate_window(
+    state: State<'_, Arc<MultiMonitorState>>,
+    event: String,
+    payload: serde_json::Value,
+) -> Result<(), MultiMonitorError> {
+    state.emit_to_alternate_window(&event, payload)
+}
+
 /// Close the live output window
 #[tauri::command]
 pub async fn close_live_window(

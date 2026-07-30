@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { canRenderOnCanvas, renderSlideToCanvas } from '../lib/graphics/renderSlide'
 import { ndiPushChannelService } from '../services/ndi-output/pushChannel'
+import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import type { AlternateOutputConfig } from '../types/alternateOutput'
 import type { Slide } from '../types'
 
@@ -9,8 +10,11 @@ import type { Slide } from '../types'
  * The alternate output: a second output that either follows the live content or
  * carries its own, landing on a monitor or on the network as its own NDI source.
  *
- * The NDI destination renders frames here, on a canvas, rather than capturing a
- * window — which is what lets the feed keep its alpha for keying, and means it
+ * Two destinations, two mechanisms:
+ *   - A monitor gets a second window running the same view as the projector, so
+ *     it renders everything — backgrounds, media, transitions. Content reaches it
+ *     by window label, which is what lets the two outputs differ.
+ *   - NDI renders frames here, on a canvas — which is what lets the feed keep its alpha for keying, and means it
  * needs no spare monitor. The trade-off is that the canvas renderer draws text,
  * not image or video backgrounds: such a slide still goes out, as its text alone,
  * with `textOnly` set so the UI can say so. For a keyed feed that is usually the
@@ -129,11 +133,16 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
 
     const enable = useCallback(async (): Promise<string | null> => {
         if (config.destination.kind === 'monitor') {
-            // The window destination needs a second live window, which doesn't
-            // exist yet — say so rather than silently doing nothing.
-            const message = 'Sending the alternate output to a monitor isn\'t available yet. Choose NDI for now.'
-            setError(message)
-            return message
+            try {
+                await nativeMultiMonitorService.openAlternateWindow(config.destination.monitorId)
+                update({ enabled: true })
+                setError(null)
+                return null
+            } catch (e) {
+                const message = e instanceof Error ? e.message : String(e)
+                setError(message)
+                return message
+            }
         }
         try {
             await ndiPushChannelService.open(ALTERNATE_CHANNEL, config.sourceName)
@@ -145,11 +154,14 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
             setError(message)
             return message
         }
-    }, [config.destination.kind, config.sourceName, update])
+    }, [config.destination, config.sourceName, update])
 
     const disable = useCallback(async () => {
         update({ enabled: false })
+        // Both are cheap no-ops when that destination was never in use, and
+        // switching destination while enabled must not leave the other running.
         await ndiPushChannelService.close(ALTERNATE_CHANNEL)
+        await nativeMultiMonitorService.closeAlternateWindow().catch(() => {})
         setFramesSent(0)
     }, [update])
 
@@ -161,12 +173,39 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
     }, [config.enabled, config.destination.kind, pushFrame])
 
     useEffect(() => {
-        if (!config.enabled) return
+        if (!config.enabled || config.destination.kind !== 'ndi') return
         const timer = setInterval(async () => {
             setFramesSent(await ndiPushChannelService.framesSent(ALTERNATE_CHANNEL))
         }, 2000)
         return () => clearInterval(timer)
-    }, [config.enabled])
+    }, [config.enabled, config.destination.kind])
+
+    // The window destination receives the same events the projector window does,
+    // addressed to its own label — so the view it runs needs no special casing.
+    useEffect(() => {
+        if (!config.enabled || config.destination.kind !== 'monitor') return
+
+        const send = async () => {
+            try {
+                if (slide) {
+                    await nativeMultiMonitorService.emitToAlternateWindow('slide-update', {
+                        slideId: slide.id,
+                        slideData: slide,
+                    })
+                } else {
+                    await nativeMultiMonitorService.emitToAlternateWindow('clear-output', { mode: 'blank' })
+                }
+                setError(null)
+            } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+            }
+        }
+
+        // A newly opened window isn't listening yet, so the first send is delayed
+        // enough for its view to mount and subscribe.
+        const timer = setTimeout(() => { void send() }, 400)
+        return () => clearTimeout(timer)
+    }, [config.enabled, config.destination.kind, slide])
 
     return {
         config,

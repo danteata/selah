@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
-use super::state::{MultiMonitorState, LIVE_WINDOW_LABEL};
+use super::state::{MultiMonitorState, ALTERNATE_WINDOW_LABEL, LIVE_WINDOW_LABEL};
 use super::types::*;
 
 /// Generate a human-readable display name.
@@ -231,9 +231,35 @@ impl MultiMonitorState {
     }
 
     /// Create the live output window
-    pub fn create_live_window(
+    /// The monitor an output should open on: the one asked for, else the best
+    /// available.
+    fn resolve_target_monitor(&self, monitor_id: Option<&str>) -> Result<MonitorInfo, MultiMonitorError> {
+        let target = match monitor_id {
+            Some(id) => self.get_monitor_by_id(id),
+            None => self.get_best_monitor_for_live(),
+        };
+
+        target.ok_or_else(|| MultiMonitorError {
+            code: "NO_MONITOR".to_string(),
+            message: "No suitable monitor found for output".to_string(),
+        })
+    }
+
+    /// Create a full-screen output window on `monitor`, replacing any existing
+    /// window with the same label.
+    ///
+    /// Shared by the live output and the alternate output: they differ only in
+    /// label, title and route. Events are addressed by label, so two windows
+    /// running the same `/#/live` view show whatever is emitted to each of them —
+    /// which is what makes an alternate output with its own content possible
+    /// without a second copy of the renderer.
+    fn build_output_window(
         &self,
-        config: LiveWindowConfig,
+        label: &str,
+        title: &str,
+        route: &str,
+        monitor: &MonitorInfo,
+        config: &LiveWindowConfig,
         dev_url: Option<&str>,
     ) -> Result<WebviewWindow, MultiMonitorError> {
         let app = self.get_app().ok_or_else(|| MultiMonitorError {
@@ -241,46 +267,26 @@ impl MultiMonitorState {
             message: "Application handle not initialized".to_string(),
         })?;
 
-        // Check if live window already exists
-        if let Some(existing) = app.get_webview_window(LIVE_WINDOW_LABEL) {
-            // Close existing window first
+        if let Some(existing) = app.get_webview_window(label) {
             let _ = existing.close();
-            // Give it a moment to close
+            // Give it a moment to close before reusing the label.
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        // Determine target monitor
-        let target_monitor = if let Some(ref monitor_id) = config.monitor_id {
-            self.get_monitor_by_id(monitor_id)
-        } else {
-            self.get_best_monitor_for_live()
-        };
-
-        let monitor = target_monitor.ok_or_else(|| MultiMonitorError {
-            code: "NO_MONITOR".to_string(),
-            message: "No suitable monitor found for live output".to_string(),
-        })?;
-
-        // Build the URL for the live view. The frontend uses HashRouter, so the
-        // route must live in the URL *hash* (`/#/live`) — a plain `/live` path
-        // leaves the hash empty, and HashRouter would render the full app at `/`
-        // instead of the live output.
+        // The frontend uses HashRouter, so the route must live in the URL *hash*
+        // — a plain `/live` path leaves the hash empty and HashRouter would
+        // render the whole app instead of the output view.
         let base_url = dev_url.unwrap_or("tauri://localhost");
-        let url = if let Some(ref slide_id) = config.initial_slide_id {
-            format!("{}/#/live?slide={}", base_url, slide_id)
-        } else {
-            format!("{}/#/live", base_url)
-        };
-
+        let url = format!("{}{}", base_url, route);
         let webview_url = WebviewUrl::External(url.parse().map_err(|e| MultiMonitorError {
             code: "URL_PARSE_ERROR".to_string(),
             message: format!("Failed to parse URL: {}", e),
         })?);
 
-        // Build the window — use visible(false) initially so we can position
-        // it before the first paint (avoids flash on wrong monitor)
-        let mut builder = WebviewWindowBuilder::new(&app, LIVE_WINDOW_LABEL, webview_url)
-            .title("Selah - Live Output")
+        // visible(false) first so the window can be positioned before its first
+        // paint, which avoids a flash on the wrong monitor.
+        let mut builder = WebviewWindowBuilder::new(&app, label, webview_url)
+            .title(title)
             .inner_size(800.0, 600.0)
             .position(0.0, 0.0)
             .decorations(config.decorations)
@@ -295,12 +301,11 @@ impl MultiMonitorState {
 
         let window = builder.build().map_err(|e| MultiMonitorError {
             code: "WINDOW_CREATE_FAILED".to_string(),
-            message: format!("Failed to create live window: {}", e),
+            message: format!("Failed to create {} window: {}", label, e),
         })?;
 
-        // Position and size using Physical coordinates — the Monitor API
-        // returns physical pixel values, so we must use Physical types
-        // (not logical) to land on the correct display on HiDPI setups.
+        // Physical coordinates throughout: the Monitor API reports physical
+        // pixels, and logical values land on the wrong display on HiDPI setups.
         window
             .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                 x: monitor.position_x,
@@ -308,7 +313,7 @@ impl MultiMonitorState {
             }))
             .map_err(|e| MultiMonitorError {
                 code: "POSITION_FAILED".to_string(),
-                message: format!("Failed to position live window: {}", e),
+                message: format!("Failed to position {} window: {}", label, e),
             })?;
 
         window
@@ -318,14 +323,88 @@ impl MultiMonitorState {
             }))
             .map_err(|e| MultiMonitorError {
                 code: "RESIZE_FAILED".to_string(),
-                message: format!("Failed to resize live window: {}", e),
+                message: format!("Failed to resize {} window: {}", label, e),
             })?;
 
-        // Now show the window on the correct monitor
         window.show().map_err(|e| MultiMonitorError {
             code: "SHOW_FAILED".to_string(),
-            message: format!("Failed to show live window: {}", e),
+            message: format!("Failed to show {} window: {}", label, e),
         })?;
+
+        Ok(window)
+    }
+
+    /// Open the alternate output on a monitor. Deliberately does not touch the
+    /// live window's state — the two outputs are independent, and the projector
+    /// must not appear to stop because a second output opened.
+    pub fn create_alternate_window(
+        &self,
+        monitor_id: Option<&str>,
+        dev_url: Option<&str>,
+    ) -> Result<WebviewWindow, MultiMonitorError> {
+        let monitor = self.resolve_target_monitor(monitor_id)?;
+        let config = LiveWindowConfig {
+            monitor_id: monitor_id.map(|id| id.to_string()),
+            fullscreen: true,
+            decorations: false,
+            always_on_top: false,
+            initial_slide_id: None,
+        };
+
+        // `output=alternate` tells the view which output it is, so it can ignore
+        // the shared live state the projector window falls back on.
+        self.build_output_window(
+            ALTERNATE_WINDOW_LABEL,
+            "Selah - Alternate Output",
+            "/#/live?output=alternate",
+            &monitor,
+            &config,
+            dev_url,
+        )
+    }
+
+    /// Close the alternate output window, if it's open.
+    pub fn close_alternate_window(&self) -> Result<(), MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        if let Some(window) = app.get_webview_window(ALTERNATE_WINDOW_LABEL) {
+            window.close().map_err(|e| MultiMonitorError {
+                code: "CLOSE_FAILED".to_string(),
+                message: format!("Failed to close alternate window: {}", e),
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Whether the alternate output window is open.
+    pub fn is_alternate_window_open(&self) -> bool {
+        self.get_app()
+            .map(|app| app.get_webview_window(ALTERNATE_WINDOW_LABEL).is_some())
+            .unwrap_or(false)
+    }
+
+    pub fn create_live_window(
+        &self,
+        config: LiveWindowConfig,
+        dev_url: Option<&str>,
+    ) -> Result<WebviewWindow, MultiMonitorError> {
+        let monitor = self.resolve_target_monitor(config.monitor_id.as_deref())?;
+        let route = match config.initial_slide_id {
+            Some(ref slide_id) => format!("/#/live?slide={}", slide_id),
+            None => "/#/live".to_string(),
+        };
+        let window = self.build_output_window(
+            LIVE_WINDOW_LABEL,
+            "Selah - Live Output",
+            &route,
+            &monitor,
+            &config,
+            dev_url,
+        )?;
 
         // Update state
         self.set_current_live_monitor(Some(monitor.id.clone()));
@@ -504,6 +583,36 @@ impl MultiMonitorState {
     }
 
     /// Emit an event to the live window
+    /// Emit an event to a specific output window. The live and alternate windows
+    /// run the same view and listen for the same event names, so the label is
+    /// what decides which output receives the content.
+    pub fn emit_to_output_window<T: serde::Serialize + Clone>(
+        &self,
+        label: &str,
+        event: &str,
+        payload: T,
+    ) -> Result<(), MultiMonitorError> {
+        let app = self.get_app().ok_or_else(|| MultiMonitorError {
+            code: "NO_APP_HANDLE".to_string(),
+            message: "Application handle not initialized".to_string(),
+        })?;
+
+        app.emit_to(label, event, payload)
+            .map_err(|e| MultiMonitorError {
+                code: "EMIT_FAILED".to_string(),
+                message: format!("Failed to emit event to {} window: {}", label, e),
+            })
+    }
+
+    /// Emit to the alternate output window.
+    pub fn emit_to_alternate_window<T: serde::Serialize + Clone>(
+        &self,
+        event: &str,
+        payload: T,
+    ) -> Result<(), MultiMonitorError> {
+        self.emit_to_output_window(ALTERNATE_WINDOW_LABEL, event, payload)
+    }
+
     pub fn emit_to_live_window<T: serde::Serialize + Clone>(
         &self,
         event: &str,

@@ -223,6 +223,57 @@ class NativeMultiMonitorService {
     }
 
     /**
+     * Open the alternate output on a monitor.
+     *
+     * Runs the same view as the live window in a window of its own, so it
+     * renders everything the projector does. Content is addressed by window
+     * label, which is how the two outputs show different things.
+     */
+    async openAlternateWindow(monitorId?: string | null): Promise<void> {
+        if (!await this.isDesktop()) {
+            throw new Error('The alternate output window requires the desktop app')
+        }
+
+        try {
+            await this.tauriApis!.invoke('open_alternate_window', { monitorId: monitorId ?? null })
+        } catch (e) {
+            const error = e as MultiMonitorError
+            throw new Error(`Failed to open the alternate output window: ${error.message}`)
+        }
+    }
+
+    async closeAlternateWindow(): Promise<void> {
+        if (!await this.isDesktop()) return
+
+        try {
+            await this.tauriApis!.invoke('close_alternate_window')
+        } catch (e) {
+            const error = e as MultiMonitorError
+            throw new Error(`Failed to close the alternate output window: ${error.message}`)
+        }
+    }
+
+    async isAlternateWindowOpen(): Promise<boolean> {
+        if (!await this.isDesktop()) return false
+        try {
+            return await this.tauriApis!.invoke<boolean>('is_alternate_window_open')
+        } catch {
+            return false
+        }
+    }
+
+    /** Send an event to the alternate output window only. */
+    async emitToAlternateWindow(event: string, payload: unknown): Promise<void> {
+        if (!await this.isDesktop()) return
+        try {
+            await this.tauriApis!.invoke('emit_to_alternate_window', { event, payload })
+        } catch (e) {
+            const error = e as MultiMonitorError
+            throw new Error(`Failed to send ${event} to the alternate output: ${error.message}`)
+        }
+    }
+
+    /**
      * Close the live output window
      */
     async closeLiveWindow(): Promise<void> {

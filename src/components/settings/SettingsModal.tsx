@@ -666,7 +666,7 @@ function DisplaySettings({
                                 <p className="text-amber-600 dark:text-amber-400">
                                     Text only: this slide's image or video background isn't drawn on this
                                     feed. Usually what you want for a keyed feed — the switcher supplies
-                                    the background. Sending to a monitor will carry it.
+                                    the background. Choose a monitor to carry it.
                                 </p>
                             )}
                             {alternate.error && (
@@ -678,7 +678,9 @@ function DisplaySettings({
                                 </p>
                             )}
                             <p className="pt-1">
-                                Sending to a monitor isn't wired up yet; NDI works today.
+                                {alternate.config.destination.kind === 'monitor'
+                                    ? 'On a monitor this output renders exactly like the projector, backgrounds included.'
+                                    : 'Over NDI this output draws text only — a monitor carries backgrounds and media.'}
                             </p>
                         </div>
                     </div>
