@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
+import { useGraphicsChannel, GRAPHICS_SOURCE_NAME, GRAPHICS_WIDTH, GRAPHICS_HEIGHT } from '../../hooks/useGraphicsChannel'
 import { useEntitlements, type PromoValidation } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { BibleVersionSettings } from './BibleVersionSettings'
@@ -290,6 +291,22 @@ function DisplaySettings({
         })
     }, [isPro, startProCheckout, ndiStart])
 
+    const graphics = useGraphicsChannel()
+
+    const handleGraphicsStart = useCallback(() => {
+        if (!isPro) {
+            toast.warning('The graphics output is a Selah Pro feature', {
+                description: 'Upgrade to send lower thirds as their own NDI source.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        void graphics.enable().then((error) => {
+            if (error) toast.error('Graphics output could not start', { description: error, duration: 12000 })
+        })
+    }, [graphics, isPro, startProCheckout])
+
     const handleIdentify = useCallback(async (monitorId: string) => {
         if (flashingId) return
         setFlashingId(monitorId)
@@ -539,8 +556,8 @@ function DisplaySettings({
                             <>
                                 <p>This build of Selah was made without NDI support.</p>
                                 <p className="mt-1">
-                                    NDI needs the SDK present when Selah is compiled, so it isn't in
-                                    the standard download yet.
+                                    Releases include it, so this is an unusual build — reinstall from
+                                    the standard download.
                                 </p>
                             </>
                         ) : (
@@ -573,6 +590,77 @@ function DisplaySettings({
                     </div>
                 )}
             </div>
+
+            {/* Graphics Output — the second, independent output. */}
+            {ndiAvailable && (
+                <div>
+                    <div className="flex items-center justify-between mb-2">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                                <Layers className="w-4 h-4" />
+                                Graphics Output
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                A second NDI source for lower thirds, with a transparent background —
+                                independent of what the projector is showing
+                            </p>
+                        </div>
+                        {graphics.isEnabled ? (
+                            <button
+                                onClick={() => void graphics.disable()}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-indigo)] text-white rounded-lg hover:brightness-110"
+                            >
+                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                Stop
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleGraphicsStart}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-indigo)] text-[var(--accent-indigo)] rounded-lg hover:bg-[var(--accent-indigo)]/10"
+                            >
+                                <Layers className="w-3.5 h-3.5" />
+                                Start graphics
+                                {!isPro && (
+                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
+                                        Pro
+                                    </span>
+                                )}
+                            </button>
+                        )}
+                    </div>
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                        <div className="flex items-center justify-between">
+                            <span>Source name</span>
+                            <span className="font-mono">{GRAPHICS_SOURCE_NAME}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span>Resolution</span>
+                            <span className="font-mono">{GRAPHICS_WIDTH}×{GRAPHICS_HEIGHT}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span>Showing</span>
+                            <span className={graphics.slide ? 'text-gray-700 dark:text-gray-300' : ''}>
+                                {graphics.slide ? (graphics.slide.title || 'Untitled slide') : 'Nothing'}
+                            </span>
+                        </div>
+                        {graphics.isEnabled && (
+                            <div className="flex items-center justify-between">
+                                <span>Frames sent</span>
+                                <span className={graphics.framesSent > 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-amber-600 dark:text-amber-400'}>
+                                    {graphics.framesSent.toLocaleString()}
+                                </span>
+                            </div>
+                        )}
+                        {graphics.error && (
+                            <div className="text-red-600 dark:text-red-400">{graphics.error}</div>
+                        )}
+                        <p className="pt-1">
+                            Send a lower third to it with the layers button on any lower-third slide.
+                            It has no screen of its own yet — that arrives with the mirror window.
+                        </p>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

@@ -20,7 +20,10 @@ function recorder() {
         fillRect: (x, y, w, h) => calls.push(`fillRect(${Math.round(x)},${Math.round(y)},${Math.round(w)},${Math.round(h)}) fill=${String(state.fillStyle)}`),
         fillText: (t, x, y) => calls.push(`fillText(${t}@${Math.round(x)},${Math.round(y)}) align=${state.textAlign} font=${state.font}`),
         strokeText: (t, x, y) => calls.push(`strokeText(${t}@${Math.round(x)},${Math.round(y)})`),
-        measureText: (t) => ({ width: t.length * 10 }),
+        measureText: (t) => {
+            const px = Number(/(\d+)px/.exec(state.font)?.[1] ?? 16)
+            return { width: t.length * px * 0.5 }
+        },
         createLinearGradient: () => ({ addColorStop: (o: number, c: string) => calls.push(`gradientStop(${o},${c})`) }),
         get fillStyle() { return state.fillStyle },
         set fillStyle(v) { state.fillStyle = v },
@@ -132,6 +135,66 @@ describe('renderLowerThird', () => {
         const outlined = recorder()
         renderLowerThird(outlined.ctx, slide(['<p>Name</p>'], { textOutlined: true }), HD)
         expect(outlined.calls.some((c) => c.startsWith('strokeText'))).toBe(true)
+    })
+
+    it('carries bold, italic and colour from the editor into the drawing', () => {
+        const { ctx, calls } = recorder()
+        renderLowerThird(
+            ctx,
+            slide(['<p>Pastor <strong>John</strong> <span style="color: #ff0000">Mensah</span></p>']),
+            HD,
+        )
+
+        const bold = calls.find((c) => c.startsWith('fillText(John@'))
+        expect(bold).toContain('font=700')
+        const plain = calls.find((c) => c.startsWith('fillText(Pastor @'))
+        expect(plain).toContain('font=700') // the title's base weight
+        // The coloured run is drawn separately so it can take its own fill.
+        expect(calls.some((c) => c.startsWith('fillText(Mensah@'))).toBe(true)
+    })
+
+    it('draws each styled run in sequence rather than as one string', () => {
+        const { ctx, calls } = recorder()
+        renderLowerThird(ctx, slide(['<p>A <em>B</em> C</p>']), HD)
+
+        const texts = calls.filter((c) => c.startsWith('fillText')).map((c) => c.slice('fillText('.length).split('@')[0])
+        expect(texts).toEqual(['A ', 'B', ' C'])
+        expect(calls.find((c) => c.startsWith('fillText(B@'))).toContain('italic')
+    })
+
+    it('advances x across runs so words do not overlap', () => {
+        const { ctx, calls } = recorder()
+        renderLowerThird(ctx, slide(['<p>A <em>B</em> C</p>']), HD)
+
+        const xs = calls
+            .filter((c) => c.startsWith('fillText'))
+            .map((c) => Number(/@(-?\d+),/.exec(c)![1]))
+        expect(xs[1]).toBeGreaterThan(xs[0])
+        expect(xs[2]).toBeGreaterThan(xs[1])
+    })
+
+    it('wraps a long name onto a second line when there is room', () => {
+        const { ctx, calls } = recorder()
+        const long = '<p>' + 'Reverend Doctor '.repeat(4) + 'Mensah</p>'
+        renderLowerThird(ctx, slide([long]), HD)
+
+        const ys = new Set(calls.filter((c) => c.startsWith('fillText')).map((c) => /@-?\d+,(-?\d+)/.exec(c)![1]))
+        expect(ys.size).toBe(2)
+    })
+
+    it('shrinks instead of wrapping when a subtitle leaves only one line', () => {
+        const long = '<p>' + 'Reverend Doctor '.repeat(4) + 'Mensah</p>'
+        const oneLine = recorder()
+        renderLowerThird(oneLine.ctx, slide([long], { lowerThirdSubtitle: 'Guest Speaker' }), HD)
+
+        const titleCalls = oneLine.calls.filter((c) => c.startsWith('fillText') && !c.includes('Guest'))
+        const ys = new Set(titleCalls.map((c) => /@-?\d+,(-?\d+)/.exec(c)![1]))
+        expect(ys.size).toBe(1)
+
+        // ...and the size actually came down to achieve that.
+        const fontPx = Number(/(\d+)px/.exec(titleCalls[0])![1])
+        const layout = layoutLowerThird(slide([long], { lowerThirdSubtitle: 'Guest Speaker' }), HD)
+        expect(fontPx).toBeLessThan(layout.title.fontPx)
     })
 
     it('draws nothing but the clear for an empty slide', () => {

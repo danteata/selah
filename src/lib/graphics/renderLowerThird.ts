@@ -11,14 +11,14 @@
  *     nothing behind the bar to blur; the translucent fill is kept and the blur
  *     dropped. The switcher composites over live video, which is the real
  *     background.
- *   - Body text is used as plain text. Slide bodies are TipTap HTML, and inline
- *     formatting is not carried; the slide's own style fields (font, colour,
- *     size, alignment) are. Lower thirds are a name and a title in practice. The
- *     upgrade path, if rich formatting is ever wanted, is an SVG foreignObject
- *     drawn through an Image — which brings its own font-embedding problems.
+ *   - Body text is drawn run by run (see `textRuns.ts`), so bold, italic and
+ *     colour from the editor survive. Layout is ours rather than the CSS
+ *     engine's: runs are measured, wrapped and drawn individually, and the size
+ *     steps down until the text fits the bar.
  */
 
 import type { Slide } from '../../types'
+import { fontForRun, parseTextRuns, runsToText, type TextRun } from './textRuns'
 
 /** The subset of CanvasRenderingContext2D this renderer uses, so the geometry can
  *  be tested without a real canvas (happy-dom provides no 2D context). */
@@ -122,7 +122,7 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
     const textRight = margin + barWidth - padding
     const textX = align === 'center' ? width / 2 : align === 'right' ? textRight : textLeft
 
-    const title = plainTextFromHtml(slide.contents?.[0] ?? '')
+    const title = runsToText(parseTextRuns(slide.contents?.[0] ?? ''))
     const subtitle = plainTextFromHtml(style.lowerThirdSubtitle ?? '')
 
     const titleFontPx = barHeight * (subtitle ? 0.42 : 0.5)
@@ -156,6 +156,114 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
         fontFamily: style.font || options.defaultFont || 'Inter, system-ui, sans-serif',
         outlined: !!style.textOutlined,
     }
+}
+
+/** One laid-out line: its runs and the total width, for alignment. */
+interface RunLine {
+    runs: TextRun[]
+    width: number
+}
+
+function measureRun(ctx: Canvas2DLike, run: TextRun, fontPx: number, fontFamily: string, weight: string): number {
+    ctx.font = fontForRun(run, fontPx, fontFamily, weight)
+    return ctx.measureText(run.text).width
+}
+
+/** Greedy word wrap across runs, so a bold word can sit mid-sentence. */
+export function wrapRuns(
+    ctx: Canvas2DLike,
+    runs: TextRun[],
+    options: { fontPx: number; fontFamily: string; weight: string; maxWidth: number },
+): RunLine[] {
+    const lines: RunLine[] = []
+    let current: RunLine = { runs: [], width: 0 }
+
+    for (const run of runs) {
+        // Keep the spaces: they are what separates words across a style change.
+        const words = run.text.split(/(\s+)/).filter((word) => word.length > 0)
+        for (const word of words) {
+            const piece: TextRun = { ...run, text: word }
+            const width = measureRun(ctx, piece, options.fontPx, options.fontFamily, options.weight)
+
+            if (current.width + width > options.maxWidth && current.runs.length > 0 && word.trim()) {
+                lines.push(current)
+                current = { runs: [], width: 0 }
+            }
+            // A wrapped line never starts with the space that caused the break.
+            if (!word.trim() && current.runs.length === 0) continue
+
+            const previous = current.runs[current.runs.length - 1]
+            if (previous && previous.bold === piece.bold && previous.italic === piece.italic && previous.color === piece.color) {
+                previous.text += piece.text
+            } else {
+                current.runs.push(piece)
+            }
+            current.width += width
+        }
+    }
+
+    if (current.runs.length > 0) lines.push(current)
+    return lines
+}
+
+/**
+ * Shrink until the text fits the bar. A long name would otherwise overflow the
+ * bar or be clipped, which on a broadcast graphic reads as a bug.
+ */
+function fitRuns(
+    ctx: Canvas2DLike,
+    runs: TextRun[],
+    options: { fontPx: number; fontFamily: string; weight: string; maxWidth: number; maxLines: number },
+): { lines: RunLine[]; fontPx: number } {
+    let fontPx = options.fontPx
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const lines = wrapRuns(ctx, runs, { ...options, fontPx })
+        if (lines.length <= options.maxLines) return { lines, fontPx }
+        fontPx *= 0.88
+    }
+    return { lines: wrapRuns(ctx, runs, { ...options, fontPx }), fontPx }
+}
+
+function drawLines(
+    ctx: Canvas2DLike,
+    lines: RunLine[],
+    options: {
+        fontPx: number
+        fontFamily: string
+        weight: string
+        align: CanvasTextAlign
+        x: number
+        firstBaselineY: number
+        lineHeight: number
+        color: string
+        outlined: boolean
+    },
+) {
+    // Runs are drawn one after another, so the alignment is applied to the line
+    // as a whole and each run advances the pen.
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+
+    lines.forEach((line, index) => {
+        const y = options.firstBaselineY + index * options.lineHeight
+        let x = options.align === 'center'
+            ? options.x - line.width / 2
+            : options.align === 'right'
+                ? options.x - line.width
+                : options.x
+
+        for (const run of line.runs) {
+            ctx.font = fontForRun(run, options.fontPx, options.fontFamily, options.weight)
+            if (options.outlined) {
+                ctx.lineWidth = Math.max(2, options.fontPx * 0.06)
+                ctx.strokeStyle = 'rgba(0,0,0,0.85)'
+                ctx.strokeText(run.text, x, y)
+            }
+            ctx.fillStyle = run.color ?? options.color
+            ctx.fillText(run.text, x, y)
+            x += ctx.measureText(run.text).width
+        }
+    })
 }
 
 /** Clears the frame to fully transparent and draws the lower third onto it. */
@@ -192,23 +300,54 @@ export function renderLowerThird(
         ctx.fillRect(layout.accentBar.x, layout.accentBar.y, layout.accentBar.width, layout.accentBar.height)
     }
 
-    const drawText = (text: string, x: number, y: number, fontPx: number, align: CanvasTextAlign, color: string, weight: string) => {
-        if (!text) return
-        ctx.font = `${weight} ${Math.round(fontPx)}px ${layout.fontFamily}`
-        ctx.textAlign = align
-        ctx.textBaseline = 'middle'
-        if (layout.outlined) {
-            ctx.lineWidth = Math.max(2, fontPx * 0.06)
-            ctx.strokeStyle = 'rgba(0,0,0,0.85)'
-            ctx.strokeText(text, x, y)
-        }
-        ctx.fillStyle = color
-        ctx.fillText(text, x, y)
+    // Text width available inside the bar, so a long name wraps or shrinks
+    // instead of running past the edge.
+    const textWidth = layout.bar.width - (options.width * PADDING) * 2 - (layout.accentBar?.width ?? 0)
+
+    const titleRuns = parseTextRuns(slide.contents?.[0] ?? '')
+    if (titleRuns.length > 0) {
+        const { lines, fontPx } = fitRuns(ctx, titleRuns, {
+            fontPx: layout.title.fontPx,
+            fontFamily: layout.fontFamily,
+            weight: '700',
+            maxWidth: textWidth,
+            maxLines: layout.subtitle ? 1 : 2,
+        })
+        drawLines(ctx, lines, {
+            fontPx,
+            fontFamily: layout.fontFamily,
+            weight: '700',
+            align: layout.title.align,
+            x: layout.title.x,
+            firstBaselineY: layout.title.y - (lines.length - 1) * fontPx * 0.6,
+            lineHeight: fontPx * 1.2,
+            color: layout.title.color,
+            outlined: layout.outlined,
+        })
     }
 
-    drawText(layout.title.text, layout.title.x, layout.title.y, layout.title.fontPx, layout.title.align, layout.title.color, '700')
     if (layout.subtitle) {
-        drawText(layout.subtitle.text, layout.subtitle.x, layout.subtitle.y, layout.subtitle.fontPx, layout.subtitle.align, layout.subtitle.color, '400')
+        // The subtitle is a plain settings field, not editor markup, so it is a
+        // single unstyled run.
+        const subtitleRuns: TextRun[] = [{ text: layout.subtitle.text, bold: false, italic: false, color: null }]
+        const { lines, fontPx } = fitRuns(ctx, subtitleRuns, {
+            fontPx: layout.subtitle.fontPx,
+            fontFamily: layout.fontFamily,
+            weight: '400',
+            maxWidth: textWidth,
+            maxLines: 1,
+        })
+        drawLines(ctx, lines, {
+            fontPx,
+            fontFamily: layout.fontFamily,
+            weight: '400',
+            align: layout.subtitle.align,
+            x: layout.subtitle.x,
+            firstBaselineY: layout.subtitle.y,
+            lineHeight: fontPx * 1.2,
+            color: layout.subtitle.color,
+            outlined: layout.outlined,
+        })
     }
 
     ctx.restore()
