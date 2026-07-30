@@ -71,7 +71,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install dependencies (Ubuntu only)
         if: startsWith(matrix.platform, 'ubuntu')
@@ -109,12 +109,12 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
@@ -129,6 +129,13 @@ jobs:
       # configure fails with "No CMAKE_C_COMPILER could be found". This action is
       # plain JS (no deprecated actions/cache), so resolving it doesn't break the
       # other jobs the way a Vulkan-setup action did.
+      #
+      # It is the last step here still declaring `using: node20`, and upstream has
+      # been dormant since March 2024 — so it will keep drawing the Node 20
+      # deprecation warning and will break outright when the runners drop that
+      # runtime. Replacing it means calling vcvarsall.bat from a pwsh `run:` step
+      # and exporting the env delta to $GITHUB_ENV; do that on its own, since a
+      # mistake there fails the Windows build ~40 minutes in.
       - name: Setup MSVC developer environment (Windows only)
         if: matrix.platform == 'windows-latest'
         uses: ilammy/msvc-dev-cmd@v1
