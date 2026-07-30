@@ -67,6 +67,23 @@ windows = { version = "0.58", features = [
     # `platform::is_windows_x64_emulated_on_arm64`.
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
+    # Windows.Graphics.Capture pipeline for NDI output (ndi_output::capture_windows).
+    # WebView2 renders through the GPU compositor, so GDI BitBlt/PrintWindow of the
+    # live output window comes back black — WGC is the API that captures composited
+    # windows correctly. All of these are feature gates on the `windows` crate that
+    # is already vendored, not new dependencies.
+    "Foundation",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # ONNX Runtime on Windows is CPU-only, matching macOS/Linux — there is
 # deliberately no `ort-directml` here. The DirectML EP pulled in pyke's prebuilt
@@ -84,6 +101,13 @@ windows = { version = "0.58", features = [
 transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Windows
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# NDI output captures the live output window with XComposite + MIT-SHM
+# (ndi_output::capture_linux). x11-dl is already in the tree via tao/tauri and
+# dlopens libX11/libXext at run time, so this adds no build-time dependency and
+# nothing new for the AppImage to bundle; libc is for the shmget/shmat pair
+# MIT-SHM needs.
+x11-dl = "2.21"
+libc = "0.2"
 transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Linux
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

@@ -14,6 +14,7 @@ import type {
     Hymn,
     Song
 } from '../types'
+import { DEFAULT_ALTERNATE_OUTPUT, type AlternateOutputConfig } from '../types/alternateOutput'
 import { bibleVersionObjects } from '../types'
 import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
 import type { NavSection, SplitPanelMode } from '../types/studio'
@@ -107,6 +108,12 @@ export interface AppState {
     // blank screen (e.g. during prayer) — independent of `liveSlideId`, which
     // keeps pointing at whatever slide is queued up so un-clearing restores it.
     liveOutputBlanked: boolean
+    // A second output, independent of the main one. It can follow the live
+    // content or carry its own, and lands on a monitor or on the network as its
+    // own NDI source.
+    alternateOutput: AlternateOutputConfig
+    // The slide this output shows when its content source is 'independent'.
+    alternateSlide: Slide | null
     // Predictive song-lyric auto-advance (Phase 2 wiring).
     songTracking: SongTrackingState
     // Audio-reactive motion-graphics layer on the live output (Phase 4).
@@ -215,6 +222,8 @@ const initialState: AppState = {
     sharedQueueSlideIds: [],
     liveSlideId: null,
     liveOutputBlanked: false,
+    alternateOutput: DEFAULT_ALTERNATE_OUTPUT,
+    alternateSlide: null,
     songTracking: DEFAULT_SONG_TRACKING,
     visualizerEnabled: false,
     emitter: null,
@@ -293,6 +302,10 @@ interface AppStore extends AppState {
     removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string | null) => void
     setLiveOutputBlanked: (blanked: boolean) => void
+    /** Put a slide on the alternate output, or clear it with null. Only used
+     *  while its content source is 'independent'. */
+    setAlternateSlide: (slide: Slide | null) => void
+    updateAlternateOutput: (patch: Partial<AlternateOutputConfig>) => void
     setSongTrackingEnabled: (enabled: boolean) => void
     setSongTrackingLocked: (locked: boolean) => void
     setSongAutoDetect: (autoDetect: boolean) => void
@@ -666,6 +679,14 @@ export const useAppStore = create<AppStore>()(
 
             setLiveOutputBlanked: (blanked) => {
                 set({ liveOutputBlanked: blanked })
+            },
+
+            setAlternateSlide: (slide) => {
+                set({ alternateSlide: slide })
+            },
+
+            updateAlternateOutput: (patch) => {
+                set((state) => ({ alternateOutput: { ...state.alternateOutput, ...patch } }))
             },
 
             setSongTrackingEnabled: (enabled) => {

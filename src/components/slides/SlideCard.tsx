@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { Trash2, Copy, Bookmark, Pencil, Zap, Lightbulb } from 'lucide-react'
+import { Trash2, Copy, Bookmark, Pencil, Zap, Lightbulb, Layers } from 'lucide-react'
 import type { Slide } from '../../types'
 import { SlideChip } from './SlideChip'
 import { LocalMediaPlaceholder } from './LocalMediaPlaceholder'
@@ -26,6 +26,11 @@ interface SlideCardProps {
     isSaved?: boolean
     onGoLive?: () => void
     onSuggestToQueue?: () => void
+    /** Put this slide on the alternate output. Offered only while that output
+     *  carries its own content rather than following the live one. */
+    onSendToAlternate?: () => void
+    /** This slide is the one currently on the alternate output. */
+    isOnAlternate?: boolean
     lockedBy?: string
 }
 
@@ -44,6 +49,8 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     isSaved = false,
     onGoLive,
     onSuggestToQueue,
+    onSendToAlternate,
+    isOnAlternate,
     lockedBy,
 }: SlideCardProps, ref) => {
     // Get file URL if slide has a backgroundStorageId
@@ -240,6 +247,19 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                         title="Send to Live"
                     >
                         <Zap className="w-4 h-4" />
+                    </button>
+                )}
+                {onSendToAlternate && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onSendToAlternate(); }}
+                        className={`absolute bottom-2 right-2 z-10 p-2 rounded-full shadow-lg transition-all transform ${
+                            isOnAlternate
+                                ? 'bg-[var(--accent-indigo)] text-white opacity-100 scale-100'
+                                : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-white hover:bg-[var(--accent-indigo)] opacity-0 group-hover:opacity-100 focus:opacity-100 scale-90 group-hover:scale-100'
+                        }`}
+                        title={isOnAlternate ? 'On the alternate output — click to remove' : 'Send to the alternate output'}
+                    >
+                        <Layers className="w-4 h-4" />
                     </button>
                 )}
                 {onSuggestToQueue && (

@@ -52,8 +52,9 @@ class NdiOutputService {
 
     /**
      * Whether this build has NDI compiled in — distinct from whether the runtime
-     * is installed. Release builds currently ship without it, so the difference
-     * decides what the UI should tell the operator to do.
+     * is installed on the machine. Releases ship with it since 0.1.12, so in
+     * practice this is only false in a build that deliberately dropped the
+     * feature; the difference decides what the UI tells the operator to do.
      */
     async isSupported(): Promise<boolean> {
         const invoke = await getInvoke()

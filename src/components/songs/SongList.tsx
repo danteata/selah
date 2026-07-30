@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap } from 'lucide-react'
+import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap, Layers } from 'lucide-react'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
+import { useResultNavigation } from '../../hooks/useResultNavigation'
+import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -33,6 +35,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
     const { createSongSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
     const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
+    const alternate = useSendToAlternate()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const lastSearchTrackRef = useRef<number>(0)
 
@@ -57,6 +60,15 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
             addToQueue(slides)
         }
     }, [getSong, createSongSlides, selectedTemplate, addAndGoLive, addToQueue, trackEvent])
+
+    /** Put a song on the alternate output. It holds one slide, so this sends the
+     *  song's first verse — enough for a title or opening line on a second
+     *  screen, and the reason a queue of its own is the obvious next step. */
+    const sendSongToAlternate = useCallback(async (song: Song) => {
+        const full = await getSong(song)
+        const slides = createSongSlides((full ?? song) as Song, { template: selectedTemplate })
+        if (slides[0]) alternate.send(slides[0])
+    }, [getSong, createSongSlides, selectedTemplate, alternate])
 
     const voice = useVoiceSearch({
         onFinal: (text) => setQuery(text),
@@ -88,6 +100,19 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
             .map((r) => byId.get(r.item.id))
             .filter((s): s is Song => !!s)
     }, [songs, songIndex, query])
+
+    // Same keyboard contract as the Bible and dictionary panels: the top hit is
+    // highlighted as results arrive, Enter sends it live, Shift+Enter queues it.
+    const { focusedIndex, setFocusedIndex, handleKeyDown, listRef } = useResultNavigation<HTMLDivElement>({
+        count: filteredSongs.length,
+        resetKey: `${query}:${filteredSongs.length}`,
+        onActivate: (index, { queue }) => {
+            const song = filteredSongs[index]
+            if (song) void quickSelect(song, !queue)
+        },
+        // The detail view owns the keyboard while a song is open.
+        enabled: !selectedSong,
+    })
 
     // Throttled song search tracking — fire at most once per 2s
     useEffect(() => {
@@ -171,7 +196,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
 
     return (
         <>
-            <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
+            <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg" onKeyDown={handleKeyDown}>
                 {/* Header - Hidden when inline */}
                 {!isInline && (
                     <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
@@ -237,7 +262,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
 
                 {/* Songs List */}
                 {!selectedSong ? (
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="flex-1 overflow-y-auto" ref={listRef}>
                         {songsLoading && filteredSongs.length === 0 ? (
                             /* Skeleton while the library loads — avoids flashing the
                                deceptive "No songs yet" state before songs arrive. */
@@ -278,10 +303,16 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                             </div>
                         ) : (
                             <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                                {filteredSongs.map((song) => (
+                                {filteredSongs.map((song, index) => (
                                     <div
                                         key={song._id || song.id}
-                                        className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 group"
+                                        data-result-index={index}
+                                        onMouseEnter={() => setFocusedIndex(index)}
+                                        className={`flex items-center justify-between px-4 py-3 group ${
+                                            focusedIndex === index
+                                                ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
+                                                : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                                        }`}
                                     >
                                         <button
                                             onClick={() => setSelectedSong(song)}
@@ -322,6 +353,16 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                                 <Plus className="w-3.5 h-3.5" />
                                                 Add
                                             </button>
+                                            {alternate.canSend && (
+                                                <button
+                                                    onClick={() => void sendSongToAlternate(song)}
+                                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-indigo)] hover:bg-[var(--accent-indigo)]/10 transition-colors"
+                                                    title="Send to the alternate output"
+                                                >
+                                                    <Layers className="w-3.5 h-3.5" />
+                                                    Alt
+                                                </button>
+                                            )}
                                             {canGoLive && (
                                                 <button
                                                     onClick={() => void quickSelect(song, true)}

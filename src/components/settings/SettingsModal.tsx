@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
+import { useAlternateOutput } from '../../hooks/useAlternateOutput'
+import { OUTPUT_FORMATS, formatLabel } from '../../types/alternateOutput'
 import { useEntitlements, type PromoValidation } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { BibleVersionSettings } from './BibleVersionSettings'
@@ -279,8 +281,32 @@ function DisplaySettings({
             })
             return
         }
-        void ndiStart()
+        // Same refusals as the Program Output toggle — say them out loud instead
+        // of letting the promise reject into the console.
+        void ndiStart().then((refusal) => {
+            if (!refusal) return
+            toast.error('NDI output could not start', {
+                description: refusal.message,
+                duration: 12000,
+            })
+        })
     }, [isPro, startProCheckout, ndiStart])
+
+    const alternate = useAlternateOutput()
+
+    const handleAlternateStart = useCallback(() => {
+        if (!isPro) {
+            toast.warning('The alternate output is a Selah Pro feature', {
+                description: 'Upgrade to run a second output alongside your main one.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        void alternate.enable().then((error: string | null) => {
+            if (error) toast.error('Alternate output could not start', { description: error, duration: 12000 })
+        })
+    }, [alternate, isPro, startProCheckout])
 
     const handleIdentify = useCallback(async (monitorId: string) => {
         if (flashingId) return
@@ -402,6 +428,264 @@ function DisplaySettings({
                 )}
             </div>
 
+            {/* NDI Output — the MAIN output's network destination, so it belongs with
+                the main output display rather than down with the general preferences. */}
+            <div>
+                <div className="flex items-center justify-between mb-2">
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                            <Radio className="w-4 h-4" />
+                            Main Output over NDI
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Stream the main output over the network, captured from the live output window
+                        </p>
+                    </div>
+                    {ndiAvailable && (
+                        ndiRunning ? (
+                            <button
+                                onClick={ndiStop}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50"
+                            >
+                                <RadioTower className="w-3.5 h-3.5" />
+                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                Stop
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleNdiStart}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50"
+                            >
+                                <Radio className="w-3.5 h-3.5" />
+                                Start NDI
+                                {!isPro && (
+                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
+                                        Pro
+                                    </span>
+                                )}
+                            </button>
+                        )
+                    )}
+                </div>
+                {!ndiAvailable && (
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400">
+                        {!isDesktop ? (
+                            <p>NDI output is only available in the desktop app.</p>
+                        ) : !ndiSupported ? (
+                            // Installing NDI Tools cannot help here, so don't ask
+                            // for it: this build has NDI compiled out.
+                            <>
+                                <p>This build of Selah was made without NDI support.</p>
+                                <p className="mt-1">
+                                    Releases include it, so this is an unusual build — reinstall from
+                                    the standard download.
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <p>NDI runtime not found.</p>
+                                <p className="mt-1">Install <a href="https://ndi.video/tools/" target="_blank" rel="noreferrer" className="text-[var(--accent-teal)] hover:underline">NDI Tools</a> and restart Selah.</p>
+                            </>
+                        )}
+                    </div>
+                )}
+                {ndiAvailable && ndiState && (
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                        <div className="flex items-center justify-between">
+                            <span>Status</span>
+                            <span className={ndiRunning ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
+                                {ndiRunning ? 'Streaming' : 'Idle'}
+                            </span>
+                        </div>
+                        {ndiRunning && (
+                            <div className="flex items-center justify-between">
+                                <span>Source name</span>
+                                <span className="font-mono">{ndiState.sourceName}</span>
+                            </div>
+                        )}
+                        {ndiState.error && (
+                            <div className="text-red-600 dark:text-red-400">
+                                {ndiState.error}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* Alternate Output Display — sits with the main output, since it is the
+                same kind of setting. */}
+            {ndiAvailable && (
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                                <Layers className="w-4 h-4" />
+                                Alternate Output Display
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                A second output alongside the main one — on its own monitor, or on the
+                                network as an NDI source
+                            </p>
+                        </div>
+                        {alternate.config.enabled ? (
+                            <button
+                                onClick={() => void alternate.disable()}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-indigo)] text-white rounded-lg hover:brightness-110"
+                            >
+                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                Stop
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleAlternateStart}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-indigo)] text-[var(--accent-indigo)] rounded-lg hover:bg-[var(--accent-indigo)]/10"
+                            >
+                                <Layers className="w-3.5 h-3.5" />
+                                Enable
+                                {!isPro && (
+                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
+                                        Pro
+                                    </span>
+                                )}
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="space-y-3">
+                        {/* Destination — monitors and NDI are peers here, the way
+                            other presentation software treats them. */}
+                        <div className="flex items-center justify-between gap-3">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">Output to</label>
+                            <select
+                                value={alternate.config.destination.kind === 'ndi'
+                                    ? 'ndi'
+                                    : `monitor:${alternate.config.destination.monitorId}`}
+                                onChange={(e) => {
+                                    const value = e.target.value
+                                    alternate.update(value === 'ndi'
+                                        ? { destination: { kind: 'ndi' } }
+                                        : { destination: { kind: 'monitor', monitorId: value.slice('monitor:'.length) } })
+                                }}
+                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                            >
+                                <option value="ndi">NDI stream</option>
+                                {monitors.map((monitor, index) => (
+                                    <option key={monitor.id} value={`monitor:${monitor.id}`}>
+                                        {monitor.name || `Monitor ${index + 1}`}
+                                        {monitor.is_primary ? ' (primary)' : ''}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {alternate.config.destination.kind === 'ndi' && (
+                            <>
+                                <div className="flex items-center justify-between gap-3">
+                                    <label className="text-sm text-gray-600 dark:text-gray-400">Output format</label>
+                                    <select
+                                        value={formatLabel(alternate.config.format)}
+                                        onChange={(e) => {
+                                            const chosen = OUTPUT_FORMATS.find((f) => formatLabel(f) === e.target.value)
+                                            if (chosen) alternate.update({ format: chosen })
+                                        }}
+                                        className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                                    >
+                                        {OUTPUT_FORMATS.map((format) => (
+                                            <option key={formatLabel(format)} value={formatLabel(format)}>
+                                                {formatLabel(format)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <label className="text-sm text-gray-600 dark:text-gray-400">Alpha channel</label>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            Keep transparency so a switcher can key this over video
+                                        </p>
+                                    </div>
+                                    <select
+                                        value={alternate.config.alpha ? 'enabled' : 'disabled'}
+                                        onChange={(e) => alternate.update({ alpha: e.target.value === 'enabled' })}
+                                        className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                                    >
+                                        <option value="enabled">Enabled</option>
+                                        <option value="disabled">Disabled</option>
+                                    </select>
+                                </div>
+                            </>
+                        )}
+
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <label className="text-sm text-gray-600 dark:text-gray-400">Content</label>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {alternate.config.contentSource === 'follow'
+                                        ? 'Shows whatever is live on the main output'
+                                        : 'Shows only what you send to it, so the two outputs can differ'}
+                                </p>
+                            </div>
+                            <select
+                                value={alternate.config.contentSource}
+                                onChange={(e) => alternate.update({ contentSource: e.target.value as 'follow' | 'independent' })}
+                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                            >
+                                <option value="follow">Follow main output</option>
+                                <option value="independent">Its own content</option>
+                            </select>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                            <label className="text-sm text-gray-600 dark:text-gray-400">NDI source name</label>
+                            <input
+                                value={alternate.config.sourceName}
+                                onChange={(e) => alternate.update({ sourceName: e.target.value })}
+                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] font-mono"
+                            />
+                        </div>
+
+                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                            <div className="flex items-center justify-between">
+                                <span>Showing</span>
+                                <span className={alternate.slide ? 'text-gray-700 dark:text-gray-300' : ''}>
+                                    {alternate.slide ? (alternate.slide.title || 'Untitled slide') : 'Nothing'}
+                                </span>
+                            </div>
+                            {alternate.config.enabled && (
+                                <div className="flex items-center justify-between">
+                                    <span>Frames sent</span>
+                                    <span className={alternate.framesSent > 0 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-amber-600 dark:text-amber-400'}>
+                                        {alternate.framesSent.toLocaleString()}
+                                    </span>
+                                </div>
+                            )}
+                            {alternate.textOnly && (
+                                <p className="text-amber-600 dark:text-amber-400">
+                                    Text only: this slide's image or video background isn't drawn on this
+                                    feed. Usually what you want for a keyed feed — the switcher supplies
+                                    the background. Choose a monitor to carry it.
+                                </p>
+                            )}
+                            {alternate.error && (
+                                <div className="text-red-600 dark:text-red-400">{alternate.error}</div>
+                            )}
+                            {alternate.config.contentSource === 'independent' && (
+                                <p className="pt-1">
+                                    Send a slide to this output with the layers button on any slide.
+                                </p>
+                            )}
+                            <p className="pt-1">
+                                {alternate.config.destination.kind === 'monitor'
+                                    ? 'On a monitor this output renders exactly like the projector, backgrounds included.'
+                                    : 'Over NDI this output draws text only — a monitor carries backgrounds and media.'}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Font Selection */}
             <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -481,90 +765,6 @@ function DisplaySettings({
                 </button>
             </div>
 
-            {/* NDI Output */}
-            <div>
-                <div className="flex items-center justify-between mb-2">
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                            <Radio className="w-4 h-4" />
-                            NDI Output
-                        </label>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Stream live output over the network via NDI
-                        </p>
-                    </div>
-                    {ndiAvailable && (
-                        ndiRunning ? (
-                            <button
-                                onClick={ndiStop}
-                                disabled={ndiLoading}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50"
-                            >
-                                <RadioTower className="w-3.5 h-3.5" />
-                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                                Stop
-                            </button>
-                        ) : (
-                            <button
-                                onClick={handleNdiStart}
-                                disabled={ndiLoading}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50"
-                            >
-                                <Radio className="w-3.5 h-3.5" />
-                                Start NDI
-                                {!isPro && (
-                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
-                                        Pro
-                                    </span>
-                                )}
-                            </button>
-                        )
-                    )}
-                </div>
-                {!ndiAvailable && (
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400">
-                        {!isDesktop ? (
-                            <p>NDI output is only available in the desktop app.</p>
-                        ) : !ndiSupported ? (
-                            // Installing NDI Tools cannot help here, so don't ask
-                            // for it: this build has NDI compiled out.
-                            <>
-                                <p>This build of Selah was made without NDI support.</p>
-                                <p className="mt-1">
-                                    NDI needs the SDK present when Selah is compiled, so it isn't in
-                                    the standard download yet.
-                                </p>
-                            </>
-                        ) : (
-                            <>
-                                <p>NDI runtime not found.</p>
-                                <p className="mt-1">Install <a href="https://ndi.video/tools/" target="_blank" rel="noreferrer" className="text-[var(--accent-teal)] hover:underline">NDI Tools</a> and restart Selah.</p>
-                            </>
-                        )}
-                    </div>
-                )}
-                {ndiAvailable && ndiState && (
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
-                        <div className="flex items-center justify-between">
-                            <span>Status</span>
-                            <span className={ndiRunning ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
-                                {ndiRunning ? 'Streaming' : 'Idle'}
-                            </span>
-                        </div>
-                        {ndiRunning && (
-                            <div className="flex items-center justify-between">
-                                <span>Source name</span>
-                                <span className="font-mono">{ndiState.sourceName}</span>
-                            </div>
-                        )}
-                        {ndiState.error && (
-                            <div className="text-red-600 dark:text-red-400">
-                                {ndiState.error}
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
         </div>
     )
 }

@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Search, X, ChevronLeft, Music, Zap, Plus } from 'lucide-react'
+import { Search, X, ChevronLeft, Music, Zap, Plus, Layers } from 'lucide-react'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
+import { useResultNavigation } from '../../hooks/useResultNavigation'
+import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -30,7 +32,14 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
     const { createHymnSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
     const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
+    const alternate = useSendToAlternate()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
+
+    /** The alternate output holds one slide, so this sends the hymn's first verse. */
+    const sendHymnToAlternate = useCallback((hymn: Hymn) => {
+        const slides = createHymnSlides(hymn, { template: selectedTemplate })
+        if (slides[0]) alternate.send(slides[0])
+    }, [createHymnSlides, selectedTemplate, alternate])
 
     // Quick Add / Live straight from a hymn row — no detail-view detour.
     const quickSelect = useCallback((hymn: Hymn, goLive: boolean) => {
@@ -90,6 +99,17 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
             .filter((h): h is Hymn => !!h)
     }, [hymns, hymnIndex, query])
 
+    // Same keyboard contract as the songs, Bible and dictionary panels.
+    const { focusedIndex, setFocusedIndex, handleKeyDown, listRef } = useResultNavigation<HTMLDivElement>({
+        count: filteredHymns.length,
+        resetKey: `${query}:${filteredHymns.length}`,
+        onActivate: (index, { queue }) => {
+            const hymn = filteredHymns[index]
+            if (hymn) quickSelect(hymn, !queue)
+        },
+        enabled: !selectedHymn,
+    })
+
     const handleCreateSlides = useCallback(() => {
         if (selectedHymn) {
             const slides = createHymnSlides(selectedHymn as any, { template: selectedTemplate })
@@ -111,7 +131,7 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
     // load (see below), consistent with the songs list.
 
     return (
-        <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
+        <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg" onKeyDown={handleKeyDown}>
             {/* Header - Hidden when inline */}
             {!isInline && (
                 <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
@@ -153,7 +173,7 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
 
             {/* Hymn List */}
             {!selectedHymn ? (
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto" ref={listRef}>
                     {loading && filteredHymns.length === 0 ? (
                         /* Skeleton while hymns load — avoids a spinner / empty flash. */
                         <div className="p-3 space-y-2.5">
@@ -174,10 +194,16 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
                         </div>
                     ) : (
                         <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                            {filteredHymns.map((hymn) => (
+                            {filteredHymns.map((hymn, index) => (
                                 <div
                                     key={hymn.number}
-                                    className="flex items-center justify-between gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
+                                    data-result-index={index}
+                                    onMouseEnter={() => setFocusedIndex(index)}
+                                    className={`flex items-center justify-between gap-2 px-4 py-3 transition-colors group ${
+                                        focusedIndex === index
+                                            ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
+                                            : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                                    }`}
                                 >
                                     <button
                                         onClick={() => setSelectedHymn(hymn)}
@@ -208,6 +234,16 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
                                             <Plus className="w-3.5 h-3.5" />
                                             Add
                                         </button>
+                                        {alternate.canSend && (
+                                            <button
+                                                onClick={() => sendHymnToAlternate(hymn)}
+                                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-indigo)] hover:bg-[var(--accent-indigo)]/10 transition-colors"
+                                                title="Send to the alternate output"
+                                            >
+                                                <Layers className="w-3.5 h-3.5" />
+                                                Alt
+                                            </button>
+                                        )}
                                         {canGoLive && (
                                             <button
                                                 onClick={() => quickSelect(hymn, true)}

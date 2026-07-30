@@ -11,6 +11,11 @@ use super::types::*;
 /// The name of the live output window
 pub const LIVE_WINDOW_LABEL: &str = "live-output";
 
+/// The alternate output's window. A second window rather than a second view in
+/// the first one: it has to sit on its own display, and events are addressed by
+/// window label, which is what lets it carry different content.
+pub const ALTERNATE_WINDOW_LABEL: &str = "alternate-output";
+
 /// State for multi-monitor management
 pub struct MultiMonitorState {
     /// The application handle

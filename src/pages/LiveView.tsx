@@ -56,6 +56,10 @@ export default function LiveView() {
     const { trackPage, trackEvent } = useAnalytics()
 
     const [flashColor, setFlashColor] = useState<string | null>(null)
+    // 'alternate' when this window is the alternate output. Both outputs run this
+    // same view and are told apart by which window each event is addressed to;
+    // this only affects what the window shows before its first event arrives.
+    const outputRole = searchParams.get('output') === 'alternate' ? 'alternate' : 'main'
     const monitorId = searchParams.get('monitorId') || null
     const monitorColor = searchParams.get('monitorColor') || null
     const monitorName = searchParams.get('monitorName') || null
@@ -115,9 +119,14 @@ export default function LiveView() {
                     if (payload.slideData) {
                         setLiveState(prev => {
                             if (!prev) return prev
-                            const slides = prev.slides.map(s =>
-                                s.id === payload.slideId ? payload.slideData! : s
-                            )
+                            // Append when the slide isn't in this window's snapshot
+                            // rather than only replacing: the alternate output can
+                            // be sent a slide that was never in the queue, and
+                            // replace-only left it with nothing to render.
+                            const known = prev.slides.some(s => s.id === payload.slideId)
+                            const slides = known
+                                ? prev.slides.map(s => (s.id === payload.slideId ? payload.slideData! : s))
+                                : [...prev.slides, payload.slideData!]
                             return { ...prev, slides }
                         })
                     }
@@ -212,7 +221,10 @@ export default function LiveView() {
             try {
                 const parsed = JSON.parse(storedState)
                 setLiveState(parsed)
-                if (!currentSlideId && parsed.liveSlideId) {
+                // The alternate output must not adopt the projector's slide — its
+                // own content arrives addressed to its window. The rest of this
+                // snapshot (fonts, verse-reference styling) is still wanted.
+                if (outputRole !== 'alternate' && !currentSlideId && parsed.liveSlideId) {
                     setCurrentSlideId(parsed.liveSlideId)
                 }
             } catch (e) {

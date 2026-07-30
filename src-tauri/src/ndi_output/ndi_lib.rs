@@ -43,6 +43,14 @@ const fn fourcc(a: u8, b: u8, c: u8, d: u8) -> u32 {
 
 /// `NDIlib_FourCC_video_type_BGRA`.
 pub const FOURCC_BGRA: u32 = fourcc(b'B', b'G', b'R', b'A');
+/// `NDIlib_FourCC_video_type_BGRX` — same layout as BGRA with the fourth byte
+/// ignored. Needed for X11 depth-24 windows, whose padding byte is zero: sent as
+/// BGRA a receiver reads that as fully transparent and shows black.
+pub const FOURCC_BGRX: u32 = fourcc(b'B', b'G', b'R', b'X');
+/// `NDIlib_FourCC_video_type_RGBA`. Canvas pixels are RGBA with straight
+/// (unpremultiplied) alpha, which is exactly what NDI wants — so a frame drawn in
+/// the app goes out without any channel swizzling.
+pub const FOURCC_RGBA: u32 = fourcc(b'R', b'G', b'B', b'A');
 /// `NDIlib_FourCC_audio_type_FLTp` — planar 32-bit float.
 pub const FOURCC_FLTP: u32 = fourcc(b'F', b'L', b'T', b'p');
 /// `NDIlib_frame_format_type_progressive`.
@@ -386,6 +394,8 @@ mod tests {
         // 'BGRA' -> 0x41524742. Getting this wrong would send channel-swapped
         // video, which is why it's pinned by a test rather than eyeballed.
         assert_eq!(FOURCC_BGRA, 0x4152_4742);
+        assert_eq!(FOURCC_BGRX, 0x5852_4742);
+        assert_eq!(FOURCC_RGBA, 0x4142_4752);
         assert_eq!(FOURCC_FLTP, 0x7054_4C46);
     }
 

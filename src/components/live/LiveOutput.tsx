@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Plus, Eye, EyeOff, Rows3, Columns2, Maximize2 } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Plus, Eye, EyeOff, Rows3, Columns2, Maximize2, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
-import { useNdiOutput } from '../../hooks/useNdiOutput'
+import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../../hooks/useNdiOutput'
+import { useAlternateOutput } from '../../hooks/useAlternateOutput'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { useLiveSession, useVerseNavigationShortcuts, useKeyboardShortcut } from '../../hooks'
@@ -97,25 +98,39 @@ export function LiveOutput() {
         isLoading: ndiLoading,
         startOutput: ndiStart,
         stopOutput: ndiStop,
+        state: ndiState,
     } = useNdiOutput()
+    const ndiSending = (ndiState?.framesSent ?? 0) > 0
     const { isPro, startProCheckout } = useEntitlements()
 
-    // NDI network streaming is Pro-only; free users get an upsell.
-    const handleNdiToggle = useCallback(() => {
-        if (ndiRunning) {
-            void ndiStop()
+
+    const alternate = useAlternateOutput()
+
+    // Independent of the program output's NDI feed: this one carries the graphics
+    // channel's own slide, with alpha, as a second source.
+    const handleAlternateToggle = useCallback(() => {
+        if (alternate.config.enabled) {
+            void alternate.disable()
             return
         }
         if (!isPro) {
-            toast.warning('NDI output is a Selah Pro feature', {
-                description: 'Upgrade to stream your live output over the network via NDI.',
+            toast.warning('The alternate output is a Selah Pro feature', {
+                description: 'Upgrade to run a second output alongside your main one.',
                 duration: 10000,
                 action: { label: 'Upgrade', onClick: () => void startProCheckout() },
             })
             return
         }
-        void ndiStart()
-    }, [ndiRunning, isPro, startProCheckout, ndiStart, ndiStop])
+        void alternate.enable().then((error: string | null) => {
+            if (!error) {
+                toast.success('Alternate output on', {
+                    description: `Take "${alternate.config.sourceName}" in your switcher.`,
+                })
+                return
+            }
+            toast.error('Alternate output could not start', { description: error, duration: 12000 })
+        })
+    }, [alternate, isPro, startProCheckout])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -443,6 +458,39 @@ export function LiveOutput() {
         }
     }, [liveOutputMonitorId, isDesktop, openLiveWindow, detectMonitors, liveSlideId])
 
+    // NDI network streaming is Pro-only; free users get an upsell.
+    const handleNdiToggle = useCallback(() => {
+        if (ndiRunning) {
+            void ndiStop()
+            return
+        }
+        if (!isPro) {
+            toast.warning('NDI output is a Selah Pro feature', {
+                description: 'Upgrade to stream your live output over the network via NDI.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        // The backend refuses for reasons the operator can act on — no Screen
+        // Recording permission, no live output window open, no capture support on
+        // this platform. `void ndiStart()` used to drop those on the floor as an
+        // uncaught promise, so the most useful sentence in the feature only ever
+        // appeared in the devtools console.
+        void ndiStart().then((refusal) => {
+            if (!refusal) return
+            toast.error('NDI output could not start', {
+                description: refusal.message,
+                duration: 12000,
+                // Nobody should have to know that NDI mirrors the live output
+                // window, or that the order matters — offer the missing step.
+                action: refusal.code === NDI_LIVE_WINDOW_MISSING
+                    ? { label: 'Open live output', onClick: () => void handleOpenLive() }
+                    : undefined,
+            })
+        })
+    }, [ndiRunning, isPro, startProCheckout, ndiStart, ndiStop, handleOpenLive])
+
     // Handle screen selection
     const handleScreenSelect = useCallback(async (screenId: string) => {
         if (isDesktop) {
@@ -694,8 +742,39 @@ export function LiveOutput() {
                         </span>
                     )}
                     {ndiRunning && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/20">
-                            NDI ACTIVE
+                        /* "Active" used to mean nothing more than "the sender was
+                           created", which is how a black feed still read as ACTIVE.
+                           It now follows the frames the sender has really pushed. */
+                        ndiSending ? (
+                            <span
+                                title={`Sending ${ndiState?.framesSent?.toLocaleString() ?? 0} frames`}
+                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/20"
+                            >
+                                NDI ACTIVE
+                            </span>
+                        ) : (
+                            <span
+                                title="The NDI source is announced but no frames have been captured yet — receivers will show black."
+                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-amber-500/10 text-amber-500 rounded-full border border-amber-500/20"
+                            >
+                                NDI — NO FRAMES
+                            </span>
+                        )
+                    )}
+                    {alternate.config.enabled && (
+                        <span
+                            title={alternate.textOnly
+                                ? `Alternate output: text only — this slide's background isn't drawn on this feed (${alternate.framesSent.toLocaleString()} frames sent)`
+                                : alternate.slide
+                                    ? `Alternate output: ${alternate.framesSent.toLocaleString()} frames sent`
+                                    : 'Alternate output is on with nothing on it'}
+                            className={`flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border ${
+                                alternate.framesSent > 0
+                                    ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)] border-[var(--accent-indigo)]/20'
+                                    : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                            }`}
+                        >
+                            {alternate.slide ? (alternate.textOnly ? 'ALT — TEXT ONLY' : 'ALT LIVE') : 'ALT EMPTY'}
                         </span>
                     )}
                 </div>
@@ -709,6 +788,17 @@ export function LiveOutput() {
                             title={isPro ? 'NDI Output' : 'NDI Output (Pro)'}
                         >
                             <Radio className="w-4 h-4" />
+                        </button>
+                    )}
+                    {ndiAvailable && (
+                        <button
+                            onClick={handleAlternateToggle}
+                            className={`p-1.5 rounded-lg transition-colors ${alternate.config.enabled ? 'text-[var(--accent-indigo)] bg-[var(--accent-indigo)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
+                            title={isPro
+                                ? 'Alternate output — a second output on a monitor or over NDI'
+                                : 'Alternate output (Pro)'}
+                        >
+                            <Layers className="w-4 h-4" />
                         </button>
                     )}
                     <button

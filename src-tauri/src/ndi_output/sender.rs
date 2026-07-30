@@ -23,7 +23,6 @@ struct NdiSenderInner {
     source_name: String,
 }
 
-static FRAME_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn compute_timecode(frame_num: u64) -> i64 {
     (frame_num * 1001 / 30) as i64
@@ -57,12 +56,17 @@ pub fn copy_frame_data(src: &[u8], dst: &mut [u8], width: u32, height: u32, src_
 
 pub struct NdiSender {
     inner: RwLock<Option<NdiSenderInner>>,
+    /// Per-sender, not a global: with a second sender (a graphics channel
+    /// alongside the program output) a shared counter would interleave the two
+    /// streams' timecodes and frame counts.
+    frames: AtomicU64,
 }
 
 impl NdiSender {
     pub fn new() -> Self {
         Self {
             inner: RwLock::new(None),
+            frames: AtomicU64::new(0),
         }
     }
 
@@ -80,7 +84,7 @@ impl NdiSender {
             config.source_name
         );
 
-        FRAME_COUNTER.store(0, Ordering::SeqCst);
+        self.frames.store(0, Ordering::SeqCst);
 
         *self.inner.write() = Some(NdiSenderInner {
             sender,
@@ -104,12 +108,25 @@ impl NdiSender {
         self.inner.read().is_some()
     }
 
+    /// Send a BGRA frame. Callers whose pixels have no meaningful alpha should use
+    /// `send_frame_with_fourcc` with `FOURCC_BGRX` instead.
     pub fn send_frame(
         &self,
         data: &[u8],
         width: u32,
         height: u32,
         bytes_per_row: i32,
+    ) -> Result<(), String> {
+        self.send_frame_with_fourcc(data, width, height, bytes_per_row, FOURCC_BGRA)
+    }
+
+    pub fn send_frame_with_fourcc(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        bytes_per_row: i32,
+        four_cc: u32,
     ) -> Result<(), String> {
         let inner = self.inner.read();
         let sender_inner = inner.as_ref().ok_or("NDI sender not running")?;
@@ -125,7 +142,7 @@ impl NdiSender {
             ));
         }
 
-        let frame_num = FRAME_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let frame_num = self.frames.fetch_add(1, Ordering::SeqCst);
         let timecode = compute_timecode(frame_num);
         let timestamp = compute_timestamp(frame_num);
 
@@ -153,7 +170,7 @@ impl NdiSender {
         let frame = VideoFrameV2 {
             xres: width as i32,
             yres: height as i32,
-            four_cc: FOURCC_BGRA,
+            four_cc,
             frame_rate_n: 30,
             frame_rate_d: 1,
             // 0 means "use xres/yres", which is what we want for square pixels.
@@ -204,7 +221,7 @@ impl NdiSender {
     }
 
     pub fn frames_sent(&self) -> u64 {
-        FRAME_COUNTER.load(Ordering::SeqCst)
+        self.frames.load(Ordering::SeqCst)
     }
 
     pub fn source_name(&self) -> Option<String> {
