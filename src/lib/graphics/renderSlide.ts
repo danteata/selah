@@ -32,6 +32,20 @@ const TEXT_MARGIN = 0.08
 const CAPTION_GAP = 0.03
 
 /**
+ * Body text size bounds, as a fraction of frame height. These mirror
+ * AutoFitText's minPx 18 / maxPx 160 at 1080p, so the alternate output fills its
+ * frame the way the projector does — and scales with the output format.
+ *
+ * The slide's own `fontSize` is deliberately NOT used as the starting size: the
+ * DOM renderer doesn't either (it auto-fits between these bounds), and treating
+ * that value as pixels here produced text a few pixels tall.
+ */
+const BODY_MAX_FRACTION = 160 / 1080
+const BODY_MIN_FRACTION = 18 / 1080
+/** Share of the frame height the body may occupy before it has to shrink. */
+const BODY_HEIGHT_FRACTION = 0.74
+
+/**
  * Whether the canvas path can draw this slide *in full*. False means the text
  * will be drawn but its background won't — see the module comment.
  */
@@ -61,14 +75,16 @@ export function renderTextSlide(ctx: Canvas2DLike, slide: Slide, options: SlideR
     const captionRuns = isCaptionedSlideType(slide.type) ? parseTextRuns(slideCaptionHtml(slide)) : []
 
     if (bodyRuns.length > 0) {
-        const startPx = slide.slideStyle?.fontSize ? slide.slideStyle.fontSize * (height / 1080) : height * 0.09
         const { lines, fontPx } = fitRuns(ctx, bodyRuns, {
-            fontPx: startPx,
+            // Start at the maximum and shrink: that is what makes short text big.
+            fontPx: height * BODY_MAX_FRACTION,
             fontFamily,
             weight: '600',
             maxWidth,
-            // Leave room for a caption when there is one.
-            maxLines: captionRuns.length > 0 ? 5 : 6,
+            maxLines: 12,
+            maxHeight: height * (captionRuns.length > 0 ? BODY_HEIGHT_FRACTION - 0.08 : BODY_HEIGHT_FRACTION),
+            lineHeightRatio: 1.25,
+            minFontPx: height * BODY_MIN_FRACTION,
         })
 
         const lineHeight = fontPx * 1.25

@@ -428,6 +428,92 @@ function DisplaySettings({
                 )}
             </div>
 
+            {/* NDI Output — the MAIN output's network destination, so it belongs with
+                the main output display rather than down with the general preferences. */}
+            <div>
+                <div className="flex items-center justify-between mb-2">
+                    <div>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                            <Radio className="w-4 h-4" />
+                            Main Output over NDI
+                        </label>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            Stream the main output over the network, captured from the live output window
+                        </p>
+                    </div>
+                    {ndiAvailable && (
+                        ndiRunning ? (
+                            <button
+                                onClick={ndiStop}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50"
+                            >
+                                <RadioTower className="w-3.5 h-3.5" />
+                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                Stop
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleNdiStart}
+                                disabled={ndiLoading}
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50"
+                            >
+                                <Radio className="w-3.5 h-3.5" />
+                                Start NDI
+                                {!isPro && (
+                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
+                                        Pro
+                                    </span>
+                                )}
+                            </button>
+                        )
+                    )}
+                </div>
+                {!ndiAvailable && (
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400">
+                        {!isDesktop ? (
+                            <p>NDI output is only available in the desktop app.</p>
+                        ) : !ndiSupported ? (
+                            // Installing NDI Tools cannot help here, so don't ask
+                            // for it: this build has NDI compiled out.
+                            <>
+                                <p>This build of Selah was made without NDI support.</p>
+                                <p className="mt-1">
+                                    Releases include it, so this is an unusual build — reinstall from
+                                    the standard download.
+                                </p>
+                            </>
+                        ) : (
+                            <>
+                                <p>NDI runtime not found.</p>
+                                <p className="mt-1">Install <a href="https://ndi.video/tools/" target="_blank" rel="noreferrer" className="text-[var(--accent-teal)] hover:underline">NDI Tools</a> and restart Selah.</p>
+                            </>
+                        )}
+                    </div>
+                )}
+                {ndiAvailable && ndiState && (
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                        <div className="flex items-center justify-between">
+                            <span>Status</span>
+                            <span className={ndiRunning ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
+                                {ndiRunning ? 'Streaming' : 'Idle'}
+                            </span>
+                        </div>
+                        {ndiRunning && (
+                            <div className="flex items-center justify-between">
+                                <span>Source name</span>
+                                <span className="font-mono">{ndiState.sourceName}</span>
+                            </div>
+                        )}
+                        {ndiState.error && (
+                            <div className="text-red-600 dark:text-red-400">
+                                {ndiState.error}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
             {/* Alternate Output Display — sits with the main output, since it is the
                 same kind of setting. */}
             {ndiAvailable && (
@@ -675,91 +761,6 @@ function DisplaySettings({
                         style={{ transform: settings.animations ? 'translateX(28px)' : 'translateX(0)' }}
                     />
                 </button>
-            </div>
-
-            {/* NDI Output */}
-            <div>
-                <div className="flex items-center justify-between mb-2">
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                            <Radio className="w-4 h-4" />
-                            NDI Output
-                        </label>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Stream live output over the network via NDI
-                        </p>
-                    </div>
-                    {ndiAvailable && (
-                        ndiRunning ? (
-                            <button
-                                onClick={ndiStop}
-                                disabled={ndiLoading}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50"
-                            >
-                                <RadioTower className="w-3.5 h-3.5" />
-                                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                                Stop
-                            </button>
-                        ) : (
-                            <button
-                                onClick={handleNdiStart}
-                                disabled={ndiLoading}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-[var(--accent-teal)] text-[var(--accent-teal)] rounded-lg hover:bg-[var(--accent-teal)]/10 disabled:opacity-50"
-                            >
-                                <Radio className="w-3.5 h-3.5" />
-                                Start NDI
-                                {!isPro && (
-                                    <span className="ml-1 rounded bg-amber-500 px-1 py-0.5 text-[9px] font-semibold uppercase leading-none text-white">
-                                        Pro
-                                    </span>
-                                )}
-                            </button>
-                        )
-                    )}
-                </div>
-                {!ndiAvailable && (
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400">
-                        {!isDesktop ? (
-                            <p>NDI output is only available in the desktop app.</p>
-                        ) : !ndiSupported ? (
-                            // Installing NDI Tools cannot help here, so don't ask
-                            // for it: this build has NDI compiled out.
-                            <>
-                                <p>This build of Selah was made without NDI support.</p>
-                                <p className="mt-1">
-                                    Releases include it, so this is an unusual build — reinstall from
-                                    the standard download.
-                                </p>
-                            </>
-                        ) : (
-                            <>
-                                <p>NDI runtime not found.</p>
-                                <p className="mt-1">Install <a href="https://ndi.video/tools/" target="_blank" rel="noreferrer" className="text-[var(--accent-teal)] hover:underline">NDI Tools</a> and restart Selah.</p>
-                            </>
-                        )}
-                    </div>
-                )}
-                {ndiAvailable && ndiState && (
-                    <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs text-gray-500 dark:text-gray-400 space-y-1">
-                        <div className="flex items-center justify-between">
-                            <span>Status</span>
-                            <span className={ndiRunning ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
-                                {ndiRunning ? 'Streaming' : 'Idle'}
-                            </span>
-                        </div>
-                        {ndiRunning && (
-                            <div className="flex items-center justify-between">
-                                <span>Source name</span>
-                                <span className="font-mono">{ndiState.sourceName}</span>
-                            </div>
-                        )}
-                        {ndiState.error && (
-                            <div className="text-red-600 dark:text-red-400">
-                                {ndiState.error}
-                            </div>
-                        )}
-                    </div>
-                )}
             </div>
 
         </div>

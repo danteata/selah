@@ -111,6 +111,46 @@ describe('renderTextSlide', () => {
         expect(Math.min(...[...ys].map(Number))).toBeGreaterThan(0)
     })
 
+    it('draws short text large, not at some tiny default', () => {
+        // The bug this pins: sizing started from slide.slideStyle.fontSize and
+        // only ever shrank, so a verse came out a few pixels tall. The DOM
+        // renderer auto-fits between 18 and 160px at 1080p; this must match.
+        const { ctx, calls } = recorder()
+        renderTextSlide(ctx, slide({ contents: ['<p>Be still.</p>'] }), HD)
+
+        const fontPx = Number(/(\d+)px/.exec(calls.find((c) => c.startsWith('fillText'))!)![1])
+        expect(fontPx).toBeGreaterThan(100)
+        expect(fontPx).toBeLessThanOrEqual(160)
+    })
+
+    it('shrinks a long passage but never below the readable floor', () => {
+        const { ctx, calls } = recorder()
+        renderTextSlide(ctx, slide({ contents: ['<p>' + 'word '.repeat(200) + '</p>'] }), HD)
+
+        const fontPx = Number(/(\d+)px/.exec(calls.find((c) => c.startsWith('fillText'))!)![1])
+        expect(fontPx).toBeLessThan(100)
+        expect(fontPx).toBeGreaterThanOrEqual(18)
+    })
+
+    it('keeps the body inside the frame it was given', () => {
+        const { ctx, calls } = recorder()
+        renderTextSlide(ctx, slide({ contents: ['<p>' + 'word '.repeat(80) + '</p>'] }), HD)
+
+        const ys = calls.filter((c) => c.startsWith('fillText')).map((c) => Number(/@-?\d+,(-?\d+)/.exec(c)![1]))
+        expect(Math.min(...ys)).toBeGreaterThan(0)
+        expect(Math.max(...ys)).toBeLessThan(HD.height)
+    })
+
+    it('scales the text with the output format', () => {
+        const hd = recorder()
+        renderTextSlide(hd.ctx, slide({ contents: ['<p>Be still.</p>'] }), HD)
+        const sd = recorder()
+        renderTextSlide(sd.ctx, slide({ contents: ['<p>Be still.</p>'] }), { width: 1280, height: 720 })
+
+        const size = (calls: string[]) => Number(/(\d+)px/.exec(calls.find((c) => c.startsWith('fillText'))!)![1])
+        expect(size(sd.calls) / 720).toBeCloseTo(size(hd.calls) / 1080, 1)
+    })
+
     it('draws the reference under a bible verse', () => {
         const { ctx, calls } = recorder()
         renderTextSlide(

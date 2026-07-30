@@ -80,20 +80,43 @@ export function wrapRuns(
 }
 
 /**
- * Shrink until the text fits the bar. A long name would otherwise overflow the
- * bar or be clipped, which on a broadcast graphic reads as a bug.
+ * Largest size that fits, found by shrinking from `fontPx` — so callers pass the
+ * *maximum* they want and get grow-to-fill behaviour, matching how AutoFitText
+ * sizes body text in the DOM renderer (minPx 18, maxPx 160 at 1080p).
+ *
+ * Bounded by line count and, when given, total height: at a large starting size
+ * six lines of text is taller than the frame.
  */
 export function fitRuns(
     ctx: Canvas2DLike,
     runs: TextRun[],
-    options: { fontPx: number; fontFamily: string; weight: string; maxWidth: number; maxLines: number },
+    options: {
+        fontPx: number
+        fontFamily: string
+        weight: string
+        maxWidth: number
+        maxLines: number
+        maxHeight?: number
+        lineHeightRatio?: number
+        minFontPx?: number
+    },
 ): { lines: RunLine[]; fontPx: number } {
+    const lineHeightRatio = options.lineHeightRatio ?? 1.2
+    const minFontPx = options.minFontPx ?? 8
     let fontPx = options.fontPx
-    for (let attempt = 0; attempt < 8; attempt++) {
+
+    for (let attempt = 0; attempt < 32; attempt++) {
         const lines = wrapRuns(ctx, runs, { ...options, fontPx })
-        if (lines.length <= options.maxLines) return { lines, fontPx }
-        fontPx *= 0.88
+        const tooManyLines = lines.length > options.maxLines
+        const tooTall =
+            options.maxHeight !== undefined && lines.length * fontPx * lineHeightRatio > options.maxHeight
+
+        if ((!tooManyLines && !tooTall) || fontPx <= minFontPx) {
+            return { lines, fontPx }
+        }
+        fontPx = Math.max(minFontPx, fontPx * 0.92)
     }
+
     return { lines: wrapRuns(ctx, runs, { ...options, fontPx }), fontPx }
 }
 
