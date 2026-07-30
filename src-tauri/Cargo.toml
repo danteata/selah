@@ -1,6 +1,6 @@
 [package]
 name = "selah"
-version = "0.1.11"
+version = "0.1.12"
 description = "Selah - Church Presentation Software"
 authors = ["Selah Team"]
 license = "MIT"
@@ -38,7 +38,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 chrono = "0.4"  # For date-based log rotation
-grafton-ndi = { version = "0.11", features = ["tokio"], optional = true }
+# NDI is loaded at runtime (see ndi_output/ndi_lib.rs), so there is no NDI SDK
+# dependency at build time and a missing runtime cannot stop the app launching.
+libloading = { version = "0.8", optional = true }
 # In-process transcription engine. Whisper-family (GGUF) models run through
 # transcribe-cpp; transcribe-rs is ONNX-only (Parakeet, Moonshine, SenseVoice,
 # GigaAM, Canary, Cohere). Optional + behind the `native-transcription` feature
@@ -90,7 +92,7 @@ tauri-plugin-process = "2.0"
 
 [features]
 # Native in-process transcription is now the default engine (transcribe-rs).
-default = ["custom-protocol", "native-transcription"]
+default = ["custom-protocol", "native-transcription", "ndi"]
 custom-protocol = ["tauri/custom-protocol"]
-ndi = ["dep:grafton-ndi"]
+ndi = ["dep:libloading"]
 native-transcription = ["dep:transcribe-rs", "dep:transcribe-cpp"]

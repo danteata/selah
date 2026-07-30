@@ -2,7 +2,7 @@
 
 A modern, real-time worship presentation application built with React, TypeScript, and Convex. Selah helps churches manage and display song lyrics, Bible verses, hymns, and media content during services — with AI-powered features like live sermon transcription and automatic scripture detection.
 
-![Selah](./final-login-page-screenshot.png)
+![Selah running a service: slide queue, program output and the Bible panel searching by meaning](./docs/images/selah-studio.png)
 
 ## Features
 

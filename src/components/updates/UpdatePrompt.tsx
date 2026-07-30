@@ -102,10 +102,8 @@ export function UpdatePrompt() {
                             )}
 
                             <div className="p-4 pt-2 space-y-2">
-                                <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
-                                    Selah will close while it installs, then reopen. Don't update
-                                    during a service — anything on the live output goes dark until
-                                    it restarts.
+                                <p className="text-[11px] text-[var(--text-muted)]">
+                                    Selah closes and reopens to install.
                                 </p>
                                 <div className="flex items-center justify-end gap-2">
                                     {!installing && (

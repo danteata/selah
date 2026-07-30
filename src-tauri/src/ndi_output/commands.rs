@@ -18,6 +18,14 @@ pub async fn ndi_is_available(
     Ok(state.is_available())
 }
 
+/// Whether this build can do NDI at all — see NdiManager::is_supported.
+#[tauri::command]
+pub async fn ndi_is_supported(
+    state: State<'_, Arc<NdiManager>>,
+) -> Result<bool, String> {
+    Ok(state.is_supported())
+}
+
 #[tauri::command]
 pub async fn ndi_get_state(
     state: State<'_, Arc<NdiManager>>,
@@ -153,31 +161,16 @@ pub async fn ndi_discover_sources(
     _state: State<'_, Arc<NdiManager>>,
     timeout_secs: Option<u64>,
 ) -> Result<Vec<super::types::NdiSourceInfo>, String> {
-    use grafton_ndi::{NDI, FinderOptions, Finder};
-    use std::time::Duration;
+    let lib = super::ndi_lib::NdiLib::get().ok_or(
+        "The NDI runtime isn't installed on this machine. Install NDI Tools from ndi.video/tools.",
+    )?;
 
-    let ndi = NDI::new().map_err(|e| format!("Failed to initialize NDI: {:?}", e))?;
+    let timeout_ms = (timeout_secs.unwrap_or(5) * 1000) as u32;
 
-    let finder_options = FinderOptions::builder()
-        .show_local_sources(true)
-        .build();
-
-    let finder = Finder::new(&ndi, &finder_options)
-        .map_err(|e| format!("Failed to create NDI finder: {:?}", e))?;
-
-    let timeout = Duration::from_secs(timeout_secs.unwrap_or(5));
-    let sources = finder.find_sources(timeout)
-        .map_err(|e| format!("Failed to find NDI sources: {:?}", e))?;
-
-    Ok(sources.iter().map(|s| {
-        let addr_str = match &s.address {
-            grafton_ndi::SourceAddress::Ip(ip) => ip.clone(),
-            grafton_ndi::SourceAddress::Url(url) => url.clone(),
-            grafton_ndi::SourceAddress::None => String::new(),
-        };
+    Ok(lib.find_sources(timeout_ms).into_iter().map(|(name, address)| {
         super::types::NdiSourceInfo {
-            name: s.name.clone(),
-            address: addr_str,
+            name,
+            address,
         }
     }).collect())
 }

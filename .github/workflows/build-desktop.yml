@@ -322,8 +322,9 @@ jobs:
 
       # Fetch the assets bundled as Tauri resources (the offline GGUF base.en
       # model and the MiniLM embedding model). Both are plain curl/fetch
-      # downloads. The heavy verse-embedding pack is built lazily at runtime, so
-      # it isn't fetched here.
+      # downloads. The verse embedding pack is not built here: the int8 pack in
+      # public/embedding-packs is committed and rides along in the Vite output,
+      # which is where the app looks for it first.
       - name: Download bundled model assets
         run: |
           node scripts/download-gguf-model.mjs

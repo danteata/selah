@@ -2,21 +2,24 @@
  * NDI Sender Module
  *
  * Handles creating an NDI source and sending video/audio frames.
- * Uses grafton-ndi bindings for the NDI SDK.
+ * Talks to the NDI library through the runtime-loaded bindings in `ndi_lib`,
+ * so a machine without the NDI runtime simply reports NDI as unavailable
+ * instead of failing to start the app.
  *
- * Thread-safe: Sender is Send+Sync, protected by RwLock for start/stop.
- * send_video and send_audio only need &self on grafton_ndi::Sender.
+ * Thread-safe: the sender handle is Send+Sync and start/stop are behind an
+ * RwLock; the NDI send calls take the instance by const pointer.
  */
-use grafton_ndi::{PixelFormat, SenderOptions, VideoFrame, NDI};
 use parking_lot::RwLock;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use super::ndi_lib::{
+    AudioFrameV3, NdiLib, SenderHandle, VideoFrameV2, FOURCC_BGRA, FOURCC_FLTP,
+    FRAME_FORMAT_PROGRESSIVE,
+};
 use super::types::NdiOutputConfig;
 
 struct NdiSenderInner {
-    ndi: Arc<NDI>,
-    sender: grafton_ndi::Sender,
+    sender: SenderHandle,
     source_name: String,
 }
 
@@ -64,16 +67,13 @@ impl NdiSender {
     }
 
     pub fn start(&self, config: &NdiOutputConfig) -> Result<(), String> {
-        let ndi = NDI::new().map_err(|e| format!("Failed to initialize NDI: {:?}", e))?;
+        let lib = NdiLib::get().ok_or(
+            "The NDI runtime isn't installed on this machine. Install NDI Tools from ndi.video/tools.",
+        )?;
 
-        let options = SenderOptions::builder(&config.source_name)
-            .clock_video(true)
-            .clock_audio(config.include_audio)
-            .groups("Public")
-            .build();
-
-        let sender = grafton_ndi::Sender::new(&ndi, &options)
-            .map_err(|e| format!("Failed to create NDI sender: {:?}", e))?;
+        let sender = lib
+            .send_create(&config.source_name, Some("Public"), config.include_audio)
+            .ok_or("NDI refused to create the sender — is another source using this name?")?;
 
         eprintln!(
             "NDI sender created: name='{}', groups='Public'",
@@ -83,7 +83,6 @@ impl NdiSender {
         FRAME_COUNTER.store(0, Ordering::SeqCst);
 
         *self.inner.write() = Some(NdiSenderInner {
-            ndi: Arc::new(ndi),
             sender,
             source_name: config.source_name.clone(),
         });
@@ -92,7 +91,13 @@ impl NdiSender {
     }
 
     pub fn stop(&self) {
-        *self.inner.write() = None;
+        // Destroy the NDI-side sender before dropping the handle, so the source
+        // disappears from the network now rather than at process exit.
+        if let Some(inner) = self.inner.write().take() {
+            if let Some(lib) = NdiLib::get() {
+                lib.send_destroy(&inner.sender);
+            }
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -124,14 +129,10 @@ impl NdiSender {
         let timecode = compute_timecode(frame_num);
         let timestamp = compute_timestamp(frame_num);
 
-        let mut frame = VideoFrame::builder()
-            .resolution(width as i32, height as i32)
-            .pixel_format(PixelFormat::BGRA)
-            .frame_rate(30, 1)
-            .timecode(timecode)
-            .timestamp(timestamp)
-            .build()
-            .map_err(|e| format!("Failed to build video frame: {:?}", e))?;
+        // NDI reads the pixels straight out of this buffer during the send call,
+        // so it has to outlive it — hence a local Vec rather than a borrow of
+        // `data`, which may have a different stride.
+        let mut pixels = vec![0u8; dst_stride * height as usize];
 
         if frame_num <= 2 || frame_num % 300 == 0 {
             let sample_offset = compute_center_sample_offset(width, height, src_stride);
@@ -147,9 +148,26 @@ impl NdiSender {
             );
         }
 
-        copy_frame_data(data, &mut frame.data, width, height, src_stride, dst_stride);
+        copy_frame_data(data, &mut pixels, width, height, src_stride, dst_stride);
 
-        sender_inner.sender.send_video(&frame);
+        let frame = VideoFrameV2 {
+            xres: width as i32,
+            yres: height as i32,
+            four_cc: FOURCC_BGRA,
+            frame_rate_n: 30,
+            frame_rate_d: 1,
+            // 0 means "use xres/yres", which is what we want for square pixels.
+            picture_aspect_ratio: 0.0,
+            frame_format_type: FRAME_FORMAT_PROGRESSIVE,
+            timecode,
+            p_data: pixels.as_mut_ptr(),
+            line_stride_in_bytes: dst_stride as i32,
+            p_metadata: std::ptr::null(),
+            timestamp,
+        };
+
+        let lib = NdiLib::get().ok_or("NDI runtime unloaded")?;
+        lib.send_video(&sender_inner.sender, &frame);
 
         Ok(())
     }
@@ -164,15 +182,23 @@ impl NdiSender {
         let inner = self.inner.read();
         let sender_inner = inner.as_ref().ok_or("NDI sender not running")?;
 
-        let audio_frame = grafton_ndi::AudioFrame::builder()
-            .data(data.to_vec())
-            .sample_rate(sample_rate as i32)
-            .channels(channels as i32)
-            .samples(num_samples)
-            .build()
-            .map_err(|e| format!("Failed to build audio frame: {:?}", e))?;
+        // FLTp is planar: each channel is a contiguous run of `num_samples`
+        // floats, one after another. Callers must supply it that way.
+        let mut samples = data.to_vec();
+        let frame = AudioFrameV3 {
+            sample_rate: sample_rate as i32,
+            no_channels: channels as i32,
+            no_samples: num_samples,
+            timecode: 0,
+            four_cc: FOURCC_FLTP,
+            p_data: samples.as_mut_ptr() as *mut u8,
+            channel_stride_in_bytes: num_samples * std::mem::size_of::<f32>() as i32,
+            p_metadata: std::ptr::null(),
+            timestamp: 0,
+        };
 
-        sender_inner.sender.send_audio(&audio_frame);
+        let lib = NdiLib::get().ok_or("NDI runtime unloaded")?;
+        lib.send_audio(&sender_inner.sender, &frame);
 
         Ok(())
     }

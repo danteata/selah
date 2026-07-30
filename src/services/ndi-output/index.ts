@@ -50,6 +50,22 @@ class NdiOutputService {
         }
     }
 
+    /**
+     * Whether this build has NDI compiled in — distinct from whether the runtime
+     * is installed. Release builds currently ship without it, so the difference
+     * decides what the UI should tell the operator to do.
+     */
+    async isSupported(): Promise<boolean> {
+        const invoke = await getInvoke()
+        if (!invoke) return false
+        try {
+            return await invoke<boolean>('ndi_is_supported')
+        } catch {
+            // An older binary without the command — infer from availability.
+            return false
+        }
+    }
+
     async getState(): Promise<NdiOutputState> {
         const invoke = await getInvoke()
         if (!invoke) {

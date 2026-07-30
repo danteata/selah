@@ -700,8 +700,8 @@ function HeroSection({ release, error, retry }: { release: ReturnType<typeof use
                         className="dl-sub text-base lg:text-lg max-w-2xl mx-auto mb-10 leading-relaxed"
                         style={{ color: 'rgba(228,228,231,0.75)' }}
                     >
-                        Native desktop apps for macOS, Windows, and Linux. No browser tab
-                        to babysit, no streaming lag — just Selah, the way it was meant to run.
+                        Native apps for macOS, Windows, and Linux. Transcription runs on your
+                        machine, and the output drives a second screen directly.
                     </p>
 
                     <div className="dl-cta flex flex-col sm:flex-row items-center justify-center gap-3 mb-12">
@@ -958,7 +958,7 @@ function RequirementsSection() {
                         What you'll need
                     </h2>
                     <p className="text-base max-w-xl mx-auto" style={{ color: 'rgba(228,228,231,0.6)' }}>
-                        Selah is light. If you can run a modern web browser, you can run Selah.
+                        Nothing exotic. Here's what each platform needs.
                     </p>
                 </div>
 

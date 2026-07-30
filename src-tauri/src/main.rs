@@ -106,6 +106,7 @@ use multi_monitor::{
 use ndi_output::{
     NdiManager,
     ndi_is_available,
+    ndi_is_supported,
     ndi_get_state,
     ndi_start_output,
     ndi_stop_output,
@@ -314,6 +315,7 @@ pub fn run() {
             is_desktop,
             identify_monitor,
             ndi_is_available,
+            ndi_is_supported,
             ndi_get_state,
             ndi_start_output,
             ndi_stop_output,

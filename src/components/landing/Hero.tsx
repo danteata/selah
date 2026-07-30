@@ -75,12 +75,12 @@ export function Hero({ started }: { started: boolean }) {
         <h1 ref={h1} className="text-5xl sm:text-7xl lg:text-[5.5rem] text-white leading-[1.02] tracking-tight" style={{ fontFamily: "Crimson Pro, serif", fontWeight: 600 }}>
           <span className="hero-line block">Preach the sermon.</span>
           <span className="hero-line block">
-            <span className="italic" style={{ background: 'linear-gradient(135deg, #5eead4 0%, #fcd34d 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>We&rsquo;ll find the verse.</span>
+            <span className="italic" style={{ background: 'linear-gradient(135deg, #5eead4 0%, #fcd34d 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Selah finds the verse.</span>
           </span>
         </h1>
 
         <p className="hero-sub mt-7 text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-          Selah listens to your sermon, catches every scripture reference, and puts the right verse on screen &mdash; <span className="text-zinc-200">automatically, offline, in real time.</span>
+          It hears the reference as you say it and puts the verse on screen &mdash; <span className="text-zinc-200">no typing, no internet.</span>
         </p>
 
         <div className="mt-9 flex flex-wrap justify-center gap-4">
@@ -249,7 +249,7 @@ export function Hero({ started }: { started: boolean }) {
           style={{ background: 'rgba(15,18,22,0.95)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)' }}
         >
           <svg className="w-3.5 h-3.5 text-teal-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>
-          <span style={{ color: 'rgba(255,255,255,0.85)' }}>Pushed to every screen instantly</span>
+          <span style={{ color: 'rgba(255,255,255,0.85)' }}>On screen in one keystroke</span>
         </div>
       </div>
     </section>

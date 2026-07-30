@@ -61,6 +61,16 @@ const DISMISSED_KEY = "selah-dismissed-update";
 /** A booth machine can stay open for days, so re-check periodically. */
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Shortest gap between focus-triggered checks.
+ *
+ * The interval alone isn't enough: a release published while the app sits open
+ * isn't noticed until the next tick, which is how an update went unseen in the
+ * top bar and had to be found in Settings. Coming back to the machine is the
+ * moment worth checking on.
+ */
+const FOCUS_RECHECK_THROTTLE_MS = 15 * 60 * 1000;
+
 /** Delay before the first check so it doesn't compete with the initial render. */
 const FIRST_CHECK_DELAY_MS = 5_000;
 
@@ -108,6 +118,8 @@ function getSnapshot(): Snapshot {
 let checkInFlight: Promise<void> | null = null;
 /** The background schedule is per-session, not per-hook-instance. */
 let backgroundStarted = false;
+/** When the last check ran, to throttle the focus-triggered ones. */
+let lastCheckAt = 0;
 
 function isDesktop(): boolean {
     // `invoke` reads `window.__TAURI_INTERNALS__` synchronously and throws a
@@ -119,6 +131,7 @@ function isDesktop(): boolean {
 async function performCheck(surfaceErrors: boolean): Promise<void> {
     if (checkInFlight) return checkInFlight;
 
+    lastCheckAt = Date.now();
     checkInFlight = (async () => {
         publish({ state: "checking", message: null });
         try {
@@ -207,9 +220,21 @@ export function useAppUpdater(): UseAppUpdaterResult {
         const first = setTimeout(() => void performCheck(false), FIRST_CHECK_DELAY_MS);
         const interval = setInterval(() => void performCheck(false), RECHECK_INTERVAL_MS);
 
+        // Also check when the operator comes back to the app, throttled. This is
+        // what catches a release published while the app was already open.
+        const checkOnReturn = () => {
+            if (document.visibilityState === "hidden") return;
+            if (Date.now() - lastCheckAt < FOCUS_RECHECK_THROTTLE_MS) return;
+            void performCheck(false);
+        };
+        window.addEventListener("focus", checkOnReturn);
+        document.addEventListener("visibilitychange", checkOnReturn);
+
         return () => {
             clearTimeout(first);
             clearInterval(interval);
+            window.removeEventListener("focus", checkOnReturn);
+            document.removeEventListener("visibilitychange", checkOnReturn);
             backgroundStarted = false;
         };
     }, []);
@@ -232,4 +257,5 @@ export function __resetAppUpdaterForTests(): void {
     listeners.clear();
     checkInFlight = null;
     backgroundStarted = false;
+    lastCheckAt = 0;
 }
