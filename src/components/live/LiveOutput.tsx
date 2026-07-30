@@ -97,7 +97,9 @@ export function LiveOutput() {
         isLoading: ndiLoading,
         startOutput: ndiStart,
         stopOutput: ndiStop,
+        state: ndiState,
     } = useNdiOutput()
+    const ndiSending = (ndiState?.framesSent ?? 0) > 0
     const { isPro, startProCheckout } = useEntitlements()
 
     // NDI network streaming is Pro-only; free users get an upsell.
@@ -114,7 +116,16 @@ export function LiveOutput() {
             })
             return
         }
-        void ndiStart()
+        // The backend refuses for reasons the operator can act on — no Screen
+        // Recording permission, no live output window open, no capture support on
+        // this platform. Swallowing the rejection (as `void ndiStart()` did) left
+        // them staring at a black feed with nothing said.
+        void ndiStart().catch((error: unknown) => {
+            toast.error('NDI output could not start', {
+                description: error instanceof Error ? error.message : String(error),
+                duration: 12000,
+            })
+        })
     }, [ndiRunning, isPro, startProCheckout, ndiStart, ndiStop])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
@@ -694,9 +705,24 @@ export function LiveOutput() {
                         </span>
                     )}
                     {ndiRunning && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/20">
-                            NDI ACTIVE
-                        </span>
+                        /* "Active" used to mean nothing more than "the sender was
+                           created", which is how a black feed still read as ACTIVE.
+                           It now follows the frames the sender has really pushed. */
+                        ndiSending ? (
+                            <span
+                                title={`Sending ${ndiState?.framesSent?.toLocaleString() ?? 0} frames`}
+                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/20"
+                            >
+                                NDI ACTIVE
+                            </span>
+                        ) : (
+                            <span
+                                title="The NDI source is announced but no frames have been captured yet — receivers will show black."
+                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-amber-500/10 text-amber-500 rounded-full border border-amber-500/20"
+                            >
+                                NDI — NO FRAMES
+                            </span>
+                        )
                     )}
                 </div>
 

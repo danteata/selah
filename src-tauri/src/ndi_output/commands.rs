@@ -30,7 +30,16 @@ pub async fn ndi_is_supported(
 pub async fn ndi_get_state(
     state: State<'_, Arc<NdiManager>>,
 ) -> Result<NdiOutputState, String> {
-    Ok(state.get_state())
+    #[allow(unused_mut)]
+    let mut current = state.get_state();
+    // Report what the sender has really pushed, not just what the (uncalled)
+    // frontend send command counted — "running, 0 frames" is the difference
+    // between NDI working and a receiver showing black.
+    #[cfg(feature = "ndi")]
+    {
+        current.frames_sent = state.sender.frames_sent();
+    }
+    Ok(current)
 }
 
 #[cfg(feature = "ndi")]
@@ -45,22 +54,98 @@ pub async fn ndi_start_output(
         return Err("NDI SDK not found. Install NDI Tools from ndi.video and restart the app.".to_string());
     }
 
-    state.sender.start(&config)?;
+    // Everything below refuses BEFORE creating the sender. Announcing a source
+    // we can't feed is worse than not announcing one: receivers show a black
+    // frame that looks like a working feed with a blank slide.
 
     #[cfg(target_os = "macos")]
-    {
-        use std::sync::atomic::Ordering;
-        state.capture_stop.store(true, Ordering::SeqCst);
-        super::capture::start_capture(&config, state.sender.clone(), state.capture_stop.clone())?;
+    if !crate::audio_capture::check_screen_capture_permission() {
+        // ScreenCaptureKit is the frame source on macOS and is gated behind the
+        // one-shot "Screen & System Audio Recording" TCC grant. Without it,
+        // SCShareableContent returns no windows at all, so the capture loop
+        // waits for a window that it can never see and not one frame is sent.
+        // Note the prompt appears once ever — if it was already declined this
+        // returns false immediately and System Settings is the only recovery.
+        if !crate::audio_capture::request_screen_capture_permission() {
+            return Err(
+                "Selah needs Screen Recording permission to send the live output over NDI. \
+                 Grant it in System Settings › Privacy & Security › Screen & System Audio \
+                 Recording, then start NDI again."
+                    .to_string(),
+            );
+        }
     }
 
-    state.update_state(|s| {
-        s.is_running = true;
-        s.source_name = config.source_name.clone();
-        s.error = None;
-    });
+    // NDI mirrors the live output window, so without that window there is
+    // nothing to capture. This is the other way a "running" sender sends black.
+    if let Some(app) = state.get_app() {
+        use tauri::Manager;
+        if app
+            .get_webview_window(crate::multi_monitor::LIVE_WINDOW_LABEL)
+            .is_none()
+        {
+            return Err(
+                "NDI sends what the live output window shows, and it isn't open yet. \
+                 Send the live output to a screen first, then start NDI again."
+                    .to_string(),
+            );
+        }
+    }
 
-    Ok(())
+    // Linux still has no frame source — only macOS (ScreenCaptureKit) and Windows
+    // (Windows.Graphics.Capture) do. Starting the sender without one announces a
+    // source that never receives a pixel: the black feed this reports instead.
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = &config; // only the capture backends read it
+        return Err(
+            "NDI output isn't supported on Linux yet — there's no screen capture backend, \
+             so the feed would be black."
+                .to_string(),
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    if !super::capture_windows::is_supported() {
+        return Err(
+            "This version of Windows is too old for NDI output — Windows.Graphics.Capture \
+             needs Windows 10 1903 or newer."
+                .to_string(),
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        use std::sync::atomic::Ordering;
+
+        state.sender.start(&config)?;
+        state.capture_stop.store(true, Ordering::SeqCst);
+
+        #[cfg(target_os = "macos")]
+        let started =
+            super::capture::start_capture(&config, state.sender.clone(), state.capture_stop.clone());
+        #[cfg(target_os = "windows")]
+        let started = super::capture_windows::start_capture(
+            &config,
+            state.sender.clone(),
+            state.capture_stop.clone(),
+        );
+
+        if let Err(e) = started {
+            // Don't leave a sender announced with no capture behind it.
+            state.capture_stop.store(false, Ordering::SeqCst);
+            state.sender.stop();
+            return Err(e);
+        }
+
+        state.update_state(|s| {
+            s.is_running = true;
+            s.source_name = config.source_name.clone();
+            s.error = None;
+        });
+
+        Ok(())
+    }
 }
 
 #[cfg(not(feature = "ndi"))]
@@ -77,7 +162,10 @@ pub async fn ndi_start_output(
 pub async fn ndi_stop_output(
     state: State<'_, Arc<NdiManager>>,
 ) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    // Signals both capture backends (the flag is "keep running") to leave their
+    // loop; without this the Windows thread would keep pushing frames at a
+    // destroyed sender.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         use std::sync::atomic::Ordering;
         state.capture_stop.store(false, Ordering::SeqCst);

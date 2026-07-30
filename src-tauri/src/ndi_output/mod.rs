@@ -24,6 +24,9 @@ mod sender;
 #[cfg(all(feature = "ndi", target_os = "macos"))]
 mod capture;
 
+#[cfg(all(feature = "ndi", target_os = "windows"))]
+mod capture_windows;
+
 #[cfg(feature = "ndi")]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -64,7 +67,7 @@ pub struct NdiManager {
     state: RwLock<NdiOutputState>,
     #[cfg(feature = "ndi")]
     sender: Arc<NdiSender>,
-    #[cfg(all(feature = "ndi", target_os = "macos"))]
+    #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows")))]
     pub capture_stop: Arc<AtomicBool>,
 }
 
@@ -81,7 +84,7 @@ impl NdiManager {
             state: RwLock::new(default_state),
             #[cfg(feature = "ndi")]
             sender: Arc::new(NdiSender::new()),
-            #[cfg(all(feature = "ndi", target_os = "macos"))]
+            #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows")))]
             capture_stop: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -106,11 +109,11 @@ impl NdiManager {
 
     /// Whether this build has NDI support compiled in at all.
     ///
-    /// The `ndi` Cargo feature is off by default because grafton-ndi needs the
-    /// NDI SDK present at build time (`NDI_SDK_DIR`), so a build machine without
-    /// it can't produce an NDI-capable binary. Without the feature,
-    /// `is_available` is a `false` stub — it can never become true, however the
-    /// operator's machine is set up.
+    /// The `ndi` feature is on by default now that the runtime is loaded through
+    /// `ndi_lib` at run time rather than linked at build time — a build machine
+    /// no longer needs the SDK. It stays a feature so a build can leave NDI out;
+    /// without it `is_available` is a `false` stub that can never become true,
+    /// however the operator's machine is set up.
     ///
     /// The UI needs these apart: "your build can't do this" and "install the
     /// runtime" are different instructions, and telling someone with NDI Tools
