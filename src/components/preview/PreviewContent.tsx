@@ -5,7 +5,6 @@ import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNav
 import type { Slide, Scripture, BibleVerse } from '../../types'
 import { bibleBooks } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
-import { isLowerThird } from '../../utils/lowerThird'
 import { EmptyState } from '../utils/EmptyState'
 import { BibleVersionSelect } from '../bible/BibleVersionSelect'
 import { SongVerseBrowser } from '../slides/SongVerseBrowser'
@@ -17,8 +16,9 @@ export function PreviewContent() {
     const [currentVerses, setCurrentVerses] = useState<BibleVerse[]>([])
     const [loadingVerses, setLoadingVerses] = useState(false)
 
-    const graphicsSlide = useAppStore((state) => state.graphicsSlide)
-    const setGraphicsSlide = useAppStore((state) => state.setGraphicsSlide)
+    const alternateSlide = useAppStore((state) => state.alternateSlide)
+    const setAlternateSlide = useAppStore((state) => state.setAlternateSlide)
+    const alternateOutput = useAppStore((state) => state.alternateOutput)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
@@ -520,12 +520,13 @@ export function PreviewContent() {
                         isSaved={isInLibrary(slide.id)}
                         onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
                         onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
-                        // Only lower thirds: the graphics output exists to carry a
-                        // keyed overlay, not a second full-screen slide.
-                        onSendToGraphics={isLowerThird(slide)
-                            ? () => setGraphicsSlide(graphicsSlide?.id === slide.id ? null : slide)
+                        // Any slide can go to the alternate output, but only while
+                        // it carries its own content — when it follows the live
+                        // output there is nothing to choose.
+                        onSendToAlternate={alternateOutput.contentSource === 'independent'
+                            ? () => setAlternateSlide(alternateSlide?.id === slide.id ? null : slide)
                             : undefined}
-                        isOnGraphics={graphicsSlide?.id === slide.id}
+                        isOnAlternate={alternateSlide?.id === slide.id}
                         isStickyActive={activeSlide?.id === slide.id}
                     />
                 </div>

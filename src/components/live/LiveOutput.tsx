@@ -3,7 +3,7 @@ import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Li
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../../hooks/useNdiOutput'
-import { useGraphicsChannel } from '../../hooks/useGraphicsChannel'
+import { useAlternateOutput } from '../../hooks/useAlternateOutput'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { useLiveSession, useVerseNavigationShortcuts, useKeyboardShortcut } from '../../hooks'
@@ -104,33 +104,33 @@ export function LiveOutput() {
     const { isPro, startProCheckout } = useEntitlements()
 
 
-    const graphics = useGraphicsChannel()
+    const alternate = useAlternateOutput()
 
     // Independent of the program output's NDI feed: this one carries the graphics
     // channel's own slide, with alpha, as a second source.
-    const handleGraphicsToggle = useCallback(() => {
-        if (graphics.isEnabled) {
-            void graphics.disable()
+    const handleAlternateToggle = useCallback(() => {
+        if (alternate.config.enabled) {
+            void alternate.disable()
             return
         }
         if (!isPro) {
-            toast.warning('The graphics output is a Selah Pro feature', {
-                description: 'Upgrade to send lower thirds as their own NDI source.',
+            toast.warning('The alternate output is a Selah Pro feature', {
+                description: 'Upgrade to run a second output alongside your main one.',
                 duration: 10000,
                 action: { label: 'Upgrade', onClick: () => void startProCheckout() },
             })
             return
         }
-        void graphics.enable().then((error) => {
+        void alternate.enable().then((error: string | null) => {
             if (!error) {
-                toast.success('Graphics output on', {
-                    description: 'Take "Selah Graphics" in your switcher. Send a lower third to it from any slide.',
+                toast.success('Alternate output on', {
+                    description: `Take "${alternate.config.sourceName}" in your switcher.`,
                 })
                 return
             }
-            toast.error('Graphics output could not start', { description: error, duration: 12000 })
+            toast.error('Alternate output could not start', { description: error, duration: 12000 })
         })
-    }, [graphics, isPro, startProCheckout])
+    }, [alternate, isPro, startProCheckout])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -761,18 +761,20 @@ export function LiveOutput() {
                             </span>
                         )
                     )}
-                    {graphics.isEnabled && (
+                    {alternate.config.enabled && (
                         <span
-                            title={graphics.slide
-                                ? `Graphics output: ${graphics.framesSent.toLocaleString()} frames sent`
-                                : 'Graphics output is on with nothing on it — sending a transparent frame'}
+                            title={alternate.unsupportedContent
+                                ? 'This slide has a background the alternate output can\'t draw yet — sending an empty frame'
+                                : alternate.slide
+                                    ? `Alternate output: ${alternate.framesSent.toLocaleString()} frames sent`
+                                    : 'Alternate output is on with nothing on it'}
                             className={`flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border ${
-                                graphics.framesSent > 0
+                                alternate.framesSent > 0 && !alternate.unsupportedContent
                                     ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)] border-[var(--accent-indigo)]/20'
                                     : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
                             }`}
                         >
-                            {graphics.slide ? 'GFX LIVE' : 'GFX EMPTY'}
+                            {alternate.unsupportedContent ? 'ALT — CAN\'T DRAW' : alternate.slide ? 'ALT LIVE' : 'ALT EMPTY'}
                         </span>
                     )}
                 </div>
@@ -790,11 +792,11 @@ export function LiveOutput() {
                     )}
                     {ndiAvailable && (
                         <button
-                            onClick={handleGraphicsToggle}
-                            className={`p-1.5 rounded-lg transition-colors ${graphics.isEnabled ? 'text-[var(--accent-indigo)] bg-[var(--accent-indigo)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
+                            onClick={handleAlternateToggle}
+                            className={`p-1.5 rounded-lg transition-colors ${alternate.config.enabled ? 'text-[var(--accent-indigo)] bg-[var(--accent-indigo)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
                             title={isPro
-                                ? 'Graphics output — a separate NDI source for lower thirds, with transparency'
-                                : 'Graphics output (Pro)'}
+                                ? 'Alternate output — a second output on a monitor or over NDI'
+                                : 'Alternate output (Pro)'}
                         >
                             <Layers className="w-4 h-4" />
                         </button>

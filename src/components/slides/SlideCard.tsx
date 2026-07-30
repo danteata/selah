@@ -26,11 +26,11 @@ interface SlideCardProps {
     isSaved?: boolean
     onGoLive?: () => void
     onSuggestToQueue?: () => void
-    /** Put this slide on the graphics channel (the alternate NDI output). Only
-     *  offered for lower-third layouts, which is what that output is for. */
-    onSendToGraphics?: () => void
-    /** This slide is the one currently on the graphics channel. */
-    isOnGraphics?: boolean
+    /** Put this slide on the alternate output. Offered only while that output
+     *  carries its own content rather than following the live one. */
+    onSendToAlternate?: () => void
+    /** This slide is the one currently on the alternate output. */
+    isOnAlternate?: boolean
     lockedBy?: string
 }
 
@@ -49,8 +49,8 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     isSaved = false,
     onGoLive,
     onSuggestToQueue,
-    onSendToGraphics,
-    isOnGraphics,
+    onSendToAlternate,
+    isOnAlternate,
     lockedBy,
 }: SlideCardProps, ref) => {
     // Get file URL if slide has a backgroundStorageId
@@ -249,15 +249,15 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                         <Zap className="w-4 h-4" />
                     </button>
                 )}
-                {onSendToGraphics && (
+                {onSendToAlternate && (
                     <button
-                        onClick={(e) => { e.stopPropagation(); onSendToGraphics(); }}
+                        onClick={(e) => { e.stopPropagation(); onSendToAlternate(); }}
                         className={`absolute bottom-2 right-2 z-10 p-2 rounded-full shadow-lg transition-all transform ${
-                            isOnGraphics
+                            isOnAlternate
                                 ? 'bg-[var(--accent-indigo)] text-white opacity-100 scale-100'
                                 : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-white hover:bg-[var(--accent-indigo)] opacity-0 group-hover:opacity-100 focus:opacity-100 scale-90 group-hover:scale-100'
                         }`}
-                        title={isOnGraphics ? 'On the graphics output — click to remove' : 'Send to the graphics output (NDI)'}
+                        title={isOnAlternate ? 'On the alternate output — click to remove' : 'Send to the alternate output'}
                     >
                         <Layers className="w-4 h-4" />
                     </button>

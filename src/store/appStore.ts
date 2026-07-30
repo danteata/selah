@@ -14,6 +14,7 @@ import type {
     Hymn,
     Song
 } from '../types'
+import { DEFAULT_ALTERNATE_OUTPUT, type AlternateOutputConfig } from '../types/alternateOutput'
 import { bibleVersionObjects } from '../types'
 import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
 import type { NavSection, SplitPanelMode } from '../types/studio'
@@ -107,12 +108,12 @@ export interface AppState {
     // blank screen (e.g. during prayer) — independent of `liveSlideId`, which
     // keeps pointing at whatever slide is queued up so un-clearing restores it.
     liveOutputBlanked: boolean
-    // The graphics channel: an alternate output (lower thirds) with its own
-    // content, sent over NDI with transparency and optionally mirrored to a
-    // screen. Independent of `liveSlideId` — that is the whole point, so lyrics
-    // can stay on the projector while a name sits on the stream.
-    graphicsSlide: Slide | null
-    graphicsChannelEnabled: boolean
+    // A second output, independent of the main one. It can follow the live
+    // content or carry its own, and lands on a monitor or on the network as its
+    // own NDI source.
+    alternateOutput: AlternateOutputConfig
+    // The slide this output shows when its content source is 'independent'.
+    alternateSlide: Slide | null
     // Predictive song-lyric auto-advance (Phase 2 wiring).
     songTracking: SongTrackingState
     // Audio-reactive motion-graphics layer on the live output (Phase 4).
@@ -221,8 +222,8 @@ const initialState: AppState = {
     sharedQueueSlideIds: [],
     liveSlideId: null,
     liveOutputBlanked: false,
-    graphicsSlide: null,
-    graphicsChannelEnabled: false,
+    alternateOutput: DEFAULT_ALTERNATE_OUTPUT,
+    alternateSlide: null,
     songTracking: DEFAULT_SONG_TRACKING,
     visualizerEnabled: false,
     emitter: null,
@@ -301,9 +302,10 @@ interface AppStore extends AppState {
     removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string | null) => void
     setLiveOutputBlanked: (blanked: boolean) => void
-    /** Put a slide on the graphics channel, or clear it with null. */
-    setGraphicsSlide: (slide: Slide | null) => void
-    setGraphicsChannelEnabled: (enabled: boolean) => void
+    /** Put a slide on the alternate output, or clear it with null. Only used
+     *  while its content source is 'independent'. */
+    setAlternateSlide: (slide: Slide | null) => void
+    updateAlternateOutput: (patch: Partial<AlternateOutputConfig>) => void
     setSongTrackingEnabled: (enabled: boolean) => void
     setSongTrackingLocked: (locked: boolean) => void
     setSongAutoDetect: (autoDetect: boolean) => void
@@ -679,12 +681,12 @@ export const useAppStore = create<AppStore>()(
                 set({ liveOutputBlanked: blanked })
             },
 
-            setGraphicsSlide: (slide) => {
-                set({ graphicsSlide: slide })
+            setAlternateSlide: (slide) => {
+                set({ alternateSlide: slide })
             },
 
-            setGraphicsChannelEnabled: (enabled) => {
-                set({ graphicsChannelEnabled: enabled })
+            updateAlternateOutput: (patch) => {
+                set((state) => ({ alternateOutput: { ...state.alternateOutput, ...patch } }))
             },
 
             setSongTrackingEnabled: (enabled) => {

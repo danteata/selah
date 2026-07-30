@@ -18,29 +18,10 @@
  */
 
 import type { Slide } from '../../types'
-import { fontForRun, parseTextRuns, runsToText, type TextRun } from './textRuns'
+import { parseTextRuns, runsToText, type TextRun } from './textRuns'
+import { drawRunLines, fitRuns, type Canvas2DLike } from './renderRuns'
 
-/** The subset of CanvasRenderingContext2D this renderer uses, so the geometry can
- *  be tested without a real canvas (happy-dom provides no 2D context). */
-export interface Canvas2DLike {
-    canvas: { width: number; height: number }
-    save(): void
-    restore(): void
-    clearRect(x: number, y: number, w: number, h: number): void
-    fillRect(x: number, y: number, w: number, h: number): void
-    fillText(text: string, x: number, y: number): void
-    strokeText(text: string, x: number, y: number): void
-    measureText(text: string): { width: number }
-    createLinearGradient(x0: number, y0: number, x1: number, y1: number): {
-        addColorStop(offset: number, color: string): void
-    }
-    fillStyle: string | object
-    strokeStyle: string | object
-    lineWidth: number
-    font: string
-    textAlign: CanvasTextAlign
-    textBaseline: CanvasTextBaseline
-}
+export type { Canvas2DLike }
 
 export interface LowerThirdRenderOptions {
     /** Frame size — the NDI feed's resolution, typically 1920×1080. */
@@ -158,114 +139,6 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
     }
 }
 
-/** One laid-out line: its runs and the total width, for alignment. */
-interface RunLine {
-    runs: TextRun[]
-    width: number
-}
-
-function measureRun(ctx: Canvas2DLike, run: TextRun, fontPx: number, fontFamily: string, weight: string): number {
-    ctx.font = fontForRun(run, fontPx, fontFamily, weight)
-    return ctx.measureText(run.text).width
-}
-
-/** Greedy word wrap across runs, so a bold word can sit mid-sentence. */
-export function wrapRuns(
-    ctx: Canvas2DLike,
-    runs: TextRun[],
-    options: { fontPx: number; fontFamily: string; weight: string; maxWidth: number },
-): RunLine[] {
-    const lines: RunLine[] = []
-    let current: RunLine = { runs: [], width: 0 }
-
-    for (const run of runs) {
-        // Keep the spaces: they are what separates words across a style change.
-        const words = run.text.split(/(\s+)/).filter((word) => word.length > 0)
-        for (const word of words) {
-            const piece: TextRun = { ...run, text: word }
-            const width = measureRun(ctx, piece, options.fontPx, options.fontFamily, options.weight)
-
-            if (current.width + width > options.maxWidth && current.runs.length > 0 && word.trim()) {
-                lines.push(current)
-                current = { runs: [], width: 0 }
-            }
-            // A wrapped line never starts with the space that caused the break.
-            if (!word.trim() && current.runs.length === 0) continue
-
-            const previous = current.runs[current.runs.length - 1]
-            if (previous && previous.bold === piece.bold && previous.italic === piece.italic && previous.color === piece.color) {
-                previous.text += piece.text
-            } else {
-                current.runs.push(piece)
-            }
-            current.width += width
-        }
-    }
-
-    if (current.runs.length > 0) lines.push(current)
-    return lines
-}
-
-/**
- * Shrink until the text fits the bar. A long name would otherwise overflow the
- * bar or be clipped, which on a broadcast graphic reads as a bug.
- */
-function fitRuns(
-    ctx: Canvas2DLike,
-    runs: TextRun[],
-    options: { fontPx: number; fontFamily: string; weight: string; maxWidth: number; maxLines: number },
-): { lines: RunLine[]; fontPx: number } {
-    let fontPx = options.fontPx
-    for (let attempt = 0; attempt < 8; attempt++) {
-        const lines = wrapRuns(ctx, runs, { ...options, fontPx })
-        if (lines.length <= options.maxLines) return { lines, fontPx }
-        fontPx *= 0.88
-    }
-    return { lines: wrapRuns(ctx, runs, { ...options, fontPx }), fontPx }
-}
-
-function drawLines(
-    ctx: Canvas2DLike,
-    lines: RunLine[],
-    options: {
-        fontPx: number
-        fontFamily: string
-        weight: string
-        align: CanvasTextAlign
-        x: number
-        firstBaselineY: number
-        lineHeight: number
-        color: string
-        outlined: boolean
-    },
-) {
-    // Runs are drawn one after another, so the alignment is applied to the line
-    // as a whole and each run advances the pen.
-    ctx.textAlign = 'left'
-    ctx.textBaseline = 'middle'
-
-    lines.forEach((line, index) => {
-        const y = options.firstBaselineY + index * options.lineHeight
-        let x = options.align === 'center'
-            ? options.x - line.width / 2
-            : options.align === 'right'
-                ? options.x - line.width
-                : options.x
-
-        for (const run of line.runs) {
-            ctx.font = fontForRun(run, options.fontPx, options.fontFamily, options.weight)
-            if (options.outlined) {
-                ctx.lineWidth = Math.max(2, options.fontPx * 0.06)
-                ctx.strokeStyle = 'rgba(0,0,0,0.85)'
-                ctx.strokeText(run.text, x, y)
-            }
-            ctx.fillStyle = run.color ?? options.color
-            ctx.fillText(run.text, x, y)
-            x += ctx.measureText(run.text).width
-        }
-    })
-}
-
 /** Clears the frame to fully transparent and draws the lower third onto it. */
 export function renderLowerThird(
     ctx: Canvas2DLike,
@@ -313,7 +186,7 @@ export function renderLowerThird(
             maxWidth: textWidth,
             maxLines: layout.subtitle ? 1 : 2,
         })
-        drawLines(ctx, lines, {
+        drawRunLines(ctx, lines, {
             fontPx,
             fontFamily: layout.fontFamily,
             weight: '700',
@@ -337,7 +210,7 @@ export function renderLowerThird(
             maxWidth: textWidth,
             maxLines: 1,
         })
-        drawLines(ctx, lines, {
+        drawRunLines(ctx, lines, {
             fontPx,
             fontFamily: layout.fontFamily,
             weight: '400',
