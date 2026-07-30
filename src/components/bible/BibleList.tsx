@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
-import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2, AlignJustify } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2, AlignJustify, Layers } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { generateSlideContent, calculateScreenFontSize, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
+import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
@@ -265,6 +266,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
+    const alternate = useSendToAlternate()
     const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
     // NOTE: there are two setLiveSlide functions in play here.
     //   - useAppStore.setLiveSlide updates ONLY the local store (offline
@@ -457,6 +459,13 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: slide }))
         return true
     }, [appendActiveSlide, setLiveSlide, isConnected, isOperator, isOpen])
+
+    // Third peer of Add and Live: put this verse on the alternate output.
+    const sendVerseToAlternate = useCallback(async (bookIndex: number, chapter: number, verse: number) => {
+        const result = await fetchScripture(`${bookIndex}:${chapter}:${verse}`, selectedVersion)
+        if (!result) return
+        alternate.send(createBibleSlide(result, { template: selectedTemplate }))
+    }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, alternate])
 
     const goLiveWithScripture = useCallback(async (bookIndex: number, chapter: number, verse: number, preText?: string) => {
         // Reveal the verse in the BibleList view (sets the search
@@ -1228,6 +1237,17 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                     >
                                                         <Plus className="w-3 h-3" /> Add
                                                     </button>
+                                                    {alternate.canSend && (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); void sendVerseToAlternate(row.bookIndex, row.chapter, row.verse) }}
+                                                            title="Send to the alternate output"
+                                                            /* No active state: the slide is created on send, so its id
+                                                               can't be matched against a row that hasn't produced one. */
+                                                            className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium rounded-md bg-[var(--bg-tertiary)] hover:bg-[var(--accent-indigo)]/10 text-[var(--text-secondary)] transition-colors"
+                                                        >
+                                                            <Layers className="w-3 h-3" /> Alt
+                                                        </button>
+                                                    )}
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation()

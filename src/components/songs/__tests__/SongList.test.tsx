@@ -12,6 +12,7 @@ const mockAppendActiveSlide = vi.fn()
 const mockTrackEvent = vi.fn()
 const mockAddToQueue = vi.fn()
 const mockAddAndGoLive = vi.fn()
+const mockSetAlternateSlide = vi.fn()
 
 vi.mock('../../../hooks', () => ({
     useSongs: () => ({
@@ -61,6 +62,11 @@ vi.mock('../../../store/appStore', () => ({
     useAppStore: vi.fn().mockImplementation((selector: any) => {
         const state = {
             appendActiveSlide: mockAppendActiveSlide,
+            // The alternate-output action reads these; without them the whole
+            // suite dies on `state.alternateOutput.contentSource`.
+            alternateOutput: { contentSource: 'independent' },
+            alternateSlide: null,
+            setAlternateSlide: mockSetAlternateSlide,
         }
         return typeof selector === 'function' ? selector(state) : state
     }),

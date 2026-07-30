@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Search, BookA, Loader2, Plus, Zap, History } from 'lucide-react'
+import { Search, BookA, Loader2, Plus, Zap, History, Layers } from 'lucide-react'
 import { useDictionary, useDictionaryPacks } from '../../hooks/useDictionary'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
+import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { useScripture, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
@@ -59,6 +60,7 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
     const { fetchScripture } = useScripture()
     const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
     const { trackEvent } = useAnalytics()
+    const alternate = useSendToAlternate()
 
     const packsById = useMemo(
         () => new Map(packs.map((pack) => [pack.id, pack])),
@@ -215,6 +217,20 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
     useEffect(() => {
         if (!isInline) searchInputRef.current?.focus()
     }, [isInline])
+
+    /** Put an entry on the alternate output — Add and Live's third peer. */
+    const sendEntryToAlternate = useCallback(async (match: DictionaryMatch) => {
+        const cacheKey = `${match.record.packId}:${match.record.key}`
+        const entry = snippets.get(cacheKey) ?? await getEntry(match.record.packId, match.record.key)
+        if (!entry) return
+        const slides = createDictionarySlides(entry, {
+            pack: packsById.get(entry.packId),
+            template: selectedTemplate,
+        })
+        // One slide only: the output holds a single slide, so a multi-sense entry
+        // sends its first card rather than silently dropping the rest.
+        if (slides[0]) alternate.send(slides[0])
+    }, [snippets, getEntry, createDictionarySlides, packsById, selectedTemplate, alternate])
 
     // Quick-add straight from a result row, without opening the entry.
     const quickUse = useCallback(async (match: DictionaryMatch, goLive: boolean) => {
@@ -401,6 +417,15 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
                                         >
                                             <Plus className="w-3.5 h-3.5" />
                                         </button>
+                                        {alternate.canSend && (
+                                            <button
+                                                onClick={() => void sendEntryToAlternate(match)}
+                                                className="p-1.5 rounded-lg text-[var(--accent-indigo)] hover:bg-[var(--accent-indigo)]/10"
+                                                title="Send to the alternate output"
+                                            >
+                                                <Layers className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
                                         {canGoLive && (
                                             <button
                                                 onClick={() => quickUse(match, true)}

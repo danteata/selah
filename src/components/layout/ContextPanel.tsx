@@ -2,12 +2,12 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     X, BookOpen, BookA, Music, Image, Layout, Clock,
-    AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin, Search, Zap, Plus, Edit, Trash2
-} from 'lucide-react'
+    AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin, Search, Zap, Plus, Edit, Trash2, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSongs, useSong, useHymn, useSlideCreation } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
+import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { isInlineNavSection, type NavSection } from '../../types/studio'
 import type { Slide, ExternalVideo, Song, Hymn } from '../../types'
@@ -496,6 +496,20 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
     }, [index, byId, query])
 
     const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
+    const alternate = useSendToAlternate()
+
+    /** Put a search hit on the alternate output. One slide, so a song or hymn
+     *  sends its first verse. */
+    const sendHitToAlternate = useCallback(async (hit: UnifiedHit) => {
+        let slides: Slide[] = []
+        if (hit.kind === 'song' && hit.song) {
+            const full = await getSong(hit.song)
+            slides = createSongSlides((full ?? hit.song) as Song)
+        } else if (hit.kind === 'hymn' && hit.hymn) {
+            slides = createHymnSlides(hit.hymn)
+        }
+        if (slides[0]) alternate.send(slides[0])
+    }, [getSong, createSongSlides, createHymnSlides, alternate])
 
     // Primary action on a result is "go live" (append + verse 1 live); the
     // secondary Add button just queues it. Going live closes the panel; Add
@@ -651,6 +665,15 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                                         <Plus className="w-3.5 h-3.5" />
                                         Add
                                     </button>
+                                    {alternate.canSend && (
+                                        <button
+                                            onClick={() => void sendHitToAlternate(hit)}
+                                            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-[var(--accent-indigo)] hover:bg-[var(--accent-indigo)]/10 transition-colors"
+                                            title="Send to the alternate output"
+                                        >
+                                            <Layers className="w-3.5 h-3.5" />
+                                        </button>
+                                    )}
                                     {canGoLive && (
                                         <button
                                             onClick={() => void handleSelect(hit, true)}

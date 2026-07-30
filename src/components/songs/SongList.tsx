@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap } from 'lucide-react'
+import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap, Layers } from 'lucide-react'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
+import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -34,6 +35,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
     const { createSongSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
     const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
+    const alternate = useSendToAlternate()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const lastSearchTrackRef = useRef<number>(0)
 
@@ -58,6 +60,15 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
             addToQueue(slides)
         }
     }, [getSong, createSongSlides, selectedTemplate, addAndGoLive, addToQueue, trackEvent])
+
+    /** Put a song on the alternate output. It holds one slide, so this sends the
+     *  song's first verse — enough for a title or opening line on a second
+     *  screen, and the reason a queue of its own is the obvious next step. */
+    const sendSongToAlternate = useCallback(async (song: Song) => {
+        const full = await getSong(song)
+        const slides = createSongSlides((full ?? song) as Song, { template: selectedTemplate })
+        if (slides[0]) alternate.send(slides[0])
+    }, [getSong, createSongSlides, selectedTemplate, alternate])
 
     const voice = useVoiceSearch({
         onFinal: (text) => setQuery(text),
@@ -342,6 +353,16 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                                 <Plus className="w-3.5 h-3.5" />
                                                 Add
                                             </button>
+                                            {alternate.canSend && (
+                                                <button
+                                                    onClick={() => void sendSongToAlternate(song)}
+                                                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-indigo)] hover:bg-[var(--accent-indigo)]/10 transition-colors"
+                                                    title="Send to the alternate output"
+                                                >
+                                                    <Layers className="w-3.5 h-3.5" />
+                                                    Alt
+                                                </button>
+                                            )}
                                             {canGoLive && (
                                                 <button
                                                     onClick={() => void quickSelect(song, true)}
