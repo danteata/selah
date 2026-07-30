@@ -104,12 +104,25 @@ impl NdiSender {
         self.inner.read().is_some()
     }
 
+    /// Send a BGRA frame. Callers whose pixels have no meaningful alpha should use
+    /// `send_frame_with_fourcc` with `FOURCC_BGRX` instead.
     pub fn send_frame(
         &self,
         data: &[u8],
         width: u32,
         height: u32,
         bytes_per_row: i32,
+    ) -> Result<(), String> {
+        self.send_frame_with_fourcc(data, width, height, bytes_per_row, FOURCC_BGRA)
+    }
+
+    pub fn send_frame_with_fourcc(
+        &self,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        bytes_per_row: i32,
+        four_cc: u32,
     ) -> Result<(), String> {
         let inner = self.inner.read();
         let sender_inner = inner.as_ref().ok_or("NDI sender not running")?;
@@ -153,7 +166,7 @@ impl NdiSender {
         let frame = VideoFrameV2 {
             xres: width as i32,
             yres: height as i32,
-            four_cc: FOURCC_BGRA,
+            four_cc,
             frame_rate_n: 30,
             frame_rate_d: 1,
             // 0 means "use xres/yres", which is what we want for square pixels.

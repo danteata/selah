@@ -101,6 +101,13 @@ windows = { version = "0.58", features = [
 transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Windows
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# NDI output captures the live output window with XComposite + MIT-SHM
+# (ndi_output::capture_linux). x11-dl is already in the tree via tao/tauri and
+# dlopens libX11/libXext at run time, so this adds no build-time dependency and
+# nothing new for the AppImage to bundle; libc is for the shmget/shmat pair
+# MIT-SHM needs.
+x11-dl = "2.21"
+libc = "0.2"
 transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Linux
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

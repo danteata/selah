@@ -27,6 +27,9 @@ mod capture;
 #[cfg(all(feature = "ndi", target_os = "windows"))]
 mod capture_windows;
 
+#[cfg(all(feature = "ndi", target_os = "linux"))]
+mod capture_linux;
+
 #[cfg(feature = "ndi")]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -67,7 +70,7 @@ pub struct NdiManager {
     state: RwLock<NdiOutputState>,
     #[cfg(feature = "ndi")]
     sender: Arc<NdiSender>,
-    #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows")))]
+    #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     pub capture_stop: Arc<AtomicBool>,
 }
 
@@ -84,7 +87,7 @@ impl NdiManager {
             state: RwLock::new(default_state),
             #[cfg(feature = "ndi")]
             sender: Arc::new(NdiSender::new()),
-            #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows")))]
+            #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows", target_os = "linux")))]
             capture_stop: Arc::new(AtomicBool::new(false)),
         }
     }
