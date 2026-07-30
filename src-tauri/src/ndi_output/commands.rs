@@ -230,6 +230,120 @@ pub async fn ndi_send_video_frame(
     Err("NDI output is not available".to_string())
 }
 
+/// Announce an NDI source for a channel the app renders itself (a lower-thirds or
+/// other graphics feed). Idempotent for the same name.
+#[cfg(feature = "ndi")]
+#[tauri::command]
+pub async fn ndi_push_open(
+    state: State<'_, Arc<NdiManager>>,
+    channel_id: String,
+    source_name: String,
+) -> Result<(), String> {
+    if !state.is_available() {
+        return Err(
+            "The NDI runtime isn't installed on this machine. Install NDI Tools from ndi.video/tools."
+                .to_string(),
+        );
+    }
+    state.push.open(&channel_id, &source_name)
+}
+
+#[cfg(not(feature = "ndi"))]
+#[tauri::command]
+pub async fn ndi_push_open(
+    _state: State<'_, Arc<NdiManager>>,
+    _channel_id: String,
+    _source_name: String,
+) -> Result<(), String> {
+    Err("NDI output is not available".to_string())
+}
+
+#[cfg(feature = "ndi")]
+#[tauri::command]
+pub async fn ndi_push_close(
+    state: State<'_, Arc<NdiManager>>,
+    channel_id: String,
+) -> Result<(), String> {
+    state.push.close(&channel_id);
+    Ok(())
+}
+
+#[cfg(not(feature = "ndi"))]
+#[tauri::command]
+pub async fn ndi_push_close(
+    _state: State<'_, Arc<NdiManager>>,
+    _channel_id: String,
+) -> Result<(), String> {
+    Ok(())
+}
+
+/// Frames sent on a pushed channel, so the UI can distinguish "announced" from
+/// "actually sending" the way the program output badge does.
+#[cfg(feature = "ndi")]
+#[tauri::command]
+pub async fn ndi_push_frames_sent(
+    state: State<'_, Arc<NdiManager>>,
+    channel_id: String,
+) -> Result<u64, String> {
+    Ok(state.push.frames_sent(&channel_id))
+}
+
+#[cfg(not(feature = "ndi"))]
+#[tauri::command]
+pub async fn ndi_push_frames_sent(
+    _state: State<'_, Arc<NdiManager>>,
+    _channel_id: String,
+) -> Result<u64, String> {
+    Ok(0)
+}
+
+/// One RGBA frame for a pushed channel.
+///
+/// Deliberately NOT a normal command with a `Vec<u8>` argument: that route
+/// serialises the pixels as a JSON array of numbers, which is around 30 MB of
+/// text per 1080p frame — the reason the old `ndi_send_video_frame` was never
+/// usable. This takes the bytes as a raw IPC body with the frame's metadata in
+/// headers, and stays synchronous because `Request` borrows the invoke message.
+#[cfg(feature = "ndi")]
+#[tauri::command]
+pub fn ndi_push_frame(
+    state: State<'_, Arc<NdiManager>>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("ndi_push_frame expects the frame as a raw binary body".to_string());
+    };
+
+    let header = |name: &str| -> Result<&str, String> {
+        request
+            .headers()
+            .get(name)
+            .ok_or_else(|| format!("missing {name} header"))?
+            .to_str()
+            .map_err(|_| format!("{name} header is not valid text"))
+    };
+    let number = |name: &str| -> Result<u32, String> {
+        header(name)?
+            .parse::<u32>()
+            .map_err(|_| format!("{name} header is not a number"))
+    };
+
+    let channel_id = header("x-ndi-channel")?.to_string();
+    let width = number("x-ndi-width")?;
+    let height = number("x-ndi-height")?;
+
+    state.push.send_frame(&channel_id, data, width, height)
+}
+
+#[cfg(not(feature = "ndi"))]
+#[tauri::command]
+pub fn ndi_push_frame(
+    _state: State<'_, Arc<NdiManager>>,
+    _request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    Err("NDI output is not available".to_string())
+}
+
 #[cfg(feature = "ndi")]
 #[tauri::command]
 pub async fn ndi_send_audio_frame(

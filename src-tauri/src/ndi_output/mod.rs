@@ -21,6 +21,9 @@ pub(crate) mod ndi_lib;
 #[cfg(feature = "ndi")]
 mod sender;
 
+#[cfg(feature = "ndi")]
+mod push;
+
 #[cfg(all(feature = "ndi", target_os = "macos"))]
 mod capture;
 
@@ -38,6 +41,9 @@ use tauri::AppHandle;
 
 #[cfg(feature = "ndi")]
 use sender::NdiSender;
+
+#[cfg(feature = "ndi")]
+use push::PushChannels;
 
 pub const NDI_SOURCE_NAME: &str = "Selah Live Output";
 
@@ -70,6 +76,10 @@ pub struct NdiManager {
     state: RwLock<NdiOutputState>,
     #[cfg(feature = "ndi")]
     sender: Arc<NdiSender>,
+    /// Sources fed by frames the app renders itself, keyed by channel id — the
+    /// graphics/lower-thirds feeds, which carry alpha and need no window.
+    #[cfg(feature = "ndi")]
+    pub push: PushChannels,
     #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     pub capture_stop: Arc<AtomicBool>,
 }
@@ -87,6 +97,8 @@ impl NdiManager {
             state: RwLock::new(default_state),
             #[cfg(feature = "ndi")]
             sender: Arc::new(NdiSender::new()),
+            #[cfg(feature = "ndi")]
+            push: PushChannels::new(),
             #[cfg(all(feature = "ndi", any(target_os = "macos", target_os = "windows", target_os = "linux")))]
             capture_stop: Arc::new(AtomicBool::new(false)),
         }

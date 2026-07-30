@@ -112,6 +112,10 @@ use ndi_output::{
     ndi_stop_output,
     ndi_send_video_frame,
     ndi_send_audio_frame,
+    ndi_push_open,
+    ndi_push_close,
+    ndi_push_frame,
+    ndi_push_frames_sent,
     ndi_discover_sources,
 };
 
@@ -321,6 +325,10 @@ pub fn run() {
             ndi_stop_output,
             ndi_send_video_frame,
             ndi_send_audio_frame,
+            ndi_push_open,
+            ndi_push_close,
+            ndi_push_frame,
+            ndi_push_frames_sent,
             ndi_discover_sources,
             log_message,
             get_logs,
