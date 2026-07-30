@@ -9,6 +9,9 @@ const mockParseSongLyrics = vi.fn().mockReturnValue([])
 const mockGetSong = vi.fn()
 const mockCreateSongSlides = vi.fn().mockReturnValue([])
 const mockAppendActiveSlide = vi.fn()
+const mockTrackEvent = vi.fn()
+const mockAddToQueue = vi.fn()
+const mockAddAndGoLive = vi.fn()
 
 vi.mock('../../../hooks', () => ({
     useSongs: () => ({
@@ -27,6 +30,30 @@ vi.mock('../../../hooks', () => ({
     }),
     useSlideCreation: () => ({
         createSongSlides: mockCreateSongSlides,
+    }),
+    // Without this the whole suite errored out on an incomplete module mock
+    // ("No 'useAnalytics' export is defined") and every test in it failed.
+    useAnalytics: () => ({
+        trackEvent: mockTrackEvent,
+    }),
+}))
+
+vi.mock('../../../hooks/useGoLive', () => ({
+    useGoLive: () => ({
+        canGoLive: true,
+        addToQueue: mockAddToQueue,
+        addAndGoLive: mockAddAndGoLive,
+    }),
+}))
+
+vi.mock('../../../hooks/useVoiceSearch', () => ({
+    useVoiceSearch: () => ({
+        isListening: false,
+        isSupported: false,
+        transcript: '',
+        error: null,
+        start: vi.fn(),
+        stop: vi.fn(),
     }),
 }))
 
@@ -70,7 +97,7 @@ describe('SongList', () => {
 
     it('renders search input', () => {
         render(<SongList {...baseProps} />)
-        expect(screen.getByPlaceholderText('Search songs...')).toBeInTheDocument()
+        expect(screen.getByPlaceholderText('Search songs…')).toBeInTheDocument()
     })
 
     it('renders all songs', () => {
@@ -88,21 +115,21 @@ describe('SongList', () => {
 
     it('filters songs by title', () => {
         render(<SongList {...baseProps} />)
-        fireEvent.change(screen.getByPlaceholderText('Search songs...'), { target: { value: 'Amazing' } })
+        fireEvent.change(screen.getByPlaceholderText('Search songs…'), { target: { value: 'Amazing' } })
         expect(screen.getByText('Amazing Grace')).toBeInTheDocument()
         expect(screen.queryByText('How Great Thou Art')).not.toBeInTheDocument()
     })
 
     it('filters songs by artist', () => {
         render(<SongList {...baseProps} />)
-        fireEvent.change(screen.getByPlaceholderText('Search songs...'), { target: { value: 'Newton' } })
+        fireEvent.change(screen.getByPlaceholderText('Search songs…'), { target: { value: 'Newton' } })
         expect(screen.getByText('Amazing Grace')).toBeInTheDocument()
         expect(screen.queryByText('How Great Thou Art')).not.toBeInTheDocument()
     })
 
     it('shows no results for non-matching search', () => {
         render(<SongList {...baseProps} />)
-        fireEvent.change(screen.getByPlaceholderText('Search songs...'), { target: { value: 'xyz' } })
+        fireEvent.change(screen.getByPlaceholderText('Search songs…'), { target: { value: 'xyz' } })
         expect(screen.getByText('No songs found')).toBeInTheDocument()
     })
 
@@ -193,7 +220,7 @@ describe('SongList', () => {
 
     it('renders inline mode', () => {
         render(<SongList {...baseProps} isInline={true} />)
-        expect(screen.getByPlaceholderText('Search songs...')).toBeInTheDocument()
+        expect(screen.getByPlaceholderText('Search songs…')).toBeInTheDocument()
         expect(screen.getByText('Amazing Grace')).toBeInTheDocument()
     })
 
@@ -208,5 +235,42 @@ describe('SongList', () => {
         const editButtons = screen.getAllByTitle('Edit song')
         fireEvent.click(editButtons[0])
         expect(screen.getByTestId('add-song-modal')).toBeInTheDocument()
+    })
+
+    // Keyboard parity with the Bible panel: operators shouldn't have to reach for
+    // the mouse to put the obvious result on screen.
+    describe('keyboard', () => {
+        beforeEach(() => {
+            mockGetSong.mockImplementation(async (song: Song) => song)
+            mockCreateSongSlides.mockReturnValue([{ id: 'slide-1' }])
+        })
+
+        it('sends the top result live on Enter, with no arrowing first', async () => {
+            render(<SongList {...baseProps} />)
+            fireEvent.keyDown(screen.getByPlaceholderText('Search songs…'), { key: 'Enter' })
+
+            await waitFor(() => expect(mockAddAndGoLive).toHaveBeenCalled())
+            expect(mockGetSong).toHaveBeenCalledWith(expect.objectContaining({ title: 'Amazing Grace' }))
+            expect(mockAddToQueue).not.toHaveBeenCalled()
+        })
+
+        it('queues the top result on Shift+Enter', async () => {
+            render(<SongList {...baseProps} />)
+            fireEvent.keyDown(screen.getByPlaceholderText('Search songs…'), { key: 'Enter', shiftKey: true })
+
+            await waitFor(() => expect(mockAddToQueue).toHaveBeenCalled())
+            expect(mockAddAndGoLive).not.toHaveBeenCalled()
+        })
+
+        it('acts on the song the arrow keys moved to', async () => {
+            render(<SongList {...baseProps} />)
+            const input = screen.getByPlaceholderText('Search songs…')
+
+            fireEvent.keyDown(input, { key: 'ArrowDown' })
+            fireEvent.keyDown(input, { key: 'Enter' })
+
+            await waitFor(() => expect(mockAddAndGoLive).toHaveBeenCalled())
+            expect(mockGetSong).toHaveBeenCalledWith(expect.objectContaining({ title: 'How Great Thou Art' }))
+        })
     })
 })

@@ -3,6 +3,7 @@ import { Search, X, ChevronLeft, Music, Zap, Plus } from 'lucide-react'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
+import { useResultNavigation } from '../../hooks/useResultNavigation'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -90,6 +91,17 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
             .filter((h): h is Hymn => !!h)
     }, [hymns, hymnIndex, query])
 
+    // Same keyboard contract as the songs, Bible and dictionary panels.
+    const { focusedIndex, setFocusedIndex, handleKeyDown, listRef } = useResultNavigation<HTMLDivElement>({
+        count: filteredHymns.length,
+        resetKey: `${query}:${filteredHymns.length}`,
+        onActivate: (index, { queue }) => {
+            const hymn = filteredHymns[index]
+            if (hymn) quickSelect(hymn, !queue)
+        },
+        enabled: !selectedHymn,
+    })
+
     const handleCreateSlides = useCallback(() => {
         if (selectedHymn) {
             const slides = createHymnSlides(selectedHymn as any, { template: selectedTemplate })
@@ -111,7 +123,7 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
     // load (see below), consistent with the songs list.
 
     return (
-        <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
+        <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg" onKeyDown={handleKeyDown}>
             {/* Header - Hidden when inline */}
             {!isInline && (
                 <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
@@ -153,7 +165,7 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
 
             {/* Hymn List */}
             {!selectedHymn ? (
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto" ref={listRef}>
                     {loading && filteredHymns.length === 0 ? (
                         /* Skeleton while hymns load — avoids a spinner / empty flash. */
                         <div className="p-3 space-y-2.5">
@@ -174,10 +186,16 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
                         </div>
                     ) : (
                         <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                            {filteredHymns.map((hymn) => (
+                            {filteredHymns.map((hymn, index) => (
                                 <div
                                     key={hymn.number}
-                                    className="flex items-center justify-between gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
+                                    data-result-index={index}
+                                    onMouseEnter={() => setFocusedIndex(index)}
+                                    className={`flex items-center justify-between gap-2 px-4 py-3 transition-colors group ${
+                                        focusedIndex === index
+                                            ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
+                                            : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                                    }`}
                                 >
                                     <button
                                         onClick={() => setSelectedHymn(hymn)}

@@ -7,6 +7,7 @@ import {
 import { useAppStore } from '../../store/appStore'
 import { useSongs, useSong, useHymn, useSlideCreation } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
+import { useResultNavigation } from '../../hooks/useResultNavigation'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { isInlineNavSection, type NavSection } from '../../types/studio'
 import type { Slide, ExternalVideo, Song, Hymn } from '../../types'
@@ -518,8 +519,20 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
         }
     }, [getSong, createSongSlides, createHymnSlides, addAndGoLive, addToQueue])
 
+    // Keyboard contract shared with the Bible and dictionary panels: the top
+    // ranked hit is highlighted as results arrive, Enter sends it live and
+    // Shift+Enter queues it — no reach for the mouse mid-service.
+    const { focusedIndex, setFocusedIndex, handleKeyDown, listRef } = useResultNavigation<HTMLDivElement>({
+        count: results.length,
+        resetKey: `${query}:${results.length}`,
+        onActivate: (index, { queue }) => {
+            const hit = results[index]
+            if (hit) void handleSelect(hit, !queue)
+        },
+    })
+
     return (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full" onKeyDown={handleKeyDown}>
             {/* When a song is live, surface its verses for quick navigation. */}
             <LiveSongNavigator />
 
@@ -557,9 +570,17 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                 </button>
             </div>
 
+            {results.length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-1.5 text-[10px] text-[var(--text-muted)]">
+                    <span>Enter = Live</span>
+                    <span>Shift+Enter = Add to queue</span>
+                    <span>↑↓ Navigate</span>
+                </div>
+            )}
+
             {query.trim() ? (
                 /* Unified results — interleaved, ranked, with a type badge. */
-                <div className="flex-1 overflow-y-auto p-2">
+                <div className="flex-1 overflow-y-auto p-2" ref={listRef}>
                     {results.length === 0 ? (
                         <div className="p-8 text-center text-[var(--text-muted)] text-sm">
                             No songs or hymns match “{query.trim()}”
@@ -569,10 +590,16 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                             className="grid gap-1"
                             style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}
                         >
-                            {results.map((hit) => (
+                            {results.map((hit, index) => (
                                 <div
                                     key={hit.id}
-                                    className="w-full flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors group"
+                                    data-result-index={index}
+                                    onMouseEnter={() => setFocusedIndex(index)}
+                                    className={`w-full flex items-center gap-1 px-2 py-1.5 rounded-lg transition-colors group ${
+                                        focusedIndex === index
+                                            ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
+                                            : 'hover:bg-[var(--bg-tertiary)]'
+                                    }`}
                                 >
                                     {/* Primary: title area sends it live in one click. */}
                                     <button

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search, BookA, Loader2, Plus, Zap, History } from 'lucide-react'
 import { useDictionary, useDictionaryPacks } from '../../hooks/useDictionary'
+import { useResultNavigation } from '../../hooks/useResultNavigation'
 import { useScripture, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
@@ -222,6 +223,18 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
         if (entry) queueEntry(entry, { goLive })
     }, [snippets, getEntry, queueEntry])
 
+    // Same keyboard contract as the Bible panel: the best match is highlighted
+    // as soon as results appear, Enter presents it, Shift+Enter queues it.
+    const { focusedIndex, setFocusedIndex, handleKeyDown, listRef } = useResultNavigation<HTMLDivElement>({
+        count: matches.length,
+        resetKey: `${query}:${matches.length}`,
+        onActivate: (index, { queue }) => {
+            const match = matches[index]
+            if (match) void quickUse(match, !queue)
+        },
+        enabled: !selected,
+    })
+
     if (selected) {
         return (
             <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
@@ -245,7 +258,7 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
     }
 
     return (
-        <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
+        <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg" onKeyDown={handleKeyDown}>
             {!isInline && (
                 <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
                     <h2 className="text-lg font-semibold">Dictionary</h2>
@@ -300,10 +313,20 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
                         ))}
                     </div>
                 )}
+
+                {/* Same hint the Bible panel carries, so the keyboard contract is
+                    discoverable rather than folklore. */}
+                {matches.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-[var(--text-muted)]">
+                        <span>Enter = Present</span>
+                        <span>Shift+Enter = Add to queue</span>
+                        <span>↑↓ Navigate</span>
+                    </div>
+                )}
             </div>
 
             {/* Results */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto" ref={listRef}>
                 {packsLoading ? (
                     <div className="p-8 flex items-center justify-center text-gray-400">
                         <Loader2 className="w-5 h-5 animate-spin" />
@@ -335,15 +358,22 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
                     </div>
                 ) : (
                     <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                        {matches.map((match) => {
+                        {matches.map((match, index) => {
                             const cacheKey = `${match.record.packId}:${match.record.key}`
                             const entry = snippets.get(cacheKey)
                             const pack = packsById.get(match.record.packId)
+                            const isFocused = focusedIndex === index
 
                             return (
                                 <div
                                     key={cacheKey}
-                                    className="flex items-start justify-between gap-2 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group"
+                                    data-result-index={index}
+                                    onMouseEnter={() => setFocusedIndex(index)}
+                                    className={`flex items-start justify-between gap-2 px-3 py-2.5 transition-colors group ${
+                                        isFocused
+                                            ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
+                                            : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                                    }`}
                                 >
                                     <button
                                         onClick={() => openEntry(match.record.packId, match.record.key)}

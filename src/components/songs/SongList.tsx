@@ -3,6 +3,7 @@ import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap } from 'l
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
+import { useResultNavigation } from '../../hooks/useResultNavigation'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -89,6 +90,19 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
             .filter((s): s is Song => !!s)
     }, [songs, songIndex, query])
 
+    // Same keyboard contract as the Bible and dictionary panels: the top hit is
+    // highlighted as results arrive, Enter sends it live, Shift+Enter queues it.
+    const { focusedIndex, setFocusedIndex, handleKeyDown, listRef } = useResultNavigation<HTMLDivElement>({
+        count: filteredSongs.length,
+        resetKey: `${query}:${filteredSongs.length}`,
+        onActivate: (index, { queue }) => {
+            const song = filteredSongs[index]
+            if (song) void quickSelect(song, !queue)
+        },
+        // The detail view owns the keyboard while a song is open.
+        enabled: !selectedSong,
+    })
+
     // Throttled song search tracking — fire at most once per 2s
     useEffect(() => {
         const trimmed = query.trim()
@@ -171,7 +185,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
 
     return (
         <>
-            <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg">
+            <div className="h-full flex flex-col bg-white dark:bg-gray-900 rounded-lg" onKeyDown={handleKeyDown}>
                 {/* Header - Hidden when inline */}
                 {!isInline && (
                     <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
@@ -237,7 +251,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
 
                 {/* Songs List */}
                 {!selectedSong ? (
-                    <div className="flex-1 overflow-y-auto">
+                    <div className="flex-1 overflow-y-auto" ref={listRef}>
                         {songsLoading && filteredSongs.length === 0 ? (
                             /* Skeleton while the library loads — avoids flashing the
                                deceptive "No songs yet" state before songs arrive. */
@@ -278,10 +292,16 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                             </div>
                         ) : (
                             <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                                {filteredSongs.map((song) => (
+                                {filteredSongs.map((song, index) => (
                                     <div
                                         key={song._id || song.id}
-                                        className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 group"
+                                        data-result-index={index}
+                                        onMouseEnter={() => setFocusedIndex(index)}
+                                        className={`flex items-center justify-between px-4 py-3 group ${
+                                            focusedIndex === index
+                                                ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
+                                                : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                                        }`}
                                     >
                                         <button
                                             onClick={() => setSelectedSong(song)}
