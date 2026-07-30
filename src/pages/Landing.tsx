@@ -873,9 +873,19 @@ function StandoutSection() {
                                 className="text-sm leading-relaxed"
                                 style={{ color: 'rgba(228,228,231,0.6)' }}
                             >
-                                Send the output to a screen, a projector, or any NDI
+                                Send the output to a screen, a projector, or any NDI&reg;
                                 receiver on your network — no capture card, no splitter,
-                                no cable run.
+                                no cable run. Needs the free{' '}
+                                <a
+                                    href="https://ndi.video/tools/"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="underline hover:text-white"
+                                >
+                                    NDI Tools
+                                </a>{' '}
+                                runtime installed. NDI&reg; is a registered trademark of
+                                Vizrt NDI AB.
                             </p>
                         </div>
                     </article>

@@ -4,15 +4,19 @@
  * Provides NDI (Network Device Interface) output for streaming
  * the live display and audio to other devices on the network.
  * 
- * When compiled with the `ndi` feature, availability is determined
- * at runtime by attempting to initialize the NDI SDK.
- * When compiled without, NDI is always reported as unavailable.
+ * The NDI library is loaded at runtime (see `ndi_lib`), so this ships in every
+ * build: availability is decided by whether the runtime is installed on the
+ * machine, not by how Selah was compiled. The `ndi` feature remains only so a
+ * build can leave NDI out entirely.
  */
 
 mod types;
 mod commands;
 
 pub use commands::*;
+
+#[cfg(feature = "ndi")]
+pub(crate) mod ndi_lib;
 
 #[cfg(feature = "ndi")]
 mod sender;
@@ -125,15 +129,10 @@ impl NdiManager {
 
     #[cfg(feature = "ndi")]
     fn check_availability() -> bool {
-        // Try to initialize the NDI runtime — this will fail
-        // if the NDI SDK libraries are not installed on the system.
-        match grafton_ndi::NDI::new() {
-            Ok(_) => true,
-            Err(e) => {
-                eprintln!("NDI SDK not available: {:?}", e);
-                false
-            }
-        }
+        // Loads the NDI runtime if it's installed. Cached after the first call,
+        // and a failure here is just "no NDI on this machine" — it can't affect
+        // the rest of the app.
+        ndi_lib::NdiLib::get().is_some()
     }
 
     #[cfg(not(feature = "ndi"))]
