@@ -23,7 +23,7 @@ vi.mock('../../services/ndi-output', () => ({
     },
 }))
 
-import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../useNdiOutput'
+import { useNdiOutput, NDI_LIVE_WINDOW_MISSING, type NdiStartRefusal } from '../useNdiOutput'
 
 describe('useNdiOutput start refusals', () => {
     beforeEach(() => {
@@ -48,23 +48,23 @@ describe('useNdiOutput start refusals', () => {
         )
 
         const { result } = renderHook(() => useNdiOutput())
-        let refusal: Awaited<ReturnType<typeof result.current.startOutput>> = null
-        await act(async () => { refusal = await result.current.startOutput() })
+        const out: { refusal?: NdiStartRefusal | null } = {}
+        await act(async () => { out.refusal = await result.current.startOutput() })
 
-        expect(refusal?.code).toBe(NDI_LIVE_WINDOW_MISSING)
+        expect(out.refusal?.code).toBe(NDI_LIVE_WINDOW_MISSING)
         // The code is machine-readable plumbing; the operator must not see it.
-        expect(refusal?.message).not.toContain(NDI_LIVE_WINDOW_MISSING)
-        expect(refusal?.message).toContain('live output window')
+        expect(out.refusal?.message).not.toContain(NDI_LIVE_WINDOW_MISSING)
+        expect(out.refusal?.message).toContain('live output window')
     })
 
     it('passes any other refusal through as advice', async () => {
         startOutput.mockRejectedValue(new Error('Selah needs Screen Recording permission…'))
 
         const { result } = renderHook(() => useNdiOutput())
-        let refusal: Awaited<ReturnType<typeof result.current.startOutput>> = null
-        await act(async () => { refusal = await result.current.startOutput() })
+        const out: { refusal?: NdiStartRefusal | null } = {}
+        await act(async () => { out.refusal = await result.current.startOutput() })
 
-        expect(refusal).toEqual({ code: 'unknown', message: 'Selah needs Screen Recording permission…' })
+        expect(out.refusal).toEqual({ code: 'unknown', message: 'Selah needs Screen Recording permission…' })
     })
 
     it('never rejects, so a caller cannot leak an uncaught promise', async () => {
@@ -82,8 +82,8 @@ describe('useNdiOutput start refusals', () => {
         const { result } = renderHook(() => useNdiOutput())
         await waitFor(() => expect(result.current.isAvailable).toBe(true))
 
-        let refusal: Awaited<ReturnType<typeof result.current.startOutput>> = null
-        await act(async () => { refusal = await result.current.startOutput() })
-        expect(refusal).toBeNull()
+        const out: { refusal?: NdiStartRefusal | null } = {}
+        await act(async () => { out.refusal = await result.current.startOutput() })
+        expect(out.refusal).toBeNull()
     })
 })

@@ -5,6 +5,7 @@ import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNav
 import type { Slide, Scripture, BibleVerse } from '../../types'
 import { bibleBooks } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
+import { isLowerThird } from '../../utils/lowerThird'
 import { EmptyState } from '../utils/EmptyState'
 import { BibleVersionSelect } from '../bible/BibleVersionSelect'
 import { SongVerseBrowser } from '../slides/SongVerseBrowser'
@@ -16,6 +17,8 @@ export function PreviewContent() {
     const [currentVerses, setCurrentVerses] = useState<BibleVerse[]>([])
     const [loadingVerses, setLoadingVerses] = useState(false)
 
+    const graphicsSlide = useAppStore((state) => state.graphicsSlide)
+    const setGraphicsSlide = useAppStore((state) => state.setGraphicsSlide)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
@@ -517,6 +520,12 @@ export function PreviewContent() {
                         isSaved={isInLibrary(slide.id)}
                         onGoLive={canGoLive ? () => { void setSharedLiveSlide(slide.id) } : undefined}
                         onSuggestToQueue={canQueueSlide ? () => { void addToQueue([slide.id]) } : undefined}
+                        // Only lower thirds: the graphics output exists to carry a
+                        // keyed overlay, not a second full-screen slide.
+                        onSendToGraphics={isLowerThird(slide)
+                            ? () => setGraphicsSlide(graphicsSlide?.id === slide.id ? null : slide)
+                            : undefined}
+                        isOnGraphics={graphicsSlide?.id === slide.id}
                         isStickyActive={activeSlide?.id === slide.id}
                     />
                 </div>

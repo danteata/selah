@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Plus, Eye, EyeOff, Rows3, Columns2, Maximize2 } from 'lucide-react'
+import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Plus, Eye, EyeOff, Rows3, Columns2, Maximize2, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../../hooks/useNdiOutput'
+import { useGraphicsChannel } from '../../hooks/useGraphicsChannel'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { useLiveSession, useVerseNavigationShortcuts, useKeyboardShortcut } from '../../hooks'
@@ -102,6 +103,34 @@ export function LiveOutput() {
     const ndiSending = (ndiState?.framesSent ?? 0) > 0
     const { isPro, startProCheckout } = useEntitlements()
 
+
+    const graphics = useGraphicsChannel()
+
+    // Independent of the program output's NDI feed: this one carries the graphics
+    // channel's own slide, with alpha, as a second source.
+    const handleGraphicsToggle = useCallback(() => {
+        if (graphics.isEnabled) {
+            void graphics.disable()
+            return
+        }
+        if (!isPro) {
+            toast.warning('The graphics output is a Selah Pro feature', {
+                description: 'Upgrade to send lower thirds as their own NDI source.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        void graphics.enable().then((error) => {
+            if (!error) {
+                toast.success('Graphics output on', {
+                    description: 'Take "Selah Graphics" in your switcher. Send a lower third to it from any slide.',
+                })
+                return
+            }
+            toast.error('Graphics output could not start', { description: error, duration: 12000 })
+        })
+    }, [graphics, isPro, startProCheckout])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -732,6 +761,20 @@ export function LiveOutput() {
                             </span>
                         )
                     )}
+                    {graphics.isEnabled && (
+                        <span
+                            title={graphics.slide
+                                ? `Graphics output: ${graphics.framesSent.toLocaleString()} frames sent`
+                                : 'Graphics output is on with nothing on it — sending a transparent frame'}
+                            className={`flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border ${
+                                graphics.framesSent > 0
+                                    ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)] border-[var(--accent-indigo)]/20'
+                                    : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                            }`}
+                        >
+                            {graphics.slide ? 'GFX LIVE' : 'GFX EMPTY'}
+                        </span>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -743,6 +786,17 @@ export function LiveOutput() {
                             title={isPro ? 'NDI Output' : 'NDI Output (Pro)'}
                         >
                             <Radio className="w-4 h-4" />
+                        </button>
+                    )}
+                    {ndiAvailable && (
+                        <button
+                            onClick={handleGraphicsToggle}
+                            className={`p-1.5 rounded-lg transition-colors ${graphics.isEnabled ? 'text-[var(--accent-indigo)] bg-[var(--accent-indigo)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
+                            title={isPro
+                                ? 'Graphics output — a separate NDI source for lower thirds, with transparency'
+                                : 'Graphics output (Pro)'}
+                        >
+                            <Layers className="w-4 h-4" />
                         </button>
                     )}
                     <button

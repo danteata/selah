@@ -107,6 +107,12 @@ export interface AppState {
     // blank screen (e.g. during prayer) — independent of `liveSlideId`, which
     // keeps pointing at whatever slide is queued up so un-clearing restores it.
     liveOutputBlanked: boolean
+    // The graphics channel: an alternate output (lower thirds) with its own
+    // content, sent over NDI with transparency and optionally mirrored to a
+    // screen. Independent of `liveSlideId` — that is the whole point, so lyrics
+    // can stay on the projector while a name sits on the stream.
+    graphicsSlide: Slide | null
+    graphicsChannelEnabled: boolean
     // Predictive song-lyric auto-advance (Phase 2 wiring).
     songTracking: SongTrackingState
     // Audio-reactive motion-graphics layer on the live output (Phase 4).
@@ -215,6 +221,8 @@ const initialState: AppState = {
     sharedQueueSlideIds: [],
     liveSlideId: null,
     liveOutputBlanked: false,
+    graphicsSlide: null,
+    graphicsChannelEnabled: false,
     songTracking: DEFAULT_SONG_TRACKING,
     visualizerEnabled: false,
     emitter: null,
@@ -293,6 +301,9 @@ interface AppStore extends AppState {
     removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string | null) => void
     setLiveOutputBlanked: (blanked: boolean) => void
+    /** Put a slide on the graphics channel, or clear it with null. */
+    setGraphicsSlide: (slide: Slide | null) => void
+    setGraphicsChannelEnabled: (enabled: boolean) => void
     setSongTrackingEnabled: (enabled: boolean) => void
     setSongTrackingLocked: (locked: boolean) => void
     setSongAutoDetect: (autoDetect: boolean) => void
@@ -666,6 +677,14 @@ export const useAppStore = create<AppStore>()(
 
             setLiveOutputBlanked: (blanked) => {
                 set({ liveOutputBlanked: blanked })
+            },
+
+            setGraphicsSlide: (slide) => {
+                set({ graphicsSlide: slide })
+            },
+
+            setGraphicsChannelEnabled: (enabled) => {
+                set({ graphicsChannelEnabled: enabled })
             },
 
             setSongTrackingEnabled: (enabled) => {
