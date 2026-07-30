@@ -18,6 +18,7 @@ A modern, real-time worship presentation application built with React, TypeScrip
 ### Presentation & Live Control
 - **Live Output** — Separate fullscreen output window for projection via the Presentation API or a second tab
 - **Screen Picker** — Select which connected display receives the live output
+- **NDI Output** (Pro) — Send the live output over the network for vMix, OBS or a hardware switcher. It mirrors the live output window, so that window has to be open — NDI can't yet be an output on its own. See [docs/NDI_OUTPUT.md](./docs/NDI_OUTPUT.md)
 - **Slide Preview** — Preview slides before going live with rich formatting
 - **Rich Text Editor** — TipTap-powered editor with font family, colour, text alignment, and highlight controls
 - **Templates** — Save and reuse slide designs
