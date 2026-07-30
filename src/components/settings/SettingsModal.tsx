@@ -279,7 +279,15 @@ function DisplaySettings({
             })
             return
         }
-        void ndiStart()
+        // Same refusals as the Program Output toggle — say them out loud instead
+        // of letting the promise reject into the console.
+        void ndiStart().then((refusal) => {
+            if (!refusal) return
+            toast.error('NDI output could not start', {
+                description: refusal.message,
+                duration: 12000,
+            })
+        })
     }, [isPro, startProCheckout, ndiStart])
 
     const handleIdentify = useCallback(async (monitorId: string) => {

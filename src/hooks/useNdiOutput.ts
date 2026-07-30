@@ -5,6 +5,28 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ndiOutputService, type NdiOutputState, type NdiOutputConfig, type NdiSourceInfo } from '../services/ndi-output'
 
+/**
+ * Code the backend prefixes onto the "live output window isn't open" refusal, so
+ * the UI can offer to open it instead of only reporting it. Must match
+ * LIVE_WINDOW_MISSING_CODE in src-tauri/src/ndi_output/commands.rs.
+ */
+export const NDI_LIVE_WINDOW_MISSING = 'live-window-missing'
+
+export interface NdiStartRefusal {
+    /** `live-window-missing` has a one-click remedy; anything else is advice. */
+    code: typeof NDI_LIVE_WINDOW_MISSING | 'unknown'
+    /** Operator-facing text, with any code prefix removed. */
+    message: string
+}
+
+function parseRefusal(error: unknown): NdiStartRefusal {
+    const raw = error instanceof Error ? error.message : String(error)
+    const prefix = `${NDI_LIVE_WINDOW_MISSING}: `
+    return raw.startsWith(prefix)
+        ? { code: NDI_LIVE_WINDOW_MISSING, message: raw.slice(prefix.length) }
+        : { code: 'unknown', message: raw }
+}
+
 interface UseNdiOutputReturn {
     /** NDI runtime found and initialised. */
     isAvailable: boolean
@@ -14,7 +36,8 @@ interface UseNdiOutputReturn {
     state: NdiOutputState | null
     sources: NdiSourceInfo[]
     isLoading: boolean
-    startOutput: (config?: Partial<NdiOutputConfig>) => Promise<void>
+    /** Resolves with null on success, or why it refused. */
+    startOutput: (config?: Partial<NdiOutputConfig>) => Promise<NdiStartRefusal | null>
     stopOutput: () => Promise<void>
     refreshState: () => Promise<void>
     discoverSources: () => Promise<void>
@@ -62,11 +85,25 @@ export function useNdiOutput(): UseNdiOutputReturn {
         setState(s)
     }, [])
 
-    const startOutput = useCallback(async (config?: Partial<NdiOutputConfig>) => {
+    /**
+     * Start NDI output. Returns null on success, or the reason it refused —
+     * "the live output window isn't open", "grant Screen Recording", "this
+     * Windows is too old". Those are all things the operator can act on, so this
+     * resolves with the message instead of rejecting: a rejection meant every
+     * caller had to remember a `.catch`, and the one that didn't turned the most
+     * useful message in the feature into an uncaught promise error in the
+     * console, where no operator would ever see it.
+     */
+    const startOutput = useCallback(async (config?: Partial<NdiOutputConfig>): Promise<NdiStartRefusal | null> => {
         setIsLoading(true)
         try {
             await ndiOutputService.startOutput(config)
             await refreshState()
+            return null
+        } catch (error) {
+            const refusal = parseRefusal(error)
+            setState((previous) => previous ? { ...previous, error: refusal.message } : previous)
+            return refusal
         } finally {
             setIsLoading(false)
         }

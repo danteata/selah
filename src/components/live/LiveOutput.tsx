@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Plus, Eye, EyeOff, Rows3, Columns2, Maximize2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
-import { useNdiOutput } from '../../hooks/useNdiOutput'
+import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../../hooks/useNdiOutput'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { useLiveSession, useVerseNavigationShortcuts, useKeyboardShortcut } from '../../hooks'
@@ -102,31 +102,6 @@ export function LiveOutput() {
     const ndiSending = (ndiState?.framesSent ?? 0) > 0
     const { isPro, startProCheckout } = useEntitlements()
 
-    // NDI network streaming is Pro-only; free users get an upsell.
-    const handleNdiToggle = useCallback(() => {
-        if (ndiRunning) {
-            void ndiStop()
-            return
-        }
-        if (!isPro) {
-            toast.warning('NDI output is a Selah Pro feature', {
-                description: 'Upgrade to stream your live output over the network via NDI.',
-                duration: 10000,
-                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
-            })
-            return
-        }
-        // The backend refuses for reasons the operator can act on — no Screen
-        // Recording permission, no live output window open, no capture support on
-        // this platform. Swallowing the rejection (as `void ndiStart()` did) left
-        // them staring at a black feed with nothing said.
-        void ndiStart().catch((error: unknown) => {
-            toast.error('NDI output could not start', {
-                description: error instanceof Error ? error.message : String(error),
-                duration: 12000,
-            })
-        })
-    }, [ndiRunning, isPro, startProCheckout, ndiStart, ndiStop])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -453,6 +428,39 @@ export function LiveOutput() {
             setShowScreenPicker(true)
         }
     }, [liveOutputMonitorId, isDesktop, openLiveWindow, detectMonitors, liveSlideId])
+
+    // NDI network streaming is Pro-only; free users get an upsell.
+    const handleNdiToggle = useCallback(() => {
+        if (ndiRunning) {
+            void ndiStop()
+            return
+        }
+        if (!isPro) {
+            toast.warning('NDI output is a Selah Pro feature', {
+                description: 'Upgrade to stream your live output over the network via NDI.',
+                duration: 10000,
+                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+            })
+            return
+        }
+        // The backend refuses for reasons the operator can act on — no Screen
+        // Recording permission, no live output window open, no capture support on
+        // this platform. `void ndiStart()` used to drop those on the floor as an
+        // uncaught promise, so the most useful sentence in the feature only ever
+        // appeared in the devtools console.
+        void ndiStart().then((refusal) => {
+            if (!refusal) return
+            toast.error('NDI output could not start', {
+                description: refusal.message,
+                duration: 12000,
+                // Nobody should have to know that NDI mirrors the live output
+                // window, or that the order matters — offer the missing step.
+                action: refusal.code === NDI_LIVE_WINDOW_MISSING
+                    ? { label: 'Open live output', onClick: () => void handleOpenLive() }
+                    : undefined,
+            })
+        })
+    }, [ndiRunning, isPro, startProCheckout, ndiStart, ndiStop, handleOpenLive])
 
     // Handle screen selection
     const handleScreenSelect = useCallback(async (screenId: string) => {

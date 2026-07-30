@@ -11,6 +11,14 @@ use tauri::State;
 use super::{NdiManager, NdiOutputState};
 use super::types::NdiOutputConfig;
 
+/// Prefix on the "the live output window isn't open" refusal. The frontend keys
+/// off it to offer a button that opens the live output, rather than only telling
+/// the operator what went wrong — most people have no reason to know NDI mirrors
+/// that window, or that the order matters. Stripped before display; keep it in
+/// step with `NDI_LIVE_WINDOW_MISSING` in src/hooks/useNdiOutput.ts.
+#[cfg(feature = "ndi")]
+pub const LIVE_WINDOW_MISSING_CODE: &str = "live-window-missing";
+
 #[tauri::command]
 pub async fn ndi_is_available(
     state: State<'_, Arc<NdiManager>>,
@@ -84,25 +92,19 @@ pub async fn ndi_start_output(
             .get_webview_window(crate::multi_monitor::LIVE_WINDOW_LABEL)
             .is_none()
         {
-            return Err(
-                "NDI sends what the live output window shows, and it isn't open yet. \
-                 Send the live output to a screen first, then start NDI again."
-                    .to_string(),
-            );
+            return Err(format!(
+                "{LIVE_WINDOW_MISSING_CODE}: NDI sends what the live output window shows, and it \
+                 isn't open yet. Send the live output to a screen, then turn NDI on."
+            ));
         }
     }
 
-    // Linux still has no frame source — only macOS (ScreenCaptureKit) and Windows
-    // (Windows.Graphics.Capture) do. Starting the sender without one announces a
-    // source that never receives a pixel: the black feed this reports instead.
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    // Every platform with a capture backend is handled below. Anything else would
+    // announce a source that never receives a pixel — the black feed.
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = &config; // only the capture backends read it
-        return Err(
-            "NDI output isn't supported on Linux yet — there's no screen capture backend, \
-             so the feed would be black."
-                .to_string(),
-        );
+        return Err("NDI output has no screen capture backend on this platform.".to_string());
     }
 
     #[cfg(target_os = "windows")]
@@ -114,7 +116,12 @@ pub async fn ndi_start_output(
         );
     }
 
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    // X11 + MIT-SHM have to be there before a sender is announced; on Wayland this
+    // is where the operator is told to run under XWayland.
+    #[cfg(target_os = "linux")]
+    super::capture_linux::preflight()?;
+
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         use std::sync::atomic::Ordering;
 
@@ -126,6 +133,12 @@ pub async fn ndi_start_output(
             super::capture::start_capture(&config, state.sender.clone(), state.capture_stop.clone());
         #[cfg(target_os = "windows")]
         let started = super::capture_windows::start_capture(
+            &config,
+            state.sender.clone(),
+            state.capture_stop.clone(),
+        );
+        #[cfg(target_os = "linux")]
+        let started = super::capture_linux::start_capture(
             &config,
             state.sender.clone(),
             state.capture_stop.clone(),
@@ -165,7 +178,7 @@ pub async fn ndi_stop_output(
     // Signals both capture backends (the flag is "keep running") to leave their
     // loop; without this the Windows thread would keep pushing frames at a
     // destroyed sender.
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         use std::sync::atomic::Ordering;
         state.capture_stop.store(false, Ordering::SeqCst);
