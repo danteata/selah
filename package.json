@@ -30,6 +30,7 @@
     "build-semantic-pack": "node scripts/build-embedding-pack.mjs --version WEB --file public/bibles/web.json --fragments",
     "build-semantic-pack:browser": "node scripts/build-embedding-pack.mjs --version WEB --file public/bibles/web.json && node scripts/build-web-embedding-pack.mjs --version WEB",
     "desktop:dev": "npm run desktop:prebuild && tauri dev",
+    "desktop:dev:lite": "sh scripts/dev-lite.sh",
     "desktop:build": "tauri build",
     "desktop:build:windows": "tauri build --target x86_64-pc-windows-msvc",
     "desktop:build:mac": "tauri build --target universal-apple-darwin",
