@@ -9,15 +9,18 @@
  * `semanticPack.ts` decides WHICH pack loads. One pack serves every Bible
  * version the user reads — see that file for why.
  *
- * Two pack shapes:
- *  - Desktop: `src-tauri/assets/embedding-packs/<VERSION>/` bundled as Tauri
- *    resources, read via `asset://`. Full verses + fragments, float32
- *    (`embeddings.f32`) — fine inside a native app. Fragments matter for
- *    short-phrase / paraphrase hits during live transcription.
- *  - Browser: `/embedding-packs/<VERSION>/` served as a static asset.
- *    Canonical verses only, int8-quantized (`embeddings.i8`, ~11 MB) so it can
- *    be downloaded once, cached in IndexedDB, and searched offline.
- *    Built by `scripts/build-web-embedding-pack.mjs`.
+ * Two places a pack can live, probed in this order by `resolvePackBaseUrl`:
+ *  - `/embedding-packs/<VERSION>/` — `public/embedding-packs`, so it is part of
+ *    the frontend bundle and reachable both on the web and inside the Tauri
+ *    webview (exactly like `/bibles` and `/dictionaries`). Canonical verses
+ *    only, int8-quantized (`embeddings.i8`, ~11 MB) so the browser can download
+ *    it once, cache it in IndexedDB, and search offline. This is the pack that
+ *    ships in releases — built by `scripts/build-web-embedding-pack.mjs`.
+ *  - `src-tauri/assets/embedding-packs/<VERSION>/` bundled as Tauri resources
+ *    and read via `asset://`. Optional and desktop-only: a bigger float32
+ *    verses+fragments pack for whoever places one there (fragments help
+ *    short-phrase / paraphrase hits during live transcription). Absent from
+ *    releases, so the bundled path above must work on its own.
  *
  * manifest.json: { version, dim, count, quantization?: 'int8', scale?, ... }
  * Embeddings are L2-normalised so cosine == dot product. int8 packs store
@@ -116,14 +119,18 @@ async function idbPutPack(pack: CachedPack): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Base URL where pack files live for a version, or null if none applies.
- * Desktop → the bundled Tauri asset dir. Browser → the static
- * `/embedding-packs` path. Only the universal packs listed in
- * `semanticPack.SEMANTIC_PACK_PREFERENCE` ship; anything else 404s, which is
- * how `hasEmbeddingPack` reports absence.
+ * Every place this version's pack might live, best-supported first. The
+ * frontend-bundled path comes first because it is the one that actually ships:
+ * `public/embedding-packs` lands in the build output, which both the web app and
+ * the Tauri webview serve from the app origin. The Tauri resource dir is only a
+ * fallback for a side-loaded pack — declaring it in `tauri.conf.json` does not
+ * put a pack there, and for a long time nothing did, so desktop reported "no
+ * pack" and every version offered "Enable Search" as if search were off.
  */
-async function resolvePackBaseUrl(version: string): Promise<string | null> {
-    if (typeof window === 'undefined') return null
+async function packBaseUrlCandidates(version: string): Promise<string[]> {
+    if (typeof window === 'undefined') return []
+
+    const candidates = [`/embedding-packs/${version}/`]
 
     if (isDesktop()) {
         try {
@@ -133,14 +140,44 @@ async function resolvePackBaseUrl(version: string): Promise<string | null> {
             ])
             const root = await resourceDir()
             const sep = root.endsWith('/') || root.endsWith('\\') ? '' : '/'
-            return convertFileSrc(`${root}${sep}assets/embedding-packs/${version}/`)
+            candidates.push(convertFileSrc(`${root}${sep}assets/embedding-packs/${version}/`))
         } catch {
-            return null
+            // No resource dir (or the API is unavailable) — the bundled path stands.
         }
     }
 
-    // Web: served statically from the site root.
-    return `/embedding-packs/${version}/`
+    return candidates
+}
+
+/** Probed base URLs. Packs are static, so one probe per version per session. */
+const baseUrlCache = new Map<string, string | null>()
+
+/**
+ * Base URL where this version's pack files live, or null if no candidate serves
+ * a matching manifest. Only the universal packs listed in
+ * `semanticPack.SEMANTIC_PACK_PREFERENCE` ship; anything else 404s everywhere,
+ * which is how `hasEmbeddingPack` reports absence.
+ */
+async function resolvePackBaseUrl(version: string): Promise<string | null> {
+    const cached = baseUrlCache.get(version)
+    if (cached !== undefined) return cached
+
+    let resolved: string | null = null
+    for (const base of await packBaseUrlCandidates(version)) {
+        const manifest = await fetchJson<PackManifest>(`${base}manifest.json`)
+        if (manifest && manifest.version === version) {
+            resolved = base
+            break
+        }
+    }
+
+    baseUrlCache.set(version, resolved)
+    return resolved
+}
+
+/** Forget probed base URLs. For tests, and after a pack is side-loaded. */
+export function resetPackBaseUrlCache(): void {
+    baseUrlCache.clear()
 }
 
 async function fetchJson<T>(url: string): Promise<T | null> {
@@ -185,10 +222,8 @@ function embeddingsFileName(manifest: PackManifest): string {
  *  reachable. Used to decide "local vs Convex" before doing the heavy load. */
 export async function hasEmbeddingPack(version: string): Promise<boolean> {
     if (await idbGetPack(version)) return true
-    const baseUrl = await resolvePackBaseUrl(version)
-    if (!baseUrl) return false
-    const manifest = await fetchJson<PackManifest>(`${baseUrl}manifest.json`)
-    return !!manifest && manifest.version === version
+    // Resolving already required a matching manifest from some candidate.
+    return (await resolvePackBaseUrl(version)) !== null
 }
 
 /**
@@ -210,7 +245,7 @@ export async function tryLoadEmbeddingPack(version: string): Promise<LoadResult>
         if (ok) return { ok: true, version: cached.version, count: cached.metadata.length }
     }
 
-    // 2) Fetch over HTTP (desktop asset:// or web static path).
+    // 2) Fetch over HTTP (bundled static path, or a side-loaded asset:// pack).
     const baseUrl = await resolvePackBaseUrl(version)
     if (!baseUrl) return { ok: false, error: 'no pack base url' }
 
