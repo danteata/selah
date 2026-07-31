@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { canRenderOnCanvas, renderSlideToCanvas } from '../lib/graphics/renderSlide'
+import { withTemplateStyle } from '../lib/graphics/templateStyle'
+import { useTemplates } from './useTemplates'
 import { ndiPushChannelService } from '../services/ndi-output/pushChannel'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import type { AlternateOutputConfig } from '../types/alternateOutput'
@@ -57,6 +59,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const activeSlides = useAppStore((state) => state.activeSlides)
     const defaultFont = useAppStore((state) => state.settings.defaultFont)
+    const { templates } = useTemplates()
 
     const [framesSent, setFramesSent] = useState(0)
     const [error, setError] = useState<string | null>(null)
@@ -66,10 +69,25 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
 
     // 'follow' tracks whatever is live; 'independent' shows only what was sent
     // here, which is what lets the projector and this output disagree.
-    const slide = useMemo(() => {
+    const contentSlide = useMemo(() => {
         if (config.contentSource === 'independent') return independentSlide
         return activeSlides.find((candidate) => candidate.id === liveSlideId) ?? null
     }, [config.contentSource, independentSlide, activeSlides, liveSlideId])
+
+    /** The output's own template, if it has one. */
+    const styleTemplate = useMemo(
+        () => (config.styleTemplateId
+            ? (templates ?? []).find((template) => template._id === config.styleTemplateId) ?? null
+            : null),
+        [config.styleTemplateId, templates],
+    )
+
+    // The output's styling is applied here, to a copy — the slide on the projector
+    // is untouched, which is what "per output" has to mean.
+    const slide = useMemo(
+        () => (contentSlide ? withTemplateStyle(contentSlide, styleTemplate) : null),
+        [contentSlide, styleTemplate],
+    )
 
     const textOnly = config.destination.kind === 'ndi' && !canRenderOnCanvas(slide)
 
@@ -192,6 +210,8 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
                     // The layout override is applied to the slide handed over,
                     // rather than needing the window to know about outputs:
                     // LiveView already renders the lower-third layout.
+                    // Already carries the output's template styling; the layout
+                    // override is the last word.
                     const outgoing = config.layout === 'lower-third'
                         ? { ...slide, layout: 'lower-third' }
                         : slide

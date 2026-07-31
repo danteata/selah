@@ -48,6 +48,13 @@ export interface AlternateOutputConfig {
     alpha: boolean
     contentSource: AlternateContentSource
     layout: AlternateLayout
+    /**
+     * Template whose styling this output applies, regardless of what the slide
+     * itself carries. That is the point: in "follow main output" mode there is no
+     * template involved in the content, so without this the output falls back to
+     * the default bar rather than the design you built.
+     */
+    styleTemplateId: string | null
     /** NDI source name, so several machines on one network stay distinguishable. */
     sourceName: string
 }
@@ -72,5 +79,6 @@ export const DEFAULT_ALTERNATE_OUTPUT: AlternateOutputConfig = {
     alpha: true,
     contentSource: 'independent',
     layout: 'follow',
+    styleTemplateId: null,
     sourceName: 'Selah Alternate',
 }

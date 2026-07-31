@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useTemplates } from '../../hooks/useTemplates'
@@ -6,6 +6,8 @@ import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { useAlternateOutput } from '../../hooks/useAlternateOutput'
 import { OUTPUT_FORMATS, formatLabel } from '../../types/alternateOutput'
+import { isLowerThirdTemplate } from '../../lib/graphics/templateStyle'
+import type { TemplateItem } from '../../hooks/useTemplates'
 import { useEntitlements, type PromoValidation } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { BibleVersionSettings } from './BibleVersionSettings'
@@ -293,6 +295,13 @@ function DisplaySettings({
     }, [isPro, startProCheckout, ndiStart])
 
     const alternate = useAlternateOutput()
+    // Only lower-third templates can style a lower-third output, so the list is
+    // filtered on the layout the template actually declares.
+    const { templates: allTemplates } = useTemplates()
+    const lowerThirdTemplates = useMemo(
+        () => (allTemplates ?? []).filter(isLowerThirdTemplate),
+        [allTemplates],
+    )
 
     const handleAlternateStart = useCallback(() => {
         if (!isPro) {
@@ -656,6 +665,30 @@ function DisplaySettings({
                                 <option value="lower-third">Lower third</option>
                             </select>
                         </div>
+
+                        {alternate.config.layout === 'lower-third' && (
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <label className="text-sm text-gray-600 dark:text-gray-400">Lower third design</label>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        {lowerThirdTemplates.length > 0
+                                            ? "This output's own styling, whatever is live"
+                                            : 'Create a template with the lower-third layout to use it here'}
+                                    </p>
+                                </div>
+                                <select
+                                    value={alternate.config.styleTemplateId ?? ''}
+                                    onChange={(e) => alternate.update({ styleTemplateId: e.target.value || null })}
+                                    disabled={lowerThirdTemplates.length === 0}
+                                    className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] disabled:opacity-50"
+                                >
+                                    <option value="">Default bar</option>
+                                    {lowerThirdTemplates.map((template: TemplateItem) => (
+                                        <option key={template._id} value={template._id}>{template.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
 
                         <div className="flex items-center justify-between gap-3">
                             <label className="text-sm text-gray-600 dark:text-gray-400">NDI source name</label>
