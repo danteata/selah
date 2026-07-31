@@ -20,6 +20,7 @@
 import type { Slide } from '../../types'
 import { parseTextRuns, runsToText } from './textRuns'
 import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
+import { resolveVerseRefPx, VERSE_REF_BOUNDS } from '../../utils/verseRefStyle'
 import { drawRunLines, fitRuns, type Canvas2DLike } from './renderRuns'
 
 export type { Canvas2DLike }
@@ -266,8 +267,18 @@ export function renderLowerThird(
         // The reference is sized from the body's *fitted* size, not from the bar,
         // so the size setting means the same thing here as on a full slide: 100%
         // is a proper citation, and no percentage can outgrow the verse.
-        const requested = layout.subtitle.isReference && layout.subtitle.sizePercent
-            ? bodyFontPx * REFERENCE_RATIO * (layout.subtitle.sizePercent / 100)
+        // A reference is sized like the projector's, from the frame width via the
+        // shared bounds; a hand-written subtitle is a name, so it stays relative
+        // to the body. The cap remains as a floor of good taste: unlike the DOM,
+        // this refuses to let the citation outgrow the verse at extreme
+        // percentages, which matters most in a bar where the body is small.
+        const requested = layout.subtitle.isReference
+            ? resolveVerseRefPx(
+                { verseRefSizePercent: layout.subtitle.sizePercent },
+                undefined,
+                VERSE_REF_BOUNDS.lowerThird,
+                options.width,
+            )
             : bodyFontPx * REFERENCE_RATIO
         const subtitlePx = Math.min(requested, bodyFontPx * REFERENCE_MAX_RATIO)
 

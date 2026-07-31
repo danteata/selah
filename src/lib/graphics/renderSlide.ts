@@ -20,6 +20,7 @@ import type { Canvas2DLike } from './renderRuns'
 import { drawRunLines, fitRuns } from './renderRuns'
 import { parseTextRuns } from './textRuns'
 import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
+import { resolveVerseRefPx, VERSE_REF_BOUNDS } from '../../utils/verseRefStyle'
 
 export interface SlideRenderOptions extends LowerThirdRenderOptions {
     /** Paint a background behind the text. Off for a keyed feed, on for a feed
@@ -122,8 +123,16 @@ export function renderTextSlide(ctx: Canvas2DLike, slide: Slide, options: SlideR
             const refColor = slide.slideStyle?.verseRefColor ?? options.verseRef?.color
             const refBold = slide.slideStyle?.verseRefBold ?? options.verseRef?.bold ?? false
             const refItalic = slide.slideStyle?.verseRefItalic ?? options.verseRef?.italic ?? false
-            const refSizePercent = slide.slideStyle?.verseRefSizePercent ?? options.verseRef?.sizePercent
-            const captionPx = fontPx * 0.5 * (refSizePercent ? refSizePercent / 100 : 1)
+            // Sized exactly as the projector sizes it — from the frame width via
+            // the shared bounds, not as a fraction of the body. A body-relative
+            // size drifted from the projector as the verse grew, so the same
+            // percentage meant different things on the two outputs.
+            const captionPx = resolveVerseRefPx(
+                slide.slideStyle,
+                { verseRefSizePercent: options.verseRef?.sizePercent },
+                VERSE_REF_BOUNDS.fullSlide,
+                width,
+            )
             const captionWeight = refBold ? '700' : '400'
             const styledCaption = captionRuns.map((run) => ({ ...run, italic: run.italic || refItalic }))
             const { lines: captionLines } = fitRuns(ctx, styledCaption, {

@@ -6,7 +6,7 @@ type VerseRefStyleFields = Pick<
     'verseRefColor' | 'verseRefBold' | 'verseRefItalic' | 'verseRefUnderline' | 'verseRefSizePercent'
 >
 
-interface ClampBase {
+export interface ClampBase {
     /** Minimum px at the low end of the clamp(). */
     minPx: number
     /** Coefficient for the viewport/container-relative unit (vw or cqw). */
@@ -14,6 +14,29 @@ interface ClampBase {
     unit: 'vw' | 'cqw'
     /** Maximum px at the high end of the clamp(). */
     maxPx: number
+}
+
+/**
+ * The caption's base bounds per layout, shared so the DOM renderer and the canvas
+ * renderer (the alternate output) size the reference identically — otherwise the
+ * same percentage means one thing on the projector and another on an NDI feed.
+ */
+export const VERSE_REF_BOUNDS = {
+    lowerThird: { minPx: 20, coefficient: 2.4, unit: 'vw', maxPx: 48 },
+    fullSlide: { minPx: 28, coefficient: 3.2, unit: 'vw', maxPx: 80 },
+} as const satisfies Record<string, ClampBase>
+
+/** Resolved size in pixels, for renderers that cannot use CSS `clamp()`. */
+export function resolveVerseRefPx(
+    slideStyle: VerseRefStyleFields | undefined,
+    defaultStyle: VerseRefStyleFields | undefined,
+    base: ClampBase,
+    frameWidth: number,
+): number {
+    const scale = (slideStyle?.verseRefSizePercent ?? defaultStyle?.verseRefSizePercent ?? 100) / 100
+    // 1vw is a hundredth of the frame, which is what the DOM clamp resolves against.
+    const preferred = base.coefficient * scale * (frameWidth / 100)
+    return Math.min(Math.max(preferred, base.minPx * scale), base.maxPx * scale)
 }
 
 /** Scales a clamp()'s min/preferred/max by `percent / 100`. */

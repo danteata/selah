@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { canRenderOnCanvas, renderSlideToCanvas, renderTextSlide } from '../renderSlide'
 import type { Canvas2DLike } from '../renderRuns'
 import type { Slide } from '../../../types'
+import { resolveVerseRefPx, VERSE_REF_BOUNDS } from '../../../utils/verseRefStyle'
 
 const HD = { width: 1920, height: 1080 }
 
@@ -172,6 +173,31 @@ describe('renderTextSlide', () => {
         expect(caption).toContain('font=700')
         // The body keeps its own colour; only the reference takes the setting.
         expect(calls.some((c) => c.startsWith('fillText(For God so loved@'))).toBe(true)
+    })
+
+    it("sizes the reference exactly as the projector does", () => {
+        // Same rule, same bounds: one percentage setting has to mean one thing
+        // across the projector and an NDI feed.
+        const { ctx, calls } = recorder()
+        renderTextSlide(ctx, slide({ type: 'bible', contents: ['<p>Short</p>', '<p>John 3:16</p>'] }), HD)
+
+        const caption = calls.find((c) => c.startsWith('fillText(John 3:16@'))!
+        const drawn = Number(/(\d+)px/.exec(caption)![1])
+        const expected = resolveVerseRefPx(undefined, undefined, VERSE_REF_BOUNDS.fullSlide, HD.width)
+        expect(drawn).toBe(Math.round(expected))
+    })
+
+    it("does not shrink the reference just because the verse is long", () => {
+        // It used to be a fraction of the body, so a long passage dragged the
+        // citation down with it while the projector held it steady.
+        const short = recorder()
+        renderTextSlide(short.ctx, slide({ type: 'bible', contents: ['<p>Short</p>', '<p>John 3:16</p>'] }), HD)
+        const long = recorder()
+        renderTextSlide(long.ctx, slide({ type: 'bible', contents: ['<p>' + 'word '.repeat(120) + '</p>', '<p>John 3:16</p>'] }), HD)
+
+        const size = (calls: string[]) =>
+            Number(/(\d+)px/.exec(calls.find((c) => c.startsWith('fillText(John 3:16@'))!)![1])
+        expect(size(long.calls)).toBe(size(short.calls))
     })
 
     it('draws the reference under a bible verse', () => {

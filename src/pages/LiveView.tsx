@@ -19,7 +19,7 @@ import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeat
 import { audioFeatures } from '../services/visualizer/audioFeatures'
 import { useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
-import { getVerseRefStyle } from '../utils/verseRefStyle'
+import { getVerseRefStyle, VERSE_REF_BOUNDS } from '../utils/verseRefStyle'
 import { isCaptionedSlideType, slideCaptionHtml } from '../utils/slideCaption'
 
 const STORAGE_KEY = 'selah-live-state'
@@ -550,7 +550,7 @@ export default function LiveView() {
                                 letterSpacing: '0.02em',
                                 width: '100%',
                                 textAlign,
-                                ...getVerseRefStyle(slide.slideStyle, settings, { minPx: 20, coefficient: 2.4, unit: 'vw', maxPx: 48 }),
+                                ...getVerseRefStyle(slide.slideStyle, settings, VERSE_REF_BOUNDS.lowerThird),
                             }}
                             // Bible reference uses raw HTML so the `<b>` book title renders; subtitle is plain.
                             {...(captionHtml
@@ -675,7 +675,7 @@ export default function LiveView() {
                                         lineHeight: 1.05,
                                         letterSpacing: '0.01em',
                                         textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
-                                        ...getVerseRefStyle(slide.slideStyle, settings, { minPx: 28, coefficient: 3.2, unit: 'vw', maxPx: 80 }),
+                                        ...getVerseRefStyle(slide.slideStyle, settings, VERSE_REF_BOUNDS.fullSlide),
                                     }}
                                 >
                                     {slide.contents.slice(1).map((ref, i) => (
@@ -706,7 +706,7 @@ export default function LiveView() {
                                         lineHeight: 1.05,
                                         letterSpacing: '0.01em',
                                         textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
-                                        ...getVerseRefStyle(slide.slideStyle, settings, { minPx: 28, coefficient: 3.2, unit: 'vw', maxPx: 80 }),
+                                        ...getVerseRefStyle(slide.slideStyle, settings, VERSE_REF_BOUNDS.fullSlide),
                                     }}
                                 >
                                     {slide.contents.slice(1).map((ref, i) => (
