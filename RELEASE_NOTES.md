@@ -1,29 +1,26 @@
-## Selah 0.1.13
+## Selah 0.1.14
 
-NDI actually sends a picture now — on Windows and Linux as well as macOS — and there's a second output you can run alongside your main one.
-
-### NDI output
-- **It works.** 0.1.12 announced "Selah Live Output" on the network and then sent nothing at all: the only screen capture in the app was macOS-only, so Windows created the source and stopped there. Windows now captures through Windows.Graphics.Capture and Linux through XComposite, so a receiver sees your slides.
-- On macOS, Selah asks for the Screen Recording permission it always needed. Without it the capture waited forever for a window it wasn't allowed to see, which looked exactly like a working feed of a black slide.
-- Nothing can claim to be sending when it isn't. The badge in Program Output reads "NDI — NO FRAMES" until frames are really going out, and turning NDI on now explains any refusal instead of failing silently — including the one most people hit: NDI mirrors the live output window, so that window has to be open. The message comes with a button that opens it.
+The alternate output, finished properly — plus a verse reference that is finally the right size everywhere.
 
 ### Alternate output
-A second output alongside the main one, in Settings › Display.
+- **Send it to a display.** Choosing a monitor now opens a second output window there, running the same view as the projector — so it renders everything, backgrounds and video included.
+- **Show the same content in a different form.** A new Layout setting draws the alternate output as a lower third whatever the slide's own layout says, so one verse can be a full slide on the projector and a bar on the stream, switching together with no extra work.
+- **Use your own design.** Pick one of your lower-third templates for the output itself. Your styling then applies to whatever passes through it, instead of only to slides that happen to be built from that template.
+- Send anything to the output from where you find it: the Bible and dictionary panels now have an Alt button beside Add and Live, and so does every slide in the queue — in both the card and the compact list views.
+- Songs and hymns deliberately don't offer it. They are groups of slides and this output holds one, so set it to follow the main output for those.
 
-- Send it to any display, or out as its own NDI source — both are just destinations of the same output.
-- Choose its resolution and frame rate, and whether it keeps an alpha channel so a switcher can key it over camera video.
-- Its content either follows your main output or is entirely its own, so lyrics can stay on the projector while something else goes to the stream.
-- Send anything to it with the Alt button, which now sits beside Add and Live in the Bible, dictionary, songs and hymns panels.
-- Over NDI it draws text — lyrics, scripture, announcements, lower thirds — with bold, italics and colour preserved. Image and video backgrounds need the display destination, which renders exactly what the projector does.
+### Verse references
+- **References are the size you'd expect at 100%.** The default was small enough that people set 200% on every slide to compensate; that size is now the default. If you had raised it, set it back to 100%.
+- The reference size setting now works on lower thirds. It previously appeared to do nothing there.
+- References on the alternate output are drawn in the colour, weight and size you set. They were coming out plain white, and on a lower third they weren't drawn at all.
+- A verse and its reference sit together as a block in a lower third, instead of the reference drifting to the bottom of the bar when the verse wrapped.
 
-### Search by meaning
-- Searching the Bible by meaning works offline in the desktop app. The bundled index never reached the installed app, so every search went over the network and stopped working without a connection.
-- Bible settings no longer offers "Enable Search" on versions the shared index already covers.
-
-### Keyboard
-- The songs, hymns and dictionary panels now behave like the Bible panel: the best result is highlighted the moment results appear, Enter presents it, Shift+Enter queues it, and the arrow keys walk the list.
-- The arrow keys no longer stop working after you click a result, or when the panel redraws.
+### Lower thirds
+- A verse gets two lines in the bar instead of being squeezed onto one, so it stays readable.
+- Bold, italics and colour from the editor are preserved on the alternate output.
 
 ### Fixes
-- Update prompts appear when you come back to the machine, not only at launch.
-- The pricing page matches what the app enforces.
+- Verse text on the alternate output is no longer tiny — it fills its frame the way the projector does.
+- A slide with an image or video background still sends its text over NDI, rather than an empty frame. Use a display for that output if you need the background too.
+- Template pickers are where the buttons are. The dictionary, songs and hymns panels had theirs hidden inside a detail view, and the songs & hymns search had none at all, so nothing found there could be styled.
+- Long song titles no longer push Add and Live off the edge of the list.
