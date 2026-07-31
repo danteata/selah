@@ -1346,6 +1346,13 @@ export const useAppStore = create<AppStore>()(
                     status: DEFAULT_SONG_TRACKING.status,
                 },
                 visualizerEnabled: state.visualizerEnabled,
+                // The alternate output's configuration is a setup decision — which
+                // display or NDI source, resolution, alpha, layout, design — so it
+                // has to survive a restart. `enabled` does not: the NDI sender and
+                // the output window live in the Rust side, which starts fresh, so a
+                // remembered `true` would show an enabled output that isn't running
+                // — the same lie as a badge claiming frames are going out.
+                alternateOutput: { ...state.alternateOutput, enabled: false },
             }),
         }
     )
