@@ -23,7 +23,9 @@ export interface ClampBase {
  */
 export const VERSE_REF_BOUNDS = {
     lowerThird: { minPx: 20, coefficient: 2.4, unit: 'vw', maxPx: 48 },
-    fullSlide: { minPx: 28, coefficient: 3.2, unit: 'vw', maxPx: 80 },
+    // Doubled from 3.2vw / 28–80px, which read too small: operators were setting
+    // 200% on every slide to compensate. 100% is now that size.
+    fullSlide: { minPx: 56, coefficient: 6.4, unit: 'vw', maxPx: 160 },
 } as const satisfies Record<string, ClampBase>
 
 /** Resolved size in pixels, for renderers that cannot use CSS `clamp()`. */

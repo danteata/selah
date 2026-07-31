@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Search, X, ChevronLeft, Music, Zap, Plus, Layers } from 'lucide-react'
+import { Search, X, ChevronLeft, Music, Zap, Plus } from 'lucide-react'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
-import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -32,14 +31,10 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
     const { createHymnSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
     const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
-    const alternate = useSendToAlternate()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
 
-    /** The alternate output holds one slide, so this sends the hymn's first verse. */
-    const sendHymnToAlternate = useCallback((hymn: Hymn) => {
-        const slides = createHymnSlides(hymn, { template: selectedTemplate })
-        if (slides[0]) alternate.send(slides[0])
-    }, [createHymnSlides, selectedTemplate, alternate])
+    // Deliberately no alternate-output button — see the note in SongList: a hymn
+    // is a group of slides and that output holds one.
 
     // Quick Add / Live straight from a hymn row — no detail-view detour.
     const quickSelect = useCallback((hymn: Hymn, goLive: boolean) => {
@@ -246,16 +241,6 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
                                             <Plus className="w-3.5 h-3.5" />
                                             Add
                                         </button>
-                                        {alternate.canSend && (
-                                            <button
-                                                onClick={() => sendHymnToAlternate(hymn)}
-                                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-indigo)] hover:bg-[var(--accent-indigo)]/10 transition-colors"
-                                                title="Send to the alternate output"
-                                            >
-                                                <Layers className="w-3.5 h-3.5" />
-                                                Alt
-                                            </button>
-                                        )}
                                         {canGoLive && (
                                             <button
                                                 onClick={() => quickSelect(hymn, true)}

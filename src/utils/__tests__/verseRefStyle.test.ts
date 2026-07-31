@@ -8,8 +8,8 @@ describe('resolveVerseRefPx', () => {
         // 1vw is a hundredth of the frame: 2.4vw of 1920 = 46px, inside the
         // lower-third bounds of 20–48.
         expect(resolveVerseRefPx(undefined, undefined, VERSE_REF_BOUNDS.lowerThird, HD_WIDTH)).toBeCloseTo(46.08)
-        // 3.2vw of 1920 = 61px, inside the full-slide bounds of 28–80.
-        expect(resolveVerseRefPx(undefined, undefined, VERSE_REF_BOUNDS.fullSlide, HD_WIDTH)).toBeCloseTo(61.44)
+        // 6.4vw of 1920 = 123px, inside the full-slide bounds of 56–160.
+        expect(resolveVerseRefPx(undefined, undefined, VERSE_REF_BOUNDS.fullSlide, HD_WIDTH)).toBeCloseTo(122.88)
     })
 
     it('scales with the percentage and honours the clamp at both ends', () => {
@@ -17,8 +17,8 @@ describe('resolveVerseRefPx', () => {
         const at = (percent: number, width = HD_WIDTH) =>
             resolveVerseRefPx({ verseRefSizePercent: percent }, undefined, bounds, width)
 
-        expect(at(200)).toBeCloseTo(122.88)
-        expect(at(50)).toBeCloseTo(30.72)
+        expect(at(200)).toBeCloseTo(245.76)
+        expect(at(50)).toBeCloseTo(61.44)
         // On a narrow frame the scaled minimum takes over...
         expect(at(100, 400)).toBeCloseTo(bounds.minPx)
         // ...and on a very wide one, the scaled maximum.
@@ -50,6 +50,6 @@ describe('getVerseRefStyle', () => {
 
     it('scales the whole clamp by the percentage', () => {
         const style = getVerseRefStyle({ verseRefSizePercent: 200 }, undefined, VERSE_REF_BOUNDS.fullSlide)
-        expect(style.fontSize).toBe('clamp(56px, 6.4vw, 160px)')
+        expect(style.fontSize).toBe('clamp(112px, 12.8vw, 320px)')
     })
 })

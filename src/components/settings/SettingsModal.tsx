@@ -728,7 +728,9 @@ function DisplaySettings({
                             )}
                             {alternate.config.contentSource === 'independent' && (
                                 <p className="pt-1">
-                                    Send a slide to this output with the layers button on any slide.
+                                    Send a slide to this output with the layers button in the queue, or
+                                    from the Bible and dictionary panels. Songs and hymns are groups of
+                                    slides, so set this output to follow the main one for those.
                                 </p>
                             )}
                             <p className="pt-1">
