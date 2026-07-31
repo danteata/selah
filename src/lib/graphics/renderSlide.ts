@@ -48,9 +48,17 @@ const BODY_HEIGHT_FRACTION = 0.74
 /**
  * Whether the canvas path can draw this slide *in full*. False means the text
  * will be drawn but its background won't — see the module comment.
+ *
+ * A lower third is always full: its renderer draws a bar over a transparent
+ * frame and never uses the slide background at all. That matters because
+ * applying any template sets a background (`applyTemplateToSlide`), so a slide
+ * made from a lower-third template carries one it will never show — and warning
+ * "text only" about it would be noise in exactly the workflow lower thirds are
+ * for.
  */
 export function canRenderOnCanvas(slide: Slide | null): boolean {
     if (!slide) return true
+    if (isLowerThird(slide)) return true
     if (slide.type === 'media') return false
     return !slide.background
 }

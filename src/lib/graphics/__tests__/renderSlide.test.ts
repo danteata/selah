@@ -55,6 +55,14 @@ describe('canRenderOnCanvas', () => {
         expect(canRenderOnCanvas(slide({ type: 'media' }))).toBe(false)
         expect(canRenderOnCanvas(null)).toBe(true)
     })
+
+    it('is true for a lower third even with a background set', () => {
+        // Applying any template sets a background, so a slide built from a
+        // lower-third template always has one — and the bar renderer never draws
+        // it. Warning "text only" there would be noise in the main workflow.
+        expect(canRenderOnCanvas(slide({ layout: 'lower-third', background: 'photo.jpg' }))).toBe(true)
+        expect(canRenderOnCanvas(slide({ layout: 'lower_third', background: 'photo.jpg' }))).toBe(true)
+    })
 })
 
 describe('renderSlideToCanvas', () => {
