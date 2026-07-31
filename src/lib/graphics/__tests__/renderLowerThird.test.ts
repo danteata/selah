@@ -101,6 +101,32 @@ describe('layoutLowerThird', () => {
         expect(alone.subtitle).toBeNull()
     })
 
+    it("uses a scripture slide's reference as the subtitle", () => {
+        // The DOM renderer shows the reference on a lower third; the canvas one
+        // dropped it, which on a keyed verse is the part that makes it citable.
+        const verse = {
+            id: 'v1',
+            type: 'bible',
+            layout: 'lower-third',
+            contents: ['<p>I will be glad and rejoice in thee</p>', '<p>Psalms 9:2 · KJV</p>'],
+            slideStyle: {},
+        } as unknown as Slide
+
+        expect(layoutLowerThird(verse, HD).subtitle?.text).toContain('Psalms 9:2')
+    })
+
+    it('lets an explicit subtitle win over the reference', () => {
+        const verse = {
+            id: 'v1',
+            type: 'bible',
+            layout: 'lower-third',
+            contents: ['<p>Body</p>', '<p>Psalms 9:2 · KJV</p>'],
+            slideStyle: { lowerThirdSubtitle: 'Guest Speaker' },
+        } as unknown as Slide
+
+        expect(layoutLowerThird(verse, HD).subtitle?.text).toBe('Guest Speaker')
+    })
+
     it('scales with the frame, so a 720p feed is the same design', () => {
         const hd = layoutLowerThird(slide(['<p>Name</p>']), HD)
         const sd = layoutLowerThird(slide(['<p>Name</p>']), { width: 1280, height: 720 })

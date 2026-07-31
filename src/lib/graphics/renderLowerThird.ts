@@ -19,6 +19,7 @@
 
 import type { Slide } from '../../types'
 import { parseTextRuns, runsToText, type TextRun } from './textRuns'
+import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
 import { drawRunLines, fitRuns, type Canvas2DLike } from './renderRuns'
 
 export type { Canvas2DLike }
@@ -104,7 +105,13 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
     const textX = align === 'center' ? width / 2 : align === 'right' ? textRight : textLeft
 
     const title = runsToText(parseTextRuns(slide.contents?.[0] ?? ''))
-    const subtitle = plainTextFromHtml(style.lowerThirdSubtitle ?? '')
+    // An explicit subtitle wins; otherwise a scripture slide's reference becomes
+    // it. Without this the canvas feed dropped "Psalms 9:2 · KJV" entirely, while
+    // the DOM renderer showed it — and on a lower third the reference is the part
+    // that makes the verse citable.
+    const explicitSubtitle = plainTextFromHtml(style.lowerThirdSubtitle ?? '')
+    const caption = isCaptionedSlideType(slide.type) ? plainTextFromHtml(slideCaptionHtml(slide)) : ''
+    const subtitle = explicitSubtitle || caption
 
     const titleFontPx = barHeight * (subtitle ? 0.42 : 0.5)
     const subtitleFontPx = barHeight * 0.26
