@@ -18,7 +18,7 @@
  */
 
 import type { Slide } from '../../types'
-import { parseTextRuns, runsToText, type TextRun } from './textRuns'
+import { parseTextRuns, runsToText } from './textRuns'
 import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
 import { drawRunLines, fitRuns, type Canvas2DLike } from './renderRuns'
 
@@ -54,6 +54,19 @@ const PADDING = 0.025
 
 const DEFAULT_ACCENT = '#0d9488'
 
+/** Line height of body text inside the bar. */
+const BODY_LINE_HEIGHT = 1.15
+/**
+ * Reference size at 100%, as a fraction of the fitted body size, and the ceiling
+ * no percentage may pass. The old baseline was a fraction of the bar, which made
+ * the reference so small that 200% was needed to look right — the setting should
+ * mean the same thing here as on a full slide.
+ */
+const REFERENCE_RATIO = 0.7
+const REFERENCE_MAX_RATIO = 0.85
+/** Gap between verse and reference, as a fraction of the reference size. */
+const REFERENCE_GAP = 0.55
+
 /** Everything needed to draw, resolved from the slide once so it can be asserted
  *  in tests without a canvas. */
 export interface LowerThirdLayout {
@@ -74,6 +87,9 @@ export interface LowerThirdLayout {
         isReference: boolean
         bold: boolean
         italic: boolean
+        /** The operator's reference size percentage, applied at draw time against
+         *  the body's fitted size. */
+        sizePercent?: number
     } | null
     fontFamily: string
     outlined: boolean
@@ -144,7 +160,7 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
     const refSizePercent = style.verseRefSizePercent ?? options.verseRef?.sizePercent
 
     const titleFontPx = barHeight * (subtitle ? 0.42 : 0.5)
-    const subtitleFontPx = barHeight * 0.26 * (isReference && refSizePercent ? refSizePercent / 100 : 1)
+    const subtitleFontPx = barHeight * 0.26
     // Vertically centre the block inside the bar.
     const blockHeight = titleFontPx + (subtitle ? subtitleFontPx * 1.6 : 0)
     const titleY = barY + (barHeight - blockHeight) / 2 + titleFontPx / 2
@@ -174,6 +190,7 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
                 isReference,
                 bold: isReference && refBold,
                 italic: isReference && refItalic,
+                sizePercent: isReference ? refSizePercent : undefined,
             }
             : null,
         fontFamily: style.font || options.defaultFont || 'Inter, system-ui, sans-serif',
@@ -220,67 +237,82 @@ export function renderLowerThird(
     const textWidth = layout.bar.width - (options.width * PADDING) * 2 - (layout.accentBar?.width ?? 0)
 
     const titleRuns = parseTextRuns(slide.contents?.[0] ?? '')
-    // The body's final size after fitting, which the reference is capped against.
-    let bodyFontPx = layout.title.fontPx
-    if (titleRuns.length > 0) {
-        const { lines, fontPx } = fitRuns(ctx, titleRuns, {
+
+    // Both blocks are measured before either is drawn, so the pair can be
+    // centred in the bar as a unit. Positioning the reference from a
+    // precomputed single-line body left a gap under a wrapped verse and pushed
+    // the pair off centre.
+    const bodyFit = titleRuns.length > 0
+        ? fitRuns(ctx, titleRuns, {
             fontPx: layout.title.fontPx,
             fontFamily: layout.fontFamily,
             weight: '700',
             maxWidth: textWidth,
-            // Two lines with a subtitle, three without. One line forced a whole
-            // verse to shrink until it was unreadable — and left the short
-            // reference beneath it looking larger than the verse itself.
+            // Two lines with a reference, three without. One line forced a whole
+            // verse to shrink until it was unreadable.
             maxLines: layout.subtitle ? 2 : 3,
-            maxHeight: layout.bar.height * (layout.subtitle ? 0.6 : 0.86),
-            lineHeightRatio: 1.15,
+            maxHeight: layout.bar.height * (layout.subtitle ? 0.62 : 0.86),
+            lineHeightRatio: BODY_LINE_HEIGHT,
             minFontPx: layout.bar.height * 0.12,
         })
-        bodyFontPx = fontPx
-        drawRunLines(ctx, lines, {
-            fontPx,
+        : null
+
+    const bodyFontPx = bodyFit?.fontPx ?? layout.title.fontPx
+    const bodyLineHeight = bodyFontPx * BODY_LINE_HEIGHT
+    const bodyHeight = (bodyFit?.lines.length ?? 0) * bodyLineHeight
+
+    let subtitleFit: ReturnType<typeof fitRuns> | null = null
+    if (layout.subtitle) {
+        // The reference is sized from the body's *fitted* size, not from the bar,
+        // so the size setting means the same thing here as on a full slide: 100%
+        // is a proper citation, and no percentage can outgrow the verse.
+        const requested = layout.subtitle.isReference && layout.subtitle.sizePercent
+            ? bodyFontPx * REFERENCE_RATIO * (layout.subtitle.sizePercent / 100)
+            : bodyFontPx * REFERENCE_RATIO
+        const subtitlePx = Math.min(requested, bodyFontPx * REFERENCE_MAX_RATIO)
+
+        subtitleFit = fitRuns(ctx, [{
+            text: layout.subtitle.text,
+            bold: layout.subtitle.bold,
+            italic: layout.subtitle.italic,
+            color: null,
+        }], {
+            fontPx: subtitlePx,
+            fontFamily: layout.fontFamily,
+            weight: layout.subtitle.bold ? '700' : '400',
+            maxWidth: textWidth,
+            maxLines: 1,
+        })
+    }
+
+    // Gap proportional to the type, not to the bar, so it holds at any size.
+    const gap = subtitleFit ? subtitleFit.fontPx * REFERENCE_GAP : 0
+    const blockHeight = bodyHeight + gap + (subtitleFit?.fontPx ?? 0)
+    const blockTop = layout.bar.y + (layout.bar.height - blockHeight) / 2
+
+    if (bodyFit) {
+        drawRunLines(ctx, bodyFit.lines, {
+            fontPx: bodyFontPx,
             fontFamily: layout.fontFamily,
             weight: '700',
             align: layout.title.align,
             x: layout.title.x,
-            firstBaselineY: layout.title.y - (lines.length - 1) * fontPx * 0.6,
-            lineHeight: fontPx * 1.2,
+            firstBaselineY: blockTop + bodyLineHeight / 2,
+            lineHeight: bodyLineHeight,
             color: layout.title.color,
             outlined: layout.outlined,
         })
     }
 
-    if (layout.subtitle) {
-        // The reference size setting is a percentage of the *body* on a full
-        // slide, where the body is huge. In a bar the body is already small and
-        // may have shrunk further to fit, so the same percentage can make the
-        // citation bigger than the verse. Cap it against the body's final size.
-        const subtitleCap = bodyFontPx * 0.72
-        const subtitlePx = Math.min(layout.subtitle.fontPx, subtitleCap)
-
-        // The subtitle is a plain settings field, not editor markup, so it is a
-        // single unstyled run.
-        const subtitleRuns: TextRun[] = [{
-            text: layout.subtitle.text,
-            bold: layout.subtitle.bold,
-            italic: layout.subtitle.italic,
-            color: null,
-        }]
-        const { lines, fontPx } = fitRuns(ctx, subtitleRuns, {
-            fontPx: subtitlePx,
+    if (layout.subtitle && subtitleFit) {
+        drawRunLines(ctx, subtitleFit.lines, {
+            fontPx: subtitleFit.fontPx,
             fontFamily: layout.fontFamily,
-            weight: '400',
-            maxWidth: textWidth,
-            maxLines: 1,
-        })
-        drawRunLines(ctx, lines, {
-            fontPx,
-            fontFamily: layout.fontFamily,
-            weight: '400',
+            weight: layout.subtitle.bold ? '700' : '400',
             align: layout.subtitle.align,
             x: layout.subtitle.x,
-            firstBaselineY: layout.subtitle.y,
-            lineHeight: fontPx * 1.2,
+            firstBaselineY: blockTop + bodyHeight + gap + subtitleFit.fontPx / 2,
+            lineHeight: subtitleFit.fontPx * 1.2,
             color: layout.subtitle.color,
             outlined: layout.outlined,
         })
