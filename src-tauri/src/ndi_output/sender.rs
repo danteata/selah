@@ -72,7 +72,8 @@ impl NdiSender {
 
     pub fn start(&self, config: &NdiOutputConfig) -> Result<(), String> {
         let lib = NdiLib::get().ok_or(
-            "The NDI runtime isn't installed on this machine. Install NDI Tools from ndi.video/tools.",
+            "The NDI runtime could not be loaded. It ships with Selah on Windows and Linux; on macOS, \
+             install NDI Tools from ndi.video/tools.",
         )?;
 
         let sender = lib

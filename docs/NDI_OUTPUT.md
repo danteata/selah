@@ -3,9 +3,15 @@
 Sends the live output over the network as an NDI source (`Selah Live Output`), so
 vMix, OBS, a hardware switcher or another machine can take it as an input.
 
-The NDI runtime is loaded at run time (`src-tauri/src/ndi_output/ndi_lib.rs`), so
-releases always ship the feature and availability depends only on whether NDI
-Tools is installed on the machine.
+The NDI runtime is loaded at run time (`src-tauri/src/ndi_output/ndi_lib.rs`), and
+**the runtime itself now ships in the app** on Windows and Linux — see
+`src-tauri/ndi-runtime/`. Those platforms need no NDI Tools install. macOS still
+does, until its dylib is added.
+
+The bundled copy is searched *before* the system one, so an older NDI Tools install
+cannot shadow the version a release was tested against. The bare library name
+remains a candidate, so anyone pointing `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` at
+their own build still wins over the guessed system locations.
 
 ## Status
 

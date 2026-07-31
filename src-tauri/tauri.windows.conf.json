@@ -3,7 +3,8 @@
   "bundle": {
     "resources": {
       "assets/": "assets/",
-      "windows-runtime/": ""
+      "windows-runtime/": "",
+      "ndi-runtime/windows/": "ndi-runtime/"
     }
   }
 }

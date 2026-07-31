@@ -214,12 +214,70 @@ fn library_files_in(dir: &str) -> Vec<String> {
     paths
 }
 
+/// Directories inside the installed app where a bundled runtime may sit.
+///
+/// Shipping the runtime is what makes NDI work without installing NDI Tools. The
+/// layout differs per bundle format, so several relatives of the executable are
+/// tried: `Resources` for a macOS .app, `resources` for the Linux and Windows
+/// bundles Tauri produces, and the executable's own directory for a plain build.
+/// Per-platform folder name under `ndi-runtime/`, matching the bundle configs.
+#[cfg(target_os = "windows")]
+const PLATFORM_DIR: &str = "windows";
+#[cfg(target_os = "macos")]
+const PLATFORM_DIR: &str = "macos";
+#[cfg(all(unix, not(target_os = "macos")))]
+const PLATFORM_DIR: &str = "linux";
+
+fn bundled_runtime_dirs() -> Vec<std::path::PathBuf> {
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    let Some(dir) = exe.parent() else {
+        return Vec::new();
+    };
+
+    // Two bundle layouts to satisfy: a flat map (`"ndi-runtime/windows/":
+    // "ndi-runtime/"`) puts the library in `resources/ndi-runtime`, while a
+    // path-preserving glob (`ndi-runtime/linux/**/*`) keeps the platform folder.
+    let mut dirs = vec![
+        dir.join("ndi-runtime"),
+        dir.join("resources").join("ndi-runtime"),
+        dir.join("resources").join("ndi-runtime").join(PLATFORM_DIR),
+        dir.to_path_buf(),
+    ];
+
+    // macOS: Contents/MacOS/selah → Contents/Resources.
+    if let Some(contents) = dir.parent() {
+        dirs.push(contents.join("Resources").join("ndi-runtime"));
+        dirs.push(contents.join("Resources").join("ndi-runtime").join(PLATFORM_DIR));
+        dirs.push(contents.join("Resources"));
+        // Linux deb/rpm/AppImage: the binary is usr/bin/selah while resources go
+        // to usr/lib/selah/resources, so neither is a sibling of the executable.
+        for base in [contents.join("lib").join("selah").join("resources"), contents.join("lib")] {
+            dirs.push(base.join("ndi-runtime").join(PLATFORM_DIR));
+            dirs.push(base.join("ndi-runtime"));
+        }
+    }
+
+    dirs
+}
+
 /// Candidate paths in the order they should be tried.
 ///
-/// Bare name first so the platform's own search path (PATH, LD_LIBRARY_PATH,
-/// DYLD_LIBRARY_PATH, rpath) is honoured before anything is guessed at.
+/// A runtime shipped inside the app comes first: it is the version this build was
+/// tested against, and preferring it means an old NDI Tools install on the machine
+/// cannot shadow it. The platform's own search path is next, so an operator who
+/// deliberately points at their own runtime still wins over the guessed locations.
 pub fn candidate_paths() -> Vec<String> {
-    let mut paths = vec![LIBRARY_NAME.to_string()];
+    let mut paths = Vec::new();
+
+    for dir in bundled_runtime_dirs() {
+        if let Some(dir) = dir.to_str() {
+            paths.extend(library_files_in(dir));
+        }
+    }
+
+    paths.push(LIBRARY_NAME.to_string());
 
     for var in REDIST_ENV_VARS {
         if let Ok(dir) = std::env::var(var) {
@@ -400,10 +458,24 @@ mod tests {
     }
 
     #[test]
-    fn library_search_prefers_the_platform_path() {
+    fn library_search_prefers_the_runtime_shipped_with_the_app() {
         let paths = candidate_paths();
-        assert_eq!(paths[0], LIBRARY_NAME, "bare name must be tried first");
-        assert!(paths.len() > 1, "fallback directories should be included");
+
+        // The order changed when the runtime started shipping inside the app: the
+        // bundled copy is the one this build was tested against, and trying it
+        // first means an older NDI Tools install on the machine can't shadow it.
+        let bare = paths.iter().position(|p| p == LIBRARY_NAME).expect("bare name is still a candidate");
+        let bundled = paths
+            .iter()
+            .position(|p| p.contains("ndi-runtime"))
+            .expect("a bundled location is searched");
+        assert!(bundled < bare, "the app's own runtime must be tried before the system one");
+
+        // The bare name has to remain, so the platform's loader path (PATH,
+        // LD_LIBRARY_PATH, DYLD_LIBRARY_PATH, rpath) still works for anyone
+        // deliberately pointing at their own build.
+        assert!(bare < paths.len());
+        assert!(paths.len() > 2, "fallback directories should be included too");
     }
 
     /// Exercises the real library when one is installed: loads it, creates a

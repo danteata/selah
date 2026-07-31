@@ -59,7 +59,11 @@ pub async fn ndi_start_output(
     let config = config.unwrap_or_default();
 
     if !state.is_available() {
-        return Err("NDI SDK not found. Install NDI Tools from ndi.video and restart the app.".to_string());
+        return Err(
+            "The NDI runtime could not be loaded. It ships with Selah on Windows and Linux; on \
+             macOS, install NDI Tools from ndi.video/tools."
+                .to_string(),
+        );
     }
 
     // Everything below refuses BEFORE creating the sender. Announcing a source
@@ -241,7 +245,7 @@ pub async fn ndi_push_open(
 ) -> Result<(), String> {
     if !state.is_available() {
         return Err(
-            "The NDI runtime isn't installed on this machine. Install NDI Tools from ndi.video/tools."
+            "The NDI runtime could not be loaded. It ships with Selah on Windows and Linux; on macOS, install NDI Tools from ndi.video/tools."
                 .to_string(),
         );
     }
@@ -377,7 +381,7 @@ pub async fn ndi_discover_sources(
     timeout_secs: Option<u64>,
 ) -> Result<Vec<super::types::NdiSourceInfo>, String> {
     let lib = super::ndi_lib::NdiLib::get().ok_or(
-        "The NDI runtime isn't installed on this machine. Install NDI Tools from ndi.video/tools.",
+        "The NDI runtime could not be loaded. It ships with Selah on Windows and Linux; on macOS, install NDI Tools from ndi.video/tools.",
     )?;
 
     let timeout_ms = (timeout_secs.unwrap_or(5) * 1000) as u32;

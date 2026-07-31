@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": [
+      "assets/*",
+      "assets/whisper-models-gguf/**/*",
+      "assets/embedding-models/**/*",
+      "assets/embedding-packs/**/*",
+      "linux-runtime/**/*",
+      "ndi-runtime/linux/**/*"
+    ]
+  }
+}
