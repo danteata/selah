@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, Copy, LayoutGrid, BookOpen, BookA, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, type LucideIcon } from 'lucide-react'
+import { Trash2, Copy, LayoutGrid, BookOpen, BookA, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, Layers, type LucideIcon } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
@@ -625,6 +625,27 @@ export function PreviewContent() {
                                 title="Send to Live"
                             >
                                 <Zap className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                        {/* The card view has this too — the compact list was left
+                            without it, so switching density silently lost the
+                            ability to send anything to the alternate output. */}
+                        {alternateOutput.contentSource === 'independent' && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    setAlternateSlide(alternateSlide?.id === slide.id ? null : slide)
+                                }}
+                                className={`p-1 rounded transition-all shrink-0 ${
+                                    alternateSlide?.id === slide.id
+                                        ? 'text-white bg-[var(--accent-indigo)] opacity-100'
+                                        : 'text-[var(--text-muted)] hover:text-white hover:bg-[var(--accent-indigo)] opacity-0 group-hover:opacity-100'
+                                }`}
+                                title={alternateSlide?.id === slide.id
+                                    ? 'On the alternate output — click to remove'
+                                    : 'Send to the alternate output'}
+                            >
+                                <Layers className="w-3.5 h-3.5" />
                             </button>
                         )}
                         <button
