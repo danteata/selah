@@ -260,6 +260,19 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                     </div>
                 )}
 
+                {/* Template picker in the list view too: the quick Add / Live / Alt
+                    buttons build slides through it, and it used to be reachable
+                    only from a song's detail view. */}
+                {!selectedSong && !hideSearch && (
+                    <div className="px-4 pb-2">
+                        <TemplateSelector
+                            slideType="song"
+                            selectedTemplate={selectedTemplate}
+                            onSelect={setSelectedTemplate}
+                        />
+                    </div>
+                )}
+
                 {/* Songs List */}
                 {!selectedSong ? (
                     <div className="flex-1 overflow-y-auto" ref={listRef}>

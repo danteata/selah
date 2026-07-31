@@ -20,6 +20,16 @@ export type AlternateDestination =
  */
 export type AlternateContentSource = 'follow' | 'independent'
 
+/**
+ * How this output renders whatever it is given.
+ *   - `follow`: the slide's own layout, so it looks like the projector.
+ *   - `lower-third`: force the lower-third bar, whatever the slide says.
+ *
+ * This is what makes "same content, full slide on the projector, lower third on
+ * the stream" possible: the content is shared, the rendering is per output.
+ */
+export type AlternateLayout = 'follow' | 'lower-third'
+
 /** Frame size and rate, used when there's no monitor to inherit them from. */
 export interface OutputFormat {
     width: number
@@ -37,6 +47,7 @@ export interface AlternateOutputConfig {
      */
     alpha: boolean
     contentSource: AlternateContentSource
+    layout: AlternateLayout
     /** NDI source name, so several machines on one network stay distinguishable. */
     sourceName: string
 }
@@ -60,5 +71,6 @@ export const DEFAULT_ALTERNATE_OUTPUT: AlternateOutputConfig = {
     format: { width: 1920, height: 1080, fps: 30 },
     alpha: true,
     contentSource: 'independent',
+    layout: 'follow',
     sourceName: 'Selah Alternate',
 }

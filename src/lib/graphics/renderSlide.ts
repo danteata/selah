@@ -25,6 +25,10 @@ export interface SlideRenderOptions extends LowerThirdRenderOptions {
     /** Paint a background behind the text. Off for a keyed feed, on for a feed
      *  that has to look like the projector. */
     opaqueBackground?: boolean
+    /** Draw as a lower third whatever the slide's own layout says — an output
+     *  setting, so one slide can be a full slide on the projector and a bar on
+     *  the stream. */
+    forceLowerThird?: boolean
 }
 
 /** Fraction of the frame reserved as a margin around body text. */
@@ -147,7 +151,7 @@ export function renderSlideToCanvas(ctx: Canvas2DLike, slide: Slide | null, opti
         return
     }
 
-    if (isLowerThird(slide)) {
+    if (options.forceLowerThird || isLowerThird(slide)) {
         renderLowerThird(ctx, slide, options)
         return
     }

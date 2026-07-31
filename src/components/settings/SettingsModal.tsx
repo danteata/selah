@@ -639,6 +639,25 @@ function DisplaySettings({
                         </div>
 
                         <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <label className="text-sm text-gray-600 dark:text-gray-400">Layout</label>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {alternate.config.layout === 'lower-third'
+                                        ? 'Draws every slide as a lower third, whatever the slide itself says'
+                                        : "Uses each slide's own layout, like the projector"}
+                                </p>
+                            </div>
+                            <select
+                                value={alternate.config.layout}
+                                onChange={(e) => alternate.update({ layout: e.target.value as 'follow' | 'lower-third' })}
+                                className="w-56 px-2 py-1.5 text-sm rounded-lg border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
+                            >
+                                <option value="follow">Follow the slide</option>
+                                <option value="lower-third">Lower third</option>
+                            </select>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
                             <label className="text-sm text-gray-600 dark:text-gray-400">NDI source name</label>
                             <input
                                 value={alternate.config.sourceName}

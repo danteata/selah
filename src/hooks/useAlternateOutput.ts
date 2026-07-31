@@ -80,7 +80,8 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         // Without alpha the feed needs something behind the text, or a switcher
         // taking it as a full-frame source shows nothing but the words.
         opaqueBackground: !config.alpha,
-    }), [config.format.width, config.format.height, config.alpha, defaultFont])
+        forceLowerThird: config.layout === 'lower-third',
+    }), [config.format.width, config.format.height, config.alpha, config.layout, defaultFont])
 
     const getCanvas = useCallback((): HTMLCanvasElement | null => {
         if (typeof document === 'undefined') return null
@@ -188,9 +189,15 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         const send = async () => {
             try {
                 if (slide) {
+                    // The layout override is applied to the slide handed over,
+                    // rather than needing the window to know about outputs:
+                    // LiveView already renders the lower-third layout.
+                    const outgoing = config.layout === 'lower-third'
+                        ? { ...slide, layout: 'lower-third' }
+                        : slide
                     await nativeMultiMonitorService.emitToAlternateWindow('slide-update', {
                         slideId: slide.id,
-                        slideData: slide,
+                        slideData: outgoing,
                     })
                 } else {
                     await nativeMultiMonitorService.emitToAlternateWindow('clear-output', { mode: 'blank' })
@@ -205,7 +212,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         // enough for its view to mount and subscribe.
         const timer = setTimeout(() => { void send() }, 400)
         return () => clearTimeout(timer)
-    }, [config.enabled, config.destination.kind, slide])
+    }, [config.enabled, config.destination.kind, config.layout, slide])
 
     return {
         config,

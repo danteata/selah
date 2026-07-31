@@ -24,6 +24,7 @@ import { LiveSongNavigator } from '../songs/LiveSongNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { MediaPicker, type MediaItem } from '../media/MediaPicker'
 import { TemplateBrowser } from '../templates/TemplateBrowser'
+import { TemplateSelector } from '../templates/TemplateSelector'
 import { AddCountdownModal } from '../countdown/AddCountdownModal'
 import { AddAlertModal } from '../alerts/AddAlertModal'
 
@@ -446,6 +447,9 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
     // Song to edit / delete straight from a search result — the browse list
     // (which normally carries these actions) is hidden while searching, so
     // without these you'd have to clear the query and scroll thousands of songs.
+    // The unified search built slides with no template at all, so a lower-third
+    // (or any) template could not be applied to anything found here.
+    const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
     const [songToEdit, setSongToEdit] = useState<Song | null>(null)
     const [songToDelete, setSongToDelete] = useState<Song | null>(null)
     const [showAddSong, setShowAddSong] = useState(false)
@@ -504,12 +508,12 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
         let slides: Slide[] = []
         if (hit.kind === 'song' && hit.song) {
             const full = await getSong(hit.song)
-            slides = createSongSlides((full ?? hit.song) as Song)
+            slides = createSongSlides((full ?? hit.song) as Song, { template: selectedTemplate })
         } else if (hit.kind === 'hymn' && hit.hymn) {
-            slides = createHymnSlides(hit.hymn)
+            slides = createHymnSlides(hit.hymn, { template: selectedTemplate })
         }
         if (slides[0]) alternate.send(slides[0])
-    }, [getSong, createSongSlides, createHymnSlides, alternate])
+    }, [getSong, createSongSlides, createHymnSlides, selectedTemplate, alternate])
 
     // Primary action on a result is "go live" (append + verse 1 live); the
     // secondary Add button just queues it. Going live closes the panel; Add
@@ -518,9 +522,9 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
         let slides: Slide[] = []
         if (hit.kind === 'song' && hit.song) {
             const full = await getSong(hit.song)
-            slides = createSongSlides((full ?? hit.song) as Song)
+            slides = createSongSlides((full ?? hit.song) as Song, { template: selectedTemplate })
         } else if (hit.kind === 'hymn' && hit.hymn) {
-            slides = createHymnSlides(hit.hymn)
+            slides = createHymnSlides(hit.hymn, { template: selectedTemplate })
         }
         if (slides.length === 0) return
         // Keep the panel open on both Add and Live — the LiveSongNavigator
@@ -531,7 +535,7 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
         } else {
             addToQueue(slides)
         }
-    }, [getSong, createSongSlides, createHymnSlides, addAndGoLive, addToQueue])
+    }, [getSong, createSongSlides, createHymnSlides, selectedTemplate, addAndGoLive, addToQueue])
 
     // Keyboard contract shared with the Bible and dictionary panels: the top
     // ranked hit is highlighted as results arrive, Enter sends it live and
@@ -582,6 +586,14 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                 >
                     <Plus className="w-4 h-4" />
                 </button>
+            </div>
+
+            <div className="px-2 pt-2">
+                <TemplateSelector
+                    slideType="song"
+                    selectedTemplate={selectedTemplate}
+                    onSelect={setSelectedTemplate}
+                />
             </div>
 
             {results.length > 0 && (

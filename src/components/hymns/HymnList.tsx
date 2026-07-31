@@ -171,6 +171,18 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
             </div>
             )}
 
+            {/* Same reasoning as the songs list: the row buttons build slides
+                through this, so it can't live only in the detail view. */}
+            {!selectedHymn && !hideSearch && (
+                <div className="px-4 pb-2">
+                    <TemplateSelector
+                        slideType="hymn"
+                        selectedTemplate={selectedTemplate}
+                        onSelect={setSelectedTemplate}
+                    />
+                </div>
+            )}
+
             {/* Hymn List */}
             {!selectedHymn ? (
                 <div className="flex-1 overflow-y-auto" ref={listRef}>

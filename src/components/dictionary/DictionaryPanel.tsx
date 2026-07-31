@@ -330,6 +330,19 @@ export function DictionaryPanel({ onClose, isInline = false, initialQuery = '' }
                     </div>
                 )}
 
+                {/* The template decides the slide's layout and styling, so it has to
+                    be choosable where Add / Live / Alt are — not only inside an
+                    opened entry, which is where it used to live. */}
+                {packs.length > 0 && (
+                    <div className="mt-2">
+                        <TemplateSelector
+                            slideType="dictionary"
+                            selectedTemplate={selectedTemplate}
+                            onSelect={setSelectedTemplate}
+                        />
+                    </div>
+                )}
+
                 {/* Same hint the Bible panel carries, so the keyboard contract is
                     discoverable rather than folklore. */}
                 {matches.length > 0 && (
