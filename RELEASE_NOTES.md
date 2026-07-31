@@ -1,14 +1,11 @@
-## Selah 0.1.15
+## Selah 0.1.16
 
-Three fixes, one of them important if your Convex deployment ever stops responding.
+NDI works out of the box on Windows and Linux.
 
-### Selah starts without Convex
-- The app now opens when the Convex deployment is unavailable — including when it has been disabled for exceeding its plan. It was failing to render at all, which is the opposite of what an offline-first app should do: local data, bundled Bibles and dictionaries, your slides and both outputs all work without a connection. Anything that writes to the cloud still won't until it's back.
+### The NDI runtime ships with Selah
+- **No more "NDI runtime not found", and no NDI Tools install needed** on Windows and Linux. The runtime library is now included in the app.
+- Until now only NDI *support* shipped. Since 0.1.12 the feature has been in every build, but the runtime it loads still had to be installed separately — which is what that error meant. It's now in the box.
+- Selah prefers its own copy over one installed on the machine, so an older NDI Tools install can't quietly replace the version this release was tested with. If you deliberately point the system library path at your own build, that still wins.
+- Adds about 26 MB on Linux and 28 MB on Windows.
 
-### macOS screen recording
-- macOS no longer asks to record your screen over and over. Selah was checking for the permission every two seconds while waiting for the live output window, and each check is what raised the dialog — so a permission macOS didn't recognise produced an endless prompt. It now asks once and explains what to do.
-- NDI no longer requests system audio unless you ask for it, so the prompt covers the screen alone. Audio was only ever captured on macOS, and a lyrics or graphics feed rarely needs it.
-- If the permission is enabled in System Settings and Selah still can't use it, remove Selah from the list and add it again. macOS ties that permission to a specific build, and Selah's macOS builds aren't yet signed, so a new version doesn't inherit it.
-
-### Alternate output
-- Your alternate output settings survive a restart — destination, resolution, alpha, content source, layout and design. You no longer have to set it up again each time. You still switch it on yourself, deliberately, since the output itself doesn't restart with the app.
+**macOS still needs NDI Tools** from ndi.video/tools for the main output — its library isn't bundled yet, and the message you get says so instead of implying it's optional. The alternate output over NDI needs nothing installed on any platform, because it renders its own frames.
