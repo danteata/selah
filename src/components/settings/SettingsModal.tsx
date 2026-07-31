@@ -683,9 +683,11 @@ function DisplaySettings({
                             )}
                             {alternate.textOnly && (
                                 <p className="text-amber-600 dark:text-amber-400">
-                                    Text only: this slide's image or video background isn't drawn on this
-                                    feed. Usually what you want for a keyed feed — the switcher supplies
-                                    the background. Choose a monitor to carry it.
+                                    Text only: this slide's image or video background isn't drawn on
+                                    <em> this </em> feed, because it renders its own frames to keep
+                                    transparency. Fliers, photos and video do go out over NDI on the
+                                    main output above, which captures the live output window — and this
+                                    output carries them too if you send it to a monitor.
                                 </p>
                             )}
                             {alternate.error && (

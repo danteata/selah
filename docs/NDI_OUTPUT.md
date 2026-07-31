@@ -82,6 +82,37 @@ renderer becomes worth having for other reasons.
 
 ---
 
+## ⬜ TODO: a second NDI feed that carries media
+
+The main output's NDI feed carries everything — fliers, photos, video — because
+it captures the live output window. The alternate output over NDI does not: it
+renders its own frames on a canvas, which is what keeps its alpha channel and
+lets it work with no window at all, but the canvas renderer draws text, not media.
+
+So today: **one** NDI feed with full fidelity (the main output), plus an alternate
+NDI feed that is text/graphics only. Sending the alternate output to a monitor
+gives it full fidelity, because that is a real window running `LiveView`.
+
+The fix is to let the alternate output be *captured* rather than rendered, and the
+existing **Alpha channel** setting is the natural switch, because the two are
+mutually exclusive on one feed:
+
+| Alpha channel | Mechanism | Carries |
+|---|---|---|
+| Enabled | canvas frames (today) | text, lower thirds — with transparency |
+| Disabled | capture its window | everything, opaque |
+
+What it needs:
+
+- An **offscreen** alternate window when the destination is NDI, since capture
+  needs a real mapped window and there may be no spare display. See the offscreen
+  notes in the section above — a minimized window yields no frames on any backend.
+- The capture backends generalised. All three hardcode the live window
+  (`LIVE_WINDOW_TITLE = "Live Output"` in `capture_windows.rs`, and the same in
+  `capture.rs` / `capture_linux.rs`), and `NdiManager` holds a single sender plus
+  a single `capture_stop` flag, so a second capture needs a per-window
+  sender/stop pair. `PushChannels` already shows the shape.
+
 ## Other known gaps
 
 - **Wayland is not supported on Linux.** A natively-Wayland Selah has no X11
