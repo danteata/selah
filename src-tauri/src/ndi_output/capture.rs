@@ -176,6 +176,24 @@ fn capture_loop(
 
     let mut waited_logged = false;
     while stop.load(Ordering::SeqCst) {
+        // SCShareableContent::get() *is* what raises the consent prompt, and
+        // find_live_window calls it. Polling it every two seconds while waiting for
+        // the window therefore re-asks every two seconds whenever the grant isn't
+        // recognised — which is how a permission that looks enabled in System
+        // Settings still produces an endless "would like to record this computer's
+        // screen" dialog. Check the grant first, and stop instead of nagging.
+        if !crate::audio_capture::check_screen_capture_permission() {
+            eprintln!(
+                "NDI capture: Screen Recording permission is not granted for this build of Selah, \
+                 so ScreenCaptureKit will not be polled (it would re-prompt). Grant it in System \
+                 Settings › Privacy & Security › Screen & System Audio Recording, then start NDI \
+                 again. If it is already listed there, this build is unsigned and macOS has tied \
+                 the grant to a previous build — remove Selah from the list, re-add it, or install \
+                 a signed build."
+            );
+            return Ok(());
+        }
+
         match find_live_window(window_title) {
             Ok((window,)) => {
                 eprintln!("NDI capture: found '{window_title}' window");

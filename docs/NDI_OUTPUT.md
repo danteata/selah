@@ -113,6 +113,34 @@ What it needs:
   a single `capture_stop` flag, so a second capture needs a per-window
   sender/stop pair. `PushChannels` already shows the shape.
 
+## ⬜ TODO: macOS builds are unsigned, so the Screen Recording grant doesn't stick
+
+Symptom: the main output re-asks for "screen and audio" on every start, even with
+Selah enabled under Privacy & Security › Screen & System Audio Recording.
+
+Cause: macOS keys a TCC grant to the app's code signature. Nothing in
+`.github/workflows/build-desktop.yml` or `tauri.conf.json` signs or notarises the
+macOS bundle, so each build has a different identity and the previous grant does
+not apply to it. Re-adding the app in System Settings fixes it until the next
+build.
+
+Two mitigations are in place, neither a cure:
+
+- `capture.rs` no longer polls `SCShareableContent::get()` while the grant is
+  missing. That call *is* what raises the prompt, and the wait-for-window loop ran
+  every two seconds — so an unrecognised grant produced a dialog every two
+  seconds. It now stops with an explanation instead.
+- Audio capture is opt-in (`NdiOutputConfig::default`), so the prompt asks for the
+  screen alone. Only the macOS backend can capture audio anyway, and system audio
+  is a stricter grant on macOS 15.
+
+The fix is to sign and notarise the macOS build: an Apple Developer ID
+certificate, `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` /
+`APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` in the
+workflow secrets, and `hardenedRuntime` in the bundle config. tauri-action picks
+those up. That also removes the Gatekeeper warning on first launch, so it is worth
+doing for its own sake.
+
 ## Other known gaps
 
 - **Wayland is not supported on Linux.** A natively-Wayland Selah has no X11

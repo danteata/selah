@@ -98,7 +98,9 @@ class NdiOutputService {
 
         const fullConfig: NdiOutputConfig = {
             sourceName: config?.sourceName || 'Selah Live Output',
-            includeAudio: config?.includeAudio ?? true,
+            // Opt-in: see NdiOutputConfig::default in Rust. Requesting audio makes
+            // macOS ask to record "screen and audio" rather than just the screen.
+            includeAudio: config?.includeAudio ?? false,
             audioSampleRate: config?.audioSampleRate || 48000,
             audioChannels: config?.audioChannels || 2,
         }

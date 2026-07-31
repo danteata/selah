@@ -13,7 +13,11 @@ impl Default for NdiOutputConfig {
     fn default() -> Self {
         Self {
             source_name: "Selah Live Output".to_string(),
-            include_audio: true,
+            // Off by default. Only the macOS backend can capture audio at all, and
+            // asking for it turns the permission prompt into "screen and audio" —
+            // a stricter grant on macOS 15 — for something a lyrics or graphics
+            // feed rarely needs. Opt in per start if you want it.
+            include_audio: false,
             audio_sample_rate: 48000,
             audio_channels: 2,
         }
@@ -35,7 +39,7 @@ mod tests {
     fn test_config_default_values() {
         let config = NdiOutputConfig::default();
         assert_eq!(config.source_name, "Selah Live Output");
-        assert!(config.include_audio);
+        assert!(!config.include_audio, "audio is opt-in: it widens the macOS permission prompt");
         assert_eq!(config.audio_sample_rate, 48000);
         assert_eq!(config.audio_channels, 2);
     }
