@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { layoutLowerThird, plainTextFromHtml, renderLowerThird, type Canvas2DLike } from '../renderLowerThird'
 import type { Slide, SlideStyle } from '../../../types'
+import { resolveVerseRefPx, VERSE_REF_BOUNDS } from '../../../utils/verseRefStyle'
 
 const HD = { width: 1920, height: 1080 }
 
@@ -258,26 +259,46 @@ describe('renderLowerThird', () => {
         expect(lines.size).toBeGreaterThan(1)
     })
 
-    it('never draws the reference larger than the verse it cites', () => {
-        // The size setting is a percentage of the body on a full slide, where the
-        // body is huge. In a bar the body is small and may shrink further, so the
-        // same percentage made the citation bigger than the verse.
-        const verse = {
-            id: 'v1',
-            type: 'bible',
-            layout: 'lower-third',
+    it('changes the reference size when the percentage changes', () => {
+        // The regression this pins: a cap against the body made every percentage
+        // above roughly 75% land on the same clamped value, so bumping the number
+        // in settings did nothing at all in a bar.
+        const verse = (sizePercent: number) => ({
+            id: 'v1', type: 'bible', layout: 'lower-third',
             contents: ['<p>If we confess our sins he is faithful and just to forgive us our sins and to cleanse us from all unrighteousness.</p>', '<p>1 John 1:9 · KJV</p>'],
-            slideStyle: { verseRefSizePercent: 200 },
-        } as unknown as Slide
+            slideStyle: { verseRefSizePercent: sizePercent },
+        } as unknown as Slide)
 
-        const { ctx, calls } = recorder()
-        renderLowerThird(ctx, verse, HD)
-
-        const size = (fragment: string) => {
-            const call = calls.find((c) => c.startsWith('fillText') && c.includes(fragment))
-            return Number(/(\d+)px/.exec(call!)![1])
+        const size = (sizePercent: number) => {
+            const { ctx, calls } = recorder()
+            renderLowerThird(ctx, verse(sizePercent), HD)
+            const call = calls.find((c) => c.startsWith('fillText') && c.includes('1 John 1:9'))!
+            return Number(/(\d+)px/.exec(call)![1])
         }
-        expect(size('1 John 1:9')).toBeLessThan(size('confess'))
+
+        const [small, medium, large] = [100, 150, 200].map(size)
+        expect(medium).toBeGreaterThan(small)
+        expect(large).toBeGreaterThan(medium)
+    })
+
+    it("sizes the reference by the projector's rule, whatever the verse", () => {
+        // Frame-relative like the DOM, so it does not follow the body down as a
+        // long verse shrinks — and one percentage means one thing on both outputs.
+        const verse = (body: string) => ({
+            id: 'v1', type: 'bible', layout: 'lower-third',
+            contents: [`<p>${body}</p>`, '<p>1 John 1:9</p>'],
+            slideStyle: {},
+        } as unknown as Slide)
+
+        const size = (body: string) => {
+            const { ctx, calls } = recorder()
+            renderLowerThird(ctx, verse(body), HD)
+            return Number(/(\d+)px/.exec(calls.find((c) => c.includes('1 John 1:9'))!)![1])
+        }
+
+        const expected = Math.round(resolveVerseRefPx(undefined, undefined, VERSE_REF_BOUNDS.lowerThird, HD.width))
+        expect(size('Short')).toBe(expected)
+        expect(size('word '.repeat(40))).toBe(expected)
     })
 
     it('keeps the reference close under the verse when it wraps', () => {
@@ -310,32 +331,6 @@ describe('renderLowerThird', () => {
         const bar = layoutLowerThird(verse, HD).bar
         expect(Math.min(...bodyRows.map((r) => r.y))).toBeGreaterThan(bar.y)
         expect(reference.y).toBeLessThan(bar.y + bar.height)
-    })
-
-    it('sizes the reference sensibly at 100% and still honours the setting', () => {
-        const verse = (sizePercent?: number) => ({
-            id: 'v1', type: 'bible', layout: 'lower-third',
-            contents: ['<p>Short verse here</p>', '<p>1 John 1:9</p>'],
-            slideStyle: sizePercent ? { verseRefSizePercent: sizePercent } : {},
-        } as unknown as Slide)
-
-        const size = (slide: Slide) => {
-            const { ctx, calls } = recorder()
-            renderLowerThird(ctx, slide, HD)
-            const ref = calls.find((c) => c.startsWith('fillText(1 John 1:9@'))!
-            const body = calls.find((c) => c.startsWith('fillText(Short verse here@'))!
-            return { ref: Number(/(\d+)px/.exec(ref)![1]), body: Number(/(\d+)px/.exec(body)![1]) }
-        }
-
-        // Default is a readable citation, not something needing 200% to look right.
-        const plain = size(verse())
-        expect(plain.ref / plain.body).toBeGreaterThan(0.5)
-        expect(plain.ref / plain.body).toBeLessThanOrEqual(0.85)
-
-        // Smaller when asked, and never past the ceiling when asked for far more.
-        expect(size(verse(50)).ref).toBeLessThan(plain.ref)
-        const huge = size(verse(300))
-        expect(huge.ref / huge.body).toBeLessThanOrEqual(0.85)
     })
 
     it('draws nothing but the clear for an empty slide', () => {

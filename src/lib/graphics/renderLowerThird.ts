@@ -58,13 +58,11 @@ const DEFAULT_ACCENT = '#0d9488'
 /** Line height of body text inside the bar. */
 const BODY_LINE_HEIGHT = 1.15
 /**
- * Reference size at 100%, as a fraction of the fitted body size, and the ceiling
- * no percentage may pass. The old baseline was a fraction of the bar, which made
- * the reference so small that 200% was needed to look right — the setting should
- * mean the same thing here as on a full slide.
+ * Size of a hand-written subtitle (a speaker's name), as a fraction of the fitted
+ * body. A scripture reference is not sized this way — it uses the projector's own
+ * frame-relative bounds, so one percentage means one thing everywhere.
  */
 const REFERENCE_RATIO = 0.7
-const REFERENCE_MAX_RATIO = 0.85
 /** Gap between verse and reference, as a fraction of the reference size. */
 const REFERENCE_GAP = 0.55
 
@@ -269,10 +267,16 @@ export function renderLowerThird(
         // is a proper citation, and no percentage can outgrow the verse.
         // A reference is sized like the projector's, from the frame width via the
         // shared bounds; a hand-written subtitle is a name, so it stays relative
-        // to the body. The cap remains as a floor of good taste: unlike the DOM,
-        // this refuses to let the citation outgrow the verse at extreme
-        // percentages, which matters most in a bar where the body is small.
-        const requested = layout.subtitle.isReference
+        // to the body.
+        //
+        // No cap against the body any more. Capping made the size setting inert:
+        // a wrapped verse shrinks to fit the bar, the cap followed it down, and
+        // every percentage above about 75% landed on the same clamped value — so
+        // bumping the number did nothing. The reason a citation could outgrow its
+        // verse in the first place was the body being crushed onto one line, which
+        // is fixed; matching the projector matters more than a guard against a
+        // problem that no longer exists.
+        const subtitlePx = layout.subtitle.isReference
             ? resolveVerseRefPx(
                 { verseRefSizePercent: layout.subtitle.sizePercent },
                 undefined,
@@ -280,7 +284,6 @@ export function renderLowerThird(
                 options.width,
             )
             : bodyFontPx * REFERENCE_RATIO
-        const subtitlePx = Math.min(requested, bodyFontPx * REFERENCE_MAX_RATIO)
 
         subtitleFit = fitRuns(ctx, [{
             text: layout.subtitle.text,

@@ -329,14 +329,17 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                     >
                                         <button
                                             onClick={() => setSelectedSong(song)}
-                                            className="flex-1 text-left"
+                                            /* min-w-0 is what makes the truncate below work: a flex
+                                               child's default min-width:auto lets a long first line
+                                               grow the row until Add / Live / Alt are off screen. */
+                                            className="flex-1 min-w-0 text-left"
                                         >
                                             <h3 className="font-medium text-gray-900 dark:text-white truncate">
                                                 {song.title}
                                             </h3>
                                             <p className="text-sm text-gray-500 truncate">{songSubtitle(song)}</p>
                                         </button>
-                                        <div className="flex items-center gap-1">
+                                        <div className="flex items-center gap-1 flex-shrink-0">
                                             {/* Edit/delete are PREPENDED and reveal on
                                                 hover, so Add/Live stay pinned at the far
                                                 right (consistent with the results list). */}
