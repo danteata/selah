@@ -115,6 +115,44 @@ describe('layoutLowerThird', () => {
         expect(layoutLowerThird(verse, HD).subtitle?.text).toContain('Psalms 9:2')
     })
 
+    it("draws the reference in the operator's colour", () => {
+        const verse = {
+            id: 'v1', type: 'bible', layout: 'lower-third',
+            contents: ['<p>Body</p>', '<p>Psalms 9:2 · KJV</p>'],
+            slideStyle: {},
+        } as unknown as Slide
+
+        // Global setting applies...
+        expect(layoutLowerThird(verse, { ...HD, verseRef: { color: '#ffa500' } }).subtitle?.color).toBe('#ffa500')
+
+        // ...and the slide's own value beats it, as in the editor.
+        const overridden = { ...verse, slideStyle: { verseRefColor: '#00ff00' } } as unknown as Slide
+        expect(layoutLowerThird(overridden, { ...HD, verseRef: { color: '#ffa500' } }).subtitle?.color).toBe('#00ff00')
+    })
+
+    it('applies reference bold, italic and size only to a reference', () => {
+        const verse = {
+            id: 'v1', type: 'bible', layout: 'lower-third',
+            contents: ['<p>Body</p>', '<p>Psalms 9:2</p>'],
+            slideStyle: { verseRefBold: true, verseRefItalic: true, verseRefSizePercent: 150 },
+        } as unknown as Slide
+        const ref = layoutLowerThird(verse, HD).subtitle!
+        expect(ref.isReference).toBe(true)
+        expect(ref.bold).toBe(true)
+        expect(ref.italic).toBe(true)
+
+        // A hand-written subtitle is not a citation, so reference styling and
+        // colour must not hijack it.
+        const named = {
+            ...verse,
+            slideStyle: { ...verse.slideStyle, lowerThirdSubtitle: 'Guest Speaker', verseRefColor: '#ff0000' },
+        } as unknown as Slide
+        const subtitle = layoutLowerThird(named, HD).subtitle!
+        expect(subtitle.isReference).toBe(false)
+        expect(subtitle.bold).toBe(false)
+        expect(subtitle.color).not.toBe('#ff0000')
+    })
+
     it('lets an explicit subtitle win over the reference', () => {
         const verse = {
             id: 'v1',

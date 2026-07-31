@@ -159,6 +159,21 @@ describe('renderTextSlide', () => {
         expect(size(sd.calls) / 720).toBeCloseTo(size(hd.calls) / 1080, 1)
     })
 
+    it("draws a full slide's reference in the operator's colour", () => {
+        const { ctx, calls } = recorder()
+        renderTextSlide(
+            ctx,
+            slide({ type: 'bible', contents: ['<p>For God so loved</p>', '<p>John 3:16</p>'] }),
+            { ...HD, verseRef: { color: '#ffa500', bold: true } },
+        )
+
+        const caption = calls.find((c) => c.startsWith('fillText(John 3:16@'))
+        expect(caption).toBeTruthy()
+        expect(caption).toContain('font=700')
+        // The body keeps its own colour; only the reference takes the setting.
+        expect(calls.some((c) => c.startsWith('fillText(For God so loved@'))).toBe(true)
+    })
+
     it('draws the reference under a bible verse', () => {
         const { ctx, calls } = recorder()
         renderTextSlide(

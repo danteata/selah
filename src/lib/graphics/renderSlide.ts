@@ -117,23 +117,31 @@ export function renderTextSlide(ctx: Canvas2DLike, slide: Slide, options: SlideR
         })
 
         if (captionRuns.length > 0) {
-            const captionPx = fontPx * 0.5
-            const { lines: captionLines } = fitRuns(ctx, captionRuns, {
+            // The reference takes the operator's styling: per-slide first, then
+            // the global setting — the order the editor and DOM renderer use.
+            const refColor = slide.slideStyle?.verseRefColor ?? options.verseRef?.color
+            const refBold = slide.slideStyle?.verseRefBold ?? options.verseRef?.bold ?? false
+            const refItalic = slide.slideStyle?.verseRefItalic ?? options.verseRef?.italic ?? false
+            const refSizePercent = slide.slideStyle?.verseRefSizePercent ?? options.verseRef?.sizePercent
+            const captionPx = fontPx * 0.5 * (refSizePercent ? refSizePercent / 100 : 1)
+            const captionWeight = refBold ? '700' : '400'
+            const styledCaption = captionRuns.map((run) => ({ ...run, italic: run.italic || refItalic }))
+            const { lines: captionLines } = fitRuns(ctx, styledCaption, {
                 fontPx: captionPx,
                 fontFamily,
-                weight: '400',
+                weight: captionWeight,
                 maxWidth,
                 maxLines: 1,
             })
             drawRunLines(ctx, captionLines, {
                 fontPx: captionPx,
                 fontFamily,
-                weight: '400',
+                weight: captionWeight,
                 align: 'center',
                 x: width / 2,
                 firstBaselineY: firstY + blockHeight + height * CAPTION_GAP,
                 lineHeight: captionPx * 1.2,
-                color,
+                color: refColor ?? color,
                 outlined: !!slide.slideStyle?.textOutlined,
             })
         }

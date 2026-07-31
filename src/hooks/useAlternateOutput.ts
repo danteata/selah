@@ -59,6 +59,9 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
     const liveSlideId = useAppStore((state) => state.liveSlideId)
     const activeSlides = useAppStore((state) => state.activeSlides)
     const defaultFont = useAppStore((state) => state.settings.defaultFont)
+    // The operator's verse-reference styling, so the feed cites verses the way
+    // the projector does rather than in plain white.
+    const slideStyles = useAppStore((state) => state.settings.slideStyles)
     const { templates } = useTemplates()
 
     const [framesSent, setFramesSent] = useState(0)
@@ -99,7 +102,13 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         // taking it as a full-frame source shows nothing but the words.
         opaqueBackground: !config.alpha,
         forceLowerThird: config.layout === 'lower-third',
-    }), [config.format.width, config.format.height, config.alpha, config.layout, defaultFont])
+        verseRef: {
+            color: slideStyles?.verseRefColor,
+            bold: slideStyles?.verseRefBold,
+            italic: slideStyles?.verseRefItalic,
+            sizePercent: slideStyles?.verseRefSizePercent,
+        },
+    }), [config.format.width, config.format.height, config.alpha, config.layout, defaultFont, slideStyles])
 
     const getCanvas = useCallback((): HTMLCanvasElement | null => {
         if (typeof document === 'undefined') return null

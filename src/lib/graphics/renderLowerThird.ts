@@ -33,6 +33,17 @@ export interface LowerThirdRenderOptions {
     /** Text colour. SlideStyle carries no colour field — in the DOM renderer it
      *  comes from the TipTap markup, which plain text can't preserve. */
     textColor?: string
+    /**
+     * Global verse-reference styling from settings. A slide's own
+     * `slideStyle.verseRef*` values win over these, matching how the editor and
+     * the DOM renderer resolve them.
+     */
+    verseRef?: {
+        color?: string
+        bold?: boolean
+        italic?: boolean
+        sizePercent?: number
+    }
 }
 
 /** Fraction of the frame height the bar occupies, and its inset from the bottom. */
@@ -51,7 +62,19 @@ export interface LowerThirdLayout {
     fill: { kind: 'solid'; color: string } | { kind: 'gradient'; from: string; to: string } | null
     accentBar: { x: number; y: number; width: number; height: number; color: string } | null
     title: { text: string; x: number; y: number; fontPx: number; align: CanvasTextAlign; color: string }
-    subtitle: { text: string; x: number; y: number; fontPx: number; align: CanvasTextAlign; color: string } | null
+    subtitle: {
+        text: string
+        x: number
+        y: number
+        fontPx: number
+        align: CanvasTextAlign
+        color: string
+        /** True when the subtitle is a scripture reference, so it takes the
+         *  operator's reference styling rather than the body's. */
+        isReference: boolean
+        bold: boolean
+        italic: boolean
+    } | null
     fontFamily: string
     outlined: boolean
 }
@@ -113,8 +136,15 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
     const caption = isCaptionedSlideType(slide.type) ? plainTextFromHtml(slideCaptionHtml(slide)) : ''
     const subtitle = explicitSubtitle || caption
 
+    const isReference = !explicitSubtitle && !!caption
+    // Per-slide beats global, the same order the editor and the DOM renderer use.
+    const refColor = style.verseRefColor ?? options.verseRef?.color
+    const refBold = style.verseRefBold ?? options.verseRef?.bold ?? false
+    const refItalic = style.verseRefItalic ?? options.verseRef?.italic ?? false
+    const refSizePercent = style.verseRefSizePercent ?? options.verseRef?.sizePercent
+
     const titleFontPx = barHeight * (subtitle ? 0.42 : 0.5)
-    const subtitleFontPx = barHeight * 0.26
+    const subtitleFontPx = barHeight * 0.26 * (isReference && refSizePercent ? refSizePercent / 100 : 1)
     // Vertically centre the block inside the bar.
     const blockHeight = titleFontPx + (subtitle ? subtitleFontPx * 1.6 : 0)
     const titleY = barY + (barHeight - blockHeight) / 2 + titleFontPx / 2
@@ -138,7 +168,12 @@ export function layoutLowerThird(slide: Slide, options: LowerThirdRenderOptions)
                 y: titleY + titleFontPx * 0.9 + subtitleFontPx * 0.6,
                 fontPx: subtitleFontPx,
                 align,
-                color: options.textColor ?? 'rgba(255,255,255,0.85)',
+                color: (isReference ? refColor : undefined)
+                    ?? options.textColor
+                    ?? 'rgba(255,255,255,0.85)',
+                isReference,
+                bold: isReference && refBold,
+                italic: isReference && refItalic,
             }
             : null,
         fontFamily: style.font || options.defaultFont || 'Inter, system-ui, sans-serif',
@@ -209,7 +244,12 @@ export function renderLowerThird(
     if (layout.subtitle) {
         // The subtitle is a plain settings field, not editor markup, so it is a
         // single unstyled run.
-        const subtitleRuns: TextRun[] = [{ text: layout.subtitle.text, bold: false, italic: false, color: null }]
+        const subtitleRuns: TextRun[] = [{
+            text: layout.subtitle.text,
+            bold: layout.subtitle.bold,
+            italic: layout.subtitle.italic,
+            color: null,
+        }]
         const { lines, fontPx } = fitRuns(ctx, subtitleRuns, {
             fontPx: layout.subtitle.fontPx,
             fontFamily: layout.fontFamily,
