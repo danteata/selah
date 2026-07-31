@@ -1,26 +1,14 @@
-## Selah 0.1.14
+## Selah 0.1.15
 
-The alternate output, finished properly — plus a verse reference that is finally the right size everywhere.
+Three fixes, one of them important if your Convex deployment ever stops responding.
+
+### Selah starts without Convex
+- The app now opens when the Convex deployment is unavailable — including when it has been disabled for exceeding its plan. It was failing to render at all, which is the opposite of what an offline-first app should do: local data, bundled Bibles and dictionaries, your slides and both outputs all work without a connection. Anything that writes to the cloud still won't until it's back.
+
+### macOS screen recording
+- macOS no longer asks to record your screen over and over. Selah was checking for the permission every two seconds while waiting for the live output window, and each check is what raised the dialog — so a permission macOS didn't recognise produced an endless prompt. It now asks once and explains what to do.
+- NDI no longer requests system audio unless you ask for it, so the prompt covers the screen alone. Audio was only ever captured on macOS, and a lyrics or graphics feed rarely needs it.
+- If the permission is enabled in System Settings and Selah still can't use it, remove Selah from the list and add it again. macOS ties that permission to a specific build, and Selah's macOS builds aren't yet signed, so a new version doesn't inherit it.
 
 ### Alternate output
-- **Send it to a display.** Choosing a monitor now opens a second output window there, running the same view as the projector — so it renders everything, backgrounds and video included.
-- **Show the same content in a different form.** A new Layout setting draws the alternate output as a lower third whatever the slide's own layout says, so one verse can be a full slide on the projector and a bar on the stream, switching together with no extra work.
-- **Use your own design.** Pick one of your lower-third templates for the output itself. Your styling then applies to whatever passes through it, instead of only to slides that happen to be built from that template.
-- Send anything to the output from where you find it: the Bible and dictionary panels now have an Alt button beside Add and Live, and so does every slide in the queue — in both the card and the compact list views.
-- Songs and hymns deliberately don't offer it. They are groups of slides and this output holds one, so set it to follow the main output for those.
-
-### Verse references
-- **References are the size you'd expect at 100%.** The default was small enough that people set 200% on every slide to compensate; that size is now the default. If you had raised it, set it back to 100%.
-- The reference size setting now works on lower thirds. It previously appeared to do nothing there.
-- References on the alternate output are drawn in the colour, weight and size you set. They were coming out plain white, and on a lower third they weren't drawn at all.
-- A verse and its reference sit together as a block in a lower third, instead of the reference drifting to the bottom of the bar when the verse wrapped.
-
-### Lower thirds
-- A verse gets two lines in the bar instead of being squeezed onto one, so it stays readable.
-- Bold, italics and colour from the editor are preserved on the alternate output.
-
-### Fixes
-- Verse text on the alternate output is no longer tiny — it fills its frame the way the projector does.
-- A slide with an image or video background still sends its text over NDI, rather than an empty frame. Use a display for that output if you need the background too.
-- Template pickers are where the buttons are. The dictionary, songs and hymns panels had theirs hidden inside a detail view, and the songs & hymns search had none at all, so nothing found there could be styled.
-- Long song titles no longer push Add and Live off the edge of the list.
+- Your alternate output settings survive a restart — destination, resolution, alpha, content source, layout and design. You no longer have to set it up again each time. You still switch it on yourself, deliberately, since the output itself doesn't restart with the app.
