@@ -246,19 +246,38 @@ describe('renderLowerThird', () => {
         expect(ys.size).toBe(2)
     })
 
-    it('shrinks instead of wrapping when a subtitle leaves only one line', () => {
+    it('gives a verse two lines in the bar rather than crushing it onto one', () => {
         const long = '<p>' + 'Reverend Doctor '.repeat(4) + 'Mensah</p>'
-        const oneLine = recorder()
-        renderLowerThird(oneLine.ctx, slide([long], { lowerThirdSubtitle: 'Guest Speaker' }), HD)
+        const { ctx, calls } = recorder()
+        renderLowerThird(ctx, slide([long], { lowerThirdSubtitle: 'Guest Speaker' }), HD)
 
-        const titleCalls = oneLine.calls.filter((c) => c.startsWith('fillText') && !c.includes('Guest'))
-        const ys = new Set(titleCalls.map((c) => /@-?\d+,(-?\d+)/.exec(c)![1]))
-        expect(ys.size).toBe(1)
+        const titleCalls = calls.filter((c) => c.startsWith('fillText') && !c.includes('Guest'))
+        const lines = new Set(titleCalls.map((c) => /@-?\d+,(-?\d+)/.exec(c)![1]))
+        // One line forced the size down until the verse was unreadable.
+        expect(lines.size).toBeLessThanOrEqual(2)
+        expect(lines.size).toBeGreaterThan(1)
+    })
 
-        // ...and the size actually came down to achieve that.
-        const fontPx = Number(/(\d+)px/.exec(titleCalls[0])![1])
-        const layout = layoutLowerThird(slide([long], { lowerThirdSubtitle: 'Guest Speaker' }), HD)
-        expect(fontPx).toBeLessThan(layout.title.fontPx)
+    it('never draws the reference larger than the verse it cites', () => {
+        // The size setting is a percentage of the body on a full slide, where the
+        // body is huge. In a bar the body is small and may shrink further, so the
+        // same percentage made the citation bigger than the verse.
+        const verse = {
+            id: 'v1',
+            type: 'bible',
+            layout: 'lower-third',
+            contents: ['<p>If we confess our sins he is faithful and just to forgive us our sins and to cleanse us from all unrighteousness.</p>', '<p>1 John 1:9 · KJV</p>'],
+            slideStyle: { verseRefSizePercent: 200 },
+        } as unknown as Slide
+
+        const { ctx, calls } = recorder()
+        renderLowerThird(ctx, verse, HD)
+
+        const size = (fragment: string) => {
+            const call = calls.find((c) => c.startsWith('fillText') && c.includes(fragment))
+            return Number(/(\d+)px/.exec(call!)![1])
+        }
+        expect(size('1 John 1:9')).toBeLessThan(size('confess'))
     })
 
     it('draws nothing but the clear for an empty slide', () => {

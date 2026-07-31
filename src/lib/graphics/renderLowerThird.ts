@@ -220,14 +220,23 @@ export function renderLowerThird(
     const textWidth = layout.bar.width - (options.width * PADDING) * 2 - (layout.accentBar?.width ?? 0)
 
     const titleRuns = parseTextRuns(slide.contents?.[0] ?? '')
+    // The body's final size after fitting, which the reference is capped against.
+    let bodyFontPx = layout.title.fontPx
     if (titleRuns.length > 0) {
         const { lines, fontPx } = fitRuns(ctx, titleRuns, {
             fontPx: layout.title.fontPx,
             fontFamily: layout.fontFamily,
             weight: '700',
             maxWidth: textWidth,
-            maxLines: layout.subtitle ? 1 : 2,
+            // Two lines with a subtitle, three without. One line forced a whole
+            // verse to shrink until it was unreadable — and left the short
+            // reference beneath it looking larger than the verse itself.
+            maxLines: layout.subtitle ? 2 : 3,
+            maxHeight: layout.bar.height * (layout.subtitle ? 0.6 : 0.86),
+            lineHeightRatio: 1.15,
+            minFontPx: layout.bar.height * 0.12,
         })
+        bodyFontPx = fontPx
         drawRunLines(ctx, lines, {
             fontPx,
             fontFamily: layout.fontFamily,
@@ -242,6 +251,13 @@ export function renderLowerThird(
     }
 
     if (layout.subtitle) {
+        // The reference size setting is a percentage of the *body* on a full
+        // slide, where the body is huge. In a bar the body is already small and
+        // may have shrunk further to fit, so the same percentage can make the
+        // citation bigger than the verse. Cap it against the body's final size.
+        const subtitleCap = bodyFontPx * 0.72
+        const subtitlePx = Math.min(layout.subtitle.fontPx, subtitleCap)
+
         // The subtitle is a plain settings field, not editor markup, so it is a
         // single unstyled run.
         const subtitleRuns: TextRun[] = [{
@@ -251,7 +267,7 @@ export function renderLowerThird(
             color: null,
         }]
         const { lines, fontPx } = fitRuns(ctx, subtitleRuns, {
-            fontPx: layout.subtitle.fontPx,
+            fontPx: subtitlePx,
             fontFamily: layout.fontFamily,
             weight: '400',
             maxWidth: textWidth,
