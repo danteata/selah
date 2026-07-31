@@ -7,6 +7,7 @@ import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { useAlternateOutput } from '../../hooks/useAlternateOutput'
 import { OUTPUT_FORMATS, formatLabel } from '../../types/alternateOutput'
 import { isLowerThirdTemplate } from '../../lib/graphics/templateStyle'
+import { proGateMessage } from '../../providers/entitlementState'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import { useEntitlements, type PromoValidation } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
@@ -266,7 +267,23 @@ function DisplaySettings({
         stopOutput: ndiStop,
         state: ndiState,
     } = useNdiOutput()
-    const { isPro, startProCheckout } = useEntitlements()
+    const { isPro, isUnverified, startProCheckout, refresh: refreshEntitlements } = useEntitlements()
+
+    // Same two-case gate as Program Output: offer a retry when the licence simply
+    // couldn't be checked, rather than selling Pro to someone who has it.
+    const showProGate = useCallback((feature: string) => {
+        const { title, description, retryable } = proGateMessage(
+            isUnverified ? 'unverified' : 'verified',
+            feature,
+        )
+        toast.warning(title, {
+            description,
+            duration: retryable ? 14000 : 10000,
+            action: retryable
+                ? { label: 'Try again', onClick: () => void refreshEntitlements() }
+                : { label: 'Upgrade', onClick: () => void startProCheckout() },
+        })
+    }, [isUnverified, refreshEntitlements, startProCheckout])
     const [localMonitorId, setLocalMonitorId] = useState<string | null>(null)
     const [flashingId, setFlashingId] = useState<string | null>(null)
 
@@ -276,11 +293,7 @@ function DisplaySettings({
     // upsell instead of starting the output.
     const handleNdiStart = useCallback(() => {
         if (!isPro) {
-            toast.warning('NDI output is a Selah Pro feature', {
-                description: 'Upgrade to stream your live output over the network via NDI.',
-                duration: 10000,
-                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
-            })
+            showProGate('NDI output')
             return
         }
         // Same refusals as the Program Output toggle — say them out loud instead
@@ -292,7 +305,7 @@ function DisplaySettings({
                 duration: 12000,
             })
         })
-    }, [isPro, startProCheckout, ndiStart])
+    }, [isPro, showProGate, ndiStart])
 
     const alternate = useAlternateOutput()
     // Only lower-third templates can style a lower-third output, so the list is
@@ -305,17 +318,13 @@ function DisplaySettings({
 
     const handleAlternateStart = useCallback(() => {
         if (!isPro) {
-            toast.warning('The alternate output is a Selah Pro feature', {
-                description: 'Upgrade to run a second output alongside your main one.',
-                duration: 10000,
-                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
-            })
+            showProGate('The alternate output')
             return
         }
         void alternate.enable().then((error: string | null) => {
             if (error) toast.error('Alternate output could not start', { description: error, duration: 12000 })
         })
-    }, [alternate, isPro, startProCheckout])
+    }, [alternate, isPro, showProGate])
 
     const handleIdentify = useCallback(async (monitorId: string) => {
         if (flashingId) return

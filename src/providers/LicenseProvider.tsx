@@ -23,6 +23,7 @@ import {
     type ReactNode,
 } from 'react'
 import { useAuth } from '@clerk/clerk-react'
+import { entitlementCertainty } from './entitlementState'
 import { useAction, useMutation, useQuery, useConvex } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { isDesktop } from '../platform'
@@ -70,6 +71,12 @@ export interface Entitlements {
     loading: boolean
     /** Where the entitlement decision came from. */
     source: 'license' | 'subscription' | 'none'
+    /**
+     * No licence could be read at all, so "not Pro" here means "couldn't check",
+     * not "on the free plan". Gates stay closed either way, but the operator
+     * should be offered a retry rather than an upgrade — see `proGateMessage`.
+     */
+    isUnverified: boolean
     /** Force a re-fetch (e.g. after returning from checkout). */
     refresh: () => Promise<void>
     /** Begin a Pro checkout and open Paystack's hosted page. Pass a discount code. */
@@ -97,6 +104,7 @@ const DEFAULT: Entitlements = {
     isTrial: false,
     trialDaysLeft: null,
     inGrace: false,
+    isUnverified: false,
     expiresAt: null,
     status: 'none',
     loading: true,
@@ -289,6 +297,8 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
             isTrial,
             trialDaysLeft: isTrial ? daysUntil(s?.expires_at) : null,
             inGrace: !!s?.in_grace,
+            // No licence file at all — the fetch failed and nothing was cached.
+            isUnverified: entitlementCertainty(!!s, loading) === 'unverified',
             expiresAt: s?.expires_at ?? null,
             status: s?.status ?? 'none',
             loading,
@@ -313,6 +323,10 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
         value = {
             plan: isPro ? 'pro' : 'free',
             isPro,
+            // On the web the subscription query is the only source, and an
+            // undefined result means it hasn't answered — the same "couldn't
+            // check" as a missing desktop licence.
+            isUnverified: entitlementCertainty(webSub !== undefined, loading) === 'unverified',
             isTrial,
             trialDaysLeft: isTrial ? daysUntil(webSub?.currentPeriodEnd) : null,
             inGrace: false,

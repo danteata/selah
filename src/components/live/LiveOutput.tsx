@@ -3,6 +3,7 @@ import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Li
 import { useAppStore } from '../../store/appStore'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../../hooks/useNdiOutput'
+import { proGateMessage } from '../../providers/entitlementState'
 import { useAlternateOutput } from '../../hooks/useAlternateOutput'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
@@ -101,7 +102,32 @@ export function LiveOutput() {
         state: ndiState,
     } = useNdiOutput()
     const ndiSending = (ndiState?.framesSent ?? 0) > 0
-    const { isPro, startProCheckout } = useEntitlements()
+    const { isPro, isUnverified, startProCheckout, refresh: refreshEntitlements } = useEntitlements()
+
+    /**
+     * Shown instead of the Pro upsell when the licence simply couldn't be checked
+     * — the case where the same account works on one machine and not another,
+     * because that one has a cached licence and this one never fetched it.
+     */
+    const showProGate = useCallback((feature: string) => {
+        const { title, description, retryable } = proGateMessage(
+            isUnverified ? 'unverified' : 'verified',
+            feature,
+        )
+        if (retryable) {
+            toast.warning(title, {
+                description,
+                duration: 14000,
+                action: { label: 'Try again', onClick: () => void refreshEntitlements() },
+            })
+            return
+        }
+        toast.warning(title, {
+            description,
+            duration: 10000,
+            action: { label: 'Upgrade', onClick: () => void startProCheckout() },
+        })
+    }, [isUnverified, refreshEntitlements, startProCheckout])
 
 
     const alternate = useAlternateOutput()
@@ -114,11 +140,7 @@ export function LiveOutput() {
             return
         }
         if (!isPro) {
-            toast.warning('The alternate output is a Selah Pro feature', {
-                description: 'Upgrade to run a second output alongside your main one.',
-                duration: 10000,
-                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
-            })
+            showProGate('The alternate output')
             return
         }
         void alternate.enable().then((error: string | null) => {
@@ -130,7 +152,7 @@ export function LiveOutput() {
             }
             toast.error('Alternate output could not start', { description: error, duration: 12000 })
         })
-    }, [alternate, isPro, startProCheckout])
+    }, [alternate, isPro, showProGate])
 
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const activeSlides = useAppStore((state) => state.activeSlides)
@@ -465,11 +487,7 @@ export function LiveOutput() {
             return
         }
         if (!isPro) {
-            toast.warning('NDI output is a Selah Pro feature', {
-                description: 'Upgrade to stream your live output over the network via NDI.',
-                duration: 10000,
-                action: { label: 'Upgrade', onClick: () => void startProCheckout() },
-            })
+            showProGate('NDI output')
             return
         }
         // The backend refuses for reasons the operator can act on — no Screen
@@ -489,7 +507,7 @@ export function LiveOutput() {
                     : undefined,
             })
         })
-    }, [ndiRunning, isPro, startProCheckout, ndiStart, ndiStop, handleOpenLive])
+    }, [ndiRunning, isPro, showProGate, ndiStart, ndiStop, handleOpenLive])
 
     // Handle screen selection
     const handleScreenSelect = useCallback(async (screenId: string) => {
