@@ -482,12 +482,19 @@ jobs:
   # assets that don't exist yet.
   publish:
     needs: build
-    # always(), because Linux is deliberately NOT required: it is the flakiest
-    # leg and a strict gate would mean no release publishes at all while it is
-    # broken. That also rules out `needs.build.result`, which is the aggregate
-    # over every matrix leg and can't say WHICH one failed — hence the API read
-    # below.
-    if: ${{ always() && github.ref_type == 'tag' }}
+    # Runs on success AND failure, because Linux is deliberately NOT required: it
+    # is the flakiest leg and a strict gate would mean no release publishes at all
+    # while it is broken. That also rules out `needs.build.result`, which is the
+    # aggregate over every matrix leg and can't say WHICH one failed — hence the
+    # API read below.
+    #
+    # `!cancelled()` and NOT `always()`: with always(), cancelling the run made
+    # this job fire, and since it only requires macOS + Windows it happily
+    # published a release whose Linux leg had just been killed — putting a
+    # latest.json with no linux-x86_64 entry on releases/latest, which is the
+    # 0.1.7 `None of the fallback platforms were found` failure for every Linux
+    # user. Cancelling a release build must abandon it, not ship it.
+    if: ${{ !cancelled() && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     name: Publish release
     steps:
