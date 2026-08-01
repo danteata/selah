@@ -168,6 +168,30 @@ Selah already knows context: the operator has a setlist item / song loaded (`app
 
 **Files (new):** `src/services/sermon-listener/songTracker.ts`, `src/services/sermon-listener/__tests__/songTracker.test.ts`.
 
+### Phase 2 — implementation status (what shipped)
+
+Building it corrected three assumptions above.
+
+**1. The trailing-edge trigger is not enough on its own.** It waits for text matching the *last line* of the current section. For a two-line chorus that text arrives after the singers have already moved on, so the projector was reliably late on exactly the material that repeats most. Shipped alongside it:
+
+- **Interim transcripts.** The listener already surfaced live partial text 1–3 s before the final — `native-stream-text` (Rust `StreamRouter`) on desktop, interim results on web, both arriving as `isFinal: false` through `unifiedTranscription` into `interimTranscript`. Both consumers ignored it and read only finalized segments, so they inherited the full VAD latency: an utterance has to *end* before it is transcribed. `TrackerChunk.interim` now feeds it to the cursor under a deliberately narrow contract — partial text may move the cursor along the expected path and lead the display, but may **not** acquire a song, confirm a jump, or push the tracker toward Lost. It is the same utterance re-sent as it grows, so each revision would otherwise supply its own "independent" corroboration for a mistake, satisfying the hysteresis single-handedly.
+- **A timing model.** `TrackerChunk.timeMs` was being collected and never read. The tracker now measures per-line duration from the gap between accepted matches (median of the last 8; only forward moves of 1–2 lines, only from finals, only within plausible bounds — a longer gap spans something unobserved). It reports `estimatedLineMs` / `linesRemaining` and the *hook* owns the timer, so the tracker stays pure and synchronously testable. The advance is scheduled at `linesRemaining × lineMs − lag − 600 ms`, re-armed on every accepted match; when that is already negative it leads immediately.
+
+**2. Transcript lag cannot be recovered from the segments alone.** `received − endMs` equals the clock origin *plus* that segment's lag, and a lag that is systematic — which transcription lag is — stays entirely folded into the estimate no matter how many segments you take the minimum over. It reports zero. `useSongTracker` therefore anchors on the rising edge of `isListening`, with the per-segment bound only refining it downward. That anchor is slightly early if anything sits between the flag and the first captured sample, which biases the lag *up* — the safe direction, since an overstated lag only puts the next section up a touch early.
+
+**3. The "instrumental hold" in the Hysteresis section above is unnecessary, and its config was dead.** The premise was that a run of non-matching transcript plus high RMS means a solo. In fact transcript only arrives when words are sung, so a real instrumental produces *no* ingest at all and the tracker simply holds by not being called. A miss therefore means words arrived that don't fit this song — i.e. a *different* song — which must reach Lost so auto-detect can go looking. `TrackerConfig.holdEnergy` and `TrackerChunk.audioEnergy` were plumbed from `useSongTracker` and never read by anything; both are deleted rather than left as a promise the code doesn't keep.
+
+**Cursor is indexed by arrangement step, not section id.** A section that repeats occupies several steps, and keying the display on its id made them indistinguishable: `seekToSection` used `findIndex`, so clicking the chorus during the *second* chorus rewound the tracker to the first and then led into whatever followed *that* one. `seekToSection` now picks the occurrence nearest the cursor, `seekToStep` addresses one exactly, and `recomputeDisplay` holds a committed one-step lead so a later match for a line the singer is still on cannot yank the projector backwards — while a confirmed backward jump still pulls it back.
+
+**Matching stayed lexical.** People sing the actual words and Whisper transcribes them closely, so `lineSimilarity` (unigram + bigram Dice plus a coverage term) carries it. The semantic path is a seam, not a dependency: `TrackerConfig.scorer` is injectable and tested with a stub, so the embedding scorer can be dropped in without touching the state machine. No `songEmbeddings` table was built.
+
+**Auto-detect (the "Searching" half)** shipped as `useSongAutoDetect` + `songIdentification.ts` (token-indexed lexical search over the library), gated by `singingDetection.ts` (a precision-biased lexical pre-gate) and confirmed by `songConfirmation.ts` (a decaying soft posterior rather than "matched twice"), with set-list scoping so the operator's queued songs are searched first against a much smaller pool.
+
+**Still open:**
+- The library search index is rebuilt on any library change; it is *not* incremental. Fine at a few thousand songs, worth revisiting beyond that.
+- `singingDetection` is purely lexical. The audio bus now has a locked tempo estimate, and "a steady beat is present" is a far stronger prior for "this is a song" than the absence of the word "therefore". The two halves remain decoupled.
+- Timing constants (`LEAD_SAFETY_MS = 600`, the 3-sample warm-up, the 500 ms–15 s plausible-line bounds) are reasoned defaults that have not been tuned against a real service.
+
 ---
 
 ## Phase 3 — Operator safety UI (non-negotiable for live)
@@ -180,6 +204,17 @@ Full automation alone is not trustworthy on a live stage. Add to `src/components
 - **Click-to-jump** on any line → resets tracker `currentStepIndex/currentLineIndex` to that point.
 
 This mirrors ProPresenter's model and is what makes churches actually trust the feature.
+
+### Phase 3 — implementation status (what shipped)
+
+Shipped as `SongTrackingControl.tsx` (in the Sermon Listener panel rather than `LiveSessionControls`, which is where the listener's other live readouts already are), backed by `songTracking` in `appStore`:
+
+- **Confidence meter + phase** (`idle | searching | tracking | lost`) and a **position readout** naming the section the tracker believes the singers are on.
+- **Arrangement chips** for click-to-jump. These compare by **step index**, not section id — comparing by id lit up every repeat of a section at once, so both choruses of `V1 C V2 C` highlighted together. `displayStepIndex`/`singerStepIndex` were added to the published status for this.
+- **`enabled` / `locked`** — the tracker always runs so the operator can watch it, but only moves the live slide when auto-advance is on and not locked. The predictive timer re-checks both at fire time, not at schedule time.
+- **Manual input is never fought.** An external live-slide change re-seats the tracker to that section (`seekToSection`) rather than yanking back, and `trackerDrivenSlideRef` is what distinguishes the tracker's own writes from the operator's.
+
+**Still open:** no per-song "don't auto-advance this one" memory; lock is session-wide and manual.
 
 ---
 
@@ -196,6 +231,27 @@ This mirrors ProPresenter's model and is what makes churches actually trust the 
 5. **Cross-window transport:** compute features once (in Rust on desktop, or in the operator WebView on web) and fan the scalar params out to every renderer — over `BroadcastChannel` on web, over `emit_to_live_window` on desktop — throttled. Never run two independent analysers.
 
 **Files (new):** `src/components/live/AudioReactiveBackground.tsx`, `src/services/visualizer/audioFeatures.ts`; a spectrum-forwarding path in `src-tauri/src/audio_capture/` + a new Tauri event; integrate in `LiveView.tsx` / `LiveOutput.tsx`, add background type in `appStore` (`DEFAULT_BACKGROUNDS`).
+
+### Phase 4 — implementation status (what shipped)
+
+Option **(a)** was taken as recommended (Rust computes, webview consumes) — see the Phase 5 status section for that transport. Rendering is **Canvas 2D**, not `three.js`: a soft central glow plus drifting particles needs no shader stack, and staying off the GPU compositor avoids interacting with the NDI window-capture path.
+
+**The first version reacted to the wrong signal, at the wrong time, on a per-platform clock.** Everything below was found and fixed after it shipped, and is the reason the layer now reads as being *in time with the room* rather than following it:
+
+- **Bands were fractions of the FFT bin count, not frequencies.** `DEFAULT_BANDS = { bassEnd: 0.15, midEnd: 0.6 }` at a 48 kHz `AudioContext` means "bass" is everything below **3.6 kHz** — the whole vocal range — so the onset detector was watching general loudness rather than the kick, and "treble" got the 14.4–24 kHz dead zone, a flat zero for mic audio (so the particle sparkle never responded to anything). `bandsForSampleRate()` now derives edges from real Hz (25–160 / 160–2000 / 2000–9000) against `ctx.sampleRate`, and `rms` is computed over the audible span only.
+- **The level meter's smoothing was destroying the onsets.** One `AnalyserNode` served both consumers at `smoothingTimeConstant = 0.8` — correct for a bar that shouldn't jitter, fatal for a detector, because it is a strong low-pass on the *time* axis that flattens and delays exactly the transients being looked for. The visualizer now taps the same source node through its own analyser at `0` with `fftSize = 1024`. That is one extra FFT per frame, **not** a second audio stream — an `AnalyserNode` is a pass-through tap.
+- **Desktop examined a third of the audio.** The VAD loop drains the buffer every 10 ms but emitted features every 33 ms, computing them from whichever single tick coincided with the emit. Which beats registered depended purely on the phase between the drain loop and the throttle. Every drained sample now accumulates into a window covering the whole inter-emit interval, and the one-pole filter state persists across ticks so each window doesn't restart at zero.
+- **Delivery gaps manufactured beats.** A tick with no samples emitted hard zeros as the watchdog heartbeat, which collapsed the detector's baseline so the *next* real frame read as a huge transient. Those frames now carry `silent: true` and are liveness-only: they refresh the capture watchdog (`isStale`) without overwriting the features.
+- **Detection was frame-based, so the platforms disagreed.** A fixed `0.9/0.1` per-frame EMA meant the ~30 fps desktop IPC feed adapted at half the rate of the ~60 fps web analyser feed. Replaced with a fast/slow envelope pair on real time constants (45 ms / 420 ms), plus a **flux gate**: the ratio test alone treats a step up to a new sustained level as a *run* of beats, because the slow baseline needs a few hundred ms to catch up and every frame in between looks loud relative to it.
+- **Latency was uncompensated and the attack was eased.** Each platform now reports its own pipeline latency (`setPipelineLatency`; ~55 ms native for the emit throttle + IPC, ~27 ms web for half the FFT window + a frame). Once ≥3 consistent inter-beat intervals are seen, `beatPulse` fires on the **predicted** next beat that much early — anticipation, capped at one beat past the last real detection so a song ending doesn't leave the visual pulsing on its own. That is what actually cancels the latency; shifting the reference alone only shortens the pulse. Easing is now asymmetric everywhere (snap to the punch, ease out of it) — the previous symmetric rate of 10 (≈100 ms) delayed every peak by about a tenth of a second.
+
+Two smaller ones worth keeping in mind because both were invisible on the dev machine: `KineticText` alternated its skew on `beatPulse > 0.9`, true for ~14 ms — one frame at 60 Hz but **two at 120 Hz**, so it flipped twice and cancelled out on exactly the high-refresh hardware most likely to be driving a projector (now latched on `beatCount`). And the desktop `mid` band was literally `g(rms, 4.0)`, a copy of the overall level, so any mid-driven visual was silently duplicating `rms`.
+
+**Still open:**
+- **Point 5 above (cross-window transport) is only half true.** On desktop every window subscribes to the same Rust broadcast, so there is one analysis and many readers — as intended. On **web** the projector is a separate browser context with no `MediaStream` and no Tauri event, and `startNativeAudioFeatures` is a no-op off desktop, so `LiveView`'s copy of the bus is never fed and the visualizer is inert there. Features would need to go over the existing `BroadcastChannel`.
+- The visual is not selectable per template as a background type; it is a single global `visualizerEnabled` toggle.
+- Intensity presets were not built.
+- Not yet validated in a room: the beat compensation is verified by unit tests against a synthetic clock, which cannot tell you whether it *feels* on the beat.
 
 ---
 
