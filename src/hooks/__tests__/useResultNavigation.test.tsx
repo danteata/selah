@@ -11,9 +11,13 @@ import { useResultNavigation } from '../useResultNavigation'
 function Panel({
     onActivate,
     initialResults = ['first', 'second', 'third'],
+    editor = false,
 }: {
     onActivate: (index: number, options: { queue: boolean }) => void
     initialResults?: string[]
+    /** Renders an editing surface inside the panel root, the way the music
+     *  browser mounts the song editor. */
+    editor?: boolean
 }) {
     const [query, setQuery] = useState('')
     const [, forceRender] = useState(0)
@@ -40,6 +44,18 @@ function Panel({
                     </div>
                 ))}
             </div>
+            {editor && (
+                <div>
+                    <textarea aria-label="lyrics" defaultValue="line one" />
+                    <div aria-label="rich lyrics" contentEditable suppressContentEditableWarning>
+                        line one
+                    </div>
+                    <select aria-label="section">
+                        <option>Verse 1</option>
+                        <option>Chorus</option>
+                    </select>
+                </div>
+            )}
         </div>
     )
 }
@@ -123,6 +139,62 @@ describe('useResultNavigation', () => {
         // acting here as well would add the row twice.
         fireEvent.keyDown(screen.getAllByText('Add')[1], { key: 'Enter' })
         expect(onActivate).not.toHaveBeenCalled()
+    })
+
+    describe('editing surfaces inside the panel', () => {
+        // The reported bug: editing a song opened from the music search results
+        // and pressing Enter in the lyrics sent that song to the live output and
+        // swallowed the newline. The handler is bound to the panel root, so it
+        // saw every key typed into the editor the panel itself renders.
+        it('does not activate a result on Enter in a textarea', () => {
+            const onActivate = vi.fn()
+            render(<Panel onActivate={onActivate} editor />)
+
+            const event = fireEvent.keyDown(screen.getByLabelText('lyrics'), {
+                key: 'Enter',
+                cancelable: true,
+            })
+            expect(onActivate).not.toHaveBeenCalled()
+            // And the newline must still be the browser's to insert.
+            expect(event).toBe(true) // not prevented
+        })
+
+        it('does not activate a result on Enter in a contenteditable', () => {
+            const onActivate = vi.fn()
+            render(<Panel onActivate={onActivate} editor />)
+
+            fireEvent.keyDown(screen.getByLabelText('rich lyrics'), { key: 'Enter' })
+            expect(onActivate).not.toHaveBeenCalled()
+        })
+
+        it('leaves the arrow keys to the caret inside a textarea', () => {
+            render(<Panel onActivate={vi.fn()} editor />)
+            expect(focusedRow()).toContain('first')
+
+            // Moving the caret between lines must not walk the result list.
+            fireEvent.keyDown(screen.getByLabelText('lyrics'), { key: 'ArrowDown' })
+            expect(focusedRow()).toContain('first')
+        })
+
+        it('leaves the arrow keys to a select', () => {
+            render(<Panel onActivate={vi.fn()} editor />)
+            fireEvent.keyDown(screen.getByLabelText('section'), { key: 'ArrowDown' })
+            expect(focusedRow()).toContain('first')
+        })
+
+        it('still drives the list from the search box', () => {
+            // The guard must not overreach: a single-line input is where the
+            // keyboard contract is meant to work, since Enter inserts nothing
+            // and the arrows don't move between lines there.
+            const onActivate = vi.fn()
+            render(<Panel onActivate={onActivate} editor />)
+            const input = screen.getByLabelText('search')
+
+            fireEvent.keyDown(input, { key: 'ArrowDown' })
+            expect(focusedRow()).toContain('second')
+            fireEvent.keyDown(input, { key: 'Enter' })
+            expect(onActivate).toHaveBeenCalledWith(1, { queue: false })
+        })
     })
 
     it('does nothing when there are no results', () => {

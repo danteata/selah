@@ -93,8 +93,20 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
 
     return (
         <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={isEditing ? 'Edit song' : 'Add song'}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
             onClick={(e) => e.target === e.currentTarget && handleClose()}
+            // Keys typed in this editor belong to this editor. Every surface that
+            // opens it — the songs panel, the music browser's search results, the
+            // browse list nested inside that browser — binds its own key handler
+            // to a container that is an ancestor of this modal in the React tree,
+            // and React propagates events up the React tree even through a
+            // portal. So without this, Enter in the lyrics box reached the search
+            // results' handler, which sent the song being edited straight to the
+            // live output and called preventDefault() on the newline.
+            onKeyDown={(e) => e.stopPropagation()}
         >
             <div className="w-full max-w-2xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden flex flex-col">
                 {/* Header */}

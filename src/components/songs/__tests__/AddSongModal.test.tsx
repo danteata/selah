@@ -41,6 +41,54 @@ describe('AddSongModal', () => {
         expect(container.firstChild).toBeNull()
     })
 
+    describe('key containment', () => {
+        // Regression: editing a song opened from the music search results and
+        // pressing Enter in the lyrics sent that song to the live output instead
+        // of starting a new line. Every surface that opens this modal binds a key
+        // handler to a container that is one of its React ancestors, and React
+        // propagates events up the React tree — so the modal has to keep its own
+        // keys to itself.
+        const renderInPanel = (onKeyDown: (e: unknown) => void) =>
+            render(
+                <div onKeyDown={onKeyDown}>
+                    <AddSongModal {...baseProps} song={existingSong} />
+                </div>,
+            )
+
+        it('does not let Enter in the lyrics reach an enclosing key handler', () => {
+            const panelKeyDown = vi.fn()
+            renderInPanel(panelKeyDown)
+
+            fireEvent.keyDown(screen.getByPlaceholderText('Paste your lyrics here...'), { key: 'Enter' })
+            expect(panelKeyDown).not.toHaveBeenCalled()
+        })
+
+        it('does not let Enter in a single-line field reach it either', () => {
+            // The title/artist inputs matter separately: a hook-level guard can
+            // only skip multi-line editors, because a single-line input is
+            // exactly where a search box's Enter-to-present has to keep working.
+            const panelKeyDown = vi.fn()
+            renderInPanel(panelKeyDown)
+
+            fireEvent.keyDown(screen.getByPlaceholderText('e.g., Hallelujah Eh'), { key: 'Enter' })
+            expect(panelKeyDown).not.toHaveBeenCalled()
+        })
+
+        it('leaves the newline itself to the browser', () => {
+            renderInPanel(vi.fn())
+            const notPrevented = fireEvent.keyDown(
+                screen.getByPlaceholderText('Paste your lyrics here...'),
+                { key: 'Enter', cancelable: true },
+            )
+            expect(notPrevented).toBe(true)
+        })
+
+        it('is announced as a modal dialog', () => {
+            render(<AddSongModal {...baseProps} song={existingSong} />)
+            expect(screen.getByRole('dialog', { name: 'Edit song' })).toBeInTheDocument()
+        })
+    })
+
     it('renders add song form when open', () => {
         render(<AddSongModal {...baseProps} />)
         expect(screen.getByText('Add New Song')).toBeInTheDocument()

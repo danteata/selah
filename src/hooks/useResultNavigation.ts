@@ -47,6 +47,31 @@ interface UseResultNavigationResult<T extends HTMLElement = HTMLDivElement> {
     listRef: React.RefObject<T | null>
 }
 
+/**
+ * True when the event's target owns these keys natively, so the panel must keep
+ * its hands off them.
+ *
+ * `handleKeyDown` is attached to the panel root (see above), which means it sees
+ * every key pressed anywhere inside the panel — including inside an editor the
+ * panel happens to render. In a textarea, Enter inserts a newline and ↑/↓ move
+ * the caret between lines; in a `contenteditable` the same; in a `<select>` the
+ * arrows change the option. Acting on those would both steal the key and
+ * `preventDefault()` the native behaviour, which is how editing a song from the
+ * music search results ended up sending the song to the live output instead of
+ * starting a new line in the lyrics.
+ *
+ * A single-line `<input>` is deliberately NOT included: Enter inserts nothing
+ * and ↑/↓ don't move a caret there, so the panel's own search box has to keep
+ * driving the list — that is the whole point of binding at the root.
+ */
+function ownsKeyNatively(target: HTMLElement | null): boolean {
+    if (!target) return false
+    // Set on any node inside a contenteditable region, not just the host.
+    if (target.isContentEditable) return true
+    const tag = target.tagName
+    return tag === 'TEXTAREA' || tag === 'SELECT'
+}
+
 export function useResultNavigation<T extends HTMLElement = HTMLDivElement>({
     count,
     resetKey,
@@ -82,6 +107,7 @@ export function useResultNavigation<T extends HTMLElement = HTMLDivElement>({
 
     const handleKeyDown = useCallback((event: ReactKeyboardEvent) => {
         if (!enabled || count === 0) return
+        if (ownsKeyNatively(event.target as HTMLElement | null)) return
 
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault()
