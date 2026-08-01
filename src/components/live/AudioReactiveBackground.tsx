@@ -41,8 +41,12 @@ export function AudioReactiveBackground({ className, enabled: enabledProp }: Aud
         const ctx = canvas.getContext('2d')
         if (!ctx) return
 
-        const dpr = Math.min(window.devicePixelRatio || 1, 2)
+        // Re-read devicePixelRatio on every resize, not once: dragging the live
+        // output onto a projector with a different DPI than the laptop panel
+        // changes it, and a stale value renders at the wrong scale.
+        let dpr = Math.min(window.devicePixelRatio || 1, 2)
         const resize = () => {
+            dpr = Math.min(window.devicePixelRatio || 1, 2)
             const rect = canvas.getBoundingClientRect()
             canvas.width = Math.max(1, Math.round(rect.width * dpr))
             canvas.height = Math.max(1, Math.round(rect.height * dpr))
@@ -87,11 +91,19 @@ export function AudioReactiveBackground({ className, enabled: enabledProp }: Aud
 
             const f = audioFeatures.current
             const active = !audioFeatures.isStale()
+            const beat = active ? audioFeatures.beatPulse : 0
             const ease = (cur: number, target: number, rate: number) =>
                 cur + (target - cur) * Math.min(dt * rate, 1)
 
             sAlpha = ease(sAlpha, active ? 1 : 0, 3)
-            sBass = ease(sBass, active ? f.bass : 0, 8)
+            // Asymmetric on the bass envelope: rise fast (rate 30 ≈ 33 ms) so a
+            // kick reads as a hit, fall slowly (rate 7) so it reads as a swell.
+            // A single symmetric rate — 8 in both directions, ≈ a 125 ms time
+            // constant — meant the glow was still on its way up when the next
+            // beat arrived, which is what made it feel like it was following the
+            // music rather than moving with it.
+            const bassTarget = active ? f.bass : 0
+            sBass = ease(sBass, bassTarget, bassTarget > sBass ? 30 : 7)
             sRms = ease(sRms, active ? f.rms : 0, 6)
             sTreble = ease(sTreble, active ? f.treble : 0, 10)
 
@@ -108,16 +120,24 @@ export function AudioReactiveBackground({ className, enabled: enabledProp }: Aud
                 const cx = W / 2
                 const cy = H * 0.55
                 const baseR = Math.min(W, H) * 0.28
-                const glowR = baseR * (1 + sBass * 0.8 + sRms * 0.3)
+                // `beat` is the latency-compensated, tempo-predicted pulse (see
+                // audioFeatures.ts) — it lands on the beat the room heard, where
+                // the band envelopes above can only ever trail it. Folding it in
+                // directly is what puts the glow on the downbeat.
+                const glowR = baseR * (1 + sBass * 0.8 + sRms * 0.3 + beat * 0.22)
 
                 const bassQ = Math.round(sBass * 20) / 20 // nearest 0.05
                 const rmsQ = Math.round(sRms * 20) / 20
+                // The beat's contribution to *brightness* is quantized into the
+                // gradient key too, so the flash is visible in the colour stops
+                // and not only in the radius, without defeating the cache below.
+                const beatQ = Math.round(beat * 8) / 8
                 const glowRQ = Math.round(glowR / 3) * 3 // nearest 3px
-                const gradKey = `${cx}|${cy}|${glowRQ}|${bassQ}|${rmsQ}`
+                const gradKey = `${cx}|${cy}|${glowRQ}|${bassQ}|${rmsQ}|${beatQ}`
                 if (gradKey !== cachedGradKey || !cachedGrad) {
                     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
-                    grad.addColorStop(0, `rgba(45,212,191,${0.14 + 0.45 * rmsQ})`) // teal core
-                    grad.addColorStop(0.5, `rgba(56,189,248,${0.06 + 0.18 * bassQ})`) // sky mid
+                    grad.addColorStop(0, `rgba(45,212,191,${0.14 + 0.45 * rmsQ + 0.18 * beatQ})`) // teal core
+                    grad.addColorStop(0.5, `rgba(56,189,248,${0.06 + 0.18 * bassQ + 0.08 * beatQ})`) // sky mid
                     grad.addColorStop(1, 'rgba(0,0,0,0)')
                     cachedGradKey = gradKey
                     cachedGrad = grad

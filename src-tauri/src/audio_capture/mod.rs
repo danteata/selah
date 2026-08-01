@@ -498,44 +498,92 @@ struct AudioFeaturesEvent {
     bass: f32,
     mid: f32,
     treble: f32,
+    /// True for a keep-alive frame emitted because no samples arrived this tick
+    /// (device hiccup / loopback stall), as opposed to a genuinely quiet room —
+    /// real silence still delivers near-zero samples. The frontend uses this to
+    /// refresh the capture watchdog's liveness WITHOUT feeding hard zeros into
+    /// the visualizer's onset detector, which would collapse its baseline and
+    /// make the next real frame fire a phantom beat.
+    silent: bool,
 }
 
-/// Compute coarse band energies from a mono sample buffer in the time domain
-/// (no FFT dependency). A one-pole low-pass approximates bass; the high-pass
-/// residual approximates treble. Values are gained and clamped to 0..1 to suit
-/// the visualizer, which smooths them further. Empty input yields silence.
-fn compute_audio_features(samples: &[f32]) -> AudioFeaturesEvent {
-    let n = samples.len();
-    if n == 0 {
-        return AudioFeaturesEvent { rms: 0.0, bass: 0.0, mid: 0.0, treble: 0.0 };
+/// Running filter state for {@link AudioFeatureFilters::compute}.
+///
+/// Persisted across ticks rather than re-zeroed per call: the one-pole filters
+/// below carry ~1 ms of memory, so restarting them at zero on every window
+/// clips the start of each window's bass and leaks it into the treble residual.
+/// Over a 33 ms window that is small but systematic, and it is exactly the kind
+/// of per-window artefact an onset detector mistakes for a transient.
+struct AudioFeatureFilters {
+    lp_bass: f32,
+    lp_mid: f32,
+}
+
+impl AudioFeatureFilters {
+    fn new() -> Self {
+        Self { lp_bass: 0.0, lp_mid: 0.0 }
     }
 
-    // One-pole low-pass coefficient (~bass), high-pass residual (~treble).
-    let a = 0.9_f32;
-    let mut lp = 0.0_f32;
-    let mut sq = 0.0_f32;
-    let mut bass_sq = 0.0_f32;
-    let mut treble_sq = 0.0_f32;
-    for &x in samples {
-        sq += x * x;
-        lp = a * lp + (1.0 - a) * x;
-        bass_sq += lp * lp;
-        let hp = x - lp;
-        treble_sq += hp * hp;
-    }
-    let inv = 1.0 / n as f32;
-    let rms = (sq * inv).sqrt();
-    let bass = (bass_sq * inv).sqrt();
-    let treble = (treble_sq * inv).sqrt();
+    /// Compute coarse band energies from a mono sample buffer in the time domain
+    /// (no FFT dependency). Two cascaded one-pole low-passes split the spectrum
+    /// into three bands:
+    ///   - `bass`   = output of the ~250 Hz low-pass (kick / bass guitar),
+    ///   - `mid`    = the ~250 Hz..~2.5 kHz band (voices, most instruments),
+    ///   - `treble` = the residual above that (cymbals / air).
+    ///
+    /// `mid` previously just re-reported `rms`, which meant the mid band never
+    /// carried any independent information on desktop and any mid-driven visual
+    /// was silently duplicating the overall level. Values are gained and clamped
+    /// to 0..1 to suit the visualizer, which smooths them further. Empty input
+    /// yields silence.
+    fn compute(&mut self, samples: &[f32], sample_rate: f32) -> AudioFeaturesEvent {
+        let n = samples.len();
+        if n == 0 {
+            return AudioFeaturesEvent {
+                rms: 0.0,
+                bass: 0.0,
+                mid: 0.0,
+                treble: 0.0,
+                silent: true,
+            };
+        }
 
-    // Raw 16kHz mono RMS is small (~0.05-0.2 for speech); gain so typical
-    // levels land in a lively 0.2-0.8 range, then clamp.
-    let g = |v: f32, gain: f32| (v * gain).clamp(0.0, 1.0);
-    AudioFeaturesEvent {
-        rms: g(rms, 4.0),
-        bass: g(bass, 6.0),
-        mid: g(rms, 4.0),
-        treble: g(treble, 8.0),
+        // One-pole coefficient for a given -3 dB cutoff: a = exp(-2*pi*fc/fs).
+        let coeff = |fc: f32| (-2.0 * std::f32::consts::PI * fc / sample_rate).exp();
+        let a_bass = coeff(250.0);
+        let a_mid = coeff(2500.0);
+
+        let mut sq = 0.0_f32;
+        let mut bass_sq = 0.0_f32;
+        let mut mid_sq = 0.0_f32;
+        let mut treble_sq = 0.0_f32;
+        for &x in samples {
+            sq += x * x;
+            self.lp_bass = a_bass * self.lp_bass + (1.0 - a_bass) * x;
+            self.lp_mid = a_mid * self.lp_mid + (1.0 - a_mid) * x;
+            bass_sq += self.lp_bass * self.lp_bass;
+            // Band-pass by difference of the two low-passes.
+            let mid = self.lp_mid - self.lp_bass;
+            mid_sq += mid * mid;
+            let hp = x - self.lp_mid;
+            treble_sq += hp * hp;
+        }
+        let inv = 1.0 / n as f32;
+        let rms = (sq * inv).sqrt();
+        let bass = (bass_sq * inv).sqrt();
+        let mid = (mid_sq * inv).sqrt();
+        let treble = (treble_sq * inv).sqrt();
+
+        // Raw 16kHz mono RMS is small (~0.05-0.2 for speech); gain so typical
+        // levels land in a lively 0.2-0.8 range, then clamp.
+        let g = |v: f32, gain: f32| (v * gain).clamp(0.0, 1.0);
+        AudioFeaturesEvent {
+            rms: g(rms, 4.0),
+            bass: g(bass, 6.0),
+            mid: g(mid, 6.0),
+            treble: g(treble, 8.0),
+            silent: false,
+        }
     }
 }
 
@@ -766,6 +814,20 @@ pub fn start_capture_with_vad(
         // Throttle continuous audio-feature emission to ~30fps for the visualizer.
         let mut last_features_emit = std::time::Instant::now();
         let features_interval_ms = 33u128;
+        // Running filter state + the accumulation window for the visualizer's
+        // features.
+        //
+        // The buffer above is drained every `check_interval_ms` (10 ms) but
+        // features are only emitted every 33 ms, so computing them from just the
+        // tick that happens to coincide with the emit examined roughly one third
+        // of the audio and threw the rest away. A kick landing in either of the
+        // two discarded 10 ms windows was invisible to the onset detector, which
+        // is why the visualizer skipped beats seemingly at random — which beats
+        // survived depended purely on the phase between the drain loop and the
+        // emit throttle. Accumulating every drained sample and computing over the
+        // whole inter-emit window means no audio goes unexamined.
+        let mut feature_filters = AudioFeatureFilters::new();
+        let mut feature_window: Vec<f32> = Vec::with_capacity(TARGET_SAMPLE_RATE as usize / 8);
         // Edge-triggers `start_stream()` on the false->true transition below;
         // see the streaming block inside the VAD match.
         #[cfg(feature = "native-transcription")]
@@ -785,16 +847,33 @@ pub fn start_capture_with_vad(
             drop(buf); // Release lock before VAD processing
 
             if samples.is_empty() {
-                // Still fire the throttled heartbeat (with zeroed features)
-                // even when no new samples arrived this tick. Skipping it
-                // here used to mean a genuine upstream audio-delivery gap
-                // (device hiccup, system-loopback stall) silenced the
-                // heartbeat entirely, which the frontend watchdog
-                // (`useSermonListener.ts`, `isStale(9000)`) reads as "capture
-                // died" and restarts the whole session — even though this
-                // thread is alive and just waiting for more samples.
+                // Still fire the throttled heartbeat even when no new samples
+                // arrived this tick. Skipping it here used to mean a genuine
+                // upstream audio-delivery gap (device hiccup, system-loopback
+                // stall) silenced the heartbeat entirely, which the frontend
+                // watchdog (`useSermonListener.ts`, `isStale(9000)`) reads as
+                // "capture died" and restarts the whole session — even though
+                // this thread is alive and just waiting for more samples.
+                //
+                // A tick with no samples at all is a delivery gap, not silence,
+                // so the frame is flagged `silent` and the frontend treats it as
+                // liveness-only (it holds the last real features rather than
+                // dropping to zero — see `publishFeatures`). If anything did
+                // accumulate before the gap, emit that instead of discarding it.
                 if last_features_emit.elapsed().as_millis() >= features_interval_ms {
-                    let _ = app.emit("audio-features", compute_audio_features(&[]));
+                    let event = if feature_window.is_empty() {
+                        AudioFeaturesEvent {
+                            rms: 0.0,
+                            bass: 0.0,
+                            mid: 0.0,
+                            treble: 0.0,
+                            silent: true,
+                        }
+                    } else {
+                        feature_filters.compute(&feature_window, TARGET_SAMPLE_RATE as f32)
+                    };
+                    feature_window.clear();
+                    let _ = app.emit("audio-features", event);
                     last_features_emit = std::time::Instant::now();
                 }
                 std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
@@ -818,8 +897,22 @@ pub fn start_capture_with_vad(
             // Emit continuous audio features for the visualizer / level meter,
             // throttled. Independent of VAD so it reflects music and instrumental
             // stretches, and works for system loopback (no JS MediaStream there).
+            // Every tick's samples are accumulated, so the emitted frame covers
+            // the whole interval since the last one rather than only the tick it
+            // happened to land on.
+            feature_window.extend_from_slice(&samples);
+            // Belt-and-braces bound: the emit below clears this every 33 ms, so
+            // it should never approach a second of audio. Cap it anyway so a
+            // pathological stall can't grow it without limit over a long service.
+            let cap = TARGET_SAMPLE_RATE as usize;
+            if feature_window.len() > cap {
+                let excess = feature_window.len() - cap;
+                feature_window.drain(..excess);
+            }
             if last_features_emit.elapsed().as_millis() >= features_interval_ms {
-                let _ = app.emit("audio-features", compute_audio_features(&samples));
+                let event = feature_filters.compute(&feature_window, TARGET_SAMPLE_RATE as f32);
+                feature_window.clear();
+                let _ = app.emit("audio-features", event);
                 last_features_emit = std::time::Instant::now();
             }
 

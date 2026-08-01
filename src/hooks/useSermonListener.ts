@@ -20,7 +20,7 @@ import { useSlideCreation, firstVerseOnly } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
-import { audioFeatures } from '../services/visualizer/audioFeatures'
+import { audioFeatures, bandsForSampleRate } from '../services/visualizer/audioFeatures'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
 import type { TranscriptionProvider, TranscriptionStatus, WhisperSegmentTiming } from '../services/sermon-listener'
 import { detectVerses,
@@ -638,7 +638,37 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             source.connect(analyser)
             audioAnalyserRef.current = analyser
 
+            // A SECOND analyser off the same source node for the visualizer.
+            // Not a second audio stream — an AnalyserNode is a pass-through tap,
+            // so this costs one more FFT per frame and nothing else.
+            //
+            // It exists because the two consumers want opposite things from the
+            // same signal. The level meter above wants a heavily smoothed
+            // reading (`smoothingTimeConstant = 0.8` blends 80% of the previous
+            // frame) so the bar doesn't jitter. That same smoothing is a strong
+            // low-pass on the *time* axis: it flattens and delays exactly the
+            // transients the beat detector looks for, which is why the pulse
+            // used to arrive late and mushy. The visualizer's tap therefore
+            // takes the frequency data raw (`0`), with a longer FFT for enough
+            // resolution to actually separate the sub-200 Hz kick region from
+            // the mids at a 48 kHz sample rate.
+            const visAnalyser = ctx.createAnalyser()
+            visAnalyser.fftSize = 1024
+            visAnalyser.smoothingTimeConstant = 0
+            source.connect(visAnalyser)
+
+            // Band edges derived from the real sample rate rather than as
+            // fractions of the bin count — see `bandsForSampleRate`.
+            const visBands = bandsForSampleRate(ctx.sampleRate)
+            // Analyser latency is roughly half the FFT window plus a frame of
+            // rAF; small, but reported so the beat pulse is compensated the
+            // same way the desktop path is.
+            audioFeatures.setPipelineLatency(
+                (visAnalyser.fftSize / 2 / ctx.sampleRate) * 1000 + 16,
+            )
+
             const dataArray = new Uint8Array(analyser.frequencyBinCount)
+            const visArray = new Uint8Array(visAnalyser.frequencyBinCount)
 
             const poll = () => {
                 if (!audioAnalyserRef.current) return
@@ -647,9 +677,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 const avg = sum / dataArray.length
                 const level = Math.min(avg / 128, 1)
                 setAudioLevel(level)
-                // Feed the audio-reactive visualizer from this same analyser so
-                // we don't open a second audio stream (Phase 4).
-                audioFeatures.publish(dataArray)
+                // Feed the audio-reactive visualizer from the unsmoothed tap on
+                // the same stream, so we don't open a second audio stream
+                // (Phase 4) but also don't inherit the meter's smoothing.
+                visAnalyser.getByteFrequencyData(visArray)
+                audioFeatures.publish(visArray, visBands)
                 audioLevelRafRef.current = requestAnimationFrame(poll)
             }
             poll()

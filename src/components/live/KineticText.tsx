@@ -39,8 +39,15 @@ export function KineticText({ enabled, children, className }: KineticTextProps) 
         let sScale = 1
         let last = performance.now()
         let raf = 0
-        // Alternates so consecutive beats don't skew the same direction every time.
+        // Alternates so consecutive beats don't skew the same direction every
+        // time. Latched on the bus's beat counter rather than on the pulse
+        // level: `beatPulse > 0.9` is true for the ~14 ms after a beat, which is
+        // one frame at 60 Hz but two at 120 Hz — so flipping on the level flipped
+        // twice on high-refresh displays and cancelled out, leaving every beat
+        // skewing the same way on exactly the hardware most likely to be driving
+        // a projector.
         let skewSign = 1
+        let lastBeat = audioFeatures.beatCount
 
         const frame = (t: number) => {
             const dt = Math.min((t - last) / 1000, 0.05)
@@ -48,16 +55,27 @@ export function KineticText({ enabled, children, className }: KineticTextProps) 
 
             const active = !audioFeatures.isStale()
             const f = audioFeatures.current
-            const beatPulse = audioFeatures.beatPulse
+            const beatPulse = active ? audioFeatures.beatPulse : 0
             const ease = (cur: number, target: number, rate: number) =>
                 cur + (target - cur) * Math.min(dt * rate, 1)
 
             sRms = ease(sRms, active ? f.rms : 0, 6)
 
-            const targetScale = active ? 1 + sRms * 0.03 + beatPulse * 0.09 : 1
-            sScale = ease(sScale, targetScale, 10)
+            const beat = audioFeatures.beatCount
+            if (beat !== lastBeat) {
+                lastBeat = beat
+                skewSign = -skewSign
+            }
 
-            if (beatPulse > 0.9) skewSign = -skewSign
+            const targetScale = active ? 1 + sRms * 0.03 + beatPulse * 0.09 : 1
+            // Asymmetric easing: snap to the punch, ease out of it. Easing the
+            // attack too (the previous single rate of 10 ≈ a 100 ms time
+            // constant) delayed the peak of every beat by about a tenth of a
+            // second — enough to read as being off the music. The release stays
+            // eased so it still feels like a swell rather than a strobe.
+            const rate = targetScale > sScale ? 40 : 9
+            sScale = ease(sScale, targetScale, rate)
+
             const skew = beatPulse * 1.5 * skewSign
 
             el.style.transform = `scale(${sScale.toFixed(4)}) skewX(${skew.toFixed(3)}deg)`
