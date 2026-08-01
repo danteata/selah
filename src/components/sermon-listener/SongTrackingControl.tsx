@@ -89,8 +89,18 @@ export function SongTrackingControl() {
             {status.arrangement.length > 0 && (
                 <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
                     {status.arrangement.map((step) => {
-                        const isLive = step.sectionId === status.displaySectionId
-                        const isSinger = step.sectionId === status.singerSectionId
+                        // Compare by step, falling back to section id only for a
+                        // status published before step indices existed. Matching
+                        // on section id alone lights up every repeat of a
+                        // section at once — both choruses of `V1 C V2 C`.
+                        const isLive =
+                            status.displayStepIndex !== null
+                                ? step.stepIndex === status.displayStepIndex
+                                : step.sectionId === status.displaySectionId
+                        const isSinger =
+                            status.singerStepIndex !== null
+                                ? step.stepIndex === status.singerStepIndex
+                                : step.sectionId === status.singerSectionId
                         const jumpable = !!step.slideId
                         return (
                             <button

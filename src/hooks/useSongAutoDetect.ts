@@ -3,7 +3,7 @@ import { useAppStore } from '../store/appStore'
 import { useSermonListenerContext } from '../components/sermon-listener/SermonListenerContext'
 import { useSlideCreation } from './useSlideCreation'
 import { getIndexedDB } from './useIndexedDB'
-import { notifySongsChanged } from './useSongs'
+import { notifySongsChanged, subscribeSongsChanged } from './useSongs'
 import { buildSongIndex, identifySong, type SongIndex } from '../services/sermon-listener/songIdentification'
 import { looksLikeSinging } from '../services/sermon-listener/singingDetection'
 import { SongConfirmationTracker } from '../services/sermon-listener/songConfirmation'
@@ -37,18 +37,26 @@ import type { Song } from '../types'
  * song is still found, just less precisely gated.
  */
 
-// Library index, built once per session (the seeder populates the library at
-// startup, so it's stable). Module-scoped so remounts don't rebuild it.
+// Library index, rebuilt whenever the song library changes (see
+// `subscribeSongsChanged` below). Module-scoped so remounts don't rebuild it.
 let cachedIndex: SongIndex | null = null
 let cachedSongs: Map<string, Song> | null = null
 let building: Promise<void> | null = null
+// Bumped by every invalidation. A build that started before the bump must not
+// install its now-stale result: reading the library is async, so an
+// invalidation can land mid-read, and without this guard the completing build
+// would overwrite the cleared cache with data that predates the change —
+// exactly the staleness the invalidation was meant to clear.
+let indexGeneration = 0
 
 async function ensureIndex(): Promise<void> {
     if (cachedIndex && cachedSongs) return
     if (!building) {
+        const generation = indexGeneration
         building = (async () => {
             const db = getIndexedDB()
             const items = await db.library.where('type').equals('song').toArray()
+            if (generation !== indexGeneration) return // superseded mid-read
             const songs = items
                 .map((i) => i.content as Song)
                 .filter((s) => s && Array.isArray(s.sections) && s.sections.length > 0)
@@ -65,6 +73,7 @@ const EXTERNAL_UNMATCHED_THRESHOLD = 3
 
 /** Invalidate the module index cache so a newly-imported song is picked up. */
 function invalidateIndexCache() {
+    indexGeneration++
     cachedIndex = null
     cachedSongs = null
     building = null
@@ -106,6 +115,17 @@ export function useSongAutoDetect() {
     // Cache of the small set-list-scoped index, rebuilt only when the set of
     // queued song ids actually changes (not on every transcript window).
     const scopedIndexRef = useRef<{ key: string; index: SongIndex } | null>(null)
+
+    // Drop both cached indexes whenever the library changes, so a song added or
+    // edited mid-service becomes detectable immediately. Without this the
+    // module-scoped index was built once per session and only ever invalidated
+    // by this hook's own online-lookup path, meaning an operator who imported a
+    // song after the listener started could never have it auto-detected.
+    // The scoped index is derived from the same songs, so it goes too.
+    useEffect(() => subscribeSongsChanged(() => {
+        invalidateIndexCache()
+        scopedIndexRef.current = null
+    }), [])
 
     // The song currently displayed (its library id), if any. While it's being
     // tracked well, the tracker owns advancing verses within it and we stay

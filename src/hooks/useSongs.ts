@@ -29,6 +29,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 const songsChangeTarget = new EventTarget()
 export const notifySongsChanged = () => songsChangeTarget.dispatchEvent(new Event('songs-changed'))
 
+/**
+ * Subscribe to the same signal from outside a `useSongs()` instance. Returns an
+ * unsubscribe function.
+ *
+ * Non-component consumers need this too: `useSongAutoDetect` keeps a
+ * module-scoped search index built once per session, which silently went stale
+ * on any library mutation — a song imported or edited mid-service could not be
+ * auto-detected for the rest of that session.
+ */
+export function subscribeSongsChanged(listener: () => void): () => void {
+    songsChangeTarget.addEventListener('songs-changed', listener)
+    return () => songsChangeTarget.removeEventListener('songs-changed', listener)
+}
+
 export interface UseSongsReturn {
     songs: Song[]
     loading: boolean

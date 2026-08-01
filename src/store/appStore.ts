@@ -54,8 +54,14 @@ export interface SongTrackingStatus {
     confidence: number
     /** Section currently shown / led-to on the projector. */
     displaySectionId: string | null
+    /** Arrangement step currently shown. Distinct from `displaySectionId` when a
+     *  section repeats — `['v1','c1','v2','c1']` has one chorus section at two
+     *  steps, and only the step says which one we're on. */
+    displayStepIndex: number | null
     /** Section we believe the singer is actually on. */
     singerSectionId: string | null
+    /** Arrangement step we believe the singer is actually on. */
+    singerStepIndex: number | null
     /** Human label of where we believe the singer is, e.g. "Chorus". */
     singerLabel: string | null
     /** The expanded arrangement (stable per song) for position chips. */
@@ -89,7 +95,9 @@ export const DEFAULT_SONG_TRACKING: SongTrackingState = {
         phase: 'idle',
         confidence: 0,
         displaySectionId: null,
+        displayStepIndex: null,
         singerSectionId: null,
+        singerStepIndex: null,
         singerLabel: null,
         arrangement: [],
     },
