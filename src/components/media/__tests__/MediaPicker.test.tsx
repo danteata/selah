@@ -87,7 +87,7 @@ describe('MediaPicker', () => {
         expect(screen.getByPlaceholderText('Search media...')).toBeInTheDocument()
     })
 
-    it('shows loading spinner while the library is loading', () => {
+    it('shows loading placeholders while the library is loading', () => {
         mockUseMediaLibrary.mockReturnValue({
             items: undefined,
             isLoading: true,
@@ -97,8 +97,10 @@ describe('MediaPicker', () => {
             deleteItem: vi.fn(),
         })
         const { container } = render(<MediaPicker {...baseProps} />)
-        const spinner = container.querySelector('.animate-spin')
-        expect(spinner).toBeTruthy()
+        // The loading affordance is a skeleton grid matching the tile layout, so
+        // nothing shifts once the items arrive — not the spinner this assertion
+        // was originally written against.
+        expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
     })
 
     it('switches to upload tab', () => {

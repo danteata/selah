@@ -22,7 +22,7 @@ vi.mock('../modals/ConfirmDialog', () => ({
 describe('LibraryContent', () => {
     it('renders search input', () => {
         render(<LibraryContent />)
-        expect(screen.getByPlaceholderText('Search library...')).toBeInTheDocument()
+        expect(screen.getByPlaceholderText(/search library/i)).toBeInTheDocument()
     })
 
     it('renders category tabs', () => {
@@ -39,7 +39,7 @@ describe('LibraryContent', () => {
 
     it('updates search query on input', () => {
         render(<LibraryContent />)
-        const input = screen.getByPlaceholderText('Search library...')
+        const input = screen.getByPlaceholderText(/search library/i)
         fireEvent.change(input, { target: { value: 'test' } })
         expect(input).toHaveValue('test')
     })
