@@ -11,7 +11,13 @@
     },
     "bundle": {
         "active": true,
-        "targets": "all",
+        "targets": [
+            "app",
+            "dmg",
+            "deb",
+            "appimage",
+            "nsis"
+        ],
         "createUpdaterArtifacts": true,
         "resources": [
             "assets/*",

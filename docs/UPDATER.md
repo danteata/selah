@@ -120,8 +120,15 @@ When you're ready to ship to real users:
    - Read `TAURI_SIGNING_PRIVATE_KEY` from the GitHub secret.
    - Sign every platform bundle.
    - Upload `.app.tar.gz`, `.app.tar.gz.sig`, `.nsis.zip`,
-     `.nsis.zip.sig`, `.msi.zip`, `.msi.zip.sig`, `.AppImage.tar.gz`,
-     `.deb`, `.rpm` as release assets.
+     `.nsis.zip.sig`, `.AppImage.tar.gz`, `.deb` as release assets.
+
+     `bundle.targets` in `tauri.conf.json` pins the formats to
+     `app, dmg, deb, appimage, nsis`. It used to be `"all"`, which also built
+     `rpm` and `msi` — neither is consumed by the updater (see the platform
+     table below) and on Linux each format re-compresses the whole
+     several-hundred-MB resource payload. `deb` is kept as a mainstream install
+     path despite the updater not using it. Adding a format back means editing
+     both that list and this one.
    - Generate and upload `latest.json` automatically.
 
 4. **Cut a release tag**:
