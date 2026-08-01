@@ -87,12 +87,29 @@ describe('SaveAsTemplateModal', () => {
 
     it('shows all slide type buttons', () => {
         render(<SaveAsTemplateModal {...baseProps} />)
-        expect(screen.getByText('Bible')).toBeInTheDocument()
+        expect(screen.getByText('Bible Verses')).toBeInTheDocument()
         expect(screen.getByText('Songs')).toBeInTheDocument()
         expect(screen.getByText('Hymns')).toBeInTheDocument()
-        expect(screen.getByText('Text')).toBeInTheDocument()
+        expect(screen.getByText('Definitions')).toBeInTheDocument()
+        expect(screen.getByText('Text Slides')).toBeInTheDocument()
         expect(screen.getByText('Media')).toBeInTheDocument()
+        expect(screen.getByText('Countdowns')).toBeInTheDocument()
         expect(screen.getByText('Any Type')).toBeInTheDocument()
+    })
+
+    it('offers only slide types that a slide can actually have', () => {
+        // "Sermon", "Prayer" and "Announcements" used to be offered here. None is
+        // a slide type, so a template restricted to one matched nothing — and the
+        // save path then rewrote it to "Any Type", turning the narrowest choice
+        // into the widest. They are categories, and only the category picker
+        // above should offer them.
+        render(<SaveAsTemplateModal {...baseProps} />)
+        const chips = screen.getByText('Which slide types can use this template?')
+            .parentElement!.querySelectorAll('button')
+        const labels = Array.from(chips).map((b) => b.textContent)
+        expect(labels).not.toContain('Announcements')
+        expect(labels).not.toContain('Sermon')
+        expect(labels).not.toContain('Prayer')
     })
 
     it('defaults appliesTo to "Any Type"', () => {
@@ -103,8 +120,8 @@ describe('SaveAsTemplateModal', () => {
 
     it('selects specific slide type and deselects Any', () => {
         render(<SaveAsTemplateModal {...baseProps} />)
-        fireEvent.click(screen.getByText('Bible'))
-        const bibleBtn = screen.getByText('Bible').closest('button')!
+        fireEvent.click(screen.getByText('Bible Verses'))
+        const bibleBtn = screen.getByText('Bible Verses').closest('button')!
         expect(bibleBtn.className).toContain('bg-[var(--accent-teal)]')
         const anyBtn = screen.getByText('Any Type').closest('button')!
         expect(anyBtn.className).not.toContain('bg-[var(--accent-teal)]')
@@ -112,26 +129,26 @@ describe('SaveAsTemplateModal', () => {
 
     it('reverts to Any when last specific type is deselected', () => {
         render(<SaveAsTemplateModal {...baseProps} />)
-        fireEvent.click(screen.getByText('Bible'))
-        fireEvent.click(screen.getByText('Bible')) // deselect
+        fireEvent.click(screen.getByText('Bible Verses'))
+        fireEvent.click(screen.getByText('Bible Verses')) // deselect
         const anyBtn = screen.getByText('Any Type').closest('button')!
         expect(anyBtn.className).toContain('bg-[var(--accent-teal)]')
     })
 
     it('allows multiple slide type selections', () => {
         render(<SaveAsTemplateModal {...baseProps} />)
-        fireEvent.click(screen.getByText('Bible'))
+        fireEvent.click(screen.getByText('Bible Verses'))
         fireEvent.click(screen.getByText('Songs'))
-        expect(screen.getByText('Bible').closest('button')!.className).toContain('bg-[var(--accent-teal)]')
+        expect(screen.getByText('Bible Verses').closest('button')!.className).toContain('bg-[var(--accent-teal)]')
         expect(screen.getByText('Songs').closest('button')!.className).toContain('bg-[var(--accent-teal)]')
     })
 
     it('clicking Any clears specific selections', () => {
         render(<SaveAsTemplateModal {...baseProps} />)
-        fireEvent.click(screen.getByText('Bible'))
+        fireEvent.click(screen.getByText('Bible Verses'))
         fireEvent.click(screen.getByText('Songs'))
         fireEvent.click(screen.getByText('Any Type'))
-        expect(screen.getByText('Bible').closest('button')!.className).not.toContain('bg-[var(--accent-teal)]')
+        expect(screen.getByText('Bible Verses').closest('button')!.className).not.toContain('bg-[var(--accent-teal)]')
         expect(screen.getByText('Any Type').closest('button')!.className).toContain('bg-[var(--accent-teal)]')
     })
 
@@ -201,7 +218,7 @@ describe('SaveAsTemplateModal', () => {
         const onSave = vi.fn().mockResolvedValue(undefined)
         render(<SaveAsTemplateModal {...baseProps} onSave={onSave} />)
 
-        fireEvent.click(screen.getByText('Bible'))
+        fireEvent.click(screen.getByText('Bible Verses'))
         fireEvent.click(screen.getByText('Save Template'))
 
         await waitFor(() => {

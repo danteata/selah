@@ -8,7 +8,7 @@ import { useAlternateOutput } from '../../hooks/useAlternateOutput'
 import { OUTPUT_FORMATS, formatLabel } from '../../types/alternateOutput'
 import { isLowerThirdTemplate } from '../../lib/graphics/templateStyle'
 import { proGateMessage } from '../../providers/entitlementState'
-import type { TemplateItem } from '../../hooks/useTemplates'
+import type { TemplateItem, SlideType } from '../../hooks/useTemplates'
 import { useEntitlements, type PromoValidation } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { BibleVersionSettings } from './BibleVersionSettings'
@@ -926,15 +926,19 @@ function TemplatesSettings() {
     const settings = useAppStore((state) => state.settings)
     const { templates, getTemplatesForSlideType } = useTemplates()
 
-    const templateCategories: { key: 'scripture' | 'hymn' | 'song' | 'text' | 'sermon' | 'announcement' | 'prayer' | 'countdown'; label: string; slideType: string }[] = [
-        { key: 'scripture', label: 'Scripture', slideType: 'bible' },
+    // Exactly the slide types whose creation path actually consults
+    // `settings.defaultTemplates` (see `useSlideCreation`). Four rows used to be
+    // listed here that nothing ever read — Sermon, Announcements, Prayer and
+    // Countdown — so choosing a default for them looked like it worked and then
+    // did nothing; three of those aren't even slide types. Conversely Definitions
+    // was missing even though its default IS honoured. Adding a row here means
+    // adding the matching lookup in `useSlideCreation`, not just the label.
+    const templateCategories: { key: 'scripture' | 'hymn' | 'song' | 'text' | 'dictionary'; label: string; slideType: SlideType }[] = [
+        { key: 'scripture', label: 'Bible Verses', slideType: 'bible' },
         { key: 'song', label: 'Songs', slideType: 'song' },
         { key: 'hymn', label: 'Hymns', slideType: 'hymn' },
-        { key: 'sermon', label: 'Sermon', slideType: 'sermon' },
-        { key: 'announcement', label: 'Announcements', slideType: 'announcement' },
-        { key: 'prayer', label: 'Prayer', slideType: 'prayer' },
+        { key: 'dictionary', label: 'Definitions', slideType: 'dictionary' },
         { key: 'text', label: 'Text / General', slideType: 'text' },
-        { key: 'countdown', label: 'Countdown', slideType: 'countdown' },
     ]
 
     const getTemplateName = (templateId: string | null | undefined) => {
@@ -942,9 +946,9 @@ function TemplatesSettings() {
         return templates?.find(t => t._id === templateId)?.name || null
     }
 
-    const getFilteredTemplates = (slideType: string) => {
+    const getFilteredTemplates = (slideType: SlideType) => {
         if (!templates) return []
-        return getTemplatesForSlideType(slideType as any)
+        return getTemplatesForSlideType(slideType)
     }
 
     return (
@@ -981,19 +985,17 @@ function TemplatesSettings() {
                                     onChange={(v) => setDefaultTemplate(key, v || null)}
                                 >
                                     <option value="">Default</option>
-                                    {filteredTemplates.length > 0 ? (
-                                        filteredTemplates.map(template => (
-                                            <option key={template._id} value={template._id}>
-                                                {template.name}
-                                            </option>
-                                        ))
-                                    ) : (
-                                        templates?.map(template => (
-                                            <option key={template._id} value={template._id}>
-                                                {template.name}
-                                            </option>
-                                        ))
-                                    )}
+                                    {/* Only templates that actually apply to this
+                                        slide type. This used to fall back to
+                                        listing every template when the filter
+                                        matched none, which contradicted the
+                                        filter it had just applied and offered
+                                        choices that would never be used. */}
+                                    {filteredTemplates.map(template => (
+                                        <option key={template._id} value={template._id}>
+                                            {template.name}
+                                        </option>
+                                    ))}
                                 </SettingsSelect>
                             </div>
                         </div>

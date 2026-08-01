@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { LayoutTemplate, ChevronDown, X } from 'lucide-react'
-import { useTemplates, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
+import { useTemplates, templateCategory, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
 
 const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     bible: 'Bible',
@@ -14,14 +14,6 @@ const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     prayer: 'Prayer',
     countdown: 'Countdown',
     any: 'Any',
-}
-
-const CATEGORY_COLORS: Record<string, string> = {
-    announcement: '#3B82F6',
-    worship: '#F59E0B',
-    sermon: '#F97316',
-    prayer: '#10B981',
-    general: '#6B7280',
 }
 
 interface TemplateSelectorProps {
@@ -67,7 +59,7 @@ export function TemplateSelector({ slideType, selectedTemplate, onSelect, maxVis
                 <div className="flex flex-wrap gap-1.5">
                     {templates.slice(0, isOpen ? undefined : maxVisible).map(template => {
                         const isSelected = selectedTemplate?._id === template._id
-                        const dotColor = CATEGORY_COLORS[template.category] || '#6B7280'
+                        const dotColor = templateCategory(template.category)?.hex || '#6B7280'
                         return (
                             <button
                                 key={template._id}

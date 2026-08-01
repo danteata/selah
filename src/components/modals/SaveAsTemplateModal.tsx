@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { X, Save } from 'lucide-react'
 import type { Slide } from '../../types'
 import { generateThumbnail } from '../../utils/templateThumbnail'
-import type { SlideType } from '../../hooks/useTemplates'
+import { TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type SlideType } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 
 interface SaveAsTemplateModalProps {
@@ -18,18 +18,11 @@ interface SaveAsTemplateModalProps {
     }) => void
 }
 
-const SLIDE_TYPES: { id: SlideType; label: string }[] = [
-    { id: 'bible', label: 'Bible' },
-    { id: 'song', label: 'Songs' },
-    { id: 'hymn', label: 'Hymns' },
-    { id: 'sermon', label: 'Sermon' },
-    { id: 'prayer', label: 'Prayer' },
-    { id: 'text', label: 'Text' },
-    { id: 'media', label: 'Media' },
-    { id: 'announcement', label: 'Announcements' },
-    { id: 'countdown', label: 'Countdowns' },
-    { id: 'any', label: 'Any Type' },
-]
+// Shared with CreateTemplateModal. This list used to be a separate copy that
+// additionally offered "Sermon" and "Prayer" — neither of which is a slide type,
+// so choosing one produced a template that applied to nothing and was then
+// rewritten to "Any Type" on save.
+const SLIDE_TYPES = TEMPLATE_SLIDE_TYPE_OPTIONS
 
 export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTemplateModalProps) {
     const [name, setName] = useState(slide?.name || '')
@@ -39,13 +32,9 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
     const [isSaving, setIsSaving] = useState(false)
     const resolvedBg = useLocalBackground(slide?.background, slide?.localFilePath)
 
-    const categories = [
-        { id: 'announcement', label: 'Announcement', color: 'bg-blue-500' },
-        { id: 'worship', label: 'Worship', color: 'bg-amber-500' },
-        { id: 'sermon', label: 'Sermon', color: 'bg-amber-500' },
-        { id: 'prayer', label: 'Prayer', color: 'bg-green-500' },
-        { id: 'general', label: 'General', color: 'bg-gray-500' },
-    ]
+    // Shared with CreateTemplateModal and the browser's card badges — see
+    // TEMPLATE_CATEGORIES for why these were consolidated.
+    const categories = TEMPLATE_CATEGORIES.map((c) => ({ id: c.id as string, label: c.label, color: c.dotClass }))
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()

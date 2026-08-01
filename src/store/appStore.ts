@@ -358,7 +358,10 @@ interface AppStore extends AppState {
     setActiveAdvert: (advert: Advert | null) => void
     setDefaultSlideBackgrounds: () => void
     setDefaultSlideBackground: (type: string, background: string, backgroundVideoKey?: string | null) => void
-    setDefaultTemplate: (slideType: 'scripture' | 'hymn' | 'song' | 'text' | 'sermon' | 'announcement' | 'prayer' | 'countdown', templateId: string | null) => void
+    /** `slideType` keys are the ones `useSlideCreation` reads; the legacy
+     *  sermon/announcement/prayer/countdown keys are still accepted so any
+     *  value an older build persisted can be cleared. */
+    setDefaultTemplate: (slideType: 'scripture' | 'hymn' | 'song' | 'text' | 'dictionary' | 'sermon' | 'announcement' | 'prayer' | 'countdown', templateId: string | null) => void
     signOut: () => void
     // Schedule CRUD
     createSchedule: (name: string) => void

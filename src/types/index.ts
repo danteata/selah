@@ -464,16 +464,23 @@ export interface AppSettings {
     motionlessSlides?: boolean
     transitionInterval?: number
     alertLimit?: number
-    // Default template IDs for slide types
+    // Default template IDs per slide type. Only the first five are read (see
+    // `useSlideCreation`); the rest are retained so values persisted by an older
+    // build — which offered rows for them that never did anything — can still be
+    // read back and cleared rather than becoming unreachable junk.
     defaultTemplates?: {
         scripture?: string | null
         hymn?: string | null
         song?: string | null
         dictionary?: string | null
         text?: string | null
+        /** @deprecated not a slide type — never applied. */
         sermon?: string | null
+        /** @deprecated not a slide type — never applied. */
         announcement?: string | null
+        /** @deprecated not a slide type — never applied. */
         prayer?: string | null
+        /** @deprecated countdown slides don't consult templates yet. */
         countdown?: string | null
     }
     // Sermon Listener Settings

@@ -15,7 +15,10 @@ let mockReturnValue = {
     isLoading: false,
 }
 
-vi.mock('../../../hooks/useTemplates', () => ({
+// Only the hook is stubbed; the shared category table and its lookup come from
+// the real module, so this mock can't go stale as that module grows.
+vi.mock('../../../hooks/useTemplates', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../hooks/useTemplates')>()),
     useTemplates: vi.fn(() => mockReturnValue),
 }))
 

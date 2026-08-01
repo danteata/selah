@@ -16,24 +16,99 @@ import {
 } from './useIndexedDB'
 
 export type SlideType = 'bible' | 'song' | 'hymn' | 'dictionary' | 'text' | 'media' | 'announcement' | 'sermon' | 'prayer' | 'countdown' | 'any'
-type TemplateAppliesTo = Exclude<SlideType, 'sermon' | 'prayer'>
 
-const TEMPLATE_APPLIES_TO_VALUES = new Set<TemplateAppliesTo>([
-    'bible',
-    'song',
-    'hymn',
-    'dictionary',
-    'text',
-    'media',
-    'announcement',
-    'countdown',
-    'any',
+/**
+ * `appliesTo` answers "which slide types can use this template?", so every
+ * option has to be a type a slide can actually have. Slides are created with
+ * `bible | song | hymn | dictionary | text | media | countdown | alert`, which
+ * is why `sermon`, `prayer` and `announcement` are absent here: no slide is ever
+ * created with those types, so a template restricted to one of them matched
+ * nothing and simply vanished from every picker.
+ *
+ * They remain accepted by the schema and the mutations below — templates saved
+ * before this list was corrected still carry them, and rewriting a user's
+ * choice behind their back is worse than showing it back to them as the stale
+ * badge it is. They are just no longer offered.
+ *
+ * `alert` is a real slide type but is deliberately NOT offered yet: nothing in
+ * the alert flow can apply a template, so listing it would recreate exactly the
+ * dead-option problem this list is fixing. Add it here together with a
+ * `TemplateSelector` in `AddAlertModal`.
+ */
+export const TEMPLATE_SLIDE_TYPE_OPTIONS: ReadonlyArray<{ id: SlideType; label: string }> = [
+    { id: 'bible', label: 'Bible Verses' },
+    { id: 'song', label: 'Songs' },
+    { id: 'hymn', label: 'Hymns' },
+    { id: 'dictionary', label: 'Definitions' },
+    { id: 'text', label: 'Text Slides' },
+    { id: 'media', label: 'Media' },
+    { id: 'countdown', label: 'Countdowns' },
+    { id: 'any', label: 'Any Type' },
+]
+
+export type TemplateCategory = 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+
+/**
+ * The template categories, with their presentation.
+ *
+ * `category` and `appliesTo` are two independent axes and are easy to confuse —
+ * `announcement` is a value in both, and `sermon`/`prayer` read like slide types
+ * but are categories only. Category answers "how is this template filed?";
+ * `appliesTo` answers "which slide types may use it?".
+ *
+ * Single source of truth because there were four hand-maintained copies of this
+ * table (the browser's badge config, the selector's dot colours, and one in each
+ * of the two authoring modals) and they had drifted: both modals coloured Sermon
+ * amber — identical to Worship — while the badge on the resulting card was
+ * orange, so the swatch you picked was not the swatch you got.
+ */
+export const TEMPLATE_CATEGORIES: ReadonlyArray<{
+    id: TemplateCategory
+    label: string
+    /** Single letter for the collapsed (inline) sidebar. */
+    abbr: string
+    /** Raw colour, for canvas/SVG and inline styles. */
+    hex: string
+    /** Tailwind background for a solid swatch. */
+    dotClass: string
+    /** Tailwind classes for the tinted badge on a template card. */
+    badgeClass: string
+}> = [
+    { id: 'announcement', label: 'Announcement', abbr: 'A', hex: '#3B82F6', dotClass: 'bg-blue-500', badgeClass: 'bg-blue-500/15 text-blue-700 dark:text-blue-300' },
+    { id: 'worship', label: 'Worship', abbr: 'W', hex: '#F59E0B', dotClass: 'bg-amber-500', badgeClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
+    { id: 'sermon', label: 'Sermon', abbr: 'S', hex: '#F97316', dotClass: 'bg-orange-500', badgeClass: 'bg-orange-500/15 text-orange-700 dark:text-orange-300' },
+    { id: 'prayer', label: 'Prayer', abbr: 'P', hex: '#10B981', dotClass: 'bg-emerald-500', badgeClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' },
+    { id: 'general', label: 'General', abbr: 'G', hex: '#6B7280', dotClass: 'bg-gray-500', badgeClass: 'bg-gray-500/15 text-gray-700 dark:text-gray-300' },
+]
+
+export function templateCategory(id: string) {
+    return TEMPLATE_CATEGORIES.find((c) => c.id === id)
+}
+
+/** Everything the `templates.appliesTo` schema union accepts, including the
+ *  legacy values no longer offered. Used to reject genuine garbage without
+ *  discarding values that are still valid on the wire. */
+const TEMPLATE_APPLIES_TO_VALUES = new Set<SlideType>([
+    'bible', 'song', 'hymn', 'dictionary', 'text', 'media', 'countdown', 'any',
+    // Legacy — see TEMPLATE_SLIDE_TYPE_OPTIONS.
+    'announcement', 'sermon', 'prayer',
 ])
 
-function normalizeAppliesTo(appliesTo?: SlideType[]): TemplateAppliesTo[] | undefined {
+/**
+ * Drop values the backend would reject, and nothing else.
+ *
+ * This used to filter out `sermon`/`prayer` and then fall back to `['any']` when
+ * that emptied the list — so a template the operator had restricted to Sermon
+ * (an option `SaveAsTemplateModal` offered) was silently saved as applying to
+ * *everything*. The narrowest possible choice became the widest. Returning
+ * `undefined` for an empty result is the honest answer: `getTemplatesForSlideType`
+ * already reads a missing `appliesTo` as unconstrained, so nothing downstream
+ * needs the sentinel.
+ */
+export function normalizeAppliesTo(appliesTo?: SlideType[]): SlideType[] | undefined {
     if (!appliesTo) return undefined
-    const normalized = appliesTo.filter((type): type is TemplateAppliesTo => TEMPLATE_APPLIES_TO_VALUES.has(type as TemplateAppliesTo))
-    return normalized.length > 0 ? normalized : ['any']
+    const normalized = appliesTo.filter((type) => TEMPLATE_APPLIES_TO_VALUES.has(type))
+    return normalized.length > 0 ? normalized : undefined
 }
 
 export type TemplateItem = {
@@ -41,7 +116,7 @@ export type TemplateItem = {
     name: string
     description?: string
     slideId: string | unknown
-    category: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+    category: TemplateCategory
     appliesTo?: SlideType[]
     thumbnail?: string
     createdBy?: string
@@ -59,7 +134,7 @@ export type UseTemplatesReturn = {
         name: string
         description?: string
         slideId: string | unknown
-        category: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        category: TemplateCategory
         appliesTo?: SlideType[]
         thumbnail?: string
         backgroundStorageId?: string
@@ -68,7 +143,7 @@ export type UseTemplatesReturn = {
         name?: string
         description?: string
         slideId?: string | unknown
-        category?: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        category?: TemplateCategory
         appliesTo?: SlideType[]
         thumbnail?: string
         backgroundStorageId?: string
@@ -348,12 +423,18 @@ export function useTemplates(): UseTemplatesReturn {
         name: string
         description?: string
         slideId: string | unknown
-        category: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        category: TemplateCategory
         appliesTo?: SlideType[]
         thumbnail?: string
         backgroundStorageId?: string
     }): Promise<string> => {
         const slideSnapshot = sanitizeSlideSnapshot(data.slideId)
+        // Normalized once, up front, so the local cache and the server can never
+        // disagree about what this template applies to. They used to: the offline
+        // write and the post-write local cache stored the raw value while only
+        // the mutation argument was normalized, so the same template read back
+        // differently depending on whether it came from Convex or IndexedDB.
+        const appliesTo = normalizeAppliesTo(data.appliesTo)
         if (isOffline) {
             const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
             const now = new Date().toISOString()
@@ -363,7 +444,7 @@ export function useTemplates(): UseTemplatesReturn {
                 description: data.description,
                 slideId: typeof slideSnapshot === 'string' ? slideSnapshot : JSON.stringify(slideSnapshot),
                 category: data.category,
-                appliesTo: data.appliesTo,
+                appliesTo,
                 thumbnail: data.thumbnail,
                 backgroundStorageId: data.backgroundStorageId,
                 createdBy: 'local',
@@ -382,7 +463,7 @@ export function useTemplates(): UseTemplatesReturn {
             description: data.description,
             slideId: slideSnapshot,
             category: data.category,
-            appliesTo: normalizeAppliesTo(data.appliesTo),
+            appliesTo,
             thumbnail: data.thumbnail,
             backgroundStorageId: data.backgroundStorageId,
         })
@@ -395,7 +476,7 @@ export function useTemplates(): UseTemplatesReturn {
             description: data.description,
             slideId: typeof slideSnapshot === 'string' ? slideSnapshot : JSON.stringify(slideSnapshot),
             category: data.category,
-            appliesTo: data.appliesTo,
+            appliesTo,
             thumbnail: data.thumbnail,
             backgroundStorageId: data.backgroundStorageId,
             createdBy: undefined,
@@ -412,7 +493,7 @@ export function useTemplates(): UseTemplatesReturn {
         name?: string
         description?: string
         slideId?: string | unknown
-        category?: 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general'
+        category?: TemplateCategory
         appliesTo?: SlideType[]
         thumbnail?: string
         backgroundStorageId?: string
@@ -420,6 +501,12 @@ export function useTemplates(): UseTemplatesReturn {
         const isLocal = templateId.startsWith('local_')
         const slideSnapshot = updates.slideId !== undefined
             ? sanitizeSlideSnapshot(updates.slideId)
+            : undefined
+        // As in `createTemplate`: normalize once so the optimistic cache, the
+        // IndexedDB row and the server all store the same thing. `undefined`
+        // means "not being changed", so only normalize when a value was supplied.
+        const appliesTo = updates.appliesTo !== undefined
+            ? normalizeAppliesTo(updates.appliesTo)
             : undefined
 
         // Optimistic update: update local state immediately so UI feels snappy
@@ -431,7 +518,7 @@ export function useTemplates(): UseTemplatesReturn {
                     description: updates.description ?? t.description,
                     slideId: typeof slideSnapshot === 'string' ? slideSnapshot : slideSnapshot ? JSON.stringify(slideSnapshot) : t.slideId,
                     category: updates.category ?? t.category,
-                    appliesTo: updates.appliesTo as string[] ?? t.appliesTo,
+                    appliesTo: appliesTo ?? t.appliesTo,
                     thumbnail: updates.thumbnail ?? t.thumbnail,
                     backgroundStorageId: updates.backgroundStorageId ?? t.backgroundStorageId,
                     updatedAt: new Date().toISOString(),
@@ -445,7 +532,7 @@ export function useTemplates(): UseTemplatesReturn {
             description: updates.description,
             slideId: typeof slideSnapshot === 'string' ? slideSnapshot : slideSnapshot ? JSON.stringify(slideSnapshot) : undefined,
             category: updates.category,
-            appliesTo: updates.appliesTo,
+            appliesTo,
             thumbnail: updates.thumbnail,
             backgroundStorageId: updates.backgroundStorageId,
         })
@@ -464,7 +551,7 @@ export function useTemplates(): UseTemplatesReturn {
             updates: {
                 ...updates,
                 ...(slideSnapshot !== undefined ? { slideId: slideSnapshot } : {}),
-                appliesTo: normalizeAppliesTo(updates.appliesTo),
+                ...(updates.appliesTo !== undefined ? { appliesTo } : {}),
             },
         })
         return templateId

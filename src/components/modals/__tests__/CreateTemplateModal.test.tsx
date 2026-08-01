@@ -7,7 +7,12 @@ const mockCreateTemplate = vi.fn()
 const mockUpdateTemplate = vi.fn()
 const mockGenerateUploadUrl = vi.fn()
 
-vi.mock('../../../hooks/useTemplates', () => ({
+// Only the hook is stubbed; everything else — notably the shared
+// TEMPLATE_SLIDE_TYPE_OPTIONS list the modal renders its chips from — comes from
+// the real module. Enumerating the exports by hand means the mock silently
+// breaks the moment the module grows one.
+vi.mock('../../../hooks/useTemplates', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../hooks/useTemplates')>()),
     useTemplates: () => ({
         createTemplate: mockCreateTemplate,
         updateTemplate: mockUpdateTemplate,

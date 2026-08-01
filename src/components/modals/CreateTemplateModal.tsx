@@ -3,7 +3,7 @@ import {
     X, Save, Upload, Image, Palette, Type, Loader2, Video,
     LayoutTemplate, PanelBottom, AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react'
-import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
+import { useTemplates, TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
 import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
 import { openFileDialog } from '../../utils/fileDialog'
 import { isDesktop } from '../../platform'
@@ -52,7 +52,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const { isOffline } = useConvexConnection()
     const [name, setName] = useState('')
     const [category, setCategory] = useState<string>('general')
-    const [appliesTo, setAppliesTo] = useState<string[]>(['any'])
+    const [appliesTo, setAppliesTo] = useState<SlideType[]>(['any'])
     const [description, setDescription] = useState('')
     const [content, setContent] = useState('')
     const [backgroundType, setBackgroundType] = useState<'image' | 'gradient' | 'color' | 'video'>('image')
@@ -75,24 +75,15 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
     const resolvedBackground = useLocalBackground(background, localFilePath ?? undefined)
 
-    const categories = [
-        { id: 'announcement', label: 'Announcement', color: 'bg-blue-500' },
-        { id: 'worship', label: 'Worship', color: 'bg-amber-500' },
-        { id: 'sermon', label: 'Sermon', color: 'bg-amber-500' },
-        { id: 'prayer', label: 'Prayer', color: 'bg-green-500' },
-        { id: 'general', label: 'General', color: 'bg-gray-500' },
-    ]
+    // Shared with the browser's badges and SaveAsTemplateModal. The local copy
+    // this replaces coloured Sermon amber — the same as Worship — while the badge
+    // on the saved card came out orange, so the swatch shown while choosing
+    // wasn't the swatch you ended up with.
+    const categories = TEMPLATE_CATEGORIES.map((c) => ({ id: c.id, label: c.label, color: c.dotClass }))
 
-    const slideTypes = [
-        { id: 'bible', label: 'Bible Verses' },
-        { id: 'song', label: 'Songs' },
-        { id: 'hymn', label: 'Hymns' },
-        { id: 'text', label: 'Text Slides' },
-        { id: 'media', label: 'Media' },
-        { id: 'announcement', label: 'Announcements' },
-        { id: 'countdown', label: 'Countdowns' },
-        { id: 'any', label: 'Any Type' },
-    ]
+    // Shared with SaveAsTemplateModal — the two lists had drifted apart, and
+    // only one of them offered options the backend then discarded.
+    const slideTypes = TEMPLATE_SLIDE_TYPE_OPTIONS
 
     const gradientOptions = [
         { name: 'Purple Dream', value: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
@@ -117,7 +108,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 // Populate form with existing template data
                 setName(editingTemplate.name)
                 setCategory(editingTemplate.category)
-                setAppliesTo((editingTemplate.appliesTo || ['any']) as string[])
+                setAppliesTo(editingTemplate.appliesTo || ['any'])
                 setDescription(editingTemplate.description || '')
 
                 // Parse slideId to get content and background
@@ -406,7 +397,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     description: description.trim() || undefined,
                     slideId: JSON.stringify(slideData),
                     category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
-                    appliesTo: appliesTo as any,
+                    appliesTo,
                     thumbnail,
                     backgroundStorageId: backgroundStorageId || undefined,
                 })
@@ -416,7 +407,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     description: description.trim() || undefined,
                     slideId: JSON.stringify(slideData),
                     category: category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
-                    appliesTo: appliesTo as any,
+                    appliesTo,
                     thumbnail,
                     backgroundStorageId: backgroundStorageId || undefined,
                 })
@@ -964,7 +955,11 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                                 setAppliesTo(['any'])
                                             } else {
                                                 setAppliesTo(prev => {
-                                                    const withoutAny = prev.filter(id => id !== 'any')
+                                                    // Annotated: TS infers a type
+                                                    // predicate from the filter and
+                                                    // would narrow 'any' out of the
+                                                    // element type.
+                                                    const withoutAny: SlideType[] = prev.filter(id => id !== 'any')
                                                     if (withoutAny.includes(st.id)) {
                                                         const next = withoutAny.filter(id => id !== st.id)
                                                         return next.length === 0 ? ['any'] : next

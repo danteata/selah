@@ -1,6 +1,38 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+/**
+ * Which slide types a template may be restricted to.
+ *
+ * Shared by the `templates` table and the `createTemplate`/`updateTemplate`
+ * mutations, which previously carried their own hand-copied unions that had
+ * drifted: the mutations rejected `sermon`/`prayer` while this table accepted
+ * them. The client compensated by stripping those values before every write and
+ * falling back to `["any"]` when that emptied the list, which silently turned a
+ * template restricted to one type into one that applied to everything.
+ *
+ * `sermon`, `prayer` and `announcement` are retained but no longer offered in
+ * the UI (see `TEMPLATE_SLIDE_TYPE_OPTIONS` in `src/hooks/useTemplates.ts`): no
+ * slide is ever created with those types, so they can never match, but existing
+ * rows still carry them. Keeping them accepted is what lets an operator edit
+ * such a template without the mutation rejecting its own stored value — narrow
+ * the union only behind a migration that rewrites those rows first.
+ */
+export const appliesToValidator = v.array(v.union(
+    v.literal("bible"),
+    v.literal("song"),
+    v.literal("hymn"),
+    v.literal("dictionary"),
+    v.literal("text"),
+    v.literal("media"),
+    v.literal("countdown"),
+    v.literal("any"),
+    // Legacy values, still present in existing documents.
+    v.literal("sermon"),
+    v.literal("prayer"),
+    v.literal("announcement")
+));
+
 // Structured song section — mirrors SongSection in src/types/index.ts.
 // Additive/optional wherever it appears; songs without it fall back to the
 // freeform `lyrics` string. Used by the predictive lyric tracker.
@@ -384,19 +416,7 @@ export default defineSchema({
             v.literal("general")
         ),
         // Which slide types this template can be applied to
-        appliesTo: v.optional(v.array(v.union(
-            v.literal("bible"),
-            v.literal("song"),
-            v.literal("hymn"),
-            v.literal("dictionary"),
-            v.literal("sermon"),
-            v.literal("prayer"),
-            v.literal("text"),
-            v.literal("media"),
-            v.literal("announcement"),
-            v.literal("countdown"),
-            v.literal("any")
-        ))),
+        appliesTo: v.optional(appliesToValidator),
         thumbnail: v.optional(v.string()),
         createdAt: v.string(),
         updatedAt: v.string(),

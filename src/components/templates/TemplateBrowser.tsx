@@ -1,17 +1,17 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video } from 'lucide-react'
-import { useTemplates, type TemplateItem, type SlideType, useFileUrl } from '../../hooks/useTemplates'
+import {
+    useTemplates,
+    TEMPLATE_CATEGORIES,
+    TEMPLATE_SLIDE_TYPE_OPTIONS,
+    templateCategory,
+    type TemplateItem,
+    type SlideType,
+    useFileUrl,
+} from '../../hooks/useTemplates'
 import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
-
-const CATEGORY_CONFIG: Record<string, { label: string; abbr: string; color: string; bgClass: string; dotClass: string }> = {
-    announcement: { label: 'Announcement', abbr: 'A', color: '#3B82F6', bgClass: 'bg-blue-500/15 text-blue-700 dark:text-blue-300', dotClass: 'bg-blue-500' },
-    worship: { label: 'Worship', abbr: 'W', color: '#F59E0B', bgClass: 'bg-amber-500/15 text-amber-700 dark:text-amber-300', dotClass: 'bg-amber-500' },
-    sermon: { label: 'Sermon', abbr: 'S', color: '#F97316', bgClass: 'bg-orange-500/15 text-orange-700 dark:text-orange-300', dotClass: 'bg-orange-500' },
-    prayer: { label: 'Prayer', abbr: 'P', color: '#10B981', bgClass: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300', dotClass: 'bg-emerald-500' },
-    general: { label: 'General', abbr: 'G', color: '#6B7280', bgClass: 'bg-gray-500/15 text-gray-700 dark:text-gray-300', dotClass: 'bg-gray-500' },
-}
 
 const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     bible: 'Bible',
@@ -27,11 +27,15 @@ const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     any: 'Any',
 }
 
+/** The slide types offered as a "Works with" filter. `any` is excluded: it isn't
+ *  a thing to filter *for*, it's the wildcard that matches every filter. */
+const WORKS_WITH_FILTERS = TEMPLATE_SLIDE_TYPE_OPTIONS.filter((o) => o.id !== 'any')
+
 function CategoryBadge({ category }: { category: string }) {
-    const config = CATEGORY_CONFIG[category]
+    const config = templateCategory(category)
     if (!config) return null
     return (
-        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${config.bgClass}`}>
+        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${config.badgeClass}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${config.dotClass}`} />
             {config.label}
         </span>
@@ -82,7 +86,7 @@ function TemplateCard({
     isCustom: boolean
 }) {
     const isFavorite = template.favoritedBy && template.favoritedBy.length > 0
-    const config = CATEGORY_CONFIG[template.category]
+    const config = templateCategory(template.category)
 
     const slideData = useMemo(() => {
         try {
@@ -139,7 +143,7 @@ function TemplateCard({
             )
         }
 
-        const bgColor = config?.color || '#6B7280'
+        const bgColor = config?.hex || '#6B7280'
         return (
             <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${bgColor}30, ${bgColor}10)` }}>
                 <div className="absolute inset-0 flex items-center justify-center opacity-20">
@@ -235,6 +239,13 @@ interface TemplateBrowserProps {
 export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCustom, isInline = false, slideType }: TemplateBrowserProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+    // Second, independent filter axis. Category answers "how is this filed?";
+    // this answers "which slide type can use it?". Only the latter reflects
+    // `appliesTo`, which until now the panel showed as badges but never filtered
+    // on — so an operator who had scoped a template to Songs had no way to find
+    // it by that, and the Prayer *category* chip looked like it should have done
+    // the job. `null` means no restriction.
+    const [selectedSlideType, setSelectedSlideType] = useState<SlideType | null>(null)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
     const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -288,12 +299,12 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     }, [isOpen, onClose, isInline])
 
     const categories = [
-        { id: null, label: 'All', icon: Grid, color: null, abbr: null },
-        ...Object.entries(CATEGORY_CONFIG).map(([id, cfg]) => ({
-            id,
+        { id: null as string | null, label: 'All', icon: Grid, color: null as string | null, abbr: null as string | null },
+        ...TEMPLATE_CATEGORIES.map((cfg) => ({
+            id: cfg.id as string | null,
             label: cfg.label,
-            color: cfg.dotClass,
-            abbr: cfg.abbr,
+            color: cfg.dotClass as string | null,
+            abbr: cfg.abbr as string | null,
             icon: null,
         })),
     ]
@@ -336,8 +347,17 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
         setShowCreateModal(true)
     }
 
+    // A `slideType` prop means the caller has already scoped the panel to one
+    // type, so it wins and the picker below is hidden — nothing good comes of
+    // offering a filter that fights the caller's own constraint.
+    const activeSlideType = slideType ?? selectedSlideType
+
     const filteredTemplates = useMemo(() => {
-        const source = slideType ? getTemplatesForSlideType(slideType) : (templates || [])
+        // `getTemplatesForSlideType` is reused rather than reimplemented so the
+        // panel agrees with the inline pickers about what "works with" means —
+        // notably that an "Any Type" template matches every slide type, and that
+        // a template with no `appliesTo` at all is unconstrained.
+        const source = activeSlideType ? getTemplatesForSlideType(activeSlideType) : (templates || [])
         return source.filter((t) => {
             if (showFavorites && !t.favoritedBy?.length) return false
             if (selectedCategory && t.category !== selectedCategory) return false
@@ -350,7 +370,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
             }
             return true
         })
-    }, [templates, slideType, getTemplatesForSlideType, selectedCategory, searchQuery, showFavorites])
+    }, [templates, activeSlideType, getTemplatesForSlideType, selectedCategory, searchQuery, showFavorites])
 
     if (!isOpen && !isInline) return null
 
@@ -383,7 +403,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                 <div className={`${isInline ? 'w-14 p-1' : 'w-56 p-4'} border-r border-gray-200 dark:border-gray-800 space-y-1 overflow-y-auto custom-scrollbar`}>
                     {!isInline && (
                         <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-                            Categories
+                            Category
                         </p>
                     )}
                     {categories.map((cat) => (
@@ -411,6 +431,49 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                             )}
                         </button>
                     ))}
+
+                    {/* Works with — the second axis. Hidden when the caller already
+                        scoped the panel to a slide type. */}
+                    {!slideType && (
+                        <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-gray-200 dark:border-gray-700 space-y-1`}>
+                            {!isInline && (
+                                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                                    Works with
+                                </p>
+                            )}
+                            <button
+                                onClick={() => setSelectedSlideType(null)}
+                                className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
+                                    isInline ? 'p-1.5 justify-center' : 'px-3 py-2'
+                                } ${selectedSlideType === null
+                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                }`}
+                                title="Any slide type"
+                            >
+                                <span className={isInline ? 'text-[9px] leading-tight truncate w-full text-center' : ''}>
+                                    {isInline ? 'Any' : 'Any slide type'}
+                                </span>
+                            </button>
+                            {WORKS_WITH_FILTERS.map((opt) => (
+                                <button
+                                    key={opt.id}
+                                    onClick={() => setSelectedSlideType(opt.id)}
+                                    className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
+                                        isInline ? 'p-1.5 justify-center' : 'px-3 py-2'
+                                    } ${selectedSlideType === opt.id
+                                        ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                    }`}
+                                    title={`Templates that work with ${opt.label}`}
+                                >
+                                    <span className={isInline ? 'text-[9px] leading-tight truncate w-full text-center' : ''}>
+                                        {isInline ? SLIDE_TYPE_LABELS[opt.id] : opt.label}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
 
                     <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-gray-200 dark:border-gray-700`}>
                         {!isInline && (
@@ -502,8 +565,8 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                     {/* Results count */}
                     <div className="px-3 py-1.5 text-[10px] text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800">
                         {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''}
-                        {slideType && ` for ${SLIDE_TYPE_LABELS[slideType] || slideType}`}
-                        {selectedCategory && ` in ${CATEGORY_CONFIG[selectedCategory]?.label || selectedCategory}`}
+                        {activeSlideType && ` for ${SLIDE_TYPE_LABELS[activeSlideType] || activeSlideType}`}
+                        {selectedCategory && ` in ${templateCategory(selectedCategory)?.label || selectedCategory}`}
                     </div>
 
                     {/* Templates Grid */}
