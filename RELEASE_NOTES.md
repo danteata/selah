@@ -22,3 +22,9 @@ Lyrics now go up before the congregation reaches them, and the motion background
 - **You can filter templates by the slide type they work with.** The Templates panel only had a category filter, so a template you had scoped to Songs couldn't be found that way, and the Prayer *category* looked like it should have done the job. Both filters now work and combine, and a template set to "Any Type" appears under every one of them.
 - Default Templates in Settings now lists only the slide types it actually applies to. Sermon, Announcements, Prayer and Countdown were accepting a choice and ignoring it; Definitions was honoured but had no setting. "Scripture" is now "Bible Verses", matching the rest of the app.
 - Category colours agree with themselves — Sermon showed amber while you picked it and orange once saved.
+
+### NDI on Linux
+- **The NDI runtime is now actually in the Linux build.** 0.1.16 announced that Windows and Linux no longer need an NDI Tools install, and that was true on Windows only — the Linux packaging step was never told to include the library, so Linux kept showing "NDI runtime not found". It's in the box now, as originally intended.
+
+### Downloads
+- **The `.rpm` and `.msi` installers are no longer published.** Linux ships as `.AppImage` and `.deb`, Windows as the `.exe` setup — the formats the auto-updater uses and that nearly everyone was downloading anyway. If you install from `.rpm` or `.msi`, switch to one of those; automatic updates are unaffected either way. Building the extra two on every release was slowing the Linux build down for no one's benefit.
