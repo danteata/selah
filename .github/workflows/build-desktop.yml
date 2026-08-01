@@ -55,7 +55,17 @@ jobs:
             # diagnostics whatsoever — which is exactly how v0.1.5 and v0.1.6
             # failed. Verbose is the only way linuxdeploy's actual error reaches
             # the log.
-            tauri_args: '--verbose'
+            #
+            # --config src-tauri/tauri.linux.conf.json is what bundles
+            # ndi-runtime/linux (libndi.so.6.3.2). It was written for 0.1.16 but
+            # never wired up here, so that release shipped the "no NDI Tools
+            # install needed on Windows and Linux" claim with the library present
+            # on Windows only — Windows passes its own config below, Linux passed
+            # nothing. build.rs stages only transcribe-cpp's .so files into
+            # linux-runtime/, and the base config's resources don't mention
+            # ndi-runtime at all, so without this flag ndi_lib.rs finds no bundled
+            # copy and falls back to the system libndi.so.6.
+            tauri_args: '--verbose --config src-tauri/tauri.linux.conf.json'
           - platform: 'windows-latest'
             target: 'x86_64-pc-windows-msvc'
             name: 'Windows'
@@ -372,6 +382,35 @@ jobs:
             echo 'RELNOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
+      # Bundle formats are pinned in tauri.conf.json's `bundle.targets`
+      # (app, dmg, deb, appimage, nsis) rather than "all". Recorded here because
+      # that file is strict JSON and can't hold the reasoning:
+      #
+      # "all" additionally produced `rpm` on Linux and `msi` on Windows. Neither
+      # is consumed by anything — latest.json.template shows the updater wants
+      # .app.tar.gz, .AppImage.tar.gz and .nsis.zip — and on Linux every extra
+      # format is another full compression pass over the same several-hundred-MB
+      # resource payload (a 198 MB GGUF model, the MiniLM ONNX, plus a Vite dist
+      # carrying ~76 MB of bibles and ~19 MB of embedding packs), with deb/rpm
+      # defaulting to single-threaded xz. Linux was already the slowest leg for a
+      # separate reason — see the GGML_CPU_ALL_VARIANTS note below — so dropping
+      # a redundant repack of that payload is the cheapest time available.
+      #
+      # deb is kept deliberately: it is a mainstream install path even though the
+      # updater doesn't use it. If rpm is ever wanted back, add it here AND to the
+      # asset list in docs/UPDATER.md.
+      #
+      # Why Linux is the long pole, for whoever looks next: `dynamic-backends` on
+      # Linux/Windows makes transcribe-cpp-sys set GGML_CPU_ALL_VARIANTS=ON, which
+      # compiles the ggml CPU backend once per ISA tier — 14 times with GCC
+      # (x64 … sapphirerapids), 9 with MSVC (which can't build ivybridge,
+      # piledriver, cooperlake, zen4 or the AMX tier), and once on macOS, which
+      # uses `metal` instead. That ratio is the whole Linux > Windows > macOS
+      # ordering. It is not waste — it is what lets an old booth CPU run the app,
+      # the same concern behind the baseline ONNX Runtime above — and ggml exposes
+      # no knob to build a subset. Making it cheaper means caching it, not cutting
+      # it: confirm rust-cache actually restores
+      # target/*/build/transcribe-cpp-sys-*/out before optimising anything else.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -423,8 +462,9 @@ jobs:
 
       # Runs even when the bundle step failed — that is the whole point. Kept
       # because it is how "the AppImage step ran out of disk" was ruled out
-      # (106G available, 27% used) after the deb/rpm/AppDir copies of a ~440 MB
-      # resource payload made that look plausible. The real cause was a missing
+      # (106G available, 27% used) after the deb/AppDir copies of a ~440 MB
+      # resource payload made that look plausible (there was an rpm copy too at
+      # the time; `bundle.targets` no longer builds it). The real cause was a missing
       # libtranscribe.so.0; see src-tauri/build.rs. If disk is ever suspected
       # again, the answer is already in the log.
       - name: Report disk usage (Ubuntu only)
