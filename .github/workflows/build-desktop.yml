@@ -313,10 +313,40 @@ jobs:
           # explicitly so the cross-build can't silently produce arm64 objects.
           echo "TRANSCRIBE_CMAKE_ARGS=-DCMAKE_OSX_ARCHITECTURES=x86_64" >> "$GITHUB_ENV"
 
+      # Caches ~/.cargo plus the workspace target dir. On Windows the target dir
+      # entry is dead weight — see the next step for why — but the ~/.cargo half
+      # is still worth having there.
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+
+      # Windows builds into CARGO_TARGET_DIR=C:\s (set above, for MAX_PATH), and
+      # rust-cache cannot follow it there: config.ts does
+      # `target = path.join(root, target)`, and path.join does not honour an
+      # absolute second argument, so `./src-tauri -> C:\s` would resolve to
+      # ...\src-tauri\C:\s. The result was a "Cache hit" of ~152 MB — just
+      # ~/.cargo — while C:\s was rebuilt from nothing every run: all 9 MSVC ggml
+      # CPU variants, the Vulkan shaders and ONNX, 1048 s of a 1200 s job, on
+      # every release. Worse, an exact-key hit makes rust-cache skip saving, so it
+      # restored the same useless 152 MB indefinitely. Compare Linux, which caches
+      # its real target dir and saves ~726 MB.
+      #
+      # So cache C:\s directly. A plain absolute path is exactly what
+      # actions/cache wants, and C:\s is stable across runs — which matters more
+      # than it looks, because CMakeCache.txt bakes in absolute paths and would be
+      # invalidated by a moving target dir.
+      #
+      # No rustc version in the key: a toolchain bump only makes cargo's
+      # fingerprints miss, so stale artifacts are rebuilt rather than misused, and
+      # the restore-keys fallback is worth more than the extra precision.
+      - name: Cache the Windows target dir (CARGO_TARGET_DIR, outside the workspace)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: C:\s
+          key: v1-win-target-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
+          restore-keys: v1-win-target-
 
       - name: Install frontend dependencies
         run: bun install
@@ -474,6 +504,32 @@ jobs:
           echo "--- largest paths under the target dir ---"
           du -sh src-tauri/target/${{ matrix.target }}/release/bundle/* 2>/dev/null | sort -h || true
           du -sh src-tauri/target/${{ matrix.target }}/release 2>/dev/null || true
+
+      # actions/cache saves C:\s wholesale in its post step, and unlike rust-cache
+      # it has no pruning pass — so without this the installers ride along too
+      # (~250 MB on top of the compile output), for artefacts that are already
+      # uploaded to the release and would be rebuilt anyway. tauri-action uploads
+      # inside its own step, so by the time this runs the bundles are safely gone
+      # to GitHub. always(), because a cache of a partial build still saves the
+      # next run most of the work.
+      #
+      # Prints the remaining size for the same reason the Ubuntu report above
+      # exists: when someone next wonders why the Windows cache is a given size,
+      # the answer should already be in the log.
+      - name: Trim bundles from the cached Windows target dir
+        if: ${{ always() && matrix.platform == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path 'C:\s\*\release\bundle' -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              Write-Host "Removing $($_.FullName)"
+              Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue
+            }
+          if (Test-Path 'C:\s') {
+            $mb = [math]::Round((Get-ChildItem 'C:\s' -Recurse -File -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum).Sum / 1MB)
+            Write-Host "C:\s is ${mb} MB before caching"
+          }
 
 
   # Flip the draft release to published once the platforms users actually run
