@@ -79,6 +79,55 @@ describe('SongConfirmationTracker', () => {
         expect(result).toBe('a')
     })
 
+    describe('window cadence', () => {
+        // Desktop Whisper finalizes a segment every several seconds, and each
+        // finalized segment is one window here. A fixed 3s half-life put the
+        // accumulation ceiling (c / (1 - decay)) below the emit threshold at
+        // that cadence, so a song sung near-verbatim for minutes on end never
+        // confirmed — the failure that left the wrong song on the projector
+        // through a whole worship set.
+        it('confirms a strong match at desktop-Whisper segment cadence', () => {
+            const t = new SongConfirmationTracker()
+            let confirmed: string | null = null
+            let words = 100
+            for (let i = 0; i < 6 && !confirmed; i++) {
+                words += 12
+                confirmed = t.update(i * 8000, { songId: 'a', confidence: 0.95, windowId: words })
+            }
+            expect(confirmed).toBe('a')
+        })
+
+        it('confirms a corroboration-level match at that cadence too, just slower', () => {
+            const t = new SongConfirmationTracker()
+            let confirmed: string | null = null
+            let windows = 0
+            let words = 100
+            for (let i = 0; i < 10 && !confirmed; i++) {
+                words += 12
+                windows++
+                confirmed = t.update(i * 8000, { songId: 'a', confidence: 0.65, windowId: words })
+            }
+            expect(confirmed).toBe('a')
+            expect(windows).toBeGreaterThan(2)
+        })
+
+        it('still forgets a lone match when the singing moves on', () => {
+            const t = new SongConfirmationTracker()
+            // Establish an 8s cadence with a few no-match windows.
+            for (let i = 0; i < 4; i++) t.update(i * 8000, null)
+            t.update(32_000, { songId: 'a', confidence: 0.9, windowId: 100 })
+            // Nothing corroborates it over the next couple of minutes of
+            // windows. The adapted half-life makes this take longer than the
+            // old fixed 3s one did, but a hypothesis nothing supports still has
+            // to end at zero — and well before then it is too small to combine
+            // with a later coincidental match into a confirmation.
+            for (let i = 1; i <= 6; i++) t.update(32_000 + i * 8000, null)
+            expect(t.scoreFor('a')).toBeLessThan(0.25)
+            for (let i = 7; i <= 14; i++) t.update(32_000 + i * 8000, null)
+            expect(t.scoreFor('a')).toBe(0)
+        })
+    })
+
     describe('window independence (defeats the sliding-buffer false positive)', () => {
         it('ignores a second hit from an overlapping (barely-advanced) window', () => {
             const t = new SongConfirmationTracker()
