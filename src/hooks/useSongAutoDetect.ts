@@ -222,6 +222,17 @@ export function useSongAutoDetect() {
             store.appendActiveSlides(slides)
             const target = slides.find((s) => s.verseIndex === sectionIndex) ?? slides[0]
             if (target) store.setLiveSlide(target.id)
+            // Appending and going live are two separate store writes, and the
+            // observed failure is a song that lands in the queue with nothing
+            // on air — so record what we asked for and what actually stuck.
+            const after = useAppStore.getState()
+            console.log('[useSongAutoDetect] loadAndDisplay', {
+                song: song.title,
+                created: slides.length,
+                targetId: target?.id ?? null,
+                liveSlideId: after.liveSlideId,
+                targetInActiveSlides: after.activeSlides.some((s) => s.id === target?.id),
+            })
         }
 
         void (async () => {
