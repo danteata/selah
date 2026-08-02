@@ -1,4 +1,5 @@
 import type { Song, SongSection } from '../../types'
+import { phoneticSimilarity } from './phoneticMatch'
 
 /**
  * Predictive song-lyric position tracker (Phase 2).
@@ -85,6 +86,25 @@ export function lineSimilarity(query: string, line: string): number {
     return Math.min(1, score)
 }
 
+/**
+ * Similarity between a transcript fragment and a lyric line, taking the kinder
+ * of the lexical and phonetic views.
+ *
+ * Sung audio does not reach the transcript as words. "Clothed in Majesty"
+ * arrives as "cloth and majesty" and "The splendour of a King" as "the splendor
+ * of a key" — spelled almost nothing alike, sounding almost identical. Scoring
+ * both ways and keeping the better one recovers those without giving up the
+ * lexical path's precision on lines that did transcribe cleanly.
+ *
+ * Measured on real mis-transcriptions (see `__tests__/lyricMatchFixtures.ts`,
+ * captured from live runs rather than invented): at the near-exact threshold
+ * that identifies a song from a single line, true-line hits go from 3/15 to
+ * 5/15, with no decoy line from an unrelated song crossing any threshold.
+ */
+export function lyricSimilarity(query: string, line: string): number {
+    return Math.max(lineSimilarity(query, line), phoneticSimilarity(query, line))
+}
+
 export type ScorerFn = (query: string, line: string) => number
 
 // ---------------------------------------------------------------------------
@@ -160,7 +180,7 @@ export interface TrackerConfig {
     jumpHysteresis: number
     /** Words of transcript tail to match against. */
     tailWords: number
-    /** Pluggable scorer (defaults to lexical {@link lineSimilarity}). */
+    /** Pluggable scorer (defaults to {@link lyricSimilarity}). */
     scorer: ScorerFn
 }
 
@@ -172,7 +192,7 @@ export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
     maxMisses: 3,
     jumpHysteresis: 2,
     tailWords: STOP_TAIL_WORDS,
-    scorer: lineSimilarity,
+    scorer: lyricSimilarity,
 }
 
 /** Line timings kept for the rolling duration estimate. */
