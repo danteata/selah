@@ -50,6 +50,7 @@ import type { Scripture, BibleVersion, Slide } from '../types'
 import type { TranscriptSegment } from '../types/sermon-listener'
 import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
 import { filterFillers } from '../services/sermon-listener/fillerFilter'
+import { isDuplicateUtterance } from '../services/sermon-listener/transcriptDedup'
 import { applyCustomWords, SERMON_PROPER_NOUNS } from '../services/sermon-listener/customWords'
 import { buildBibleInitialPrompt } from '../services/sermon-listener/bibleInitialPrompt'
 import { audioFeedbackService } from '../services/sermon-listener/audioFeedback'
@@ -723,40 +724,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [isListening, startAudioAnalyser, stopAudioAnalyser])
 
     /**
-     * Check if text is a duplicate or near-duplicate of recent chunks
-     * Returns true if the text should be skipped (is a duplicate)
+     * Check if text is a duplicate or near-duplicate of recent chunks.
+     * Returns true if the text should be skipped. See transcriptDedup.ts for
+     * why worship mode narrows the comparison window.
      */
     const isDuplicateText = useCallback((newText: string): boolean => {
-        if (!newText || newText.length < 5) return false
-
-        const normalizedNew = newText.toLowerCase().trim()
-
-        for (const recent of recentChunksRef.current) {
-            const normalizedRecent = recent.toLowerCase().trim()
-
-            // Exact match
-            if (normalizedNew === normalizedRecent) return true
-
-            // Check containment: only block if the new text is mostly contained in recent
-            // (indicating it's a subset, not new content extending it)
-            if (normalizedRecent.includes(normalizedNew)) {
-                // New text is entirely contained in a recent chunk — skip
-                const lengthRatio = normalizedNew.length / normalizedRecent.length
-                if (lengthRatio > 0.85) return true
-            }
-
-            // Check for repeated patterns (e.g., "Okay. Okay. Okay.")
-            const words = normalizedNew.split(/\s+/)
-            if (words.length >= 3) {
-                const phrase = words.slice(0, 3).join(' ')
-                const repeatedPattern = new RegExp(`(${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*){2,}`, 'i')
-                if (repeatedPattern.test(normalizedNew)) {
-                    return true
-                }
-            }
-        }
-
-        return false
+        return isDuplicateUtterance(newText, recentChunksRef.current, {
+            worshipMode: useAppStore.getState().songTracking.autoDetect,
+        })
     }, [])
 
     /**
