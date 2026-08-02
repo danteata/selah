@@ -631,16 +631,29 @@ fn handle_speech_segment(
                 // roughly doubling the per-segment cost on exactly the sustained
                 // input the cut exists for, and back the worker queue up until
                 // the transcript falls minutes behind.
+                //
+                // An *empty* stream result is not an answer, it is the absence
+                // of one, and it must never be preferred over audio we still
+                // hold. `finalize_stream` finalizes whichever stream is open,
+                // with nothing binding that stream to this segment: if the
+                // worker thread falls a segment behind, a finalize can land on
+                // a stream that opened moments ago and has been fed nothing,
+                // which returns "" — and because an empty result emits no
+                // event, the transcript simply stops while capture continues.
+                // That state sustains itself, since every later finalize lands
+                // the same way. Falling back to a batch transcribe of the
+                // buffered samples costs one decode and cannot come up empty
+                // for audio that actually contained words.
                 let via_stream;
                 let result = match tm.finalize_stream() {
-                    Ok(Some(text)) => {
+                    Ok(Some(text)) if !text.trim().is_empty() => {
                         via_stream = true;
                         Ok(crate::transcription::TranscriptionOutput {
                             text,
                             segments: Vec::new(),
                         })
                     }
-                    Ok(None) => {
+                    Ok(_) => {
                         via_stream = false;
                         tm.transcribe(samples)
                     }
@@ -869,13 +882,23 @@ pub fn start_capture_with_vad(
         // streaming block inside the VAD match.
         #[cfg(feature = "native-transcription")]
         let mut was_speaking = false;
-        // Set when a segment was cut at `max_speech_ms` while speech continued.
-        // Finalizing that segment closes the live stream mid-utterance, and the
-        // speech-onset edge that normally opens one has long since passed, so
-        // this asks for exactly one more open. Cleared the moment a stream is
-        // opened, which is what keeps it from becoming a level trigger.
+        // "This utterance should have a live stream and does not yet."
+        //
+        // Set by the speech-onset edge and by a `max_speech_ms` cut (which
+        // finalizes, and so closes, the stream mid-utterance, long after the
+        // onset edge has passed). Cleared only when a stream actually opens, or
+        // when speech ends — an edge that could not be honoured because the
+        // previous stream was still finalizing has to survive to the next tick,
+        // or the whole utterance runs unstreamed.
+        //
+        // Deliberately not a plain `now_speaking && can_start_stream()` level
+        // trigger: on an engine that cannot stream, the worker `start_stream`
+        // spawns discovers this and exits within milliseconds, so that
+        // condition is true again on the next 10 ms tick and would spawn a
+        // worker a hundred times a second, each taking and returning the engine
+        // lease `transcribe()` needs.
         #[cfg(feature = "native-transcription")]
-        let mut stream_rearm = false;
+        let mut want_stream = false;
 
         while is_capturing.load(Ordering::SeqCst) {
             if !vad_enabled.load(Ordering::SeqCst) {
@@ -977,26 +1000,18 @@ pub fn start_capture_with_vad(
                 #[cfg(feature = "native-transcription")]
                 {
                     let now_speaking = vad.is_speaking();
-                    // Open on the not-speaking->speaking edge, plus the one-shot
-                    // re-arm a `max_speech_ms` cut sets (that cut closes the
-                    // stream without the speaker ever stopping, so the edge alone
-                    // would never fire again for the rest of the run).
-                    //
-                    // Deliberately NOT a plain `now_speaking && can_start_stream()`
-                    // level trigger. On an engine that can't stream, the worker
-                    // that `start_stream` spawns discovers this, drops the router
-                    // and exits within milliseconds — so `can_start_stream()` is
-                    // true again on the very next 10 ms tick, and a level trigger
-                    // spawns a fresh worker a hundred times a second for the whole
-                    // utterance, each one taking and returning the engine lease
-                    // that `transcribe()` is trying to hold.
-                    if now_speaking && (!was_speaking || stream_rearm) {
+                    if now_speaking && !was_speaking {
+                        want_stream = true;
+                    } else if !now_speaking {
+                        want_stream = false;
+                    }
+                    if now_speaking && want_stream {
                         if let Some(tm) = native_transcription_manager.as_ref() {
-                            // A previous stream may still be finalizing; leave the
-                            // re-arm set and retry on a later tick if so.
+                            // A previous stream may still be finalizing; keep
+                            // wanting one and retry on a later tick if so.
                             if tm.can_start_stream() {
                                 tm.start_stream();
-                                stream_rearm = false;
+                                want_stream = false;
                                 // Seed the fresh stream with the VAD pre-roll
                                 // (pre-speech + onset frames) so the streaming
                                 // model sees the start of the utterance. Without
@@ -1028,10 +1043,10 @@ pub fn start_capture_with_vad(
                         // A segment that ends while the VAD still hears speech
                         // was cut at `max_speech_ms`, not at a silence. Its
                         // finalize will close the live stream mid-utterance, so
-                        // ask for one more open (see `stream_rearm`).
+                        // ask for another one (see `want_stream`).
                         #[cfg(feature = "native-transcription")]
                         if vad.is_speaking() {
-                            stream_rearm = true;
+                            want_stream = true;
                         }
                         // Complete speech segment: hand off to the transcription
                         // worker thread (see above) so a slow transcribe() call

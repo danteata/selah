@@ -664,10 +664,21 @@ impl TranscriptionManager {
             self.touch_activity();
             info!("[transcription] live streaming transcription started (model '{:?}')", model_id);
 
+            // How much audio this stream actually saw before it was finalized.
+            // A finalize is not bound to any particular segment — it takes
+            // whichever stream is open — so a worker thread running a segment
+            // behind can finalize a stream that has been fed nothing and get
+            // "" back. These counters are what tells that apart from a model
+            // that simply found no words in real audio.
+            let mut fed_frames: u64 = 0;
+            let mut fed_samples: u64 = 0;
+
             while let Ok(cmd) = rx.recv() {
                 match cmd {
                     StreamCmd::Feed(pcm) => {
                         self.touch_activity();
+                        fed_frames += 1;
+                        fed_samples += pcm.len() as u64;
                         match stream.feed(&pcm) {
                             Ok(update) => {
                                 if update.committed_changed || update.tentative_changed {
@@ -679,6 +690,18 @@ impl TranscriptionManager {
                         }
                     }
                     StreamCmd::Finalize(reply) => {
+                        let ms = fed_samples * 1000 / 16_000;
+                        if fed_samples == 0 {
+                            warn!(
+                                "[transcription] finalizing a stream that was fed no audio — \
+                                 the finalize has landed on the wrong stream"
+                            );
+                        } else {
+                            debug!(
+                                "[transcription] finalizing stream after {} frames / {} ms",
+                                fed_frames, ms
+                            );
+                        }
                         let result = match stream.finalize() {
                             // After finalize the committed prefix holds the
                             // full text; display() = committed + tentative is
