@@ -1,5 +1,5 @@
 import type { Song } from '../../types'
-import { lineSimilarity, tokenize } from './songTracker'
+import { lyricSimilarity, tokenize } from './songTracker'
 import { getContentWords, isTheologicalCommon, isAmbiguousMatch, type ScoredVerseCandidate } from '../../lib/semanticRetrievalPolicy'
 
 /**
@@ -19,6 +19,23 @@ import { getContentWords, isTheologicalCommon, isAmbiguousMatch, type ScoredVers
 /** A minimum line length filters out short filler ("oh", "yeah") that would
  *  match many songs and cause false positives. */
 const MIN_LINE_WORDS = 4
+/**
+ * …but length alone doesn't measure how discriminating a line is, because it
+ * counts a repeated word once per repetition. "Yeah yeah (yeah yeah)" is four
+ * tokens and clears {@link MIN_LINE_WORDS}, yet carries exactly one distinct
+ * content word, and a one-word line is a wildcard: {@link lineSimilarity}'s
+ * coverage term is `shared / distinct-words-in-line`, so *any* transcript
+ * containing "yeah" scores 0.95 against it — above the near-exact threshold
+ * that identifies a song on its own, with no corroboration required.
+ *
+ * That is not hypothetical. A worship set transcribed as "…all will see how
+ * great and crazy yeah…" identified an unrelated library song outright on its
+ * "yeah yeah (yeah yeah)" line (0.95), while that song's one genuinely
+ * relevant lyric scored 0.24 — and the wrong song went to the projector.
+ * Requiring two distinct content words keeps real short lines ("How great is
+ * our God" → great, god) and drops the wildcards.
+ */
+const MIN_LINE_DISTINCT_CONTENT = 2
 /** Tokens shorter than this are too common to be discriminating. */
 const SIG_TOKEN_LEN = 4
 
@@ -28,8 +45,12 @@ export interface SongLineEntry {
     sectionId: string
     lineIndex: number
     text: string
-    /** Distinctive (stopword-filtered, stemmed) words of the line. Used to
-     *  reject matches that only overlap on filler words. */
+    /** Distinctive (stopword-filtered, stemmed) words of the line, DEDUPED.
+     *  Used to reject matches that only overlap on filler words — which means
+     *  it has to count distinct words. Kept as duplicates, one shared word in a
+     *  line that repeats it four times counted as four shared words, clearing
+     *  both {@link MIN_SHARED_CONTENT} and {@link MIN_DISTINCTIVE_SHARED} (and
+     *  the query-coverage gate) on the strength of a single overlap. */
     content: string[]
 }
 
@@ -118,6 +139,8 @@ export function buildSongIndex(songs: Song[]): SongIndex {
             section.lines.forEach((line, lineIndex) => {
                 const toks = tokenize(line)
                 if (toks.length < MIN_LINE_WORDS) return
+                const content = Array.from(new Set(getContentWords(line)))
+                if (content.length < MIN_LINE_DISTINCT_CONTENT) return
                 const idx = entries.length
                 entries.push({
                     songId,
@@ -125,7 +148,7 @@ export function buildSongIndex(songs: Song[]): SongIndex {
                     sectionId: section.id,
                     lineIndex,
                     text: line,
-                    content: getContentWords(line),
+                    content,
                 })
                 const seen = new Set<string>()
                 for (const t of toks) {
@@ -204,7 +227,7 @@ export function identifySong(
         }
         if (sharedContent < MIN_SHARED_CONTENT) continue
         if (qContent.size >= MIN_QUERY_SIZE_FOR_COVERAGE_CHECK && sharedContent / qContent.size < MIN_QUERY_COVERAGE) continue
-        const score = lineSimilarity(query, e.text)
+        const score = lyricSimilarity(query, e.text)
         if (score < FLOOR) continue // ignore weak incidental token overlap
         // Distinctive-vocabulary gate: reject a line whose overlap is only
         // generic theological words ("God"/"Lord"/"praise") UNLESS it matches

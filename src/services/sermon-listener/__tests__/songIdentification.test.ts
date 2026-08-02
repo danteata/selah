@@ -290,4 +290,66 @@ describe('identifySong', () => {
             expect(m?.songId).toBe('song-x')
         })
     })
+
+    describe('filler lines are not wildcards (regression: wrong song went live)', () => {
+        // Observed in a real service: Parakeet transcribed "how great is our
+        // God" as "how crazy", and an unrelated library song was identified
+        // outright — not on its "You drive me crazy" lyric (which scored 0.24)
+        // but on a "yeah yeah (yeah yeah)" filler line, which scored 0.95
+        // against any transcript containing the word "yeah". A single distinct
+        // content word makes a line match nearly everything, because coverage
+        // is measured as shared / distinct-words-in-line.
+        const FILLER_SONG: Song = {
+            id: 'filler-song', _id: 'filler-song', title: 'You drive me crazy',
+            sections: [
+                { id: 'v1', label: 'Verse 1', lines: [
+                    "oh oh Jesus, I'm so in love with You drive me crazy, can't stop thinking about You",
+                ] },
+                { id: 'v2', label: 'Verse 2', lines: [
+                    'yeah yeah (yeah yeah)',
+                    'yeah yeah (yeah yeah)',
+                    'yeah yeah (yeah yeah)',
+                    'yeah yeah (yeah yeah)',
+                ] },
+            ],
+        } as unknown as Song
+
+        const MISHEARD = 'cause i got all will see how great and crazy yeah and time is in the ache'
+
+        it('does not index a line whose words are all the same', () => {
+            const idx = buildSongIndex([FILLER_SONG])
+            expect(idx.entries.map((e) => e.text)).not.toContain('yeah yeah (yeah yeah)')
+        })
+
+        it('does not identify a song from a repeated-filler line', () => {
+            const idx = buildSongIndex([FILLER_SONG])
+            expect(identifySong(MISHEARD, idx)).toBeNull()
+        })
+
+        it('counts a line\'s shared content words distinctly, not per repetition', () => {
+            // "holy" three times is one shared word, not three, so it cannot
+            // clear the two-shared-content gate on its own.
+            const REPEATER: Song = {
+                id: 'repeater', _id: 'repeater', title: 'Repeater',
+                sections: [{ id: 'v1', label: 'Verse 1', lines: ['holy holy holy mercy'] }],
+            } as unknown as Song
+            const idx = buildSongIndex([REPEATER])
+            expect(identifySong('he is holy and we lift our voices to him today', idx)).toBeNull()
+        })
+
+        it('still identifies a real short line with two distinct content words', () => {
+            const REAL: Song = {
+                id: 'hgiog', _id: 'hgiog', title: 'How Great Is Our God',
+                sections: [{ id: 'c1', label: 'Chorus', lines: [
+                    'How great is our God',
+                    'Sing with me how great is our God',
+                    'And all will see how great how great is our God',
+                ] }],
+            } as unknown as Song
+            const idx = buildSongIndex([REAL])
+            expect(idx.entries.length).toBeGreaterThan(0)
+            const m = identifySong('sing with me how great is our God and all will see how great', idx)
+            expect(m?.songId).toBe('hgiog')
+        })
+    })
 })
