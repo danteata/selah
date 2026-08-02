@@ -622,18 +622,48 @@ fn handle_speech_segment(
                 // user already saw appear live. `Ok(None)` means no stream was
                 // active (the loaded model doesn't support streaming) — fall
                 // back to a normal batch transcribe of the buffered samples.
+                //
+                // This holds for a segment cut at `max_speech_ms` too. Finalizing
+                // is what closes the stream so the next one can open, and on a
+                // streaming engine its text is the *better* result — it decoded
+                // this audio with full context. Batch-transcribing the buffered
+                // samples instead would decode the same seconds a second time,
+                // roughly doubling the per-segment cost on exactly the sustained
+                // input the cut exists for, and back the worker queue up until
+                // the transcript falls minutes behind.
+                let via_stream;
                 let result = match tm.finalize_stream() {
-                    Ok(Some(text)) => Ok(crate::transcription::TranscriptionOutput {
-                        text,
-                        segments: Vec::new(),
-                    }),
-                    Ok(None) => tm.transcribe(samples),
-                    Err(e) => Err(e),
+                    Ok(Some(text)) => {
+                        via_stream = true;
+                        Ok(crate::transcription::TranscriptionOutput {
+                            text,
+                            segments: Vec::new(),
+                        })
+                    }
+                    Ok(None) => {
+                        via_stream = false;
+                        tm.transcribe(samples)
+                    }
+                    Err(e) => {
+                        via_stream = true;
+                        Err(e)
+                    }
                 };
                 match result {
                     Ok(out) => {
                         let text = out.text.trim().to_string();
-                        if !text.is_empty() {
+                        if text.is_empty() {
+                            // Emitting nothing is indistinguishable, from the
+                            // frontend, from the engine having died — the
+                            // transcript just stops while capture carries on.
+                            // Say so, so the two can be told apart in the log.
+                            tracing::warn!(
+                                "[native-transcription] empty result for {} ms segment at {} ms (via {})",
+                                duration_ms,
+                                start_offset_ms,
+                                if via_stream { "stream" } else { "batch" },
+                            );
+                        } else {
                             // Engine times are relative to this utterance; shift
                             // them onto the session timeline before emitting.
                             let offset_secs = start_offset_ms as f64 / 1000.0;
@@ -748,6 +778,13 @@ pub fn start_capture_with_vad(
         state.vad_enabled.store(true, Ordering::SeqCst);
     }
 
+    // The segmenter outlives a capture session (it is only built once), so its
+    // sample clock — which is what dates every emitted segment — has to be
+    // rewound here or a second session's timestamps continue the first's.
+    if let Some(ref mut vad) = *state.vad_segmenter.lock() {
+        vad.reset();
+    }
+
     // Clone what we need for the VAD processing thread BEFORE calling start_capture
     let is_capturing = state.is_capturing.clone();
     let audio_buffer = state.audio_buffer.clone();
@@ -828,10 +865,17 @@ pub fn start_capture_with_vad(
         // whole inter-emit window means no audio goes unexamined.
         let mut feature_filters = AudioFeatureFilters::new();
         let mut feature_window: Vec<f32> = Vec::with_capacity(TARGET_SAMPLE_RATE as usize / 8);
-        // Edge-triggers `start_stream()` on the false->true transition below;
-        // see the streaming block inside the VAD match.
+        // Whether audio should currently be routed to a live stream; see the
+        // streaming block inside the VAD match.
         #[cfg(feature = "native-transcription")]
         let mut was_speaking = false;
+        // Set when a segment was cut at `max_speech_ms` while speech continued.
+        // Finalizing that segment closes the live stream mid-utterance, and the
+        // speech-onset edge that normally opens one has long since passed, so
+        // this asks for exactly one more open. Cleared the moment a stream is
+        // opened, which is what keeps it from becoming a level trigger.
+        #[cfg(feature = "native-transcription")]
+        let mut stream_rearm = false;
 
         while is_capturing.load(Ordering::SeqCst) {
             if !vad_enabled.load(Ordering::SeqCst) {
@@ -933,21 +977,41 @@ pub fn start_capture_with_vad(
                 #[cfg(feature = "native-transcription")]
                 {
                     let now_speaking = vad.is_speaking();
-                    if !was_speaking && now_speaking {
+                    // Open on the not-speaking->speaking edge, plus the one-shot
+                    // re-arm a `max_speech_ms` cut sets (that cut closes the
+                    // stream without the speaker ever stopping, so the edge alone
+                    // would never fire again for the rest of the run).
+                    //
+                    // Deliberately NOT a plain `now_speaking && can_start_stream()`
+                    // level trigger. On an engine that can't stream, the worker
+                    // that `start_stream` spawns discovers this, drops the router
+                    // and exits within milliseconds — so `can_start_stream()` is
+                    // true again on the very next 10 ms tick, and a level trigger
+                    // spawns a fresh worker a hundred times a second for the whole
+                    // utterance, each one taking and returning the engine lease
+                    // that `transcribe()` is trying to hold.
+                    if now_speaking && (!was_speaking || stream_rearm) {
                         if let Some(tm) = native_transcription_manager.as_ref() {
-                            tm.start_stream();
-                        }
-                        // Seed the fresh stream with the VAD pre-roll (pre-speech
-                        // + onset frames) so the streaming model sees the start of
-                        // the utterance. Without this, feeding only begins on the
-                        // onset tick and the first word or two gets clipped —
-                        // exactly what the batch path avoids by prepending the same
-                        // pre_speech_buffer to its committed segment. The prefill
-                        // excludes this tick's `samples`, which are fed next.
-                        if let Some(router) = native_stream_router.as_ref() {
-                            let prefill = vad.stream_prefill(samples.len());
-                            if !prefill.is_empty() {
-                                router.feed(prefill);
+                            // A previous stream may still be finalizing; leave the
+                            // re-arm set and retry on a later tick if so.
+                            if tm.can_start_stream() {
+                                tm.start_stream();
+                                stream_rearm = false;
+                                // Seed the fresh stream with the VAD pre-roll
+                                // (pre-speech + onset frames) so the streaming
+                                // model sees the start of the utterance. Without
+                                // this, feeding only begins on the onset tick and
+                                // the first word or two gets clipped — exactly
+                                // what the batch path avoids by prepending the
+                                // same pre_speech_buffer to its committed
+                                // segment. The prefill excludes this tick's
+                                // `samples`, which are fed next.
+                                if let Some(router) = native_stream_router.as_ref() {
+                                    let prefill = vad.stream_prefill(samples.len());
+                                    if !prefill.is_empty() {
+                                        router.feed(prefill);
+                                    }
+                                }
                             }
                         }
                     }
@@ -960,13 +1024,21 @@ pub fn start_capture_with_vad(
                 }
 
                 match segment_result {
-                    Ok(Some(speech_samples)) => {
+                    Ok(Some(segment)) => {
+                        // A segment that ends while the VAD still hears speech
+                        // was cut at `max_speech_ms`, not at a silence. Its
+                        // finalize will close the live stream mid-utterance, so
+                        // ask for one more open (see `stream_rearm`).
+                        #[cfg(feature = "native-transcription")]
+                        if vad.is_speaking() {
+                            stream_rearm = true;
+                        }
                         // Complete speech segment: hand off to the transcription
                         // worker thread (see above) so a slow transcribe() call
                         // can never stall this loop's heartbeat.
                         let _ = job_tx.send(TranscriptionJob {
-                            samples: speech_samples,
-                            start_offset_ms,
+                            samples: segment.samples,
+                            start_offset_ms: segment.start_ms,
                             is_speaking: true,
                         });
                     }
@@ -997,11 +1069,10 @@ pub fn start_capture_with_vad(
         // reference) would be lost on stop.
         let mut segmenter = vad_segmenter.lock();
         if let Some(ref mut vad) = *segmenter {
-            if let Some(speech_samples) = vad.flush() {
-                let start_offset_ms = session_start.elapsed().as_millis() as u32;
+            if let Some(segment) = vad.flush() {
                 let _ = job_tx.send(TranscriptionJob {
-                    samples: speech_samples,
-                    start_offset_ms,
+                    samples: segment.samples,
+                    start_offset_ms: segment.start_ms,
                     is_speaking: false,
                 });
             }

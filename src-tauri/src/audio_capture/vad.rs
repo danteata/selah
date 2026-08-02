@@ -29,6 +29,19 @@ pub struct VadConfig {
     /// cough, a chair scrape, a mic pop — that would otherwise open a bogus
     /// segment. At 512 samples / 32 ms per chunk, 3 ≈ 96 ms. (default: 3)
     pub onset_chunks: usize,
+    /// Hard ceiling on how long one speech segment may run before it is cut
+    /// and emitted regardless of whether silence was ever heard (default:
+    /// 10_000 ms).
+    ///
+    /// Without this the segmenter only ever closes a segment on
+    /// `min_silence_ms` of contiguous sub-threshold audio — which congregational
+    /// singing over a band never produces. Silero reports speech continuously,
+    /// `speech_buffer` grows without bound, and *nothing is ever transcribed*
+    /// even though audio is plainly arriving: the transcript simply stops
+    /// mid-song while the level meter keeps moving. Capping the segment
+    /// guarantees forward progress for any input, at the cost of an occasional
+    /// mid-phrase cut (which {@link CUT_BACK_WINDOW_MS} below minimizes).
+    pub max_speech_ms: u32,
 }
 
 impl Default for VadConfig {
@@ -40,6 +53,7 @@ impl Default for VadConfig {
             min_silence_ms: 100,
             speech_pad_ms: 30,
             onset_chunks: 3,
+            max_speech_ms: 10_000,
         }
     }
 }
@@ -212,6 +226,26 @@ impl SileroVad {
     }
 }
 
+/// How far back from a forced cut we will look for a momentary dip below the
+/// speech threshold to cut at instead. A breath between sung phrases is often
+/// only one or two chunks long — far short of `min_silence_ms` — so it never
+/// closes a segment on its own, but it is still a much better place to split
+/// than an arbitrary sample in the middle of a word.
+const CUT_BACK_WINDOW_MS: u32 = 1_500;
+
+/// A completed speech segment plus where it sits on the capture timeline.
+pub struct SpeechSegment {
+    pub samples: Vec<f32>,
+    /// Milliseconds from the first captured sample to this segment's *first*
+    /// sample. Callers shift the engine's utterance-relative word timings by
+    /// this to put them on the session timeline, so it has to be the segment's
+    /// start — using the moment the segment *closed* (which is what the capture
+    /// loop's own clock reports) puts every timestamp a whole segment-length
+    /// late, and the song tracker's latency estimate reads that as "the
+    /// transcript is caught up" when it is seconds behind.
+    pub start_ms: u32,
+}
+
 /// VAD-based speech segmenter
 /// Accumulates audio and emits complete speech segments
 pub struct VadSegmenter {
@@ -236,6 +270,15 @@ pub struct VadSegmenter {
     onset_chunks: usize,
     /// Consecutive speech chunks seen so far while not yet speaking
     onset_chunks_seen: usize,
+    /// Total samples drained through the VAD since the last `reset()`. The
+    /// authoritative capture timeline — derived from the audio itself rather
+    /// than wall-clock, so it can't drift when the processing thread is late.
+    samples_processed: u64,
+    /// Length of `speech_buffer` at the most recent sub-threshold chunk within
+    /// the current segment, i.e. the last place the voice dipped. Used as the
+    /// preferred split point for a forced cut. `None` until the segment has
+    /// dipped at all.
+    last_dip_len: Option<usize>,
 }
 
 impl VadSegmenter {
@@ -261,6 +304,8 @@ impl VadSegmenter {
             pre_speech_chunks: 10, // ~320ms pre-speech buffer
             onset_chunks,
             onset_chunks_seen: 0,
+            samples_processed: 0,
+            last_dip_len: None,
         })
     }
 
@@ -278,8 +323,8 @@ impl VadSegmenter {
     }
 
     /// Process audio samples and return complete speech segments
-    /// Returns Some(wav_data) when a complete speech segment is detected
-    pub fn process(&mut self, samples: &[f32]) -> Result<Option<Vec<f32>>, String> {
+    /// Returns Some(segment) when a complete speech segment is detected
+    pub fn process(&mut self, samples: &[f32]) -> Result<Option<SpeechSegment>, String> {
         // Add samples to buffer
         self.audio_buffer.extend_from_slice(samples);
 
@@ -289,6 +334,7 @@ impl VadSegmenter {
         while self.audio_buffer.len() >= self.chunk_size {
             // Extract chunk
             let chunk: Vec<f32> = self.audio_buffer.drain(..self.chunk_size).collect();
+            self.samples_processed += self.chunk_size as u64;
 
             // Run VAD
             let probability = self.vad.process(&chunk)?;
@@ -306,6 +352,7 @@ impl VadSegmenter {
                         self.is_speaking = true;
                         self.onset_chunks_seen = 0;
                         self.silence_chunks = 0;
+                        self.last_dip_len = None;
                         // Prepend pre-speech buffer (already includes onset frames
                         // and the current chunk) to capture the start of words.
                         self.speech_buffer
@@ -321,24 +368,16 @@ impl VadSegmenter {
                 // Still in speech segment but detected silence
                 self.speech_buffer.extend_from_slice(&chunk);
                 self.silence_chunks += 1;
+                // Remember this dip: if the segment later has to be force-cut,
+                // splitting here beats splitting mid-word.
+                self.last_dip_len = Some(self.speech_buffer.len());
 
                 // Check if silence duration exceeds threshold
                 let silence_ms =
                     (self.silence_chunks as u32 * self.chunk_size as u32 * 1000) / self.sample_rate;
                 if silence_ms >= self.vad.config().min_silence_ms {
                     // Speech segment ended
-                    let speech_samples = self.speech_buffer.len() as u32;
-                    let speech_ms = (speech_samples * 1000) / self.sample_rate;
-
-                    // Only emit if speech duration meets minimum
-                    if speech_ms >= self.vad.config().min_speech_ms {
-                        result = Some(std::mem::take(&mut self.speech_buffer));
-                    }
-
-                    // Reset for next segment
-                    self.speech_buffer.clear();
-                    self.is_speaking = false;
-                    self.silence_chunks = 0;
+                    result = self.close_segment();
                 }
             } else {
                 // Not speaking and this chunk is silence: the onset run (if any)
@@ -346,22 +385,107 @@ impl VadSegmenter {
                 self.onset_chunks_seen = 0;
                 self.push_pre_speech(&chunk);
             }
+
+            // Forced cut. Sustained input that never dips long enough to close a
+            // segment — congregational singing over a band is the standard case —
+            // would otherwise accumulate forever and never reach the engine.
+            if result.is_none() && self.is_speaking && self.speech_ms() >= self.vad.config().max_speech_ms
+            {
+                result = self.force_cut();
+            }
+
+            // A completed segment leaves the rest of this call's audio in
+            // `audio_buffer` for the next one, rather than being overwritten by
+            // a later segment from the same call (only one can be returned).
+            if result.is_some() {
+                break;
+            }
         }
 
         Ok(result)
     }
 
-    /// Flush any remaining speech buffer
-    pub fn flush(&mut self) -> Option<Vec<f32>> {
-        if !self.speech_buffer.is_empty() {
-            let speech_samples = self.speech_buffer.len() as u32;
-            let speech_ms = (speech_samples * 1000) / self.sample_rate;
+    /// Duration of the open speech buffer in milliseconds. Widened to u64
+    /// before scaling: `len * 1000` overflows a u32 at ~75 hours of samples,
+    /// and the buffer's only bound is `max_speech_ms`, which is configurable.
+    fn speech_ms(&self) -> u32 {
+        (self.speech_buffer.len() as u64 * 1000 / self.sample_rate as u64) as u32
+    }
 
-            if speech_ms >= self.vad.config().min_speech_ms {
-                return Some(std::mem::take(&mut self.speech_buffer));
-            }
+    /// Sample offset of the first sample currently in `speech_buffer`.
+    fn speech_start_sample(&self) -> u64 {
+        self.samples_processed
+            .saturating_sub(self.speech_buffer.len() as u64)
+    }
+
+    fn start_ms_for(&self, start_sample: u64) -> u32 {
+        (start_sample * 1000 / self.sample_rate as u64) as u32
+    }
+
+    /// End the open segment normally (silence heard). Emits it if it cleared
+    /// `min_speech_ms`; either way the segmenter returns to the not-speaking
+    /// state ready for the next utterance.
+    fn close_segment(&mut self) -> Option<SpeechSegment> {
+        let start_ms = self.start_ms_for(self.speech_start_sample());
+        let long_enough = self.speech_ms() >= self.vad.config().min_speech_ms;
+        let samples = std::mem::take(&mut self.speech_buffer);
+        self.is_speaking = false;
+        self.silence_chunks = 0;
+        self.last_dip_len = None;
+        if long_enough {
+            Some(SpeechSegment { samples, start_ms })
+        } else {
+            None
         }
-        None
+    }
+
+    /// Cut the open segment at `max_speech_ms` and keep listening — the speaker
+    /// (or singer) has not stopped, so the tail stays open as the start of the
+    /// next segment and no audio is dropped.
+    ///
+    /// Prefers the most recent momentary dip below the speech threshold as the
+    /// split point, when there was one close enough to the cut, so the split
+    /// lands in a breath rather than mid-word.
+    fn force_cut(&mut self) -> Option<SpeechSegment> {
+        let cut_back_samples =
+            (CUT_BACK_WINDOW_MS as usize * self.sample_rate as usize) / 1000;
+        let split = match self.last_dip_len {
+            Some(len)
+                if len > 0
+                    && len <= self.speech_buffer.len()
+                    && self.speech_buffer.len() - len <= cut_back_samples =>
+            {
+                len
+            }
+            _ => self.speech_buffer.len(),
+        };
+
+        let start_sample = self.speech_start_sample();
+        let tail = self.speech_buffer.split_off(split);
+        let samples = std::mem::replace(&mut self.speech_buffer, tail);
+        // Still speaking: the remainder becomes the head of the next segment.
+        self.silence_chunks = 0;
+        self.last_dip_len = None;
+
+        Some(SpeechSegment {
+            samples,
+            start_ms: self.start_ms_for(start_sample),
+        })
+    }
+
+    /// Flush any remaining speech buffer
+    pub fn flush(&mut self) -> Option<SpeechSegment> {
+        if self.speech_buffer.is_empty() {
+            return None;
+        }
+        if self.speech_ms() < self.vad.config().min_speech_ms {
+            return None;
+        }
+        let start_ms = self.start_ms_for(self.speech_start_sample());
+        Some(SpeechSegment {
+            samples: std::mem::take(&mut self.speech_buffer),
+            start_ms,
+        })
     }
 
     /// Reset segmenter state
@@ -373,6 +497,8 @@ impl VadSegmenter {
         self.is_speaking = false;
         self.silence_chunks = 0;
         self.onset_chunks_seen = 0;
+        self.samples_processed = 0;
+        self.last_dip_len = None;
     }
 
     /// Check if currently in a speech segment
@@ -409,5 +535,7 @@ mod tests {
         assert_eq!(config.min_silence_ms, 100);
         // Onset smoothing defaults to 3 consecutive speech chunks (~96 ms).
         assert_eq!(config.onset_chunks, 3);
+        // Sustained input must be cut and emitted even if it never falls silent.
+        assert_eq!(config.max_speech_ms, 10_000);
     }
 }

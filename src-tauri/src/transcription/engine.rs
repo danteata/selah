@@ -538,6 +538,17 @@ impl TranscriptionManager {
     /// until `finalize_stream` and reports `None` so the caller falls back to
     /// batch transcription. Frames sent before the stream begins queue on the
     /// channel and are not lost.
+    /// Whether [`start_stream`] would actually open a stream right now — i.e.
+    /// no stream is open and no previous stream worker is still winding down.
+    ///
+    /// The VAD capture loop polls this instead of edge-triggering on speech
+    /// onset, so a stream that was finalized mid-utterance (a segment cut at
+    /// `max_speech_ms`) gets reopened as soon as the previous worker lets go,
+    /// without spamming `start_stream`'s "already active" warning every tick.
+    pub fn can_start_stream(&self) -> bool {
+        !self.router.is_open() && self.active_stream_worker.load(Ordering::Acquire) == 0
+    }
+
     pub fn start_stream(&self) {
         if self.router.is_open() || self.active_stream_worker.load(Ordering::Acquire) != 0 {
             warn!("[transcription] start_stream called while a stream worker is already active");
