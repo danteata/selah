@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "presenta-react",
@@ -83,6 +82,7 @@
   },
   "trustedDependencies": [
     "esbuild",
+    "sharp",
     "@esbuild/linux-arm64",
     "@esbuild/linux-x64",
     "@esbuild/win32-x64",
