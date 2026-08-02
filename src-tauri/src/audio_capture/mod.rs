@@ -595,6 +595,12 @@ struct TranscriptionJob {
     samples: Vec<f32>,
     start_offset_ms: u32,
     is_speaking: bool,
+    /// Reply channel for the live stream that received *this* segment's audio,
+    /// detached from the router by the capture thread at the moment the segment
+    /// ended. `None` when no stream was open. See
+    /// `TranscriptionManager::request_finalize` for why the detach has to
+    /// happen there rather than on the worker thread.
+    finalize: Option<std::sync::mpsc::Receiver<Option<String>>>,
 }
 
 /// Handle a complete VAD speech segment.
@@ -607,6 +613,9 @@ fn handle_speech_segment(
     samples: Vec<f32>,
     start_offset_ms: u32,
     is_speaking: bool,
+    #[cfg_attr(not(feature = "native-transcription"), allow(unused_variables))] finalize: Option<
+        std::sync::mpsc::Receiver<Option<String>>,
+    >,
 ) {
     use tauri::Emitter;
     let duration_ms = (samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
@@ -632,35 +641,24 @@ fn handle_speech_segment(
                 // input the cut exists for, and back the worker queue up until
                 // the transcript falls minutes behind.
                 //
-                // An *empty* stream result is not an answer, it is the absence
-                // of one, and it must never be preferred over audio we still
-                // hold. `finalize_stream` finalizes whichever stream is open,
-                // with nothing binding that stream to this segment: if the
-                // worker thread falls a segment behind, a finalize can land on
-                // a stream that opened moments ago and has been fed nothing,
-                // which returns "" — and because an empty result emits no
-                // event, the transcript simply stops while capture continues.
-                // That state sustains itself, since every later finalize lands
-                // the same way. Falling back to a batch transcribe of the
-                // buffered samples costs one decode and cannot come up empty
-                // for audio that actually contained words.
-                let via_stream;
-                let result = match tm.finalize_stream() {
-                    Ok(Some(text)) if !text.trim().is_empty() => {
-                        via_stream = true;
-                        Ok(crate::transcription::TranscriptionOutput {
-                            text,
-                            segments: Vec::new(),
-                        })
-                    }
-                    Ok(_) => {
-                        via_stream = false;
-                        tm.transcribe(samples)
-                    }
-                    Err(e) => {
-                        via_stream = true;
-                        Err(e)
-                    }
+                // `finalize` is this segment's own stream, detached by the
+                // capture thread when the segment ended, so its text describes
+                // this audio and no other. An *empty* answer is still not an
+                // answer, though, and must never be preferred over samples we
+                // still hold: a model can stream nothing for reasons of its own,
+                // and emitting nothing looks exactly like a dead engine from the
+                // frontend. Batch transcribing costs one decode and cannot come
+                // up empty for audio that actually contained words.
+                let streamed = finalize
+                    .and_then(crate::transcription::TranscriptionManager::await_finalize)
+                    .filter(|text| !text.trim().is_empty());
+                let via_stream = streamed.is_some();
+                let result = match streamed {
+                    Some(text) => Ok(crate::transcription::TranscriptionOutput {
+                        text,
+                        segments: Vec::new(),
+                    }),
+                    None => tm.transcribe(samples),
                 };
                 match result {
                     Ok(out) => {
@@ -837,7 +835,13 @@ pub fn start_capture_with_vad(
     let worker_app = app.clone();
     let worker_handle = std::thread::spawn(move || {
         for job in job_rx {
-            handle_speech_segment(&worker_app, job.samples, job.start_offset_ms, job.is_speaking);
+            handle_speech_segment(
+                &worker_app,
+                job.samples,
+                job.start_offset_ms,
+                job.is_speaking,
+                job.finalize,
+            );
         }
     });
 
@@ -1040,10 +1044,24 @@ pub fn start_capture_with_vad(
 
                 match segment_result {
                     Ok(Some(segment)) => {
+                        // Detach this segment's stream here, on the thread that
+                        // knows the segment just ended, and send it with the
+                        // job. Doing it synchronously is the whole point: the
+                        // router is emptied before another sample can be fed,
+                        // so the stream the worker finalizes is exactly the one
+                        // that heard this segment — never a newer, empty one it
+                        // happened to find open.
+                        #[cfg(feature = "native-transcription")]
+                        let finalize = native_transcription_manager
+                            .as_ref()
+                            .and_then(|tm| tm.request_finalize());
+                        #[cfg(not(feature = "native-transcription"))]
+                        let finalize = None;
+
                         // A segment that ends while the VAD still hears speech
-                        // was cut at `max_speech_ms`, not at a silence. Its
-                        // finalize will close the live stream mid-utterance, so
-                        // ask for another one (see `want_stream`).
+                        // was cut at `max_speech_ms`, not at a silence. The
+                        // detach above closed the stream mid-utterance, so ask
+                        // for another one (see `want_stream`).
                         #[cfg(feature = "native-transcription")]
                         if vad.is_speaking() {
                             want_stream = true;
@@ -1055,6 +1073,7 @@ pub fn start_capture_with_vad(
                             samples: segment.samples,
                             start_offset_ms: segment.start_ms,
                             is_speaking: true,
+                            finalize,
                         });
                     }
                     Ok(None) => {
@@ -1085,10 +1104,17 @@ pub fn start_capture_with_vad(
         let mut segmenter = vad_segmenter.lock();
         if let Some(ref mut vad) = *segmenter {
             if let Some(segment) = vad.flush() {
+                #[cfg(feature = "native-transcription")]
+                let finalize = native_transcription_manager
+                    .as_ref()
+                    .and_then(|tm| tm.request_finalize());
+                #[cfg(not(feature = "native-transcription"))]
+                let finalize = None;
                 let _ = job_tx.send(TranscriptionJob {
                     samples: segment.samples,
                     start_offset_ms: segment.start_ms,
                     is_speaking: false,
+                    finalize,
                 });
             }
             vad.reset();

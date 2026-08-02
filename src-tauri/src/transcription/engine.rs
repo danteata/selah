@@ -754,24 +754,41 @@ impl TranscriptionManager {
         }
     }
 
-    /// Flush the active stream and return its final text.
+    /// Detach the live stream and ask it to flush, without waiting for the
+    /// answer. Returns a receiver for its final text, or `None` if no stream
+    /// was open.
     ///
-    /// `Ok(None)` means no usable stream was active (no model loaded, model
-    /// doesn't support streaming, or finalize failed/timed out) and the
-    /// caller should fall back to batch transcription.
-    pub fn finalize_stream(&self) -> Result<Option<String>> {
-        let Some(tx) = self.router.take() else {
-            return Ok(None);
-        };
+    /// Requesting and awaiting are separate calls so that the *capture* thread
+    /// can request at the exact instant a speech segment ends. That is what
+    /// binds a segment to the stream which actually received its audio: the
+    /// detach happens synchronously there, so no later audio can reach the
+    /// stream being finalized, and no other thread can finalize it first.
+    ///
+    /// Doing it from the transcription worker instead — as this used to —
+    /// finalizes whichever stream happens to be open when the worker gets to
+    /// the job. One segment of backlog is enough for that to be a stream
+    /// opened moments ago and fed nothing, which answers with an empty string
+    /// for audio full of words, and stays wrong for every job after it.
+    pub fn request_finalize(&self) -> Option<mpsc::Receiver<Option<String>>> {
+        let tx = self.router.take()?;
         let (reply_tx, reply_rx) = mpsc::channel();
         if tx.send(StreamCmd::Finalize(reply_tx)).is_err() {
-            return Ok(None);
+            return None;
         }
-        match reply_rx.recv_timeout(Duration::from_secs(30)) {
-            Ok(text) => Ok(text),
+        Some(reply_rx)
+    }
+
+    /// Wait for the text of a finalize started by [`Self::request_finalize`].
+    ///
+    /// `None` means the stream produced nothing usable — it never began, the
+    /// model does not stream, or it timed out — and the caller should batch
+    /// transcribe the buffered samples instead.
+    pub fn await_finalize(rx: mpsc::Receiver<Option<String>>) -> Option<String> {
+        match rx.recv_timeout(Duration::from_secs(30)) {
+            Ok(text) => text,
             Err(_) => {
                 warn!("[transcription] stream finalize timed out; falling back to batch");
-                Ok(None)
+                None
             }
         }
     }
