@@ -832,9 +832,15 @@ pub fn start_capture_with_vad(
     // processing them on a separate thread keeps the heartbeat flowing
     // regardless of how long transcription takes, for any engine.
     let (job_tx, job_rx) = std::sync::mpsc::channel::<TranscriptionJob>();
+    // Segments queued but not yet transcribed. Logged with each segment so a
+    // backlog — the engine falling behind the singing — is visible as a number
+    // rather than inferred from a transcript that has gone quiet.
+    let queue_depth = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let worker_depth = queue_depth.clone();
     let worker_app = app.clone();
     let worker_handle = std::thread::spawn(move || {
         for job in job_rx {
+            worker_depth.fetch_sub(1, Ordering::SeqCst);
             handle_speech_segment(
                 &worker_app,
                 job.samples,
@@ -903,6 +909,8 @@ pub fn start_capture_with_vad(
         // lease `transcribe()` needs.
         #[cfg(feature = "native-transcription")]
         let mut want_stream = false;
+        #[cfg(feature = "native-transcription")]
+        let mut stream_blocked_ticks: u32 = 0;
 
         while is_capturing.load(Ordering::SeqCst) {
             if !vad_enabled.load(Ordering::SeqCst) {
@@ -1013,7 +1021,27 @@ pub fn start_capture_with_vad(
                         if let Some(tm) = native_transcription_manager.as_ref() {
                             // A previous stream may still be finalizing; keep
                             // wanting one and retry on a later tick if so.
-                            if tm.can_start_stream() {
+                            if !tm.can_start_stream() {
+                                // A previous stream worker has not let go. If
+                                // this persists, streams stop opening even
+                                // though the VAD is firing normally — which
+                                // reads from outside exactly like a VAD that
+                                // has gone deaf.
+                                stream_blocked_ticks += 1;
+                                if stream_blocked_ticks == 200 {
+                                    tracing::warn!(
+                                        "[VAD] wanted a live stream for 2s but the previous \
+                                         stream worker has not released"
+                                    );
+                                }
+                            } else {
+                                if stream_blocked_ticks >= 200 {
+                                    tracing::info!(
+                                        "[VAD] live stream available again after {} ticks",
+                                        stream_blocked_ticks
+                                    );
+                                }
+                                stream_blocked_ticks = 0;
                                 tm.start_stream();
                                 want_stream = false;
                                 // Seed the fresh stream with the VAD pre-roll
@@ -1069,6 +1097,14 @@ pub fn start_capture_with_vad(
                         // Complete speech segment: hand off to the transcription
                         // worker thread (see above) so a slow transcribe() call
                         // can never stall this loop's heartbeat.
+                        let depth = queue_depth.fetch_add(1, Ordering::SeqCst) + 1;
+                        tracing::info!(
+                            "[VAD] segment {} ms at {} ms ({}), {} awaiting transcription",
+                            segment.samples.len() as u64 * 1000 / TARGET_SAMPLE_RATE as u64,
+                            segment.start_ms,
+                            segment.cause.as_str(),
+                            depth,
+                        );
                         let _ = job_tx.send(TranscriptionJob {
                             samples: segment.samples,
                             start_offset_ms: segment.start_ms,

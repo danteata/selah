@@ -302,6 +302,29 @@ fn rms(samples: &[f32]) -> f32 {
     (sum / samples.len() as f32).sqrt()
 }
 
+/// Why a segment ended — the capture loop logs it, because "the VAD produced
+/// nothing" and "the VAD produced plenty and nobody transcribed it" look
+/// identical from outside and need different fixes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentCause {
+    /// Closed normally, on `min_silence_ms` of quiet.
+    Silence,
+    /// Cut at `max_speech_ms` while speech continued.
+    MaxLength,
+    /// Audible audio the VAD never called speech (`fallback_after_ms`).
+    NoSpeechFallback,
+}
+
+impl SegmentCause {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SegmentCause::Silence => "silence",
+            SegmentCause::MaxLength => "max-length",
+            SegmentCause::NoSpeechFallback => "no-speech-fallback",
+        }
+    }
+}
+
 /// A completed speech segment plus where it sits on the capture timeline.
 pub struct SpeechSegment {
     pub samples: Vec<f32>,
@@ -313,6 +336,8 @@ pub struct SpeechSegment {
     /// late, and the song tracker's latency estimate reads that as "the
     /// transcript is caught up" when it is seconds behind.
     pub start_ms: u32,
+    /// What ended this segment.
+    pub cause: SegmentCause,
 }
 
 /// VAD-based speech segmenter
@@ -529,7 +554,11 @@ impl VadSegmenter {
         self.silence_chunks = 0;
         self.last_dip_len = None;
         if long_enough {
-            Some(SpeechSegment { samples, start_ms })
+            Some(SpeechSegment {
+                samples,
+                start_ms,
+                cause: SegmentCause::Silence,
+            })
         } else {
             None
         }
@@ -566,6 +595,7 @@ impl VadSegmenter {
         Some(SpeechSegment {
             samples,
             start_ms: self.start_ms_for(start_sample),
+            cause: SegmentCause::MaxLength,
         })
     }
 
@@ -584,6 +614,7 @@ impl VadSegmenter {
         Some(SpeechSegment {
             samples,
             start_ms: self.start_ms_for(start_sample),
+            cause: SegmentCause::NoSpeechFallback,
         })
     }
 
@@ -599,6 +630,7 @@ impl VadSegmenter {
         Some(SpeechSegment {
             samples: std::mem::take(&mut self.speech_buffer),
             start_ms,
+            cause: SegmentCause::Silence,
         })
     }
 
