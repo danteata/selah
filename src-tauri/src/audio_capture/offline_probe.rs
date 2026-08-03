@@ -25,6 +25,14 @@
 //!
 //! Leave `SELAH_PROBE_MODEL` unset to time the segmentation alone, which is
 //! fast and needs no ASR model.
+//!
+//! `SELAH_PROBE_PROMPT=<file>` supplies a decode prompt — the set list's
+//! lyrics, say — to measure what contextual biasing is worth. Only whisper
+//! models accept one: transcribe-cpp exposes `initial_prompt` on the whisper
+//! run extension alone, because an RNN-T like Parakeet has no text input to
+//! condition on. The engine reports the capability, so this asks rather than
+//! assumes, and says so when a prompt is supplied to a model that will ignore
+//! it.
 
 use super::vad::{SegmentCause, VadConfig, VadSegmenter};
 use std::path::PathBuf;
@@ -134,12 +142,13 @@ fn replay(
         let text = {
             #[cfg(feature = "native-transcription")]
             {
-                use transcribe_cpp::RunOptions;
                 match session.as_mut() {
-                    Some(s) => s
-                        .run(&segment.samples, &RunOptions::default())
-                        .map(|r| r.text.trim().to_string())
-                        .unwrap_or_else(|e| format!("<error: {e}>")),
+                    Some(s) => {
+                        let opts = run_options(s);
+                        s.run(&segment.samples, &opts)
+                            .map(|r| r.text.trim().to_string())
+                            .unwrap_or_else(|e| format!("<error: {e}>"))
+                    }
                     None => String::new(),
                 }
             }
@@ -201,15 +210,54 @@ fn load_inputs() -> (Vec<f32>, u32, PathBuf, Option<transcribe_cpp::Session>) {
 
     #[cfg(feature = "native-transcription")]
     let session = env_path("SELAH_PROBE_MODEL").map(|path| {
-        use transcribe_cpp::{Model, ModelOptions};
+        use transcribe_cpp::{Feature, Model, ModelOptions};
         let model = Model::load_with(&path, &ModelOptions::default()).expect("load asr model");
-        println!("model: {}", path.display());
+        println!("model: {} (arch {})", path.display(), model.arch());
+        if prompt().is_some() {
+            if model.supports(Feature::InitialPrompt) {
+                println!("prompt: supplied, and this model accepts one");
+            } else {
+                println!(
+                    "prompt: supplied but IGNORED — {} has no text input to condition on",
+                    model.arch()
+                );
+            }
+        }
         model.session().expect("asr session")
     });
     #[cfg(not(feature = "native-transcription"))]
     let session = None;
 
     (samples, total_ms, vad_model, session)
+}
+
+/// Decode prompt for biasing, read from `SELAH_PROBE_PROMPT`.
+fn prompt() -> Option<String> {
+    let path = env_path("SELAH_PROBE_PROMPT")?;
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read prompt {path:?}: {e}"));
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// Run options carrying the prompt when the loaded model can use one.
+#[cfg(feature = "native-transcription")]
+fn run_options(session: &transcribe_cpp::Session) -> transcribe_cpp::RunOptions {
+    use transcribe_cpp::{RunExtension, RunOptions, WhisperRunOptions};
+    let family = prompt().filter(|_| session.model().arch() == "whisper").map(|text| {
+        RunExtension::Whisper(WhisperRunOptions {
+            initial_prompt: Some(text),
+            ..Default::default()
+        })
+    });
+    RunOptions {
+        family,
+        ..Default::default()
+    }
 }
 
 #[test]
