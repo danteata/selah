@@ -3,7 +3,7 @@ import { SongPositionTracker } from '../songTracker'
 import { buildSongIndex, identifySong, type IdentifyOptions } from '../songIdentification'
 import { SongConfirmationTracker } from '../songConfirmation'
 import { parseLyricsIntoSections } from '../../../lib/songSections'
-import { HEARD, PRAYER_ANSWERING_GOD_LYRICS } from './realSongTranscript'
+import { HEARD, HEARD_VOCALS_WHISPER, PRAYER_ANSWERING_GOD_LYRICS } from './realSongTranscript'
 import { DECOYS } from './lyricMatchFixtures'
 import type { Song } from '../../../types'
 
@@ -45,18 +45,29 @@ interface Outcome {
      *  cursor finds a genuinely better line rather than settling for the best
      *  of a restricted candidate set. */
     meanConfidence: number
+    /** Slide changes that moved *backwards* through the arrangement.
+     *
+     *  `tracked` saturates — once locked, the tracker reports "tracking" on
+     *  almost every window whether or not the position is right — so it cannot
+     *  tell a good run from a bad one. This song is performed close to in
+     *  order, so a backward move is very likely the cursor being wrong, and it
+     *  is what an operator sees as the slides going back on themselves. */
+    backwardMoves: number
 }
 
-function replay(): Outcome {
+function replay(windows: Array<{ atMs: number; text: string }> = HEARD): Outcome {
     const tracker = new SongPositionTracker(SONG)
     tracker.start()
 
-    const outcome: Outcome = { tracked: 0, missed: 0, lostEvents: 0, displayed: [], meanConfidence: 0 }
+    const outcome: Outcome = {
+        tracked: 0, missed: 0, lostEvents: 0, displayed: [], meanConfidence: 0, backwardMoves: 0,
+    }
+    let lastStep: number | null = null
     let wasLost = false
     let confidenceSum = 0
     let placed = 0
 
-    for (const { atMs, text } of HEARD) {
+    for (const { atMs, text } of windows) {
         const update = tracker.ingest({ text, timeMs: atMs })
         if (update.phase === 'tracking') outcome.tracked++
         if (update.reason === 'advanced' || update.reason === 'tracking' || update.reason === 'acquired') {
@@ -72,6 +83,9 @@ function replay(): Outcome {
         const shown = update.displaySectionId
         if (shown && outcome.displayed[outcome.displayed.length - 1] !== shown) {
             outcome.displayed.push(shown)
+            const step = update.displayStepIndex
+            if (step !== null && lastStep !== null && step < lastStep) outcome.backwardMoves++
+            if (step !== null) lastStep = step
         }
     }
     outcome.meanConfidence = placed > 0 ? confidenceSum / placed : 0
@@ -87,7 +101,7 @@ describe('tracking a real song from real transcription', () => {
         console.log(
             `tracked ${outcome.tracked}/${HEARD.length} windows, ` +
                 `${outcome.missed} unplaceable, lost ${outcome.lostEvents}x, ` +
-                `${outcome.displayed.length} slide changes, ` +
+                `${outcome.displayed.length} slide changes (${outcome.backwardMoves} backwards), ` +
                 `mean confidence ${outcome.meanConfidence.toFixed(3)}`,
         )
         expect(outcome.tracked).toBeGreaterThan(HEARD.length * 0.5)
@@ -215,5 +229,25 @@ describe('following a leader who jumps out of order', () => {
             held || arrived,
             `moved to ${first.singer?.sectionId} at confidence ${first.confidence.toFixed(2)}`,
         ).toBe(true)
+    })
+})
+
+describe('what a vocal-only feed would buy', () => {
+    // Same nine minutes, band removed, transcribed by whisper — see
+    // HEARD_VOCALS_WHISPER. Reported rather than asserted on: this is the
+    // input we do not have yet, so it belongs in the record as a comparison,
+    // not as a gate on the build.
+    it('reports tracking on a clean vocal feed beside the real one', () => {
+        const mix = replay(HEARD)
+        const vocals = replay(HEARD_VOCALS_WHISPER)
+        const line = (label: string, o: Outcome, n: number) =>
+            `${label.padEnd(16)} tracked ${o.tracked}/${n}, lost ${o.lostEvents}x, ` +
+            `${o.displayed.length} slide changes (${o.backwardMoves} backwards), ` +
+            `mean confidence ${o.meanConfidence.toFixed(3)}`
+        // eslint-disable-next-line no-console
+        console.log(line('mix/parakeet', mix, HEARD.length))
+        // eslint-disable-next-line no-console
+        console.log(line('vocals/whisper', vocals, HEARD_VOCALS_WHISPER.length))
+        expect(vocals.tracked).toBeGreaterThan(0)
     })
 })
