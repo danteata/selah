@@ -18,7 +18,14 @@ pub struct VadConfig {
     pub silence_threshold: f32,
     /// Minimum speech duration in milliseconds (default: 250)
     pub min_speech_ms: u32,
-    /// Minimum silence duration to end speech in milliseconds (default: 100)
+    /// Minimum silence duration to end speech in milliseconds (default: 300).
+    ///
+    /// At 100 a single breath between sung phrases closed a segment, and the
+    /// fragment left behind was too short to decode: measured over a full
+    /// worship track, segments under 1.5s came back empty 33% of the time
+    /// against 11% for longer ones. Those fragments are where "Hey." and
+    /// "Sure." came from. 300 was the best of 100/200/300/500 on that track
+    /// for both empty rate and words recovered.
     pub min_silence_ms: u32,
     /// Padding to add around speech segments in milliseconds (default: 30)
     #[allow(dead_code)]
@@ -64,6 +71,17 @@ pub struct VadConfig {
     /// count toward {@link fallback_after_ms}. Set well under speech level: the
     /// point is only to tell "audio nobody classified" apart from "no audio".
     pub silence_rms: f32,
+    /// How much audio each fallback window keeps from the end of the previous
+    /// one (default: 1500 ms; 0 disables).
+    ///
+    /// Fallback windows are cut on a timer, not on anything in the audio, so a
+    /// sung phrase straddling a boundary is split across two decodes and both
+    /// halves come out worse than the whole would have. Carrying a little of
+    /// the tail forward gives the next window the run-up to that phrase. It
+    /// costs re-decoding the overlap, and can repeat a few words across two
+    /// segments — which the transcript's duplicate suppression already exists
+    /// to absorb.
+    pub fallback_overlap_ms: u32,
 }
 
 impl Default for VadConfig {
@@ -72,12 +90,13 @@ impl Default for VadConfig {
             speech_threshold: 0.5,
             silence_threshold: 0.35,
             min_speech_ms: 250,
-            min_silence_ms: 100,
+            min_silence_ms: 300,
             speech_pad_ms: 30,
             onset_chunks: 3,
             max_speech_ms: 10_000,
             fallback_after_ms: 8_000,
             silence_rms: 0.005,
+            fallback_overlap_ms: 1_500,
         }
     }
 }
@@ -607,6 +626,15 @@ impl VadSegmenter {
             return None;
         }
         let start_sample = self.samples_processed.saturating_sub(samples.len() as u64);
+
+        // Carry the tail forward so the next window opens mid-phrase rather
+        // than mid-word. See `fallback_overlap_ms`.
+        let overlap =
+            (self.vad.config().fallback_overlap_ms as usize * self.sample_rate as usize) / 1000;
+        if overlap > 0 && overlap < samples.len() {
+            self.nonspeech_buffer
+                .extend_from_slice(&samples[samples.len() - overlap..]);
+        }
         tracing::info!(
             "[VAD] {} ms of audible audio with no detected speech; transcribing it anyway",
             samples.len() as u64 * 1000 / self.sample_rate as u64,
@@ -679,13 +707,20 @@ mod tests {
         assert_eq!(config.speech_threshold, 0.5);
         assert_eq!(config.silence_threshold, 0.35);
         assert_eq!(config.min_speech_ms, 250);
-        assert_eq!(config.min_silence_ms, 100);
+        assert_eq!(config.min_silence_ms, 300);
         // Onset smoothing defaults to 3 consecutive speech chunks (~96 ms).
         assert_eq!(config.onset_chunks, 3);
         // Sustained input must be cut and emitted even if it never falls silent.
         assert_eq!(config.max_speech_ms, 10_000);
         // Audible audio the VAD never calls speech is transcribed anyway.
         assert_eq!(config.fallback_after_ms, 8_000);
+        // Fallback windows overlap so a phrase cut by a window boundary is
+        // still decoded whole once.
+        assert_eq!(config.fallback_overlap_ms, 1_500);
+        assert!(
+            config.fallback_overlap_ms < config.fallback_after_ms,
+            "an overlap at or beyond the window length would never advance",
+        );
     }
 
     #[test]
