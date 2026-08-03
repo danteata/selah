@@ -41,18 +41,28 @@ interface Outcome {
     lostEvents: number
     /** Distinct sections it put on screen, in order of first appearance. */
     displayed: string[]
+    /** Mean confidence of the windows it managed to place. Rises when the
+     *  cursor finds a genuinely better line rather than settling for the best
+     *  of a restricted candidate set. */
+    meanConfidence: number
 }
 
 function replay(): Outcome {
     const tracker = new SongPositionTracker(SONG)
     tracker.start()
 
-    const outcome: Outcome = { tracked: 0, missed: 0, lostEvents: 0, displayed: [] }
+    const outcome: Outcome = { tracked: 0, missed: 0, lostEvents: 0, displayed: [], meanConfidence: 0 }
     let wasLost = false
+    let confidenceSum = 0
+    let placed = 0
 
     for (const { atMs, text } of HEARD) {
         const update = tracker.ingest({ text, timeMs: atMs })
         if (update.phase === 'tracking') outcome.tracked++
+        if (update.reason === 'advanced' || update.reason === 'tracking' || update.reason === 'acquired') {
+            confidenceSum += update.confidence
+            placed++
+        }
         if (update.reason === 'miss' || update.reason === 'searching') outcome.missed++
 
         const nowLost = update.phase === 'lost'
@@ -64,6 +74,7 @@ function replay(): Outcome {
             outcome.displayed.push(shown)
         }
     }
+    outcome.meanConfidence = placed > 0 ? confidenceSum / placed : 0
     return outcome
 }
 
@@ -76,7 +87,8 @@ describe('tracking a real song from real transcription', () => {
         console.log(
             `tracked ${outcome.tracked}/${HEARD.length} windows, ` +
                 `${outcome.missed} unplaceable, lost ${outcome.lostEvents}x, ` +
-                `${outcome.displayed.length} slide changes`,
+                `${outcome.displayed.length} slide changes, ` +
+                `mean confidence ${outcome.meanConfidence.toFixed(3)}`,
         )
         expect(outcome.tracked).toBeGreaterThan(HEARD.length * 0.5)
     })
@@ -158,5 +170,50 @@ describe('how long until the right song is on screen', () => {
         // A minute of singing before the lyrics appear is already poor; this
         // guards the regression rather than endorsing the number.
         expect(at!).toBeLessThan(120_000)
+    })
+})
+
+describe('following a leader who jumps out of order', () => {
+    // Worship does not run top to bottom. A leader drops into the middle of a
+    // later verse, doubles back to a chorus, vamps. The arrangement is an
+    // expectation, not a script.
+    const sections = parseLyricsIntoSections(PRAYER_ANSWERING_GOD_LYRICS)
+    const freedom = sections.find((s) => s.lines.some((l) => /Freedom is in your hands/i.test(l)))
+
+    function jump() {
+        const tracker = new SongPositionTracker(SONG)
+        tracker.start()
+        tracker.ingest({ text: 'I will look to the hills mountains and valleys', timeMs: 0 })
+        // "Freedom is in your hands" is the second line of a section well past
+        // the lookahead window — the shape of jump the old candidate set could
+        // not see, because it only considered the *first* line of a distant
+        // section.
+        const first = tracker.ingest({ text: 'freedom is in your hands', timeMs: 20_000 })
+        // Fed twice: a non-adjacent move needs corroboration before it is
+        // accepted. That gate is deliberate and stays.
+        const second = tracker.ingest({ text: 'freedom is in your hands', timeMs: 24_000 })
+        return { first, second }
+    }
+
+    it('lands on the section the line actually belongs to', () => {
+        expect(freedom).toBeDefined()
+        expect(jump().second.singer?.sectionId).toBe(freedom!.id)
+    })
+
+    it('does not stop at a wrong section on the way', () => {
+        // The failure this fixes. With only first lines of distant sections as
+        // candidates, the best available match for "freedom is in your hands"
+        // was an unrelated nearby line at 0.40 — just over the tracking
+        // threshold, so it was accepted and displayed. The tracker reached the
+        // right section on the following window, but put a wrong slide up in
+        // between. Seeing every line means the exact match outscores the
+        // spurious one immediately, so the cursor holds instead.
+        const { first } = jump()
+        const held = first.singer?.sectionId === sections[0].id
+        const arrived = first.singer?.sectionId === freedom!.id
+        expect(
+            held || arrived,
+            `moved to ${first.singer?.sectionId} at confidence ${first.confidence.toFixed(2)}`,
+        ).toBe(true)
     })
 })

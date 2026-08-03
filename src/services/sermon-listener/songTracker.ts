@@ -621,10 +621,27 @@ export class SongPositionTracker {
         for (let s = from; s <= to; s++) {
             for (let l = 0; l < this.steps[s].lines.length; l++) coords.push([s, l])
         }
-        // Include the first line of every step so an unplanned jump/repeat can
-        // still be detected (confirmed via hysteresis before it's accepted).
+        // Every line of every other step, so a leader who drops into the
+        // *middle* of a distant section can be followed there.
+        //
+        // Only first lines used to be considered outside the lookahead window,
+        // on the reasoning that an unplanned jump lands at the top of a
+        // section. Worship does not oblige: leaders jump into the middle of a
+        // verse, double back to a chorus, vamp. Worse than missing the jump,
+        // the restricted set made the tracker take a *wrong* one — with the
+        // true line invisible, the best remaining candidate for "freedom is in
+        // your hands" was an unrelated nearby line at 0.40, just over the
+        // tracking threshold, so it was accepted and put on screen. Seeing
+        // every line means an exact match outscores that immediately.
+        //
+        // This widens what can be *seen*, not what is accepted: a non-adjacent
+        // match is still a pending jump needing `jumpHysteresis` corroboration
+        // before the cursor moves. Cost is scoring every line of one song per
+        // window, which is tens of comparisons.
         for (let s = 0; s < this.steps.length; s++) {
-            if (s < from || s > to) coords.push([s, 0])
+            if (s < from || s > to) {
+                for (let l = 0; l < this.steps[s].lines.length; l++) coords.push([s, l])
+            }
         }
         return coords
     }
