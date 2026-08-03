@@ -65,6 +65,8 @@ pub struct SileroVad {
     c: Array3<f32>, // Cell state (2, 1, 64)
     sample_rate: i64,
     config: VadConfig,
+    /// Count of recoveries from a non-finite recurrent state — see `process`.
+    nonfinite_recoveries: u64,
 }
 
 impl SileroVad {
@@ -87,6 +89,7 @@ impl SileroVad {
             c,
             sample_rate: 16000,
             config: VadConfig::default(),
+            nonfinite_recoveries: 0,
         })
     }
 
@@ -200,7 +203,45 @@ impl SileroVad {
             .into_dimensionality::<ndarray::Ix3>()
             .map_err(|e| format!("Failed to convert cn to Array3: {}", e))?;
 
+        // Silero is recurrent, and `h`/`c` are carried across every call for
+        // the whole session. That makes a single non-finite value permanent:
+        // the recurrence feeds it forward, `probability` becomes NaN, and
+        // because every comparison against NaN is false, `is_speech` answers
+        // "no" for the rest of the service. No error is raised and nothing is
+        // logged — the level meter keeps moving (features are computed before
+        // the VAD runs), while segments, transcript and song tracking all stop
+        // dead. Recover by clearing the state and treating this chunk as
+        // silence, so a numerical hiccup costs one 32 ms frame instead of the
+        // remainder of the session.
+        if !probability.is_finite()
+            || self.h.iter().any(|v| !v.is_finite())
+            || self.c.iter().any(|v| !v.is_finite())
+        {
+            self.nonfinite_recoveries += 1;
+            // Rate-limited: if it ever becomes persistent this would otherwise
+            // be ~31 lines a second.
+            if self.nonfinite_recoveries == 1 || self.nonfinite_recoveries % 100 == 0 {
+                tracing::warn!(
+                    "[VAD] non-finite state (probability {:?}); resetting — occurrence {}",
+                    probability,
+                    self.nonfinite_recoveries
+                );
+            }
+            // Zero the fields directly rather than calling `reset()`: the
+            // inference outputs still hold a mutable borrow of `self.session`
+            // for this scope, and a whole-`self` method would collide with it.
+            self.h = Array3::<f32>::zeros((2, 1, 64));
+            self.c = Array3::<f32>::zeros((2, 1, 64));
+            return Ok(0.0);
+        }
+
         Ok(probability)
+    }
+
+    /// How many times the recurrent state had to be cleared after going
+    /// non-finite. Exposed for the capture loop's diagnostics.
+    pub fn nonfinite_recoveries(&self) -> u64 {
+        self.nonfinite_recoveries
     }
 
     /// Reset VAD state (call when starting new capture)

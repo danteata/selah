@@ -1090,7 +1090,11 @@ pub fn start_capture_with_vad(
                         );
                     }
                     Err(e) => {
-                        eprintln!("[VAD] Error processing audio: {}", e);
+                        // tracing, not eprintln: this goes to the rotating log
+                        // the operator can actually send us. On stderr it is
+                        // visible only to whoever launched the binary from a
+                        // terminal, which is nobody in a service.
+                        tracing::warn!("[VAD] error processing audio: {}", e);
                     }
                 }
             }
