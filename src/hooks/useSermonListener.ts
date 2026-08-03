@@ -51,6 +51,7 @@ import type { TranscriptSegment } from '../types/sermon-listener'
 import { filterHallucinations, correctAccentMishearings } from '../services/sermon-listener/hallucinationFilter'
 import { filterFillers } from '../services/sermon-listener/fillerFilter'
 import { isDuplicateUtterance } from '../services/sermon-listener/transcriptDedup'
+import { isCongregationSinging } from '../services/sermon-listener/worshipMode'
 import { applyCustomWords, SERMON_PROPER_NOUNS } from '../services/sermon-listener/customWords'
 import { buildBibleInitialPrompt } from '../services/sermon-listener/bibleInitialPrompt'
 import { audioFeedbackService } from '../services/sermon-listener/audioFeedback'
@@ -1779,7 +1780,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // sermon every debounce firing would resend the whole thing (tens of
         // thousands of tokens), burning through the provider's rate/quota limit
         // far faster than the sermon actually needs LLM help.
-        scheduleLlmExtraction(recentTextForVerseDetection)
+        // Same reasoning as the semantic gate: a song in progress cannot
+        // contain a reading, and this was firing on every window of a
+        // nine-minute song — enough to exhaust the day's LLM quota on audio
+        // that could never yield a verse.
+        if (!isCongregationSinging(useAppStore.getState().songTracking)) {
+            scheduleLlmExtraction(recentTextForVerseDetection)
+        }
 
         let verses = detectVerses(recentTextForVerseDetection)
 
@@ -2047,7 +2054,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         // reading — that is the premise the rest of the context work is built
         // on, so it should open this gate too.
         const inReadingContext = isContextValid(activeReferenceContextRef.current, CONTEXT_TTL_MS)
+        // Worship lyrics are scripture-adjacent by design, so the semantic
+        // matcher keeps finding verses in them and putting them on screen —
+        // see worshipMode.ts for what this costs and why the test is what it
+        // is. While the tracker is following a song, the audio is singing.
+        const singing = isCongregationSinging(useAppStore.getState().songTracking)
         const semanticReady = semanticDetectorRef.current
+            && !singing
             && cleanText.length >= 30
             && !hasRegexVerses
             && (hasScriptureSignal(latestChunkForCommands || cleanText) || inReadingContext)
@@ -2066,6 +2079,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     `regexVerses=${hasRegexVerses}`,
                     `signal=${hasScriptureSignal(latestChunkForCommands || cleanText)}`,
                     `readingContext=${inReadingContext}`,
+                    `singing=${singing}`,
                 )
             }
         }
