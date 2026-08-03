@@ -10,6 +10,8 @@
 //! - Windows: WASAPI loopback for system audio
 //! - Linux: PulseAudio monitor source (microphone only for now)
 
+#[cfg(test)]
+mod offline_probe;
 mod microphone;
 #[cfg(debug_assertions)]
 mod session_recorder;
