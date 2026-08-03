@@ -238,12 +238,6 @@ impl SileroVad {
         Ok(probability)
     }
 
-    /// How many times the recurrent state had to be cleared after going
-    /// non-finite. Exposed for the capture loop's diagnostics.
-    pub fn nonfinite_recoveries(&self) -> u64 {
-        self.nonfinite_recoveries
-    }
-
     /// Reset VAD state (call when starting new capture)
     pub fn reset(&mut self) {
         self.h = Array3::<f32>::zeros((2, 1, 64));
