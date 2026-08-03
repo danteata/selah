@@ -1,6 +1,7 @@
 import type { Song } from '../../types'
 import { lyricSimilarity, tokenize } from './songTracker'
 import { getContentWords, isTheologicalCommon, isAmbiguousMatch, type ScoredVerseCandidate } from '../../lib/semanticRetrievalPolicy'
+import { sectionsForSong } from '../../lib/songSections'
 
 /**
  * Song identification from a live transcript (Phase 2 "Searching").
@@ -134,7 +135,10 @@ export function buildSongIndex(songs: Song[]): SongIndex {
 
     for (const song of songs) {
         const songId = song._id || song.id
-        const sections = song.sections ?? []
+        // Derived when the song has none stored: a song with only freeform
+        // lyrics was previously indexed as zero lines, so auto-detect could
+        // never name it however clearly it was sung.
+        const sections = sectionsForSong(song)
         for (const section of sections) {
             section.lines.forEach((line, lineIndex) => {
                 const toks = tokenize(line)

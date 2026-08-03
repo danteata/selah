@@ -256,3 +256,45 @@ export function deriveSongStructure(
 export function buildDefaultArrangement(sections: SongSection[]): string[] {
     return sections.map((s) => s.id)
 }
+
+/**
+ * The structured sections of a song, deriving them from its lyrics when it has
+ * none stored.
+ *
+ * `Song.sections` is documented as optional and additive — plenty of the
+ * library predates it, and importers that only ever produced `lyrics`/`verses`
+ * still do. But the song tracker and the song identifier both read
+ * `song.sections` directly and treat its absence as "not a song I can work
+ * with": the identifier indexes nothing for it, so auto-detect can never name
+ * it, and the tracker filters its slides out, so `songTracking.status.songId`
+ * stays null and the auto-advance control does not even render. The operator
+ * sees a song sitting live with no controls and no explanation.
+ *
+ * Deriving on read closes that gap without a migration or a schema change, and
+ * without touching what is stored: `lyrics` remains the source of truth and
+ * sections stay a projection of it.
+ */
+export function sectionsForSong(song: {
+    sections?: SongSection[]
+    lyrics?: string
+    verses?: string[]
+}): SongSection[] {
+    if (song.sections && song.sections.length > 0) return song.sections
+
+    const cached = derivedSections.get(song)
+    if (cached) return cached
+
+    // `verses` is the already-split form the slide builders use; falling back
+    // to it keeps derived sections aligned with the slides the operator can
+    // actually see, and blank-line-joining reproduces the block structure
+    // parseLyricsIntoSections expects.
+    const source = song.lyrics?.trim() ? song.lyrics : (song.verses ?? []).join('\n\n')
+    const sections = source.trim() ? parseLyricsIntoSections(source) : []
+    derivedSections.set(song, sections)
+    return sections
+}
+
+/** Derivation is pure and a song object is stable for as long as it is held,
+ *  so results are cached against it — the identifier rebuilds its index over
+ *  the whole library and would otherwise reparse every song's lyrics. */
+const derivedSections = new WeakMap<object, SongSection[]>()

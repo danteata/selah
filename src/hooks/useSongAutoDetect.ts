@@ -57,9 +57,12 @@ async function ensureIndex(): Promise<void> {
             const db = getIndexedDB()
             const items = await db.library.where('type').equals('song').toArray()
             if (generation !== indexGeneration) return // superseded mid-read
+            // Songs without stored `sections` are kept: buildSongIndex derives
+            // them from the lyrics. Dropping them here made every such song in
+            // the library permanently undetectable.
             const songs = items
                 .map((i) => i.content as Song)
-                .filter((s) => s && Array.isArray(s.sections) && s.sections.length > 0)
+                .filter((s) => s && (s.lyrics?.trim() || s.verses?.length || s.sections?.length))
             cachedIndex = buildSongIndex(songs)
             cachedSongs = new Map(songs.map((s) => [s._id || s.id, s]))
         })()

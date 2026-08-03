@@ -1,5 +1,6 @@
 import type { Song, SongSection } from '../../types'
 import { phoneticSimilarity } from './phoneticMatch'
+import { sectionsForSong } from '../../lib/songSections'
 
 /**
  * Predictive song-lyric position tracker (Phase 2).
@@ -695,7 +696,9 @@ export class SongPositionTracker {
  * referencing unknown section ids are skipped.
  */
 function buildSteps(song: Song, arrangement?: string[]): Step[] {
-    const sections = song.sections ?? []
+    // Derived when the song stores none — otherwise a song with only freeform
+    // lyrics expands to zero steps and the tracker silently does nothing.
+    const sections = sectionsForSong(song)
     if (sections.length === 0) return []
 
     const byId = new Map<string, SongSection>()

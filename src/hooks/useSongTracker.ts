@@ -4,6 +4,7 @@ import { DEFAULT_SONG_TRACKING, type SongTrackingStep, type SongTrackingStatus }
 import { useSermonListenerContext } from '../components/sermon-listener/SermonListenerContext'
 import { SongPositionTracker, type TrackerUpdate } from '../services/sermon-listener/songTracker'
 import type { Slide, Song } from '../types'
+import { sectionsForSong } from '../lib/songSections'
 
 /**
  * Live wiring for the predictive song-lyric tracker (Phase 2 + 3).
@@ -114,16 +115,24 @@ export function useSongTracker() {
                 sectionLabels: new Map<string, string>(),
                 arrangement: [] as SongTrackingStep[],
             }
+            // Sections are derived when a song does not store them. Requiring
+            // stored sections here meant a song added from search — most of the
+            // library — produced no tracked song at all: `status.songId` stayed
+            // null, so SongTrackingControl rendered nothing and the operator
+            // saw a live song with no auto-advance and no reason given.
             const songSlides = activeSlides.filter(
                 (s): s is Slide =>
-                    s.type === 'song' && !!(s.data as Song | undefined)?.sections?.length,
+                    s.type === 'song' && sectionsForSong((s.data ?? {}) as Song).length > 0,
             )
             if (songSlides.length === 0) return empty
 
             const owningLive = songSlides.find((s) => s.id === liveSlideId)
             const key = (owningLive ?? songSlides[0]).songId ?? null
             const group = songSlides.filter((s) => (s.songId ?? null) === key)
-            const song = group[0].data as Song
+            const stored = group[0].data as Song
+            // One normalized object, so every consumer below and the tracker
+            // itself agree on the same section list and indices.
+            const song: Song = { ...stored, sections: sectionsForSong(stored) }
 
             const sectionToSlide = new Map<string, string>()
             const slideToSection = new Map<string, string>()
