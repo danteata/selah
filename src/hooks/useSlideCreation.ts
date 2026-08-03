@@ -25,6 +25,7 @@ import {
 import { saveMedia } from './useIndexedDB'
 import type { TemplateItem } from './useTemplates'
 import { useTemplates } from './useTemplates'
+import { sectionsForSong } from '../lib/songSections'
 
 function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, defaultBg: string, defaultBgType: string, defaultBgVideoKey?: string): void {
     if (!template) {
@@ -670,24 +671,36 @@ export function useSlideCreation() {
     }, [preSlideCreation, settings, templates, trackEvent])
 
     const createSongSlides = useCallback((song: Song, options?: { template?: TemplateItem | null }): Slide[] => {
-        console.log('createSongSlides called with song:', song)
+        // `verses` is the only thing this builds slides from, but it is a
+        // derived field, not a stored one: the search path fills it in via
+        // `useSong.getSong`, while anything handing over a raw library record —
+        // auto-detect, for one — does not. Without it every verse collapsed
+        // onto a single slide carrying the entire lyric, which is not a
+        // recognisable failure to an operator, just a song that inexplicably
+        // stopped being multi-slide. Derive it here so it cannot depend on
+        // which path reached us.
+        const verses = song.verses?.length
+            ? song.verses
+            : sectionsForSong(song).map((section) => section.lines.join('\n'))
+        const source: Song = verses.length ? { ...song, verses } : song
 
         const slides: Slide[] = []
-        const totalVerses = song.verses?.length || 0
+        const totalVerses = source.verses?.length || 0
 
         if (totalVerses === 0) {
+            // Genuinely nothing to split on — a song with neither verses,
+            // sections, nor lyrics.
             console.warn('No verses found in song! Creating single slide with full lyrics.')
-            const slide = createSongSlide(song, 0, options)
-            slide.contents = [song.lyrics || '']
-            slide.name = song.title || 'Song'
+            const slide = createSongSlide(source, 0, options)
+            slide.contents = [source.lyrics || '']
+            slide.name = source.title || 'Song'
             slides.push(slide)
         } else {
             for (let i = 0; i < totalVerses; i++) {
-                slides.push(createSongSlide(song, i, options))
+                slides.push(createSongSlide(source, i, options))
             }
         }
 
-        console.log('Created slides:', slides.length)
         return slides
     }, [createSongSlide])
 

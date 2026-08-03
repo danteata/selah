@@ -69,3 +69,26 @@ describe('a section-less song is usable end to end', () => {
         expect(update.displaySectionId).not.toBeNull()
     })
 })
+
+describe('deriving verses for slide building', () => {
+    // The regression: auto-detect hands `createSongSlides` a raw library
+    // record, which carries `lyrics` but no `verses` (the search path fills
+    // `verses` in via useSong.getSong, auto-detect does not). Slides are built
+    // purely from `verses`, so the whole song collapsed onto one slide holding
+    // the entire lyric — POS 1/1, nothing for the tracker to advance through,
+    // and no visible error to explain it.
+    it('produces one verse per section for a lyrics-only song', () => {
+        const verses = sectionsForSong(SECTIONLESS).map((s) => s.lines.join('\n'))
+        expect(verses.length).toBeGreaterThan(1)
+        expect(verses[0]).toContain('I will look to the Hills')
+        expect(verses[1]).toContain('I have searched')
+    })
+
+    it('leaves a song that already has verses alone', () => {
+        const song = { ...SECTIONLESS, verses: ['only this one'] } as unknown as Song
+        const verses = song.verses?.length
+            ? song.verses
+            : sectionsForSong(song).map((s) => s.lines.join('\n'))
+        expect(verses).toEqual(['only this one'])
+    })
+})
