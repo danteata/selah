@@ -5,6 +5,7 @@ import { SongConfirmationTracker } from '../songConfirmation'
 import { parseLyricsIntoSections } from '../../../lib/songSections'
 import { HEARD, HEARD_VOCALS_WHISPER, PRAYER_ANSWERING_GOD_LYRICS } from './realSongTranscript'
 import { DECOYS } from './lyricMatchFixtures'
+import { expectedSectionAt, labelledMs, GROUND_TRUTH } from './realSongGroundTruth'
 import type { Song } from '../../../types'
 
 /**
@@ -23,6 +24,13 @@ import type { Song } from '../../../types'
  * ratchet against regression, not a target. Tightening them is how an
  * improvement gets recorded.
  */
+
+/** The section that follows `sectionId` in the arrangement, if any. */
+function nextSectionAfter(sectionId: string): string | null {
+    const order = parseLyricsIntoSections(PRAYER_ANSWERING_GOD_LYRICS)
+    const at = order.findIndex((s) => s.id === sectionId)
+    return at >= 0 && at + 1 < order.length ? order[at + 1].id : null
+}
 
 const SONG: Song = {
     id: 'prayer-answering-god',
@@ -53,6 +61,21 @@ interface Outcome {
      *  order, so a backward move is very likely the cursor being wrong, and it
      *  is what an operator sees as the slides going back on themselves. */
     backwardMoves: number
+    /** Windows where the displayed section was the one actually being sung. */
+    correct: number
+    /** Windows showing the section immediately *after* the one being sung.
+     *
+     *  Not an error: the display leads by one step at a trailing edge on
+     *  purpose, to cover transcription latency, so at the end of every section
+     *  the correct slide to show is the next one. Scoring those as wrong would
+     *  penalise the feature. Counted separately so both readings are visible. */
+    leading: number
+    /** Windows showing neither the sung section nor its successor. */
+    wrong: number
+    /** Windows with no correct answer, excluded from scoring. */
+    unlabelled: number
+    /** Windows inside a labelled span where nothing was displayed at all. */
+    blank: number
 }
 
 function replay(windows: Array<{ atMs: number; text: string }> = HEARD): Outcome {
@@ -61,6 +84,7 @@ function replay(windows: Array<{ atMs: number; text: string }> = HEARD): Outcome
 
     const outcome: Outcome = {
         tracked: 0, missed: 0, lostEvents: 0, displayed: [], meanConfidence: 0, backwardMoves: 0,
+        correct: 0, leading: 0, wrong: 0, unlabelled: 0, blank: 0,
     }
     let lastStep: number | null = null
     let wasLost = false
@@ -79,6 +103,20 @@ function replay(windows: Array<{ atMs: number; text: string }> = HEARD): Outcome
         const nowLost = update.phase === 'lost'
         if (nowLost && !wasLost) outcome.lostEvents++
         wasLost = nowLost
+
+        // Score against what was actually being sung at this moment.
+        const expected = expectedSectionAt(atMs)
+        if (expected === null) {
+            outcome.unlabelled++
+        } else if (update.displaySectionId === null) {
+            outcome.blank++
+        } else if (update.displaySectionId === expected) {
+            outcome.correct++
+        } else if (update.displaySectionId === nextSectionAfter(expected)) {
+            outcome.leading++
+        } else {
+            outcome.wrong++
+        }
 
         const shown = update.displaySectionId
         if (shown && outcome.displayed[outcome.displayed.length - 1] !== shown) {
@@ -242,12 +280,38 @@ describe('what a vocal-only feed would buy', () => {
         const vocals = replay(HEARD_VOCALS_WHISPER)
         const line = (label: string, o: Outcome, n: number) =>
             `${label.padEnd(16)} tracked ${o.tracked}/${n}, lost ${o.lostEvents}x, ` +
-            `${o.displayed.length} slide changes (${o.backwardMoves} backwards), ` +
-            `mean confidence ${o.meanConfidence.toFixed(3)}`
+            `right ${o.correct + o.leading}/${o.correct + o.leading + o.wrong + o.blank} ` +
+            `(${(((o.correct + o.leading) / Math.max(1, o.correct + o.leading + o.wrong + o.blank)) * 100).toFixed(0)}%) ` +
+            `[${o.correct} exact + ${o.leading} leading], wrong ${o.wrong}, blank ${o.blank}, ` +
+            `${o.displayed.length} slide changes (${o.backwardMoves} backwards)`
         // eslint-disable-next-line no-console
         console.log(line('mix/parakeet', mix, HEARD.length))
         // eslint-disable-next-line no-console
         console.log(line('vocals/whisper', vocals, HEARD_VOCALS_WHISPER.length))
         expect(vocals.tracked).toBeGreaterThan(0)
+    })
+})
+
+describe('accuracy against what was actually being sung', () => {
+    it('reports how often the right slide was on screen', () => {
+        const mix = replay(HEARD)
+        const scored = mix.correct + mix.leading + mix.wrong + mix.blank
+        const right = mix.correct + mix.leading
+        // eslint-disable-next-line no-console
+        console.log(
+            `ACCURACY mix/parakeet: ${right}/${scored} showing a defensible slide ` +
+                `(${((right / scored) * 100).toFixed(0)}%) — ${mix.correct} exactly the sung ` +
+                `section, ${mix.leading} leading into the next by design; ` +
+                `${mix.wrong} genuinely wrong, ${mix.blank} nothing shown, ` +
+                `${mix.unlabelled} of ${HEARD.length} windows unlabelled`,
+        )
+        // eslint-disable-next-line no-console
+        console.log(
+            `ground truth covers ${(labelledMs() / 1000).toFixed(0)}s of 561s ` +
+                `across ${GROUND_TRUTH.filter((s) => s.sectionId).length} spans`,
+        )
+        expect(scored).toBeGreaterThan(20)
+        // A ratchet at the measured level, not a target.
+        expect(right / scored).toBeGreaterThan(0.8)
     })
 })
