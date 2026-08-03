@@ -42,6 +42,28 @@ pub struct VadConfig {
     /// guarantees forward progress for any input, at the cost of an occasional
     /// mid-phrase cut (which {@link CUT_BACK_WINDOW_MS} below minimizes).
     pub max_speech_ms: u32,
+    /// Emit a segment anyway once the VAD has reported no speech for this long
+    /// while audio is plainly audible (default: 8000 ms; 0 disables).
+    ///
+    /// Silero detects *speech*. Dense full-band worship, with sustained sung
+    /// vowels over drums and keys, is not speech, and it rejects it. Measured
+    /// on a five-minute worship track, speech onsets arrived every few seconds
+    /// for the first two and a half minutes and then essentially stopped —
+    /// three onsets in the remaining two and a half minutes, as the
+    /// arrangement thickened. The transcript died with them, while the level
+    /// meter showed a strong signal throughout, because nothing had failed:
+    /// the VAD was answering the question it was built to answer.
+    ///
+    /// So this asks a different question. If audio is audible and the VAD has
+    /// found nothing in it for a while, hand it to the engine regardless and
+    /// let the downstream filters judge the text. The cost is that a purely
+    /// instrumental passage now reaches the engine too, and may transcribe to
+    /// nonsense; losing the back half of every song is the worse trade.
+    pub fallback_after_ms: u32,
+    /// RMS below which a frame counts as genuinely silent, and so does not
+    /// count toward {@link fallback_after_ms}. Set well under speech level: the
+    /// point is only to tell "audio nobody classified" apart from "no audio".
+    pub silence_rms: f32,
 }
 
 impl Default for VadConfig {
@@ -54,6 +76,8 @@ impl Default for VadConfig {
             speech_pad_ms: 30,
             onset_chunks: 3,
             max_speech_ms: 10_000,
+            fallback_after_ms: 8_000,
+            silence_rms: 0.005,
         }
     }
 }
@@ -220,7 +244,7 @@ impl SileroVad {
             self.nonfinite_recoveries += 1;
             // Rate-limited: if it ever becomes persistent this would otherwise
             // be ~31 lines a second.
-            if self.nonfinite_recoveries == 1 || self.nonfinite_recoveries % 100 == 0 {
+            if self.nonfinite_recoveries == 1 || self.nonfinite_recoveries.is_multiple_of(100) {
                 tracing::warn!(
                     "[VAD] non-finite state (probability {:?}); resetting — occurrence {}",
                     probability,
@@ -268,6 +292,16 @@ impl SileroVad {
 /// than an arbitrary sample in the middle of a word.
 const CUT_BACK_WINDOW_MS: u32 = 1_500;
 
+/// Root mean square level of a frame, the cheapest usable "is there audio
+/// here at all" measure.
+fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum: f32 = samples.iter().map(|s| s * s).sum();
+    (sum / samples.len() as f32).sqrt()
+}
+
 /// A completed speech segment plus where it sits on the capture timeline.
 pub struct SpeechSegment {
     pub samples: Vec<f32>,
@@ -314,6 +348,10 @@ pub struct VadSegmenter {
     /// preferred split point for a forced cut. `None` until the segment has
     /// dipped at all.
     last_dip_len: Option<usize>,
+    /// Audible audio the VAD declined to call speech, held in case it declines
+    /// for long enough to be worth transcribing anyway. See
+    /// `VadConfig::fallback_after_ms`.
+    nonspeech_buffer: Vec<f32>,
 }
 
 impl VadSegmenter {
@@ -341,6 +379,7 @@ impl VadSegmenter {
             onset_chunks_seen: 0,
             samples_processed: 0,
             last_dip_len: None,
+            nonspeech_buffer: Vec::new(),
         })
     }
 
@@ -388,6 +427,10 @@ impl VadSegmenter {
                         self.onset_chunks_seen = 0;
                         self.silence_chunks = 0;
                         self.last_dip_len = None;
+                        // The VAD found speech after all, so anything held for
+                        // the fallback belongs to this segment's run-up and is
+                        // already covered by the pre-speech buffer.
+                        self.nonspeech_buffer.clear();
                         // Prepend pre-speech buffer (already includes onset frames
                         // and the current chunk) to capture the start of words.
                         self.speech_buffer
@@ -419,6 +462,24 @@ impl VadSegmenter {
                 // is broken, so reset it. Keep the pre-speech buffer rolling.
                 self.onset_chunks_seen = 0;
                 self.push_pre_speech(&chunk);
+
+                // Hold audible-but-unclassified audio, and hand it over once
+                // there is enough of it. Genuinely quiet frames clear the hold
+                // instead, so a real pause between songs stays a pause rather
+                // than accumulating into a spurious segment.
+                let fallback_after = self.vad.config().fallback_after_ms;
+                if fallback_after > 0 {
+                    if rms(&chunk) >= self.vad.config().silence_rms {
+                        self.nonspeech_buffer.extend_from_slice(&chunk);
+                    } else {
+                        self.nonspeech_buffer.clear();
+                    }
+                    let held_ms =
+                        self.nonspeech_buffer.len() as u64 * 1000 / self.sample_rate as u64;
+                    if held_ms >= fallback_after as u64 {
+                        result = self.emit_nonspeech();
+                    }
+                }
             }
 
             // Forced cut. Sustained input that never dips long enough to close a
@@ -508,6 +569,24 @@ impl VadSegmenter {
         })
     }
 
+    /// Hand over audio the VAD never classified as speech. See
+    /// `VadConfig::fallback_after_ms` for why this exists.
+    fn emit_nonspeech(&mut self) -> Option<SpeechSegment> {
+        let samples = std::mem::take(&mut self.nonspeech_buffer);
+        if samples.is_empty() {
+            return None;
+        }
+        let start_sample = self.samples_processed.saturating_sub(samples.len() as u64);
+        tracing::info!(
+            "[VAD] {} ms of audible audio with no detected speech; transcribing it anyway",
+            samples.len() as u64 * 1000 / self.sample_rate as u64,
+        );
+        Some(SpeechSegment {
+            samples,
+            start_ms: self.start_ms_for(start_sample),
+        })
+    }
+
     /// Flush any remaining speech buffer
     pub fn flush(&mut self) -> Option<SpeechSegment> {
         if self.speech_buffer.is_empty() {
@@ -534,6 +613,7 @@ impl VadSegmenter {
         self.onset_chunks_seen = 0;
         self.samples_processed = 0;
         self.last_dip_len = None;
+        self.nonspeech_buffer.clear();
     }
 
     /// Check if currently in a speech segment
@@ -572,5 +652,31 @@ mod tests {
         assert_eq!(config.onset_chunks, 3);
         // Sustained input must be cut and emitted even if it never falls silent.
         assert_eq!(config.max_speech_ms, 10_000);
+        // Audible audio the VAD never calls speech is transcribed anyway.
+        assert_eq!(config.fallback_after_ms, 8_000);
+    }
+
+    #[test]
+    fn rms_separates_audible_audio_from_silence() {
+        // Digital silence and a dithered-noise floor must both read as silent,
+        // or a quiet room would accumulate into fallback segments all service.
+        let silence = vec![0.0f32; 512];
+        assert!(rms(&silence) < VadConfig::default().silence_rms);
+
+        let noise_floor: Vec<f32> = (0..512)
+            .map(|i| if i % 2 == 0 { 0.0005 } else { -0.0005 })
+            .collect();
+        assert!(rms(&noise_floor) < VadConfig::default().silence_rms);
+
+        // A signal at ordinary programme level must read as audible.
+        let audible: Vec<f32> = (0..512)
+            .map(|i| ((i as f32) * 0.05).sin() * 0.2)
+            .collect();
+        assert!(rms(&audible) >= VadConfig::default().silence_rms);
+    }
+
+    #[test]
+    fn rms_of_nothing_is_zero() {
+        assert_eq!(rms(&[]), 0.0);
     }
 }
