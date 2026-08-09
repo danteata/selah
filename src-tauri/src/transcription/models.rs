@@ -18,9 +18,29 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tracing::{info, warn};
+
+/// Bound on connection setup. Separate from the stall timeout below: a host
+/// that never completes a TCP/TLS handshake should fail fast, whereas an
+/// established transfer deserves the longer grace period.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long a transfer may produce no data before it counts as stalled.
+///
+/// Applied per chunk rather than to the download as a whole, so a large model
+/// on a slow-but-healthy link is never killed for simply taking a while.
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Backoff between download retries. Each retry resumes from the `.partial`
+/// file, so the cost of one is only the bytes the failed attempt missed.
+const DOWNLOAD_RETRY_BACKOFF: [Duration; 4] = [
+    Duration::from_secs(1),
+    Duration::from_secs(4),
+    Duration::from_secs(10),
+    Duration::from_secs(16),
+];
 
 /// Which inference engine a model uses (mirrors transcribe-rs engines).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -966,7 +986,7 @@ impl ModelManager {
         let partial = self.models_dir.join(format!("{}.partial", info.filename));
 
         let result = self
-            .download_to(&url, &partial, &cancel, app, id, info.size_bytes)
+            .download_with_retries(&url, &partial, &cancel, app, id, info.size_bytes)
             .await;
 
         if let Err(e) = result {
@@ -1015,6 +1035,78 @@ impl ModelManager {
         Ok(())
     }
 
+    /// Retry [`download_to`] with backoff, resuming from the partial file.
+    ///
+    /// A church runs this on venue wifi, often minutes before a service. Any
+    /// single attempt can die on a transient DNS failure, a captive-portal
+    /// blip, or a stall — and without a retry that surfaced as a progress bar
+    /// frozen at 62% with no error and no recovery. Each attempt resumes from
+    /// whatever `.partial` already holds, so a retry costs only the bytes the
+    /// failed attempt didn't get.
+    ///
+    /// Cancellation is checked between attempts as well as inside the stream,
+    /// so pressing cancel during a backoff doesn't wait it out.
+    async fn download_with_retries(
+        &self,
+        url: &str,
+        partial: &Path,
+        cancel: &Arc<AtomicBool>,
+        app: &AppHandle,
+        model_id: &str,
+        size_hint: u64,
+    ) -> Result<(), String> {
+        let mut last_error = String::new();
+
+        for (attempt, backoff) in DOWNLOAD_RETRY_BACKOFF.iter().enumerate() {
+            if cancel.load(Ordering::SeqCst) {
+                return Err("Download cancelled".to_string());
+            }
+
+            match self
+                .download_to(url, partial, cancel, app, model_id, size_hint)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                // A cancel is a decision, not a failure to retry around.
+                Err(e) if e.contains("cancelled") => return Err(e),
+                Err(e) => {
+                    warn!(
+                        "[models] download attempt {} for {} failed: {}",
+                        attempt + 1,
+                        model_id,
+                        e
+                    );
+                    last_error = e;
+                }
+            }
+
+            // Sleep in slices so a cancel during a 16 s backoff is prompt.
+            let mut waited = Duration::ZERO;
+            while waited < *backoff {
+                if cancel.load(Ordering::SeqCst) {
+                    return Err("Download cancelled".to_string());
+                }
+                let slice = Duration::from_millis(250).min(*backoff - waited);
+                tokio::time::sleep(slice).await;
+                waited += slice;
+            }
+        }
+
+        // One last go, so the budget above is retries rather than attempts.
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Download cancelled".to_string());
+        }
+        self.download_to(url, partial, cancel, app, model_id, size_hint)
+            .await
+            .map_err(|e| {
+                if last_error.is_empty() {
+                    e
+                } else {
+                    format!("{} (after {} retries)", e, DOWNLOAD_RETRY_BACKOFF.len())
+                }
+            })
+    }
+
     /// Stream the URL into `partial`, resuming if a partial file already exists.
     async fn download_to(
         &self,
@@ -1029,12 +1121,28 @@ impl ModelManager {
 
         let mut downloaded = fs::metadata(partial).map(|m| m.len()).unwrap_or(0);
 
-        let client = reqwest::Client::new();
+        // Timeouts are the whole point of this layer: `reqwest::Client::new()`
+        // sets none, so a half-open socket — venue wifi dropping mid-transfer,
+        // a proxy that accepts and never answers — parks this future forever
+        // with the UI showing a frozen percentage.
+        let client = reqwest::Client::builder()
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
+            .build()
+            .map_err(|e| format!("Could not build HTTP client: {}", e))?;
+
         let mut req = client.get(url);
         if downloaded > 0 {
             req = req.header(RANGE, format!("bytes={}-", downloaded));
         }
-        let mut resp = req.send().await.map_err(|e| format!("Request failed: {}", e))?;
+        let mut resp = tokio::time::timeout(DOWNLOAD_STALL_TIMEOUT, req.send())
+            .await
+            .map_err(|_| {
+                format!(
+                    "No response within {}s",
+                    DOWNLOAD_STALL_TIMEOUT.as_secs()
+                )
+            })?
+            .map_err(|e| format!("Request failed: {}", e))?;
 
         // If we asked to resume but the server replied 200 (not 206), it ignored
         // the Range header — restart from scratch to avoid a corrupt concatenation.
@@ -1066,9 +1174,18 @@ impl ModelManager {
             if cancel.load(Ordering::SeqCst) {
                 return Err("Download cancelled".to_string());
             }
-            let chunk = resp
-                .chunk()
+            // A stalled transfer is the common venue-wifi failure and looks
+            // identical to a slow one from the outside, so bound each chunk
+            // rather than the download as a whole — a 2 GB model on a slow but
+            // healthy link must not be killed for taking a long time.
+            let chunk = tokio::time::timeout(DOWNLOAD_STALL_TIMEOUT, resp.chunk())
                 .await
+                .map_err(|_| {
+                    format!(
+                        "Transfer stalled: no data for {}s",
+                        DOWNLOAD_STALL_TIMEOUT.as_secs()
+                    )
+                })?
                 .map_err(|e| format!("Stream error: {}", e))?;
             let Some(bytes) = chunk else { break };
             file.write_all(&bytes).map_err(|e| format!("Write error: {}", e))?;
