@@ -703,10 +703,16 @@ impl TranscriptionManager {
                             );
                         }
                         let result = match stream.finalize() {
-                            // After finalize the committed prefix holds the
-                            // full text; display() = committed + tentative is
-                            // the safe read.
-                            Ok(_) => Some(stream.text().display()),
+                            // `full` is the model's authoritative hypothesis and
+                            // the only correct read here. `committed` is
+                            // append-only by construction, so when finalize
+                            // rewrites an earlier span the committed prefix
+                            // cannot follow it — display() (= committed +
+                            // tentative) then returns the pre-rewrite text.
+                            // display() is right for the live path above, where
+                            // flicker-free matters more than being current, and
+                            // wrong here, where this is the text we keep.
+                            Ok(_) => Some(stream.text().full),
                             Err(e) => {
                                 error!(
                                     "[transcription] stream finalize failed: {}; falling back to batch",
