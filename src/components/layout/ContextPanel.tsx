@@ -21,6 +21,7 @@ import { SongList } from '../songs/SongList'
 import { AddSongModal } from '../songs/AddSongModal'
 import { LiveSongNavigator } from '../songs/LiveSongNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
+import { PanelErrorBoundary } from '../offline/PanelErrorBoundary'
 import { MediaPicker, type MediaItem } from '../media/MediaPicker'
 import { TemplateBrowser } from '../templates/TemplateBrowser'
 import { TemplateSelector } from '../templates/TemplateSelector'
@@ -378,7 +379,9 @@ export function ContextSectionContent({
                 )}
                 {section === 'sermon' && (
                     <div className="h-full">
-                        <SermonListenerPanel onHide={onClose} />
+                        <PanelErrorBoundary name="sermon-listener-context">
+                            <SermonListenerPanel onHide={onClose} />
+                        </PanelErrorBoundary>
                     </div>
                 )}
                 {section === 'media' && (

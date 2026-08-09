@@ -5,6 +5,7 @@ import { QuickActionsSidebar } from '../quick-actions/QuickActionsSidebar'
 import { PreviewContent } from '../preview/PreviewContent'
 import { LiveOutput } from '../live/LiveOutput'
 import { SermonListenerPanel } from '../sermon-listener'
+import { PanelErrorBoundary } from '../offline/PanelErrorBoundary'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import { useAppStore } from '../../store/appStore'
 import {
@@ -288,11 +289,13 @@ export function DashboardLayout({
                 return <LiveOutput />
             case 'sermonListener':
                 return (
-                    <SermonListenerPanel
-                        autoLookup={true}
-                        autoDisplay={false}
-                        compact={true}
-                    />
+                    <PanelErrorBoundary name="sermon-listener-dashboard">
+                        <SermonListenerPanel
+                            autoLookup={true}
+                            autoDisplay={false}
+                            compact={true}
+                        />
+                    </PanelErrorBoundary>
                 )
             case 'library':
                 return <LibraryContent compact={true} />

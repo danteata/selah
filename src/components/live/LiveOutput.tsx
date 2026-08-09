@@ -24,6 +24,7 @@ import { KineticText } from './KineticText'
 import { audioFeatures } from '../../services/visualizer/audioFeatures'
 import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
+import { PanelErrorBoundary } from '../offline/PanelErrorBoundary'
 import { ContextSectionContent } from '../layout/ContextPanel'
 import { VideoBackground } from './VideoBackground'
 import { MediaContent, type MediaProgress } from './MediaContent'
@@ -661,7 +662,12 @@ export function LiveOutput() {
                 </span>
             </div>
             <div className="h-[calc(100%-1.25rem)] min-h-0 overflow-y-auto custom-scrollbar pr-1">
-                <SermonListenerPanel compact />
+                {/* Silent: this renders on the output the congregation sees, so
+                    a failure here should vanish, not become a notice on screen.
+                    Without the boundary it takes the whole /live route down. */}
+                <PanelErrorBoundary name="sermon-listener-live" silent>
+                    <SermonListenerPanel compact />
+                </PanelErrorBoundary>
             </div>
         </div>
     ) : null
