@@ -31,6 +31,7 @@ tauri::embed_plist::embed_info_plist!(concat!(env!("CARGO_MANIFEST_DIR"), "/Info
 mod audio_capture;
 mod license;
 mod logging;
+mod memory;
 mod multi_monitor;
 mod ndi_output;
 mod oauth_listener;
@@ -270,6 +271,9 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything allocates — see memory.rs for why the ordering matters.
+    memory::init_allocator();
+
     let multi_monitor_state: Arc<MultiMonitorState> = Arc::new(MultiMonitorState::new());
     let ndi_manager: Arc<NdiManager> = Arc::new(NdiManager::new());
 
