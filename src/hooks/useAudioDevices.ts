@@ -8,6 +8,13 @@ export interface AudioInputDevice {
     isDefault: boolean
     /** Native device name for Tauri audio capture (different from browser deviceId) */
     nativeName?: string
+    /**
+     * Input channel count as the native host reports it. Only present on
+     * desktop, where a multi-channel interface can carry a vocal aux on one
+     * channel and the front-of-house mix on another — see the input-channel
+     * setting. Browser enumeration doesn't expose this.
+     */
+    channels?: number
 }
 
 const DEVICE_LABEL_STORAGE_KEY = 'sermon-listener:selected-mic-label'
@@ -117,6 +124,7 @@ export function useAudioDevices() {
                                 label: nativeMatch.name,
                                 nativeName: nativeMatch.name,
                                 isDefault: nativeMatch.is_default,
+                                channels: nativeMatch.channels,
                             }
                         }
                         return bd
@@ -132,6 +140,7 @@ export function useAudioDevices() {
                             label: d.name,
                             isDefault: d.is_default,
                             nativeName: d.name,
+                            channels: d.channels,
                         }))
                 }
             } else {

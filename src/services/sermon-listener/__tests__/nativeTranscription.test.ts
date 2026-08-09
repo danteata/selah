@@ -52,6 +52,7 @@ describe('nativeTranscriptionService', () => {
         expect(invokeMock).toHaveBeenCalledWith('start_capture_with_vad', {
             captureType: 'microphone',
             deviceName: undefined,
+            inputChannel: undefined,
         })
 
         // Simulate a transcription-result (final) event reaching the listener.
@@ -60,6 +61,32 @@ describe('nativeTranscriptionService', () => {
         // No segments in the payload → the segments argument is omitted rather
         // than forwarded as an empty array.
         expect(onResult).toHaveBeenCalledWith('For God so loved the world', true, undefined)
+    })
+
+    it('forwards the selected input channel to native capture', async () => {
+        // The vocal-aux setup this exists for: a desk sending an isolated vocal
+        // feed on channel 3 of a multi-channel interface. If the index doesn't
+        // reach Rust the capture averages every channel and mixes the band back
+        // in, which is the case the eval measured as far worse.
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
+            return Promise.resolve(undefined)
+        })
+
+        await nativeTranscriptionService.start({
+            language: 'en-US',
+            captureSource: 'microphone',
+            microphoneDeviceId: 'Scarlett 4i4 USB',
+            inputChannel: 2,
+            onResult: vi.fn(),
+            onError: vi.fn(),
+        })
+
+        expect(invokeMock).toHaveBeenCalledWith('start_capture_with_vad', {
+            captureType: 'microphone',
+            deviceName: 'Scarlett 4i4 USB',
+            inputChannel: 2,
+        })
     })
 
     it('forwards segment timings from transcription-result when the model supplies them', async () => {

@@ -20,13 +20,21 @@ export const transcriptionErrorCodes = {
     SCREEN_CAPTURE_DENIED: 'screen_capture_denied',
     VAD_LOAD_FAILED: 'vad_load_failed',
     TRANSCRIPTION_TIMEOUT: 'transcription_timeout',
+    /**
+     * The native capture stream died under us — device unplugged, USB or
+     * Bluetooth dropout, a hub going to sleep. Distinct from
+     * MICROPHONE_NOT_FOUND, which is a device that was never there: this one
+     * was working a moment ago, and the pipeline otherwise reports a healthy
+     * but permanently silent room.
+     */
+    CAPTURE_STREAM_LOST: 'capture_stream_lost',
     INTERNAL_ERROR: 'internal_error',
 } as const
 
 export type TranscriptionErrorCode = typeof transcriptionErrorCodes[keyof typeof transcriptionErrorCodes]
 
 export type UserErrorCode = 'invalid_audio' | 'microphone_denied' | 'mic_not_found' | 'screen_capture_denied' | 'model_not_found' | 'vad_load_failed'
-export type RetryableErrorCode = 'server_not_running' | 'server_busy' | 'server_crashed' | 'network_timeout' | 'transcription_timeout'
+export type RetryableErrorCode = 'server_not_running' | 'server_busy' | 'server_crashed' | 'network_timeout' | 'transcription_timeout' | 'capture_stream_lost'
 
 const USER_ERRORS: Set<string> = new Set([
     transcriptionErrorCodes.INVALID_AUDIO,
@@ -43,6 +51,10 @@ const RETRYABLE_ERRORS: Set<string> = new Set([
     transcriptionErrorCodes.SERVER_CRASHED,
     transcriptionErrorCodes.NETWORK_TIMEOUT,
     transcriptionErrorCodes.TRANSCRIPTION_TIMEOUT,
+    // The capture supervisor rebuilds the stream on its own with backoff, so
+    // this really is retryable — until it reports itself fatal, which arrives
+    // as a separate, non-retryable message.
+    transcriptionErrorCodes.CAPTURE_STREAM_LOST,
 ])
 
 export function isUserError(code: string): boolean {
@@ -96,6 +108,8 @@ export function getUserAction(code: string): string | null {
             return 'Check your internet connection (VAD model needs to download once).'
         case transcriptionErrorCodes.INVALID_AUDIO:
             return 'Audio format not supported. Try a different input.'
+        case transcriptionErrorCodes.CAPTURE_STREAM_LOST:
+            return 'Check the microphone or interface cable. Selah is trying to reconnect.'
         default:
             return null
     }
@@ -157,6 +171,12 @@ export function classifyTranscriptionError(error: unknown): TranscriptionErrorCo
     }
     if (lower.includes('permission') || lower.includes('notallowederror') || lower.includes('not allowed')) {
         return transcriptionErrorCodes.MICROPHONE_DENIED
+    }
+    // Before MICROPHONE_NOT_FOUND: the capture supervisor's message can mention
+    // a missing device ("No input device available") on a rebuild, but the
+    // meaningful fact is that a working stream dropped, not that none existed.
+    if (lower.includes('capture_stream_lost') || lower.includes('input stream')) {
+        return transcriptionErrorCodes.CAPTURE_STREAM_LOST
     }
     if (lower.includes('notfounderror') || lower.includes('no audio') || lower.includes('requested device not found')) {
         return transcriptionErrorCodes.MICROPHONE_NOT_FOUND

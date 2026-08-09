@@ -32,10 +32,38 @@ export interface AudioChunk {
     sample_rate: number
 }
 
+/** Mirrors Rust `CaptureStreamErrorEvent` (the `capture-stream-error` payload). */
+export interface CaptureStreamErrorEvent {
+    message: string
+    attempt: number
+    recovered: boolean
+    fatal: boolean
+}
+
+/**
+ * Subscribe to native capture-stream failures.
+ *
+ * Worth a dedicated channel because a dead stream is otherwise invisible: the
+ * VAD thread keeps emitting its `audio-features` heartbeat through delivery
+ * gaps by design, so a microphone that dropped at 11:04 looks exactly like a
+ * quiet room for the rest of the service. Rust rebuilds the stream on its own
+ * with backoff; these events say whether that is working.
+ *
+ * Resolves to a no-op unsubscribe on web, so callers don't need a guard.
+ */
+export async function onCaptureStreamError(
+    handler: (event: CaptureStreamErrorEvent) => void
+): Promise<UnlistenFn> {
+    if (!isTauriAvailable()) return () => {}
+    return listen<CaptureStreamErrorEvent>('capture-stream-error', (e) => handler(e.payload))
+}
+
 export interface NativeCaptureConfig {
     captureType: CaptureType
     chunkDurationMs?: number
     deviceName?: string
+    /** 0-based input channel on a multi-channel interface; omit to average all. */
+    inputChannel?: number
     onChunk?: (chunk: AudioChunk) => void
     onStatus?: (status: CaptureStatus) => void
     onError?: (error: string) => void
@@ -45,6 +73,8 @@ export interface NativeCaptureEventConfig {
     captureType: CaptureType
     chunkDurationMs?: number
     deviceName?: string
+    /** 0-based input channel on a multi-channel interface; omit to average all. */
+    inputChannel?: number
     onWavChunk?: (wavBase64: string, durationMs: number, startOffsetMs: number) => void
     onStatus?: (status: CaptureStatus) => void
     onError?: (error: string) => void
@@ -166,6 +196,7 @@ class NativeAudioCaptureService {
             await invoke('start_capture_with_vad', {
                 captureType: config.captureType,
                 deviceName: config.deviceName,
+                inputChannel: config.inputChannel,
             })
 
             config.onStatus?.('capturing')
@@ -207,6 +238,7 @@ class NativeAudioCaptureService {
                 captureType: config.captureType,
                 chunkDurationMs: config.chunkDurationMs || 3000,
                 deviceName: config.deviceName,
+                inputChannel: config.inputChannel,
             })
 
             config.onStatus?.('capturing')

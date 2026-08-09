@@ -501,6 +501,13 @@ export interface AppSettings {
         captureSource?: 'microphone' | 'system'
         /** Selected microphone device ID (browser deviceId or native device name) */
         selectedMicrophoneId?: string
+        /**
+         * Which input channel to take from a multi-channel interface, 0-based.
+         * Undefined averages all channels, which is right for an ordinary mic
+         * and wrong for a desk that sends a vocal aux on one channel and the
+         * front-of-house mix on another. Desktop capture only.
+         */
+        inputChannel?: number
         /** Selected Whisper model id (catalog id, e.g. "base.en", "small.en"). */
         whisperModel?: string
         /** Act on spoken commands ("next verse", "switch to NIV", …) heard in

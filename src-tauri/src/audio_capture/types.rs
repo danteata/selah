@@ -216,19 +216,40 @@ pub fn resample_cubic(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32>
     result
 }
 
-/// Mix stereo to mono
-pub fn mix_to_mono(samples: &[f32], channels: u16) -> Vec<f32> {
+/// Reduce interleaved multi-channel audio to mono.
+///
+/// `selected` picks one channel instead of averaging them. That matters for a
+/// multi-channel interface at a sound desk (Focusrite Scarlett, MOTU M4,
+/// Behringer UMC), where the extra channels are not more of the same source:
+/// they carry the front-of-house mix, or loopback, alongside a vocal aux.
+/// Averaging mixes the band back into a feed that was chosen precisely to
+/// exclude it — the input `songTracking.eval.test.ts` measured as collapsing
+/// no-speech fallback segments from 46 to 1.
+///
+/// A `selected` channel that doesn't exist on this device falls back to
+/// averaging rather than erroring: the setting is stored per user, not per
+/// device, so unplugging the interface and running off the laptop mic must
+/// keep working.
+///
+/// Trailing partial frames are dropped. cpal delivers whole frames, so this is
+/// a guard rather than a code path — but averaging a short chunk over the full
+/// channel count (as this did before) silently scaled that frame down.
+pub fn downmix(samples: &[f32], channels: u16, selected: Option<u16>) -> Vec<f32> {
     if channels <= 1 {
         return samples.to_vec();
     }
+    let stride = channels as usize;
 
-    samples
-        .chunks(channels as usize)
-        .map(|chunk| {
-            let sum: f32 = chunk.iter().sum();
-            sum / channels as f32
-        })
-        .collect()
+    match selected {
+        Some(ch) if (ch as usize) < stride => {
+            let idx = ch as usize;
+            samples.chunks_exact(stride).map(|frame| frame[idx]).collect()
+        }
+        _ => samples
+            .chunks_exact(stride)
+            .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+            .collect(),
+    }
 }
 
 /// 2nd-order Butterworth highpass IIR filter coefficients at 85 Hz, Q=0.707
@@ -274,8 +295,19 @@ pub fn process_audio_samples(
     source_sample_rate: u32,
     source_channels: u16,
 ) -> Vec<f32> {
+    process_audio_samples_on_channel(samples, source_sample_rate, source_channels, None)
+}
+
+/// As [`process_audio_samples`], but taking a single input channel rather than
+/// the average of all of them. See [`downmix`] for why that is worth a setting.
+pub fn process_audio_samples_on_channel(
+    samples: &[f32],
+    source_sample_rate: u32,
+    source_channels: u16,
+    selected_channel: Option<u16>,
+) -> Vec<f32> {
     // Mix to mono if stereo
-    let mut mono_samples = mix_to_mono(samples, source_channels);
+    let mut mono_samples = downmix(samples, source_channels, selected_channel);
 
     // Resample to 16kHz if needed
     if source_sample_rate != TARGET_SAMPLE_RATE {
@@ -286,4 +318,56 @@ pub fn process_audio_samples(
     HighpassFilter::apply(&mut mono_samples);
 
     mono_samples
+}
+
+#[cfg(test)]
+mod downmix_tests {
+    use super::downmix;
+
+    #[test]
+    fn mono_passes_through_untouched() {
+        let s = [0.1, -0.2, 0.3];
+        assert_eq!(downmix(&s, 1, None), s.to_vec());
+        // A channel selection on a mono device is meaningless, not an error.
+        assert_eq!(downmix(&s, 1, Some(3)), s.to_vec());
+    }
+
+    #[test]
+    fn averages_all_channels_by_default() {
+        // Two frames of stereo: (1.0, 0.0) and (0.5, -0.5).
+        let s = [1.0, 0.0, 0.5, -0.5];
+        assert_eq!(downmix(&s, 2, None), vec![0.5, 0.0]);
+    }
+
+    #[test]
+    fn takes_only_the_selected_channel() {
+        let s = [1.0, 0.0, 0.5, -0.5];
+        assert_eq!(downmix(&s, 2, Some(0)), vec![1.0, 0.5]);
+        assert_eq!(downmix(&s, 2, Some(1)), vec![0.0, -0.5]);
+    }
+
+    #[test]
+    fn isolates_a_vocal_aux_from_a_four_channel_desk() {
+        // ch0/ch1 carry the FOH mix, ch2 the vocal aux, ch3 unused. Averaging
+        // buries the vocal; selecting it recovers the feed exactly.
+        let s = [0.8, 0.8, 0.2, 0.0, 0.6, 0.6, 0.1, 0.0];
+        assert_eq!(downmix(&s, 4, Some(2)), vec![0.2, 0.1]);
+        assert_ne!(downmix(&s, 4, None), vec![0.2, 0.1]);
+    }
+
+    #[test]
+    fn out_of_range_selection_falls_back_to_averaging() {
+        // The setting is stored per user, not per device: unplugging the
+        // interface and running off a built-in stereo mic must keep working.
+        let s = [1.0, 0.0, 0.5, -0.5];
+        assert_eq!(downmix(&s, 2, Some(7)), downmix(&s, 2, None));
+    }
+
+    #[test]
+    fn drops_a_trailing_partial_frame() {
+        // Averaging a short frame over the full channel count scaled it down.
+        let s = [1.0, 1.0, 1.0];
+        assert_eq!(downmix(&s, 2, None), vec![1.0]);
+        assert_eq!(downmix(&s, 2, Some(0)), vec![1.0]);
+    }
 }

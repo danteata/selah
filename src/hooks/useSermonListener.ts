@@ -20,6 +20,7 @@ import { useSlideCreation, firstVerseOnly } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
+import { onCaptureStreamError } from '../services/sermon-listener/nativeAudioCapture'
 import { audioFeatures, bandsForSampleRate } from '../services/visualizer/audioFeatures'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
 import type { TranscriptionProvider, TranscriptionStatus, WhisperSegmentTiming } from '../services/sermon-listener'
@@ -723,6 +724,45 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             stopAudioAnalyser()
         }
     }, [isListening, startAudioAnalyser, stopAudioAnalyser])
+
+    /**
+     * Surface native capture-stream failures while listening.
+     *
+     * Nothing else can: the VAD thread keeps its `audio-features` heartbeat
+     * running through delivery gaps on purpose, so a microphone that dropped
+     * mid-service reads downstream as a room that simply went quiet. Rust
+     * rebuilds the stream itself with backoff — these events are what tell the
+     * operator it is happening, and when it has given up.
+     */
+    useEffect(() => {
+        if (!isListening || !isDesktop()) return
+
+        let unlisten: (() => void) | null = null
+        let cancelled = false
+
+        onCaptureStreamError((event) => {
+            if (event.recovered) {
+                setError(null)
+                toast.success('Microphone reconnected')
+                return
+            }
+            if (event.fatal) {
+                setError(`Microphone disconnected and could not be reopened: ${event.message}`)
+                return
+            }
+            // Retryable: classifyTranscriptionError maps "input stream" to
+            // CAPTURE_STREAM_LOST, which renders as the amber auto-retry banner.
+            setError(`Lost the input stream (attempt ${event.attempt}): ${event.message}`)
+        }).then((fn) => {
+            if (cancelled) fn()
+            else unlisten = fn
+        })
+
+        return () => {
+            cancelled = true
+            unlisten?.()
+        }
+    }, [isListening])
 
     /**
      * Check if text is a duplicate or near-duplicate of recent chunks.
@@ -2632,6 +2672,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 language,
                 captureSource: sermonSettings?.captureSource,
                 microphoneDeviceId: sermonSettings?.selectedMicrophoneId,
+                inputChannel: sermonSettings?.inputChannel,
                 continuous: true,
                 interimResults: true,
                 useVAD: globalSettings?.sermonListener_useVAD,
@@ -2831,6 +2872,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         provider,
         sermonSettings?.captureSource,
         sermonSettings?.selectedMicrophoneId,
+        sermonSettings?.inputChannel,
         globalSettings?.sermonListener_transcriptionProvider,
         globalSettings?.sermonListener_useVAD,
         semanticDetectorReady,

@@ -19,6 +19,8 @@ export interface VadAudioChunkEvent {
 
 export interface NativeVadConfig {
     captureType: 'microphone' | 'system'
+    /** 0-based input channel on a multi-channel interface; omit to average all. */
+    inputChannel?: number
     onSpeechChunk: (wavBase64: string, durationMs: number, startOffsetMs: number) => void
     onSpeakingChange?: (isSpeaking: boolean) => void
     onError?: (error: string) => void
@@ -59,6 +61,7 @@ export async function startNativeVadCapture(config: NativeVadConfig): Promise<()
         // Start capture with VAD
         await invoke('start_capture_with_vad', {
             captureType: config.captureType,
+            inputChannel: config.inputChannel,
         })
 
         console.log('[NativeVadCapture] Started with capture type:', config.captureType)

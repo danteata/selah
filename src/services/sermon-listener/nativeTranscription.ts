@@ -49,6 +49,8 @@ export interface NativeTranscriptionStartOptions {
     initialPrompt?: string
     captureSource?: 'microphone' | 'system'
     microphoneDeviceId?: string
+    /** 0-based input channel on a multi-channel interface; omit to average all. */
+    inputChannel?: number
     onResult: (text: string, isFinal: boolean, segments?: WhisperSegmentTiming[]) => void
     onError: (error: string) => void
 }
@@ -123,6 +125,7 @@ class NativeTranscriptionService {
             await invoke('start_capture_with_vad', {
                 captureType: options.captureSource ?? 'microphone',
                 deviceName: options.microphoneDeviceId,
+                inputChannel: options.inputChannel,
             })
 
             this.isRunning = true

@@ -54,6 +54,12 @@ pub struct AudioCaptureState {
     pub vad_segmenter: Arc<Mutex<Option<VadSegmenter>>>,
     pub vad_enabled: Arc<AtomicBool>,
     pub device_name: Arc<Mutex<Option<String>>>,
+    /// Which input channel to take, or `None` to average all of them.
+    ///
+    /// Only meaningful on a multi-channel interface, where the extra channels
+    /// carry different sources rather than more of the same one — a vocal aux
+    /// alongside the front-of-house mix. See `types::downmix`.
+    pub input_channel: Arc<Mutex<Option<u16>>>,
     /// Dev-only: active session-audio recorder, if a dev has started one via
     /// `start_session_recording`. Always `None` in release builds.
     #[cfg(debug_assertions)]
@@ -73,6 +79,7 @@ impl AudioCaptureState {
             vad_segmenter: Arc::new(Mutex::new(None)),
             vad_enabled: Arc::new(AtomicBool::new(false)),
             device_name: Arc::new(Mutex::new(None)),
+            input_channel: Arc::new(Mutex::new(None)),
             #[cfg(debug_assertions)]
             session_recorder: Arc::new(Mutex::new(None)),
         }
@@ -173,10 +180,12 @@ pub fn open_screen_capture_settings() -> Result<(), String> {
 /// Tauri command: Start audio capture with specified type
 #[tauri::command]
 pub fn start_capture(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AudioCaptureState>,
     capture_type: Option<String>,
     chunk_duration_ms: Option<u32>,
     device_name: Option<String>,
+    input_channel: Option<u16>,
 ) -> Result<(), String> {
     let ct = match capture_type.as_deref() {
         Some("system") => CaptureType::System,
@@ -193,11 +202,13 @@ pub fn start_capture(
     } else {
         *state.device_name.lock() = None;
     }
+    *state.input_channel.lock() = input_channel;
 
-    start_audio_capture_internal(&state, ct, chunk_duration_ms)
+    start_audio_capture_internal(&app, &state, ct, chunk_duration_ms)
 }
 
 fn start_audio_capture_internal(
+    app: &tauri::AppHandle,
     state: &tauri::State<'_, AudioCaptureState>,
     capture_type: CaptureType,
     chunk_duration_ms: Option<u32>,
@@ -244,15 +255,18 @@ fn start_audio_capture_internal(
     let buffer_size = state.buffer_size.clone();
     let sample_rate = state.sample_rate.clone();
     let device_name = state.device_name.lock().clone();
+    let input_channel = *state.input_channel.lock();
 
     match capture_type {
         CaptureType::Microphone => start_microphone_capture(
+            app.clone(),
             is_capturing,
             audio_buffer,
             buffer_size,
             sample_rate,
             stop_rx,
             device_name,
+            input_channel,
         ),
         CaptureType::System => {
             // Use platform-specific system audio capture
@@ -285,12 +299,14 @@ fn start_audio_capture_internal(
             // TODO: Implement mixed capture
             // For now, fall back to microphone
             start_microphone_capture(
+                app.clone(),
                 is_capturing,
                 audio_buffer,
                 buffer_size,
                 sample_rate,
                 stop_rx,
                 device_name,
+                input_channel,
             )
         }
     }
@@ -771,6 +787,7 @@ pub fn start_capture_with_vad(
     state: tauri::State<'_, AudioCaptureState>,
     capture_type: Option<String>,
     device_name: Option<String>,
+    input_channel: Option<u16>,
 ) -> Result<(), String> {
     // Initialize VAD if not already done
     if state.vad_segmenter.lock().is_none() {
@@ -819,7 +836,8 @@ pub fn start_capture_with_vad(
     } else {
         *state.device_name.lock() = None;
     }
-    start_audio_capture_internal(&state, ct, Some(32))?;
+    *state.input_channel.lock() = input_channel;
+    start_audio_capture_internal(&app, &state, ct, Some(32))?;
 
     // Speech segments are transcribed on a dedicated worker thread, not the
     // VAD-processing thread below. `handle_speech_segment` calls into

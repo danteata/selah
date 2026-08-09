@@ -129,6 +129,12 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     // otherwise fall back to the stored deviceId
     const activeMicId = sermon?.selectedMicrophoneId || resolvedDeviceId || ''
 
+    // Channel count for the selected device, as the native host reports it.
+    // Only desktop enumeration fills this in, so on web it stays 1 and the
+    // channel selector below never appears — which is correct, since browser
+    // capture hands us an already-mixed track.
+    const activeMicChannels = micDevices.find(d => d.id === activeMicId)?.channels ?? 1
+
     const handleDeviceChange = (deviceId: string) => {
         // Find the label for this device to persist it
         const selectedDevice = micDevices.find(d => d.id === deviceId)
@@ -137,7 +143,17 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         } else if (!deviceId) {
             saveSelectedDeviceLabel(null)
         }
-        update({ selectedMicrophoneId: deviceId })
+        // Channel 3 of a four-channel desk means nothing on the laptop mic the
+        // operator just switched to. The capture side falls back to averaging
+        // for an out-of-range index, but leaving the stale number selected in
+        // the UI would read as though it were still in effect.
+        const channels = selectedDevice?.channels ?? 1
+        const keepChannel =
+            sermon?.inputChannel !== undefined && sermon.inputChannel < channels
+        update({
+            selectedMicrophoneId: deviceId,
+            inputChannel: keepChannel ? sermon?.inputChannel : undefined,
+        })
     }
 
     return (
@@ -303,6 +319,33 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDevices ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
+
+                    {/* Input channel — only meaningful on a multi-channel interface,
+                        where the extra channels carry different sources rather than
+                        more of the same one. Hidden entirely on an ordinary mic so
+                        it can't confuse anyone it doesn't apply to. */}
+                    {activeMicChannels > 1 && (
+                        <div className="mt-3">
+                            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Input channel</label>
+                            <select
+                                value={sermon?.inputChannel ?? ''}
+                                onChange={(e) => update({
+                                    inputChannel: e.target.value === '' ? undefined : Number(e.target.value),
+                                })}
+                                className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white appearance-none"
+                            >
+                                <option value="">Average all channels</option>
+                                {Array.from({ length: activeMicChannels }, (_, i) => (
+                                    <option key={i} value={i}>Channel {i + 1}</option>
+                                ))}
+                            </select>
+                            <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                                This interface has {activeMicChannels} inputs. If your sound desk sends a
+                                vocal-only aux on one of them, pick it — averaging mixes the band back in,
+                                which is what makes lyrics hard to transcribe during worship.
+                            </p>
+                        </div>
+                    )}
 
                     {/* Live signal test for the selected microphone */}
                     <div className="mt-3">
