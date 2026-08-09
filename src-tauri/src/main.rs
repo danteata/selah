@@ -393,6 +393,10 @@ pub fn run() {
             std::mem::forget(sentinel_guard);
 
             multi_monitor_state.init(app.handle().clone());
+            // Keeps the projector output correctly sized when a display sleeps,
+            // is unplugged, or changes resolution mid-service. Must come after
+            // init(), which is where the watcher gets its app handle.
+            multi_monitor_state.spawn_monitor_watcher();
             ndi_manager.init(app.handle().clone());
 
             // Native transcription model store (Whisper GGUF + Parakeet ONNX).

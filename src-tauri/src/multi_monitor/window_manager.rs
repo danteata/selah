@@ -36,6 +36,36 @@ pub fn generate_stable_id(raw_name: &str, position_x: i32, position_y: i32) -> S
     }
 }
 
+/// The name part of a stable ID — everything before the trailing `-{x}x{y}`.
+///
+/// The ID encodes position, so a display that comes back at different
+/// coordinates (rearranged in system settings, or a projector rejoining a
+/// layout that changed while it was away) gets a different ID even though it
+/// is the same panel. Matching on the name part is what lets the output window
+/// follow it instead of falling back to whatever monitor happens to be next.
+///
+/// `None` when the host reported no name, since the `monitor-` placeholder
+/// identifies nothing and would match every unnamed display.
+fn stable_id_name_part(id: &str) -> Option<&str> {
+    let is_int = |s: &str| {
+        let digits = s.strip_prefix('-').unwrap_or(s);
+        !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+    };
+
+    let (head, y) = id.rsplit_once('x')?;
+    if !is_int(y) {
+        return None;
+    }
+    let (name, x) = head.rsplit_once('-')?;
+    if !x.bytes().all(|b| b.is_ascii_digit()) || x.is_empty() {
+        return None;
+    }
+    // A negative x left its minus sign behind as the trailing separator.
+    let name = name.strip_suffix('-').unwrap_or(name);
+
+    (!name.is_empty() && name != "monitor").then_some(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +125,45 @@ mod tests {
         let id1 = generate_stable_id("Monitor", 0, 0);
         let id2 = generate_stable_id("Monitor", 1920, 0);
         assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn name_part_survives_a_display_moving() {
+        // The whole point: same panel, new coordinates, same name part — so an
+        // output window follows it rather than falling back to another display.
+        let plugged_right = generate_stable_id("EPSON PJ", 1920, 0);
+        let plugged_left = generate_stable_id("EPSON PJ", -1920, 0);
+        assert_ne!(plugged_right, plugged_left);
+        assert_eq!(
+            stable_id_name_part(&plugged_right),
+            stable_id_name_part(&plugged_left)
+        );
+        assert_eq!(stable_id_name_part(&plugged_right), Some("epson-pj"));
+    }
+
+    #[test]
+    fn name_part_handles_hyphens_and_symbols_in_the_name() {
+        assert_eq!(
+            stable_id_name_part(&generate_stable_id("Dell U2723QE", 0, 0)),
+            Some("dell-u2723qe")
+        );
+        assert_eq!(
+            stable_id_name_part(&generate_stable_id("Monitor #14090", 1920, 0)),
+            Some("monitor-#14090")
+        );
+        assert_eq!(
+            stable_id_name_part(&generate_stable_id("Left Monitor", -1920, -1080)),
+            Some("left-monitor")
+        );
+    }
+
+    #[test]
+    fn unnamed_displays_have_no_name_part() {
+        // "monitor-0x0" identifies nothing; matching on it would make every
+        // unnamed display look like the same one.
+        assert_eq!(stable_id_name_part(&generate_stable_id("", 0, 0)), None);
+        assert_eq!(stable_id_name_part(&generate_stable_id("", -1920, 0)), None);
+        assert_eq!(stable_id_name_part("not-an-id"), None);
     }
 
     #[test]
@@ -228,6 +297,159 @@ impl MultiMonitorState {
         self.get_available_monitors()
             .into_iter()
             .find(|m| m.id == id)
+    }
+
+    /// Find the monitor an output on `id` should now be on, given the current
+    /// layout. Exact ID first, then the same display at new coordinates.
+    ///
+    /// Returns `None` when the display is genuinely gone, which is different
+    /// from "moved" and must not be treated as it: silently relocating a
+    /// projector output onto the operator's laptop screen mid-service would
+    /// put the slides where the congregation can't see them and the operator
+    /// can't work.
+    fn rematch_monitor(&self, id: &str, monitors: &[MonitorInfo]) -> Option<MonitorInfo> {
+        if let Some(exact) = monitors.iter().find(|m| m.id == id) {
+            return Some(exact.clone());
+        }
+        let name = stable_id_name_part(id)?;
+        monitors
+            .iter()
+            .find(|m| stable_id_name_part(&m.id) == Some(name))
+            .cloned()
+    }
+
+    /// A cheap fingerprint of the current monitor layout.
+    ///
+    /// Covers every field an output window's geometry is derived from, so a
+    /// resolution change, a rearrangement, or a DPI change all register — not
+    /// just monitors appearing and disappearing.
+    fn layout_fingerprint(monitors: &[MonitorInfo]) -> String {
+        monitors
+            .iter()
+            .map(|m| {
+                format!(
+                    "{}:{}x{}@{},{}:{}",
+                    m.id, m.width, m.height, m.position_x, m.position_y, m.scale_factor
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    /// Re-apply position and size to every open output window.
+    ///
+    /// Geometry was previously set once at creation and never revisited, so a
+    /// projector that slept and woke, an HDMI cable reseated, or a resolution
+    /// changed mid-service left the output window sized for a layout that no
+    /// longer existed. Physical coordinates throughout, matching
+    /// `build_output_window`.
+    pub fn reapply_output_geometry(&self) {
+        let Some(app) = self.get_app() else { return };
+        let monitors = self.get_available_monitors();
+        if monitors.is_empty() {
+            return;
+        }
+
+        let live_monitor_id = self.current_live_monitor.read().clone();
+
+        for label in [LIVE_WINDOW_LABEL, ALTERNATE_WINDOW_LABEL] {
+            let Some(window) = app.get_webview_window(label) else {
+                continue;
+            };
+
+            // The live output tracks the monitor it was opened on. The
+            // alternate output isn't tracked in state, so fall back to
+            // wherever the window currently sits.
+            let wanted = match (label, live_monitor_id.as_deref()) {
+                (LIVE_WINDOW_LABEL, Some(id)) => self.rematch_monitor(id, &monitors),
+                _ => window
+                    .current_monitor()
+                    .ok()
+                    .flatten()
+                    .and_then(|m| {
+                        let pos = m.position();
+                        monitors
+                            .iter()
+                            .find(|c| c.position_x == pos.x && c.position_y == pos.y)
+                            .cloned()
+                    }),
+            };
+
+            let Some(monitor) = wanted else {
+                println!(
+                    "[multi-monitor] {} display is gone; leaving the window where it is",
+                    label
+                );
+                continue;
+            };
+
+            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+                x: monitor.position_x,
+                y: monitor.position_y,
+            }));
+            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                width: monitor.width,
+                height: monitor.height,
+            }));
+
+            // The live output's stored monitor ID follows the display, so a
+            // later re-match starts from the coordinates it actually has.
+            if label == LIVE_WINDOW_LABEL {
+                self.set_current_live_monitor(Some(monitor.id.clone()));
+                self.update_window_state(|state| {
+                    state.live_monitor_id = Some(monitor.id.clone());
+                });
+            }
+
+            println!(
+                "[multi-monitor] re-applied {} geometry to {} ({}x{} @ {},{})",
+                label, monitor.name, monitor.width, monitor.height, monitor.position_x, monitor.position_y
+            );
+        }
+    }
+
+    /// Watch for monitor-configuration changes and keep the outputs correct.
+    ///
+    /// Tauri has no cross-platform "displays changed" event, so this polls.
+    /// The cost is one `available_monitors()` call every couple of seconds
+    /// against a failure that otherwise persists for the rest of a service.
+    pub fn spawn_monitor_watcher(self: &Arc<Self>) {
+        let state = Arc::clone(self);
+        std::thread::spawn(move || {
+            let mut fingerprint: Option<String> = None;
+
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+
+                let Some(app) = state.get_app() else { continue };
+                let monitors = state.get_available_monitors();
+                if monitors.is_empty() {
+                    // A transient enumeration failure is not a layout change;
+                    // treating it as one would relocate the output twice.
+                    continue;
+                }
+
+                let current = Self::layout_fingerprint(&monitors);
+                let Some(previous) = fingerprint.replace(current.clone()) else {
+                    continue; // First observation is the baseline, not a change.
+                };
+                if previous == current {
+                    continue;
+                }
+
+                println!("[multi-monitor] display configuration changed");
+                state.reapply_output_geometry();
+
+                let _ = app.emit(
+                    "monitor-config-changed",
+                    MonitorEventPayload {
+                        event_type: "configuration-changed".to_string(),
+                        monitor: None,
+                        monitors,
+                    },
+                );
+            }
+        });
     }
 
     /// Create the live output window

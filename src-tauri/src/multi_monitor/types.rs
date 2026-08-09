@@ -99,7 +99,7 @@ impl Default for WindowState {
 }
 
 /// Event payload sent to the frontend when monitor configuration changes
-#[allow(dead_code)]
+/// (`monitor-config-changed`), emitted by the watcher in `window_manager`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorEventPayload {
     /// The type of event
