@@ -1,30 +1,35 @@
-## Selah 0.1.17
+## Selah 0.1.18
 
-Lyrics now go up before the congregation reaches them, and the motion background moves with the music instead of trailing it.
+The transcript no longer goes quiet halfway through a worship set, and Selah now tells you when your microphone has stopped instead of showing you a silent room.
 
-### Lyrics arrive ahead of the singers
-- **The next lines are on screen before the congregation gets to them.** Selah now follows the live, partial transcript — the text that appears while someone is still singing, a second or two before the finished version — and learns how long a line takes, so it can put the next section up on time instead of waiting to hear the last line of the current one.
-- This is the case that used to fail: a two-line chorus went by faster than the transcript could describe it, so the projector was always a beat behind. Selah now leads immediately when the transcript is already later than the section has left to run.
-- **A repeated chorus is no longer mistaken for the first one.** If your arrangement is Verse 1, Chorus, Verse 2, Chorus, clicking the chorus during the *second* one used to send the tracker back to the first — and from there it advanced to Verse 2 instead of what actually follows. The operator's position chips highlighted both choruses at once for the same reason.
-- **A song imported mid-service can now be detected.** The search index was built once when the session started, so anything added afterwards stayed invisible to auto-detect until you restarted.
+### The transcript survives the whole song
+- **Selah keeps transcribing once the band fills out.** The speech detector was answering the question it was built to answer — *is this speech?* — and the back half of a worship song isn't. On one five-minute track it found phrases every few seconds until 2:37, then three times in the remaining two and a half minutes, and the transcript died with them while the level meter still showed strong signal. Audio that is plainly audible but that the detector won't call speech is now transcribed anyway after eight seconds. On a nine-minute recording this took coverage from 21% to 87% and removed every gap over eight seconds, including one that ran 133 seconds.
+- **Phrases are no longer clipped into fragments too short to read.** A single breath between sung lines used to close a segment, and what was left came back empty a third of the time — that's where the stray "Hey." and "Really?" entries in transcripts came from. Segments are now cut on a longer silence, and windows overlap so a phrase straddling a boundary isn't split across two attempts and mangled in both. Distinct words recovered rose from 173 to 189 over the same audio.
+- **The text Selah keeps is the text the model actually settled on.** When a transcription revises something it already said, the finished result was being assembled from a running draft that can only be added to — so a correction to an earlier word never made it through. Every finished segment could carry a stale opening, in sermons as well as songs.
+- **A transcription that returns nothing no longer stops the transcript.** Nor does a segment getting attached to the wrong stream.
 
-### The motion background keeps time
-- **The pulse lands on the beat instead of just after it.** Selah now measures how long audio takes to reach the screen and, once it has locked onto a steady tempo, fires the pulse that much early. The punch is instant and only the fade is smoothed; before, the rise was smoothed too, which put every hit about a tenth of a second late.
-- Beat detection was watching the wrong thing. What it treated as "bass" covered everything below 3.6 kHz — most of the vocal range — so it followed general loudness rather than the kick. The bands are now real frequency ranges, which also gives the drifting particles something to sparkle to.
-- On Windows and Linux two thirds of the audio was never examined, so which beats registered came down to timing luck, and a gap in audio delivery could invent beats that weren't in the music. Both are fixed, and the visuals now behave the same on every platform.
-- On a 120 Hz screen the text's nudge cancelled itself out, so it always leaned the same way.
+### Songs go up, and stay in step
+- **Lyrics are matched by sound, not spelling.** "Hallelujah" heard as "hallelooya" now finds the song.
+- **Selah follows a leader who jumps into the middle of a section.** It used to look only at the first line of each section when searching outside the expected range, on the assumption that an unplanned jump lands at the top of one. Worship doesn't oblige — leaders drop into the middle of a verse, double back, vamp. Worse than missing those jumps, with the real line invisible the closest remaining guess was sometimes an unrelated line that scraped over the threshold and went on screen. That's the flicker where a clearly-sung line sat in another slide and Selah wouldn't pick it up.
+- **A returning chorus isn't dropped as a repeat**, and a song added to your library mid-service can now be detected — the search index used to be built once at the start of the session.
+- **Songs stored as plain lyrics work properly.** They were being skipped by auto-detect entirely; now they're found, and they build one slide per verse instead of collapsing the whole song onto a single slide with nothing to advance through.
+- **A single filler line can't identify a song on its own.**
 
-### Editing a song no longer puts it on the projector
-- **Pressing Enter in a song's lyrics starts a new line.** Opening a song from the search results and pressing Enter used to send that song straight to the live output and swallow the newline — the search results' keyboard shortcut was catching keys typed into the editor on top of them. The arrow keys had the same problem, moving the highlighted result instead of the cursor.
+### Scripture detection knows when you're singing
+- **Selah stops hunting for verses in lyrics while it's following a song.** Worship lyrics are scripture-adjacent by design, so the verse matcher kept finding them — from sung lines alone during one song it surfaced Psalms 121:1, Isaiah 15:9 and Philippians 4:1. "I will look to the hills, from whence cometh my help" genuinely is an allusion to Psalm 121, which is exactly why it scored well and exactly why putting it on screen mid-song is wrong. The congregation is singing, not being read to. It was expensive, too: a nine-minute song ran a full search on every window and could exhaust the day's AI quota on audio guaranteed to contain no reading. When preaching starts, verse detection resumes on its own — there's no mode to remember to leave.
 
-### Templates
-- **"Applies to" does what it says.** Setting a template to Sermon or Prayer quietly saved it as applying to *every* slide type, so the narrowest choice became the widest. Neither was ever a slide type, so both are gone from that list along with Announcements, and Definitions — which was missing — has been added.
-- **You can filter templates by the slide type they work with.** The Templates panel only had a category filter, so a template you had scoped to Songs couldn't be found that way, and the Prayer *category* looked like it should have done the job. Both filters now work and combine, and a template set to "Any Type" appears under every one of them.
-- Default Templates in Settings now lists only the slide types it actually applies to. Sermon, Announcements, Prayer and Countdown were accepting a choice and ignoring it; Definitions was honoured but had no setting. "Scripture" is now "Bible Verses", matching the rest of the app.
-- Category colours agree with themselves — Sermon showed amber while you picked it and orange once saved.
+### Your sound desk's vocal feed
+- **You can now pick a single input channel from a multi-channel interface.** If you're on a Focusrite, MOTU or similar, your desk can send an isolated vocal aux on one channel while the front-of-house mix sits on another — and Selah used to average every channel together, mixing the band straight back into the feed chosen to exclude it. There's now an "Input channel" dropdown in Sermon Listener settings, which appears only when the selected device has more than one input. Measured against the full mix on the same nine minutes, a vocal feed cut timer-forced segments from 46 to one and raised distinct words per unit of audio by 67%. If your desk can send one, it's the single biggest improvement available to you.
 
-### NDI on Linux
-- **The NDI runtime is now actually in the Linux build.** 0.1.16 announced that Windows and Linux no longer need an NDI Tools install, and that was true on Windows only — the Linux packaging step was never told to include the library, so Linux kept showing "NDI runtime not found". It's in the box now, as originally intended.
+### Selah tells you when something has stopped
+- **A microphone that drops mid-service now says so, and reconnects itself.** When an interface is unplugged, a Bluetooth mic drops, or a USB hub sleeps, the audio stream dies — and Selah used to carry on as though nothing had happened, reporting a healthy but permanently silent room for the rest of the service. It now notices, reconnects on its own with a few increasingly patient attempts, and shows you a banner throughout: that it's trying, that it worked, or that it has given up and needs your attention.
+- **The projector output resizes itself when your displays change.** A projector that slept and woke, an HDMI cable reseated, or a resolution changed at the desk used to leave the output window laid out for a screen arrangement that no longer existed, with no fix short of closing and reopening it. Selah now watches for display changes and re-fits the output — following the same projector even if it comes back in a different position. If a display disappears entirely, the window is left alone rather than being relocated onto your laptop where the congregation can't see it.
+- **One panel failing no longer takes the page down with it.** A fault in the sermon listener used to blank the whole Dashboard, or the whole live output. It's now contained to the panel, and on the projector it disappears quietly rather than showing the congregation an error.
+- **The settings panel opens without a stutter.** Listing audio devices was blocking the interface while it queried each one.
 
-### Downloads
-- **The `.rpm` and `.msi` installers are no longer published.** Linux ships as `.AppImage` and `.deb`, Windows as the `.exe` setup — the formats the auto-updater uses and that nearly everyone was downloading anyway. If you install from `.rpm` or `.msi`, switch to one of those; automatic updates are unaffected either way. Building the extra two on every release was slowing the Linux build down for no one's benefit.
+### Model downloads
+- **A stalled download no longer hangs forever.** With no timeouts anywhere, a dropped connection or a captive portal left the progress bar frozen at some percentage with no error and no way forward. Downloads now notice when they've stopped and retry up to four times, resuming from where they left off rather than starting a several-hundred-megabyte file again. Cancelling takes effect immediately.
+
+### Under the hood
+- **Memory no longer creeps up across a long service on Linux.** Every phrase transcribed allocated buffers the system never took back, so a ninety-minute service slowly accumulated hundreds of megabytes it would never touch again.
+- Selah recovers from an internal speech-detector fault instead of going deaf for the rest of the session.
