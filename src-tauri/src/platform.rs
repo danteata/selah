@@ -1,5 +1,43 @@
 //! Small host-platform probes that inform runtime decisions.
 
+/// Disable ggml's Metal residency sets before the transcription engine ever
+/// initialises its Metal device.
+///
+/// ggml-metal pins its buffers into a `MTLResidencySet` and asserts on the set
+/// during teardown. Selah's engine can still be loaded when the process is
+/// going down — `TranscriptionManager` lives in Tauri state and its idle
+/// watcher holds a model until the unload timeout elapses — so the engine
+/// routinely outlives Tauri's shutdown sequence and the assertion fires as a
+/// crash on quit. The operator sees the app "close weirdly"; nothing in the
+/// log says why, because the process is already past the point where our
+/// logging is running.
+///
+/// Handy hit the same thing on the same crate and version (transcribe-cpp
+/// 0.1.3, `metal` feature) and disables residency outright — their issue
+/// #1902. Residency sets are a page-residency optimisation, not a correctness
+/// feature, so losing them costs a little first-run latency and nothing else.
+///
+/// ggml reads `GGML_METAL_NO_RESIDENCY` by *presence*, not value, so opting
+/// back in means removing the variable rather than setting it to 0. Set
+/// `SELAH_METAL_RESIDENCY=1` to do that and get upstream behaviour back.
+///
+/// Must run before the first Metal device is created — called at the top of
+/// `run()`, alongside [`crate::memory::init_allocator`], for the same reason.
+pub fn init_metal_backend() {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: called from `run()` before any other thread is spawned, so
+        // there is no concurrent getenv/setenv to race with.
+        unsafe {
+            if std::env::var("SELAH_METAL_RESIDENCY").as_deref() == Ok("1") {
+                std::env::remove_var("GGML_METAL_NO_RESIDENCY");
+            } else {
+                std::env::set_var("GGML_METAL_NO_RESIDENCY", "1");
+            }
+        }
+    }
+}
+
 /// Whether this is an x86_64 Windows process running under emulation on an
 /// ARM64 host (Windows-on-ARM's x64 emulation layer).
 ///

@@ -273,6 +273,8 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 pub fn run() {
     // Before anything allocates — see memory.rs for why the ordering matters.
     memory::init_allocator();
+    // Before the engine creates a Metal device — see platform.rs.
+    platform::init_metal_backend();
 
     let multi_monitor_state: Arc<MultiMonitorState> = Arc::new(MultiMonitorState::new());
     let ndi_manager: Arc<NdiManager> = Arc::new(NdiManager::new());
