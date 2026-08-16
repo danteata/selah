@@ -15,7 +15,9 @@
 //! Ignored by default because it needs a model and a recording on disk.
 //!
 //! ```text
-//! ffmpeg -i song.mp3 -ar 16000 -ac 1 -c:a pcm_s16le /tmp/song.wav
+//! # Any rate and channel count; the capture front end handles the conversion,
+//! # and giving it the original rate is what puts that front end under test.
+//! ffmpeg -i song.mp3 -c:a pcm_s16le /tmp/song.wav
 //!
 //! SELAH_PROBE_WAV=/tmp/song.wav \
 //! SELAH_PROBE_MODEL="$HOME/Library/Application Support/app.selah.desktop/\
@@ -47,30 +49,24 @@ fn env_path(key: &str) -> Option<PathBuf> {
     std::env::var(key).ok().filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
-/// Read a 16 kHz mono WAV as f32 samples.
+/// Read a WAV at whatever rate and channel count it happens to be, through the
+/// same front end a live capture stream uses.
+///
+/// This used to demand 16 kHz mono and reject anything else, which quietly
+/// excluded the capture pipeline from every measurement taken with it: downmix,
+/// resampling and the highpass all run *before* the point this harness started,
+/// so a change to any of them was invisible to the thing we use to judge
+/// changes. Handing it the original 48 kHz stereo recording now exercises them.
+/// A file already at 16 kHz mono is unaffected — the preprocessor skips the
+/// resampler at the target rate.
+///
+/// `SELAH_PROBE_CHANNEL=<n>` takes a single channel instead of averaging, to
+/// replay a desk feed the way the matching capture setting would.
 fn read_wav(path: &PathBuf) -> Result<Vec<f32>, String> {
-    let mut reader = hound::WavReader::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
-    let spec = reader.spec();
-    if spec.sample_rate != SAMPLE_RATE || spec.channels != 1 {
-        return Err(format!(
-            "expected 16 kHz mono, got {} Hz / {} channel(s) — reconvert with ffmpeg",
-            spec.sample_rate, spec.channels
-        ));
-    }
-    match spec.sample_format {
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .collect::<Result<_, _>>()
-            .map_err(|e| format!("read f32: {e}")),
-        hound::SampleFormat::Int => {
-            let scale = 1.0 / (1i64 << (spec.bits_per_sample - 1)) as f32;
-            reader
-                .samples::<i32>()
-                .map(|s| s.map(|v| v as f32 * scale))
-                .collect::<Result<_, _>>()
-                .map_err(|e| format!("read int: {e}"))
-        }
-    }
+    let channel = std::env::var("SELAH_PROBE_CHANNEL")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok());
+    super::types::decode_wav_to_capture_mono(&path.to_string_lossy(), channel)
 }
 
 fn mmss(ms: u32) -> String {
