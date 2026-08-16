@@ -35,6 +35,24 @@ const SUPERVISOR_POLL: Duration = Duration::from_millis(250);
 /// backing off and never reporting itself fatal.
 const STREAM_STABLE_AFTER: Duration = Duration::from_secs(30);
 
+/// How long a freshly opened stream may go without delivering a single
+/// callback before it is treated as dead and rebuilt.
+///
+/// `stream.play()` returning does not mean the device is producing audio. A
+/// Bluetooth headset negotiating a profile, a USB interface still powering up,
+/// or a host that hands back a stream for a device that has quietly gone away
+/// can all open cleanly and then deliver nothing, ever. Without this check
+/// that state is invisible: cpal's error callback never fires, so
+/// `stream_failed` stays false, `is_capturing` stays true, and the operator
+/// gets a "listening" UI in front of a silent room — the exact failure the
+/// rebuild supervisor was written to eliminate, arriving through the one door
+/// it did not cover.
+///
+/// Five seconds is chosen to sit above a cold USB interface's start-up, which
+/// is normally well under a second and occasionally a second or two, and well
+/// below the point where an operator concludes the software is broken.
+const FIRST_SAMPLE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Emitted on `capture-stream-error` when the input stream dies or is rebuilt.
 ///
 /// This event exists because a dead stream is otherwise indistinguishable from
@@ -142,6 +160,7 @@ fn build_stream<T>(
     buffer_size: Arc<AtomicUsize>,
     stream_failed: Arc<AtomicBool>,
     failure_message: Arc<Mutex<String>>,
+    saw_samples: Arc<AtomicBool>,
 ) -> Result<Stream, String>
 where
     T: cpal::SizedSample + Send + 'static,
@@ -157,6 +176,11 @@ where
                 if !is_capturing.load(Ordering::SeqCst) {
                     return;
                 }
+                // The device is delivering. Recorded before any processing:
+                // the question this answers is whether the host is handing us
+                // callbacks, not whether they contained speech or even
+                // survived the resampler's block buffering.
+                saw_samples.store(true, Ordering::Relaxed);
                 let samples: Vec<f32> = data.iter().copied().map(convert).collect();
                 let processed = pre.process(&samples);
                 let mut buf = audio_buffer.lock();
@@ -186,6 +210,7 @@ fn open_stream(
     buffer_size: &Arc<AtomicUsize>,
     stream_failed: &Arc<AtomicBool>,
     failure_message: &Arc<Mutex<String>>,
+    saw_samples: &Arc<AtomicBool>,
 ) -> Result<Stream, String> {
     let device = resolve_device(device_name).ok_or_else(|| "No input device available".to_string())?;
 
@@ -225,6 +250,7 @@ fn open_stream(
                 buffer_size.clone(),
                 stream_failed.clone(),
                 failure_message.clone(),
+                saw_samples.clone(),
             )
         };
     }
@@ -266,6 +292,9 @@ pub fn start_microphone_capture(
     std::thread::spawn(move || {
         let stream_failed = Arc::new(AtomicBool::new(false));
         let failure_message = Arc::new(Mutex::new(String::new()));
+        // Set by the capture callback the first time this device hands us a
+        // chunk. Cleared per stream, immediately before each open.
+        let saw_samples = Arc::new(AtomicBool::new(false));
         // Consecutive rebuilds not yet separated by a stream that ran long
         // enough to count as good. Indexes REBUILD_BACKOFF; running off the end
         // is what makes a permanently absent device fatal instead of a loop.
@@ -273,6 +302,7 @@ pub fn start_microphone_capture(
 
         'session: loop {
             stream_failed.store(false, Ordering::SeqCst);
+            saw_samples.store(false, Ordering::SeqCst);
 
             let opened = open_stream(
                 device_name.as_deref(),
@@ -282,6 +312,7 @@ pub fn start_microphone_capture(
                 &buffer_size,
                 &stream_failed,
                 &failure_message,
+                &saw_samples,
             );
 
             let stream = match opened {
@@ -312,13 +343,26 @@ pub fn start_microphone_capture(
                 }
             };
 
-            // Park until stopped, or until the stream dies under us.
+            // Park until stopped, or until the stream dies under us — either
+            // because cpal said so, or because it never started delivering.
             let opened_at = std::time::Instant::now();
+            let mut silent_open = false;
             let died = loop {
                 match stop_rx.recv_timeout(SUPERVISOR_POLL) {
                     Ok(()) | Err(RecvTimeoutError::Disconnected) => break false,
                     Err(RecvTimeoutError::Timeout) => {
                         if stream_failed.load(Ordering::SeqCst) {
+                            break true;
+                        }
+                        // Polling a flag the callback sets, rather than waiting
+                        // on a readiness signal the callback sends, is what
+                        // keeps this free of the stale-signal race: there is no
+                        // in-flight notification that can outlive the stream it
+                        // describes and report a dead device ready.
+                        if !saw_samples.load(Ordering::SeqCst)
+                            && opened_at.elapsed() >= FIRST_SAMPLE_TIMEOUT
+                        {
+                            silent_open = true;
                             break true;
                         }
                     }
@@ -339,6 +383,16 @@ pub fn start_microphone_capture(
                 attempt = 0;
             }
             attempt += 1;
+            // A stream that opened and stayed silent leaves nothing in
+            // `failure_message` — cpal never reported an error, which is the
+            // whole problem — so say what actually happened rather than
+            // emitting a banner with an empty detail line.
+            if silent_open {
+                *failure_message.lock() = format!(
+                    "Device opened but delivered no audio within {}s",
+                    FIRST_SAMPLE_TIMEOUT.as_secs()
+                );
+            }
             let message = failure_message.lock().clone();
             eprintln!(
                 "[audio] input stream died ({}); rebuilding (attempt {})",
@@ -401,4 +455,41 @@ fn report_and_back_off(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod supervisor_policy_tests {
+    use super::{FIRST_SAMPLE_TIMEOUT, REBUILD_BACKOFF, STREAM_STABLE_AFTER, SUPERVISOR_POLL};
+
+    /// A stream killed for delivering nothing must not also count as having
+    /// "run long enough to be good".
+    ///
+    /// The rebuild budget resets whenever a stream survives
+    /// `STREAM_STABLE_AFTER`. If the silence timeout were the longer of the
+    /// two, a device that opens cleanly and never delivers would reset the
+    /// budget on every cycle: rebuild forever, never back off past the first
+    /// step, never report itself fatal, and never tell the operator. That is
+    /// the exact loop `STREAM_STABLE_AFTER` exists to prevent, reintroduced
+    /// through the silent-open path.
+    #[test]
+    fn a_silent_stream_cannot_reset_the_rebuild_budget() {
+        assert!(
+            FIRST_SAMPLE_TIMEOUT < STREAM_STABLE_AFTER,
+            "silence timeout {FIRST_SAMPLE_TIMEOUT:?} must be under the \
+             stable-stream threshold {STREAM_STABLE_AFTER:?}"
+        );
+    }
+
+    /// The supervisor only tests for silence when its poll wakes it, so a
+    /// timeout below the poll interval would be rounded up unpredictably.
+    #[test]
+    fn the_supervisor_polls_often_enough_to_observe_the_timeout() {
+        assert!(FIRST_SAMPLE_TIMEOUT > SUPERVISOR_POLL);
+    }
+
+    /// Rebuilds have to be finite, or the fatal event never fires.
+    #[test]
+    fn the_rebuild_budget_is_bounded() {
+        assert!(!REBUILD_BACKOFF.is_empty());
+    }
 }
