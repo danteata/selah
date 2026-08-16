@@ -146,6 +146,10 @@ fn build_stream<T>(
 where
     T: cpal::SizedSample + Send + 'static,
 {
+    // Owned by the callback and carried across it: the resampler and the
+    // highpass both hold state that must not restart per chunk.
+    let mut pre = AudioPreprocessor::new(source_sample_rate, source_channels, selected_channel);
+
     device
         .build_input_stream(
             config,
@@ -154,12 +158,7 @@ where
                     return;
                 }
                 let samples: Vec<f32> = data.iter().copied().map(convert).collect();
-                let processed = process_audio_samples_on_channel(
-                    &samples,
-                    source_sample_rate,
-                    source_channels,
-                    selected_channel,
-                );
+                let processed = pre.process(&samples);
                 let mut buf = audio_buffer.lock();
                 buf.extend_from_slice(&processed);
                 buffer_size.store(buf.len(), Ordering::SeqCst);

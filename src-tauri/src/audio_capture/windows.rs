@@ -145,6 +145,10 @@ pub fn start_system_audio_capture(
 
         println!("[WASAPI] Loopback capture started");
 
+        // Lives for the whole capture loop: the resampler and the highpass
+        // carry state that must not restart per WASAPI packet.
+        let mut pre = AudioPreprocessor::new(source_sample_rate, channels as u16, None);
+
         // Capture loop
         loop {
             // Check stop signal (non-blocking)
@@ -202,12 +206,9 @@ pub fn start_system_audio_capture(
                                         continue; // Skip unsupported formats
                                     };
 
-                                    // Process: mix to mono + resample to 16kHz
-                                    let processed = process_audio_samples(
-                                        &raw_samples,
-                                        source_sample_rate,
-                                        channels as u16,
-                                    );
+                                    // Process: mix to mono + band-limited
+                                    // resample to 16 kHz + highpass
+                                    let processed = pre.process(&raw_samples);
 
                                     // Append to shared buffer
                                     let mut buf = audio_buffer.lock();

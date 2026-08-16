@@ -67,6 +67,8 @@ pub fn start_system_audio_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
+                let mut pre =
+                    AudioPreprocessor::new(source_sample_rate, source_channels, None);
 
                 device
                     .build_input_stream(
@@ -75,8 +77,7 @@ pub fn start_system_audio_capture(
                             if !is_capturing.load(Ordering::SeqCst) {
                                 return;
                             }
-                            let processed =
-                                process_audio_samples(data, source_sample_rate, source_channels);
+                            let processed = pre.process(data);
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -90,6 +91,8 @@ pub fn start_system_audio_capture(
                 let buffer = audio_buffer.clone();
                 let buffer_size = buffer_size.clone();
                 let is_capturing = is_capturing.clone();
+                let mut pre =
+                    AudioPreprocessor::new(source_sample_rate, source_channels, None);
 
                 device
                     .build_input_stream(
@@ -100,11 +103,7 @@ pub fn start_system_audio_capture(
                             }
                             let samples: Vec<f32> =
                                 data.iter().map(|s| f32::from(*s) / 32768.0).collect();
-                            let processed = process_audio_samples(
-                                &samples,
-                                source_sample_rate,
-                                source_channels,
-                            );
+                            let processed = pre.process(&samples);
                             let mut buf = buffer.lock();
                             buf.extend_from_slice(&processed);
                             buffer_size.store(buf.len(), Ordering::SeqCst);

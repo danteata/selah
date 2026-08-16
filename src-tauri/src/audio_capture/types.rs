@@ -2,6 +2,7 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use hound::{WavSpec, WavWriter};
+use rubato::{FftFixedIn, Resampler};
 use std::io::Cursor;
 
 /// Target sample rate for whisper (16kHz)
@@ -154,66 +155,51 @@ pub fn decode_wav_to_f32(path: &str) -> Result<Vec<f32>, String> {
     }
 }
 
-/// Simple linear resampling
+/// Decode a WAV at any rate and channel count into the exact `f32` mono
+/// [`TARGET_SAMPLE_RATE`] samples a capture stream would have produced from
+/// the same audio, by running it through [`AudioPreprocessor`].
+///
+/// This exists so an offline replay can measure the capture front end rather
+/// than starting downstream of it. [`decode_wav_to_f32`] deliberately refuses
+/// anything but 16 kHz mono, which meant every harness built on it began after
+/// the resampler and the highpass — so a change to either was invisible to the
+/// thing we use to judge changes. Feed this a 48 kHz stereo recording of a
+/// service and the VAD sees what it would have seen live.
+///
+/// `selected_channel` mirrors the capture setting; see [`downmix`].
+// Dev tooling: the only caller is `offline_probe`, which is `cfg(test)`.
 #[allow(dead_code)]
-pub fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
-    if from_rate == to_rate {
-        return samples.to_vec();
-    }
+pub fn decode_wav_to_capture_mono(
+    path: &str,
+    selected_channel: Option<u16>,
+) -> Result<Vec<f32>, String> {
+    let mut reader = hound::WavReader::open(path)
+        .map_err(|e| format!("Failed to open WAV file {path}: {e}"))?;
+    let spec = reader.spec();
 
-    let ratio = from_rate as f64 / to_rate as f64;
-    let new_length = (samples.len() as f64 / ratio) as usize;
-    let mut result = Vec::with_capacity(new_length);
+    let interleaved: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to decode WAV samples: {e}"))?,
+        hound::SampleFormat::Int => {
+            // hound yields the stored width sign-extended into i32, so one
+            // scale factor derived from the header covers 16- and 24-bit.
+            let scale = 1.0 / (1i64 << (spec.bits_per_sample - 1)) as f32;
+            reader
+                .samples::<i32>()
+                .map(|s| s.map(|v| v as f32 * scale))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to decode WAV samples: {e}"))?
+        }
+    };
 
-    for i in 0..new_length {
-        let src_index = i as f64 * ratio;
-        let src_index_floor = src_index.floor() as usize;
-        let fraction = src_index - src_index_floor as f64;
-
-        // Linear interpolation
-        let y0 = samples.get(src_index_floor).copied().unwrap_or(0.0f32);
-        let y1 = samples.get(src_index_floor + 1).copied().unwrap_or(y0);
-
-        result.push(y0 * (1.0f32 - fraction as f32) + y1 * fraction as f32);
-    }
-
-    result
-}
-
-/// Cubic interpolation resampling (higher quality)
-pub fn resample_cubic(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
-    if from_rate == to_rate {
-        return samples.to_vec();
-    }
-
-    let ratio = from_rate as f64 / to_rate as f64;
-    let new_length = (samples.len() as f64 / ratio) as usize;
-    let mut result = Vec::with_capacity(new_length);
-
-    for i in 0..new_length {
-        let src_index = i as f64 * ratio;
-        let src_index_floor = src_index.floor() as usize;
-        let fraction = src_index - src_index_floor as f64;
-
-        let y0 = samples
-            .get(src_index_floor.saturating_sub(1))
-            .copied()
-            .unwrap_or(0.0);
-        let y1 = samples.get(src_index_floor).copied().unwrap_or(0.0);
-        let y2 = samples.get(src_index_floor + 1).copied().unwrap_or(y1);
-        let y3 = samples.get(src_index_floor + 2).copied().unwrap_or(y2);
-
-        // Cubic interpolation
-        let c0 = y1;
-        let c1 = 0.5 * (y2 - y0);
-        let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
-        let c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
-
-        let t = fraction as f32;
-        result.push(((c3 * t + c2) * t + c1) * t + c0);
-    }
-
-    result
+    Ok(AudioPreprocessor::process_all(
+        &interleaved,
+        spec.sample_rate,
+        spec.channels,
+        selected_channel,
+    ))
 }
 
 /// Reduce interleaved multi-channel audio to mono.
@@ -254,6 +240,11 @@ pub fn downmix(samples: &[f32], channels: u16, selected: Option<u16>) -> Vec<f32
 
 /// 2nd-order Butterworth highpass IIR filter coefficients at 85 Hz, Q=0.707
 /// for 16 kHz sample rate. Removes low-frequency rumble (HVAC, handling noise).
+///
+/// State is carried across calls by whoever owns it. An IIR filter restarted
+/// on every capture callback is a different filter: its two delay taps begin
+/// at zero, so each chunk opens with a transient the audio never contained.
+/// At a 10 ms drain that is a click 100 times a second.
 struct HighpassFilter {
     d1: f32,
     d2: f32,
@@ -267,11 +258,25 @@ impl HighpassFilter {
     fn process_sample(&mut self, input: f32) -> f32 {
         // 2nd-order Butterworth highpass at 85 Hz for 16 kHz
         // H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)
-        const B0: f32 = 0.944_35;
-        const B1: f32 = -1.888_70;
-        const B2: f32 = 0.944_35;
-        const A1: f32 = -1.889_15;
-        const A2: f32 = 0.888_25;
+        //
+        // RBJ cookbook, f0 = 85, Q = 1/sqrt(2), fs = 16000, normalised by a0.
+        //
+        // These replace a set that was *unstable*: its denominator
+        // z^2 - 1.88915 z + 0.88825 factors to poles at 0.8816 and **1.0076**,
+        // and a pole outside the unit circle means the filter's output grows
+        // by 0.76% per sample without bound. It survived only because the old
+        // code built a fresh filter for every capture callback and threw it
+        // away again, so the divergence was cut off after a few hundred
+        // samples — but that still put an exponential ramp of up to ~37x on
+        // the end of every chunk, reset 100 times a second, immediately
+        // upstream of the VAD. Run continuously, as it now is, the same
+        // coefficients reach f32 infinity in about 0.8 seconds.
+        // See `stays_stable_over_a_long_run`.
+        const B0: f32 = 0.976_673_5;
+        const B1: f32 = -1.953_347;
+        const B2: f32 = 0.976_673_5;
+        const A1: f32 = -1.952_802_8;
+        const A2: f32 = 0.953_891_2;
 
         let output = B0 * input + self.d1;
         self.d1 = B1 * input - A1 * output + self.d2;
@@ -279,45 +284,199 @@ impl HighpassFilter {
         output
     }
 
-    fn apply(samples: &mut [f32]) {
-        let mut filter = Self::new();
+    fn process_slice(&mut self, samples: &mut [f32]) {
         // +3 dB gain ≈ 1.4125 linear
         const GAIN: f32 = 1.4125;
         for sample in samples.iter_mut() {
-            *sample = filter.process_sample(*sample) * GAIN;
+            *sample = self.process_sample(*sample) * GAIN;
         }
     }
 }
 
-/// Process audio samples (mix to mono, resample, highpass filter, and buffer)
-pub fn process_audio_samples(
-    samples: &[f32],
-    source_sample_rate: u32,
-    source_channels: u16,
-) -> Vec<f32> {
-    process_audio_samples_on_channel(samples, source_sample_rate, source_channels, None)
-}
+/// Input frames the resampler consumes per call, counted at the *source* rate.
+/// 1024 frames is 21 ms at 48 kHz and 23 ms at 44.1 kHz — under the 32 ms VAD
+/// frame the audio ends up in, so nothing downstream waits on it.
+const RESAMPLER_CHUNK_IN: usize = 1024;
 
-/// As [`process_audio_samples`], but taking a single input channel rather than
-/// the average of all of them. See [`downmix`] for why that is worth a setting.
-pub fn process_audio_samples_on_channel(
-    samples: &[f32],
-    source_sample_rate: u32,
+/// One capture stream's audio front end: downmix → band-limited resample to
+/// [`TARGET_SAMPLE_RATE`] → highpass → gain.
+///
+/// This is a *stateful* pipeline and must be owned per stream, because two of
+/// its three stages have memory. It replaced a set of free functions that
+/// rebuilt their state on every callback, which cost us two things:
+///
+/// 1. **Aliasing.** The old resampler was bare cubic interpolation between
+///    neighbouring samples, with no band limit. Decimating 48 kHz to 16 kHz
+///    that way folds everything between 8 and 24 kHz back down into the
+///    output: cymbals, sibilance, stage hiss and switching noise all land on
+///    top of the 300–3400 Hz band the ASR actually reads, and no downstream
+///    filter can separate them again because by then they *are* the signal.
+///    `rubato`'s FFT resampler applies the anti-alias filter the decimation
+///    always needed. See `resampler_tests::alias_above_nyquist_is_rejected`.
+/// 2. **Chunk-boundary transients**, from restarting the IIR every callback.
+///
+/// A resampler is only allocated when the source rate differs from the target;
+/// at 16 kHz in, audio passes straight to the filter.
+pub struct AudioPreprocessor {
     source_channels: u16,
     selected_channel: Option<u16>,
-) -> Vec<f32> {
-    // Mix to mono if stereo
-    let mut mono_samples = downmix(samples, source_channels, selected_channel);
+    resampler: Option<FftFixedIn<f32>>,
+    /// Mono source-rate frames not yet handed to the resampler. It consumes a
+    /// fixed block; capture callbacks deliver whatever the device felt like.
+    pending: Vec<f32>,
+    /// Reused non-interleaved scratch, so the audio thread never allocates.
+    in_buf: Vec<Vec<f32>>,
+    out_buf: Vec<Vec<f32>>,
+    highpass: HighpassFilter,
+    /// A resampler error repeats every callback if it repeats at all; say it
+    /// once rather than filling the log from the audio thread.
+    warned: bool,
+}
 
-    // Resample to 16kHz if needed
-    if source_sample_rate != TARGET_SAMPLE_RATE {
-        mono_samples = resample_cubic(&mono_samples, source_sample_rate, TARGET_SAMPLE_RATE);
+impl AudioPreprocessor {
+    /// Build a front end for a stream of `source_channels` at
+    /// `source_sample_rate`. `selected_channel` picks one channel instead of
+    /// averaging them — see [`downmix`] for why that is worth a setting.
+    pub fn new(
+        source_sample_rate: u32,
+        source_channels: u16,
+        selected_channel: Option<u16>,
+    ) -> Self {
+        let resampler = if source_sample_rate == TARGET_SAMPLE_RATE {
+            None
+        } else {
+            FftFixedIn::<f32>::new(
+                source_sample_rate as usize,
+                TARGET_SAMPLE_RATE as usize,
+                RESAMPLER_CHUNK_IN,
+                2,
+                1,
+            )
+            .map_err(|e| {
+                // Falling back to pass-through would hand the VAD and the ASR
+                // audio at the wrong rate, which sounds like a chipmunk and
+                // transcribes like one. Better to produce nothing and have the
+                // silence be visible than to produce plausible garbage.
+                eprintln!(
+                    "Failed to build resampler for {source_sample_rate} Hz → \
+                     {TARGET_SAMPLE_RATE} Hz: {e}"
+                );
+            })
+            .ok()
+        };
+
+        let (in_buf, out_buf) = match resampler.as_ref() {
+            Some(rs) => (
+                vec![Vec::with_capacity(rs.input_frames_max())],
+                rs.output_buffer_allocate(true),
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
+
+        Self {
+            source_channels,
+            selected_channel,
+            resampler,
+            pending: Vec::with_capacity(RESAMPLER_CHUNK_IN * 2),
+            in_buf,
+            out_buf,
+            highpass: HighpassFilter::new(),
+            warned: false,
+        }
     }
 
-    // Apply highpass filter (85 Hz) and +3 dB gain to suppress rumble/boost speech
-    HighpassFilter::apply(&mut mono_samples);
+    /// Feed one capture callback's interleaved samples through the pipeline.
+    ///
+    /// Returns however many 16 kHz mono samples are ready *now*, which for a
+    /// resampled stream may be none: the resampler consumes fixed blocks, so a
+    /// short callback is buffered until it can fill one. Callers append the
+    /// result to a rolling buffer, so an empty return is not a special case.
+    pub fn process(&mut self, samples: &[f32]) -> Vec<f32> {
+        let mono = downmix(samples, self.source_channels, self.selected_channel);
 
-    mono_samples
+        // Split the borrow so `pending`/`in_buf`/`out_buf` stay reachable while
+        // `resampler` is mutably borrowed.
+        let Self {
+            resampler,
+            pending,
+            in_buf,
+            out_buf,
+            warned,
+            ..
+        } = self;
+
+        let mut out = match resampler.as_mut() {
+            None => mono,
+            Some(rs) => {
+                pending.extend_from_slice(&mono);
+                let mut out = Vec::new();
+                loop {
+                    let need = rs.input_frames_next();
+                    if pending.len() < need {
+                        break;
+                    }
+                    in_buf[0].clear();
+                    in_buf[0].extend_from_slice(&pending[..need]);
+                    pending.drain(..need);
+
+                    match rs.process_into_buffer(in_buf, out_buf, None) {
+                        Ok((_, written)) => out.extend_from_slice(&out_buf[0][..written]),
+                        Err(e) => {
+                            if !*warned {
+                                *warned = true;
+                                eprintln!("Resampler error (dropping audio block): {e}");
+                            }
+                        }
+                    }
+                }
+                out
+            }
+        };
+
+        self.highpass.process_slice(&mut out);
+        out
+    }
+
+    /// Run a whole buffer through a fresh pipeline in one call, including the
+    /// resampler's tail. For offline/batch use — a live stream must hold an
+    /// [`AudioPreprocessor`] across callbacks instead.
+    pub fn process_all(
+        samples: &[f32],
+        source_sample_rate: u32,
+        source_channels: u16,
+        selected_channel: Option<u16>,
+    ) -> Vec<f32> {
+        let mut pre = Self::new(source_sample_rate, source_channels, selected_channel);
+        let mut out = pre.process(samples);
+        out.extend(pre.flush());
+        out
+    }
+
+    /// Push the resampler's remaining buffered frames out at end of stream, so
+    /// an offline run does not silently lose its last block.
+    pub fn flush(&mut self) -> Vec<f32> {
+        let Self {
+            resampler,
+            pending,
+            out_buf,
+            ..
+        } = self;
+
+        let Some(rs) = resampler.as_mut() else {
+            return Vec::new();
+        };
+        if pending.is_empty() {
+            return Vec::new();
+        }
+
+        let tail = std::mem::take(pending);
+        let mut out = Vec::new();
+        if let Ok((_, written)) = rs.process_partial_into_buffer(Some(&[tail]), out_buf, None) {
+            out.extend_from_slice(&out_buf[0][..written]);
+        }
+        self.highpass.process_slice(&mut out);
+        out
+    }
 }
 
 #[cfg(test)]
@@ -369,5 +528,267 @@ mod downmix_tests {
         let s = [1.0, 1.0, 1.0];
         assert_eq!(downmix(&s, 2, None), vec![1.0]);
         assert_eq!(downmix(&s, 2, Some(0)), vec![1.0]);
+    }
+}
+
+#[cfg(test)]
+mod resampler_tests {
+    use super::{AudioPreprocessor, TARGET_SAMPLE_RATE};
+
+    /// One second of a mono sine at `freq`, sampled at `rate`.
+    fn tone(freq: f32, rate: u32, secs: f32) -> Vec<f32> {
+        let n = (rate as f32 * secs) as usize;
+        (0..n)
+            .map(|i| {
+                (2.0 * std::f32::consts::PI * freq * i as f32 / rate as f32).sin() * 0.5
+            })
+            .collect()
+    }
+
+    /// Amplitude at `freq`, by projecting onto a sine and cosine at that
+    /// frequency — a single DFT bin. Accumulated in f64: over a second of
+    /// 16 kHz audio an f32 accumulator loses the precision this needs.
+    /// Cheaper than pulling in an FFT crate to answer one question per test.
+    fn amplitude_at(samples: &[f32], freq: f32, rate: u32) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        let w = 2.0 * std::f64::consts::PI * freq as f64 / rate as f64;
+        let (mut re, mut im) = (0.0f64, 0.0f64);
+        for (i, &x) in samples.iter().enumerate() {
+            let phase = w * i as f64;
+            re += x as f64 * phase.cos();
+            im += x as f64 * phase.sin();
+        }
+        let n = samples.len() as f64;
+        (2.0 * (re * re + im * im).sqrt() / n) as f32
+    }
+
+    /// The defect this pipeline was rebuilt to fix.
+    ///
+    /// 15 kHz at 48 kHz input is above the 8 kHz Nyquist limit of a 16 kHz
+    /// output. A resampler with an anti-alias filter discards it. Bare
+    /// interpolation — what `resample_cubic` did — folds it down to
+    /// |15000 - 16000| = 1 kHz, landing it squarely in the speech band where
+    /// it is indistinguishable from signal for everything downstream.
+    #[test]
+    fn alias_above_nyquist_is_rejected() {
+        let input = tone(15_000.0, 48_000, 1.0);
+        let out = AudioPreprocessor::process_all(&input, 48_000, 1, None);
+
+        assert!(!out.is_empty(), "resampler produced no output");
+        let alias = amplitude_at(&out, 1_000.0, TARGET_SAMPLE_RATE);
+        assert!(
+            alias < 0.01,
+            "15 kHz folded back to 1 kHz at amplitude {alias:.4}; \
+             the anti-alias filter is not doing its job"
+        );
+    }
+
+    /// The other half of the claim: rejecting the alias must not cost us the
+    /// band we actually read. 1 kHz is mid-vowel, the loudest part of speech.
+    #[test]
+    fn in_band_tone_survives_resampling() {
+        let input = tone(1_000.0, 48_000, 1.0);
+        let out = AudioPreprocessor::process_all(&input, 48_000, 1, None);
+
+        let kept = amplitude_at(&out, 1_000.0, TARGET_SAMPLE_RATE);
+        // Input amplitude 0.5, times the pipeline's +3 dB (1.4125) ≈ 0.71.
+        assert!(
+            kept > 0.5,
+            "1 kHz came through at only {kept:.4}; the passband is being eaten"
+        );
+    }
+
+    /// 44.1 kHz is what a consumer interface hands back when it is not asked
+    /// otherwise, and it is the ratio (147:160) most likely to break a
+    /// resampler built for clean integer decimation.
+    #[test]
+    fn handles_a_non_integer_ratio() {
+        let input = tone(1_000.0, 44_100, 1.0);
+        let out = AudioPreprocessor::process_all(&input, 44_100, 1, None);
+
+        let kept = amplitude_at(&out, 1_000.0, TARGET_SAMPLE_RATE);
+        assert!(kept > 0.5, "1 kHz from 44.1 kHz came through at {kept:.4}");
+    }
+
+    /// Output length must track the rate ratio, or every downstream duration —
+    /// segment timestamps, `min_silence_ms`, the level meter — drifts.
+    #[test]
+    fn output_length_matches_the_rate_ratio() {
+        let input = tone(440.0, 48_000, 1.0);
+        let out = AudioPreprocessor::process_all(&input, 48_000, 1, None);
+
+        // One second in, one second out, within a resampler block.
+        let expected = TARGET_SAMPLE_RATE as usize;
+        let slack = super::RESAMPLER_CHUNK_IN;
+        assert!(
+            out.len().abs_diff(expected) < slack,
+            "1 s of 48 kHz gave {} samples, expected ~{expected}",
+            out.len()
+        );
+    }
+
+    /// Streaming in ragged callback-sized pieces must give the same audio as
+    /// one batch call. This is what makes the preprocessor safe to hold across
+    /// a live capture loop, and it fails immediately if the pending buffer
+    /// drops or duplicates a block.
+    #[test]
+    fn chunked_streaming_matches_a_single_pass() {
+        let input = tone(1_000.0, 48_000, 0.5);
+        let batch = AudioPreprocessor::process_all(&input, 48_000, 1, None);
+
+        let mut pre = AudioPreprocessor::new(48_000, 1, None);
+        let mut streamed = Vec::new();
+        // Deliberately not a divisor of the resampler block size.
+        for chunk in input.chunks(479) {
+            streamed.extend(pre.process(chunk));
+        }
+        streamed.extend(pre.flush());
+
+        assert_eq!(streamed.len(), batch.len());
+        for (i, (a, b)) in streamed.iter().zip(batch.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-5,
+                "sample {i} differs: streamed {a}, batch {b}"
+            );
+        }
+    }
+
+    /// The offline harness reads a recording through this, so a 48 kHz stereo
+    /// file must arrive at the VAD as 16 kHz mono of the right duration.
+    #[test]
+    fn decodes_a_source_rate_wav_through_the_capture_front_end() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("selah_capture_decode_test.wav");
+
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        {
+            let mut w = hound::WavWriter::create(&path, spec).expect("create wav");
+            for s in tone(1_000.0, 48_000, 1.0) {
+                let v = (s * 32767.0) as i16;
+                w.write_sample(v).unwrap(); // left
+                w.write_sample(v).unwrap(); // right
+            }
+            w.finalize().expect("finalize wav");
+        }
+
+        let out = super::decode_wav_to_capture_mono(&path.to_string_lossy(), None)
+            .expect("decode");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            out.len().abs_diff(TARGET_SAMPLE_RATE as usize) < super::RESAMPLER_CHUNK_IN,
+            "1 s of 48 kHz stereo decoded to {} samples", out.len()
+        );
+        let kept = amplitude_at(&out, 1_000.0, TARGET_SAMPLE_RATE);
+        assert!(kept > 0.5, "1 kHz survived the decode at only {kept:.4}");
+    }
+
+    /// At the target rate there is no resampler, so audio must pass through
+    /// the filter alone — same length in as out, no buffering delay.
+    #[test]
+    fn passes_through_at_the_target_rate() {
+        let input = tone(1_000.0, TARGET_SAMPLE_RATE, 0.1);
+        let mut pre = AudioPreprocessor::new(TARGET_SAMPLE_RATE, 1, None);
+        let out = pre.process(&input);
+
+        assert_eq!(out.len(), input.len());
+        assert!(pre.flush().is_empty());
+    }
+
+    /// The filter must not run away. The coefficients this replaced had a pole
+    /// at |z| = 1.0076, so every sample multiplied the state by another 0.76%:
+    /// continuous 16 kHz audio reached f32 infinity in under a second, and
+    /// even chopped into callbacks it put an exponential ramp on the tail of
+    /// every chunk. Ten seconds is long enough that anything unstable is not
+    /// merely large but non-finite.
+    #[test]
+    fn stays_stable_over_a_long_run() {
+        let input = tone(1_000.0, TARGET_SAMPLE_RATE, 10.0);
+        let mut pre = AudioPreprocessor::new(TARGET_SAMPLE_RATE, 1, None);
+        let out = pre.process(&input);
+
+        assert!(out.iter().all(|v| v.is_finite()), "filter output diverged");
+        let peak = out.iter().fold(0.0f32, |a, b| a.max(b.abs()));
+        // Input peak 0.5, passband gain +3 dB (1.4125) ≈ 0.71. Anything much
+        // above that is the state growing rather than the signal passing.
+        assert!(peak < 1.0, "peak {peak:.3} — the filter is amplifying, not passing");
+    }
+
+    /// What the highpass is actually for: rumble (HVAC, stage thump, handling
+    /// noise) attenuated while speech passes flat.
+    ///
+    /// Thresholds come from the filter's own definition rather than taste. A
+    /// 2nd-order highpass rolls off 12 dB/octave, so well below the 85 Hz
+    /// corner the response approaches (f/f0)^2: 0.221 at 40 Hz (-13.1 dB) and
+    /// 0.055 at 20 Hz (-25.1 dB). Asserting those is what makes this a test of
+    /// the coefficients and not merely of "some filtering happened" — the
+    /// unstable set it replaced would have sailed past a vaguer check.
+    #[test]
+    fn rejects_rumble_and_passes_speech() {
+        let measure = |freq: f32| {
+            let input = tone(freq, TARGET_SAMPLE_RATE, 1.0);
+            let mut pre = AudioPreprocessor::new(TARGET_SAMPLE_RATE, 1, None);
+            amplitude_at(&pre.process(&input), freq, TARGET_SAMPLE_RATE)
+        };
+
+        let speech = measure(1_000.0);
+        // Input amplitude 0.5 through the pipeline's +3 dB ≈ 0.706, flat.
+        assert!(
+            (speech - 0.706).abs() < 0.02,
+            "1 kHz passband gain is {speech:.4}, expected ~0.706"
+        );
+
+        let at_40 = measure(40.0) / speech;
+        assert!(
+            (0.15..0.30).contains(&at_40),
+            "40 Hz relative response {at_40:.3}, expected ~0.22 (-13 dB)"
+        );
+
+        let at_20 = measure(20.0) / speech;
+        assert!(
+            at_20 < 0.09,
+            "20 Hz relative response {at_20:.3}, expected ~0.055 (-25 dB)"
+        );
+    }
+
+    /// The highpass is the reason the preprocessor is per-stream rather than
+    /// per-callback: restarted every chunk, its delay taps reopen from zero
+    /// and stamp a transient on audio that was continuous.
+    #[test]
+    fn highpass_state_survives_chunk_boundaries() {
+        let input = tone(1_000.0, TARGET_SAMPLE_RATE, 0.1);
+
+        let mut streaming = AudioPreprocessor::new(TARGET_SAMPLE_RATE, 1, None);
+        let mut continuous = Vec::new();
+        for chunk in input.chunks(160) {
+            continuous.extend(streaming.process(chunk));
+        }
+
+        // Same audio, but with the filter restarted per chunk — the old
+        // behaviour. The two must NOT agree, which is the whole point.
+        let mut restarted = Vec::new();
+        for chunk in input.chunks(160) {
+            let mut fresh = AudioPreprocessor::new(TARGET_SAMPLE_RATE, 1, None);
+            restarted.extend(fresh.process(chunk));
+        }
+
+        assert_eq!(continuous.len(), restarted.len());
+        let worst = continuous
+            .iter()
+            .zip(restarted.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            worst > 1e-4,
+            "restarting the filter per chunk changed nothing (worst delta \
+             {worst:.2e}) — the state is not actually being carried"
+        );
     }
 }

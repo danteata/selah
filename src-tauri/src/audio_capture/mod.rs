@@ -10,7 +10,10 @@
 //! - Windows: WASAPI loopback for system audio
 //! - Linux: PulseAudio monitor source (microphone only for now)
 
-#[cfg(test)]
+// The probe drives a `transcribe_cpp::Session` in its own signatures, so it
+// only compiles when that crate is linked. Without the gate, `cargo test
+// --no-default-features` fails to build the whole test binary.
+#[cfg(all(test, feature = "native-transcription"))]
 mod offline_probe;
 mod microphone;
 #[cfg(debug_assertions)]

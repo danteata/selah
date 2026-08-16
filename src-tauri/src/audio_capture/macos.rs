@@ -61,6 +61,11 @@ pub fn start_system_audio_capture(
         struct AudioHandler {
             samples: Arc<Mutex<Vec<f32>>>,
             buffer_size: Arc<AtomicUsize>,
+            /// ScreenCaptureKit hands us `&self`, but the 48 kHz → 16 kHz
+            /// resampler and the highpass are both stateful and must persist
+            /// across callbacks — hence the extra lock. It is uncontended:
+            /// only this callback ever takes it.
+            pre: Mutex<AudioPreprocessor>,
         }
 
         impl SCStreamOutputTrait for AudioHandler {
@@ -73,7 +78,7 @@ pub fn start_system_audio_capture(
                     if let Ok(audio_buffer_list) = sample.get_audio_buffer_list() {
                         let buffers = audio_buffer_list.buffers();
                         if let Ok(audio_samples) = extract_audio_from_buffers(buffers) {
-                            let processed = process_audio_samples(&audio_samples, 48000, 2);
+                            let processed = self.pre.lock().process(&audio_samples);
 
                             let mut samples_guard = self.samples.lock();
                             samples_guard.extend_from_slice(&processed);
@@ -88,6 +93,9 @@ pub fn start_system_audio_capture(
         let handler = AudioHandler {
             samples: audio_buffer.clone(),
             buffer_size: buffer_size.clone(),
+            // ScreenCaptureKit is configured for 48 kHz stereo in
+            // `build_stream_config`.
+            pre: Mutex::new(AudioPreprocessor::new(48_000, 2, None)),
         };
 
         let mut stream = SCStream::new(&filter, &config);
