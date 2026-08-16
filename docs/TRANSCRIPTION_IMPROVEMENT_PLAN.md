@@ -1,6 +1,6 @@
 # Selah Transcription Improvement Plan
 
-## Implementation Status (as of 2026-05-27)
+## Implementation Status (as of 2026-08-16)
 
 | Phase | Item | Status | Files Changed |
 |-------|------|--------|---------------|
@@ -12,6 +12,10 @@
 | 2.1 | Fix double getUserMedia | ✅ Done | `src/hooks/useSermonListener.ts`, `src/services/sermon-listener/desktopWhisperTranscription.ts` |
 | 2.2 | Real-time audio preprocessing | ✅ Done | `src/services/sermon-listener/audioPreprocessing.ts`, `src/services/sermon-listener/desktopWhisperTranscription.ts`, `src-tauri/src/audio_capture/types.rs` |
 | 2.4 | Chunk drop rate visibility | ✅ Done | `src/services/sermon-listener/desktopWhisperTranscription.ts`, `src/hooks/useSermonListener.ts`, `src/components/sermon-listener/SermonListenerPanel.tsx` |
+| 2.5 | Band-limited resampling | ✅ Done (0.1.19) | `src-tauri/src/audio_capture/types.rs`, `linux.rs`, `macos.rs`, `microphone.rs`, `windows.rs` |
+| 2.6 | Stable highpass coefficients | ✅ Done (0.1.19) | `src-tauri/src/audio_capture/types.rs` |
+| 2.7 | Adaptive input gain | ⬜ Pending | — |
+| 2.8 | Speech enhancement before the ASR | ⬜ Future | — |
 | 3.1 | Structured error codes | ✅ Done | `src/services/sermon-listener/transcriptionErrors.ts` |
 | 3.2 | Transcript export formats | ✅ Done | `src/services/sermon-listener/transcriptExport.ts` |
 | 4.1 | ndjson streaming | ✅ Done | `src-tauri/binaries/whisper-server.py`, `src/services/sermon-listener/desktopWhisperService.ts`, `src/services/sermon-listener/desktopWhisperTranscription.ts`, `src/services/sermon-listener/unifiedTranscription.ts`, `src/hooks/useSermonListener.ts` |
@@ -243,6 +247,44 @@ Integration:
 - `src/components/sermon-listener/SermonListenerPanel.tsx` — warning badge
 
 ---
+
+### 2.5 Band-limited resampling — done in 0.1.19
+
+**Problem:** The resampler written for 2.2 had no anti-alias filter. `resample_cubic` interpolated between neighbouring samples and nothing else, so decimating 48 kHz to 16 kHz folded everything between 8 and 24 kHz back into the output — cymbals, sibilance, stage hiss, switching noise — landing on top of the 300–3400 Hz band the ASR reads. A 15 kHz tone came back as 1 kHz. Nothing downstream can undo it, because by that point the alias *is* the signal.
+
+**Resolution:** Replaced with `rubato::FftFixedIn`, which had been declared in `Cargo.toml` since the module was written (commented "For audio resampling") and never wired up. See `resampler_tests` in `types.rs`.
+
+### 2.6 Stable highpass coefficients — done in 0.1.19
+
+**Problem:** The 85 Hz highpass added by 2.2 was unstable. Its denominator `z² − 1.88915z + 0.88825` factors to poles at 0.8816 and **1.0076** — the second outside the unit circle, so the filter's state grew 0.76% per sample without bound. It survived only because the old code built a fresh filter for every capture callback and threw it away, which cut the divergence off after a few hundred samples while still stamping an exponential ramp of up to ~37× on the tail of every chunk, reset ~100 times a second, immediately upstream of the VAD.
+
+**Resolution:** RBJ cookbook coefficients for the filter it was documented to be (85 Hz, Q=0.707, 16 kHz, pole radius 0.9767). Measured response now matches theory: −13 dB at 40 Hz, −25 dB at 20 Hz, flat in the passband. Filter state is carried across callbacks by `AudioPreprocessor` rather than reset.
+
+### 2.7 Adaptive input gain
+
+**Problem:** The gain stage from 2.2 is a fixed +3 dB applied blind (`HighpassFilter::process_slice` in `types.rs`). Input level varies enormously between venues and sources — a hot desk aux, a laptop mic across a room, a loopback feed at whatever the last person left the slider on — and a constant multiplier serves none of them. Too quiet and the VAD's `silence_rms` floor swallows real speech; too loud and it clips. Every threshold in `vad.rs` (`speech_threshold`, `silence_rms`) is implicitly calibrated against a level nothing currently guarantees.
+
+**Implementation sketch:**
+- Track a slow RMS estimate over a few seconds and apply gain toward a target level (≈ −20 dBFS RMS is the usual ASR target), rather than a constant
+- Attack/release asymmetric and slow — this is levelling, not compression; it must not pump on sung dynamics or duck a quiet answer to a loud question
+- Hard-limit the applied gain (say 0.5×–8×) so a silent room does not get amplified into noise, and hold gain steady rather than climbing when input is below the silence floor
+- Feed the same estimate to the level meter so the operator sees pre-gain level, not the levelled result
+- Verify with `offline_probe` on recordings at deliberately different input levels: the same audio at −6 dB and −26 dB should produce comparable segment counts and word counts, which it currently will not
+
+**Files that would change:** `src-tauri/src/audio_capture/types.rs` (gain stage inside `AudioPreprocessor`), possibly `vad.rs` if thresholds can be tightened once level is predictable.
+
+### 2.8 Speech enhancement before the ASR
+
+**Problem:** There is no denoise stage anywhere in the pipeline. The band the ASR reads carries the full room — band, HVAC, congregation, handling noise — and `vad.rs` documents at length what that costs: sung phrases the VAD will not classify as speech, the `fallback_after_ms` timer that exists to hand it audio anyway, segments that decode to nothing. Channel selection (0.1.18) helped because it attacked the same problem from the source end; this attacks it from the processing end, and is the option available to a church whose desk cannot send an isolated aux.
+
+**Implementation sketch:**
+- A small speech-enhancement model run per segment, or streaming per frame, before the audio reaches the engine
+- Candidates: RNNoise (tiny, CPU-cheap, no new runtime), or a compact ONNX enhancer such as GTCRN or DTLN through the `ort` runtime **already linked for Silero VAD** — no new dependency, no new build toolchain
+- Enhance before the VAD, after it, or both, is an open question worth measuring rather than assuming: denoising before VAD may recover the sung phrases Silero currently rejects, but an enhancer trained on speech can also mangle singing
+- Must be defeatable. A vocal aux that is already clean has nothing to gain and something to lose
+- `offline_probe` is now the right harness for this — it runs the real front end, so an enhancement stage inserted into `AudioPreprocessor` shows up directly in `empty`, `words`, `vocab` and `gaps`
+
+**Explicitly not the approach:** [audio.cpp](https://github.com/0xShug0/audio.cpp) was evaluated for this in August 2026 and rejected. It is a capable ggml framework with exactly these utilities (denoise, enhancement, resampling, STFT), but it ships only a CLI, a REST server and a WebUI — no C API, no shared library, no bindings. Adopting it means re-introducing a sidecar process, which is the architecture the `native-transcription` migration was undertaken to remove, plus a CUDA/Vulkan/ROCm build matrix and a Python model manager. Its GPU/AVX-tuned C++ also carries the same hardware risk that got DirectML dropped from this build (see the comment in `Cargo.toml`), on exactly the aging booth PCs this software runs on. Take the idea, not the dependency.
 
 ## Phase 3: UX — Error Handling, Export, and Visualizer
 
