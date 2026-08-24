@@ -11,6 +11,7 @@ vi.mock('../../../platform', () => ({ isDesktop: isDesktopMock }))
 import {
     formatBytes,
     formatDuration,
+    retranscribe,
     sweepRetention,
     startRecording,
     type RecordingFile,
@@ -138,6 +139,83 @@ describe('startRecording', () => {
         invokeMock.mockRejectedValue(new Error('disk full'))
 
         await expect(startRecording('abc')).resolves.toBeNull()
+    })
+})
+
+describe('retranscribe', () => {
+    beforeEach(() => {
+        invokeMock.mockReset()
+        isDesktopMock.mockReset().mockReturnValue(true)
+        vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+
+    function stubEngine(loaded: string | null, result: string | Error = 'the new text') {
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(loaded)
+            if (cmd === 'transcribe_audio_file') {
+                return result instanceof Error ? Promise.reject(result) : Promise.resolve(result)
+            }
+            return Promise.resolve(undefined)
+        })
+    }
+
+    it('transcribes with the chosen model', async () => {
+        stubEngine(null)
+
+        const out = await retranscribe('/tmp/a.wav', 'whisper-large-v3')
+
+        expect(out).toEqual({ text: 'the new text', modelId: 'whisper-large-v3' })
+        expect(invokeMock).toHaveBeenCalledWith('transcribe_audio_file', {
+            filePath: '/tmp/a.wav',
+            modelId: 'whisper-large-v3',
+        })
+    })
+
+    it('restores the previously loaded model afterwards', async () => {
+        // Otherwise re-transcribing on Large silently leaves Large loaded, and
+        // the next service starts on a model nobody chose.
+        stubEngine('moonshine-streaming-small')
+
+        await retranscribe('/tmp/a.wav', 'whisper-large-v3')
+
+        expect(invokeMock).toHaveBeenCalledWith('load_native_model', {
+            modelId: 'moonshine-streaming-small',
+        })
+    })
+
+    it('restores the previous model even when transcription fails', async () => {
+        stubEngine('moonshine-streaming-small', new Error('decode failed'))
+
+        await expect(retranscribe('/tmp/a.wav', 'whisper-large-v3')).rejects.toThrow(
+            'decode failed',
+        )
+        expect(invokeMock).toHaveBeenCalledWith('load_native_model', {
+            modelId: 'moonshine-streaming-small',
+        })
+    })
+
+    it('does not reload when the chosen model was already the loaded one', async () => {
+        stubEngine('whisper-large-v3')
+
+        await retranscribe('/tmp/a.wav', 'whisper-large-v3')
+
+        expect(invokeMock).not.toHaveBeenCalledWith('load_native_model', expect.anything())
+    })
+
+    it('still returns the text when the restore fails', async () => {
+        // A failed restore is worth a warning, not worth throwing away the
+        // transcript the operator just waited several minutes for.
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve('small')
+            if (cmd === 'transcribe_audio_file') return Promise.resolve('recovered text')
+            if (cmd === 'load_native_model') return Promise.reject(new Error('gone'))
+            return Promise.resolve(undefined)
+        })
+
+        await expect(retranscribe('/tmp/a.wav', 'large')).resolves.toEqual({
+            text: 'recovered text',
+            modelId: 'large',
+        })
     })
 })
 

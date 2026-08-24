@@ -1,6 +1,7 @@
 export { SermonListenerPanel } from './SermonListenerPanel'
 export { FeatureGatedSermonListener } from './FeatureGatedSermonListener'
 export { SermonListenerSettings } from './SermonListenerSettings'
+export { SermonArchive } from './SermonArchive'
 export { LocalEmbeddingSync } from './LocalEmbeddingSync'
 export { SermonListenerProvider, useSermonListenerContext } from './SermonListenerContext'
 export { DetectedVersesBar } from './DetectedVersesBar'

@@ -207,12 +207,18 @@ pub async fn get_loaded_native_model(app: AppHandle) -> Result<Option<String>, S
     }
 }
 
-/// Dev-only: one-shot offline (batch) re-transcription of a saved recording,
-/// used to build a higher-accuracy "ground truth" transcript to diff against
-/// what the live detector flagged in realtime. Loads `model_id` (typically a
-/// bigger/slower model than realtime affords) and leaves it loaded afterward
-/// — the caller can restore whatever was previously loaded itself via
-/// `get_loaded_native_model`/`load_native_model` if it cares to.
+/// One-shot offline (batch) re-transcription of a saved recording.
+///
+/// Two callers, both shipping: the dev accuracy report builds a higher-accuracy
+/// "ground truth" transcript to diff against what the live detector flagged,
+/// and the sermon archive re-runs a service whose live transcript came out
+/// poor. Gated on the `native-transcription` feature rather than
+/// `debug_assertions` — that feature is in `default`, so this is available in
+/// release builds too, despite what this comment used to claim.
+///
+/// Loads `model_id` (typically bigger and slower than realtime affords) and
+/// leaves it loaded afterward — the caller restores whatever was previously
+/// loaded via `get_loaded_native_model`/`load_native_model` if it cares to.
 #[tauri::command]
 pub async fn transcribe_audio_file(
     app: AppHandle,

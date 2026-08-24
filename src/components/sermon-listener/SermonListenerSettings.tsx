@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeAudioCapture } from '../../services/sermon-listener/nativeAudioCapture'
 import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDevices'
+import { SermonArchive } from './SermonArchive'
 import {
     DEFAULT_RETENTION,
     RETENTION_POLICIES,
@@ -139,6 +140,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
     // flashing "no recordings" at someone who has a year of them.
     const [recordingCount, setRecordingCount] = useState<number | null>(null)
     const [recordingBytes, setRecordingBytes] = useState(0)
+    const [archiveOpen, setArchiveOpen] = useState(false)
 
     useEffect(() => {
         if (!recordSessions) return
@@ -322,15 +324,29 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between gap-4 text-xs text-gray-500 dark:text-gray-400">
-                                <span>
+                            <div className="flex items-center justify-between gap-4">
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
                                     {recordingCount === null
                                         ? 'Checking saved recordings…'
                                         : recordingCount === 0
                                           ? 'No recordings saved yet.'
                                           : `${recordingCount} recording${recordingCount === 1 ? '' : 's'} · ${formatBytes(recordingBytes)} on disk`}
                                 </span>
+                                {(recordingCount ?? 0) > 0 && (
+                                    <button
+                                        onClick={() => setArchiveOpen((open) => !open)}
+                                        className="text-xs text-[var(--accent-teal)] hover:underline"
+                                    >
+                                        {archiveOpen ? 'Hide recordings' : 'Manage recordings'}
+                                    </button>
+                                )}
                             </div>
+
+                            {archiveOpen && (
+                                <div className="pt-1">
+                                    <SermonArchive />
+                                </div>
+                            )}
                         </>
                     )}
                 </div>

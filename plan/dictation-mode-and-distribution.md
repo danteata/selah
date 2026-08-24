@@ -461,17 +461,30 @@ If we cannot do those four well, we should ship the transcript half and not the 
 
 ## 5.4 What to build, ranked by value per unit of work
 
-1. **Re-transcribe a past session with a better model.** The one capability that cannot be
-   had any other way, and the closest to done. A service transcribed on a fast model
-   during the meeting can be re-run overnight on Large.
-2. **Session list** — date, duration, transcript, play, copy, export, delete. Selah already
-   holds the transcripts; this adds the audio and the join between them.
-3. **Retention policy**, borrowing Handy's shape almost verbatim: never / keep-N /
-   3 days / 2 weeks / 3 months, plus a count cap and "open recordings folder".
-   Non-optional — 45 min of 16 kHz mono is ~86 MB, so weekly services are ~4.5 GB a year
-   on a volunteer's laptop.
-4. **Star / keep**, so a sermon worth archiving survives the retention sweep. Handy's
-   `saved` flag, which its own retention respects.
+Built in dependency order rather than this one — the other three all need recordings to
+exist before they mean anything.
+
+1. [x] **Re-transcribe a past session with a better model.** The one capability that cannot
+   be had any other way. `transcribe_audio_file` turned out to be gated on the
+   `native-transcription` feature rather than `debug_assertions`, and that feature is in
+   `default` — so it already shipped in release builds and only its doc comment claimed
+   otherwise. The service reads the loaded model first and restores it afterwards, or
+   re-transcribing on Large silently leaves Large loaded for the next service.
+2. [x] **Session list** — date, duration, size, play, star, delete, re-transcribe
+   (`SermonArchive.tsx`). The join to the saved transcript is still open; the archive
+   currently stands on its own by date.
+3. [x] **Retention policy** — never / 30 days / 3 months / a year / last-10-unstarred.
+   Swept at startup, in TypeScript because it depends on starring.
+4. [x] **Star / keep**, exempt from both retention rules.
+
+Still open in this part:
+
+- [ ] Join a recording to the transcript saved from the same service, so the archive can
+      show what was said and offer to replace a poor transcript with a re-transcribed one
+- [ ] Export a recording (copy the WAV somewhere the operator chooses)
+- [ ] Seen working in a running app — as with dictation, none of this has been watched on
+      screen; the WAV-header repair in particular is verified by reasoning about the format
+      rather than by opening a file the app actually died in the middle of
 
 ## 5.5 What not to take from Handy's version
 
@@ -482,7 +495,10 @@ If we cannot do those four well, we should ship the transcript half and not the 
   thousands. Selah has roughly one per service — about 52 a year. A plain list is right.
 - **SQLite (`history.db`).** Handy needs it for that volume. Selah already persists
   transcripts to IndexedDB; adding a second store for ~52 rows a year is not worth the
-  migration surface.
+  migration surface. (Implemented as `sermonRecordingMeta`, IndexedDB v10.)
+- **"Reveal in Finder".** It needs an opener plugin this project does not have, which is
+  more surface than a convenience button earns. The archive copies the folder path
+  instead — which also works when the operator is reading it to someone over the phone.
 
 ## 5.6 Open questions
 

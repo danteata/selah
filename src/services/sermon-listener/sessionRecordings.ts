@@ -280,3 +280,55 @@ export async function runRetentionOnStartup(
         return null
     }
 }
+
+// --- re-transcription --------------------------------------------------------
+
+export interface RetranscribeResult {
+    text: string
+    /** The model actually used. */
+    modelId: string
+}
+
+/**
+ * Re-run a saved recording through a chosen model.
+ *
+ * The point of keeping the audio: a service transcribed on a small fast model
+ * during the meeting can be redone on a large one afterwards, when nobody is
+ * waiting.
+ *
+ * Two things the caller does not have to think about. The engine refuses while
+ * a live session is capturing — there is one engine slot shared with the live
+ * path, and swapping the model under a running service would be far worse than
+ * making someone wait. And whatever model was loaded before is restored
+ * afterwards, so re-transcribing on Large does not silently leave Large loaded
+ * for the next service that starts.
+ */
+export async function retranscribe(
+    filePath: string,
+    modelId: string,
+): Promise<RetranscribeResult> {
+    if (!isDesktop()) throw new Error('Re-transcription is only available in the desktop app')
+
+    // Read before, restore after. Not in a `finally` on the load itself: if the
+    // restore fails there is nothing useful to do about it, and it must not
+    // mask the transcription result the operator is waiting for.
+    let previous: string | null = null
+    try {
+        previous = await invoke<string | null>('get_loaded_native_model')
+    } catch {
+        // Not knowing the previous model is survivable; skip the restore.
+    }
+
+    try {
+        const text = await invoke<string>('transcribe_audio_file', { filePath, modelId })
+        return { text, modelId }
+    } finally {
+        if (previous && previous !== modelId) {
+            try {
+                await invoke('load_native_model', { modelId: previous })
+            } catch (err) {
+                console.warn(`[recordings] could not restore model ${previous}:`, err)
+            }
+        }
+    }
+}
