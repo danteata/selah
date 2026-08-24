@@ -594,6 +594,40 @@ pub fn delete_sermon_recording(
     Ok(())
 }
 
+/// Copy a recording somewhere the operator chose.
+///
+/// A copy rather than a move: the archive keeps its own file, so exporting to a
+/// USB stick for the pastor does not quietly remove the recording from the
+/// machine and from retention's view of it.
+///
+/// The destination comes from the OS save dialog, so it is a path the user
+/// picked. The *source* is still built from the id rather than accepted, for
+/// the same reason as `delete_sermon_recording`.
+#[tauri::command]
+pub fn export_sermon_recording(
+    app: tauri::AppHandle,
+    session_id: String,
+    destination: String,
+) -> Result<(), String> {
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..")
+    {
+        return Err("Invalid recording id".to_string());
+    }
+
+    let source = sermon_recordings_path(&app)?.join(format!("{session_id}.wav"));
+    if !source.exists() {
+        return Err("That recording no longer exists".to_string());
+    }
+
+    std::fs::copy(&source, &destination)
+        .map_err(|e| format!("Could not save the recording: {e}"))?;
+    tracing::info!("[recording] exported {session_id} to {destination}");
+    Ok(())
+}
+
 /// Absolute path of the recordings directory, for "show in folder".
 #[tauri::command]
 pub fn sermon_recordings_dir(app: tauri::AppHandle) -> Result<String, String> {

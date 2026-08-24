@@ -84,6 +84,7 @@ use audio_capture::{
     stop_sermon_recording,
     list_sermon_recordings,
     delete_sermon_recording,
+    export_sermon_recording,
     sermon_recordings_dir,
 };
 
@@ -342,6 +343,7 @@ pub fn run() {
             stop_sermon_recording,
             list_sermon_recordings,
             delete_sermon_recording,
+            export_sermon_recording,
             sermon_recordings_dir,
             get_monitors,
             get_primary_monitor,

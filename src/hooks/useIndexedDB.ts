@@ -148,6 +148,17 @@ export interface SermonRecordingMetaRecord {
     starred: boolean
     /** Operator-given name; falls back to the date in the UI. */
     title?: string
+    /**
+     * The transcript produced live, stored alongside rather than referenced.
+     *
+     * A reference would have to point at one of two different systems — the
+     * IndexedDB `sermonSavedTranscripts` store, or a Convex row via
+     * `useTranscripts` — and would dangle whenever the operator cleared their
+     * history. A few tens of KB per service (about 2 MB a year) buys an archive
+     * that is self-contained and can show the old and new text side by side
+     * after a re-transcription.
+     */
+    liveTranscript?: string
     createdAt: string
 }
 
@@ -576,6 +587,22 @@ export async function getStarredRecordingIds(): Promise<Set<string>> {
     return new Set(rows.map((row) => row.sessionId))
 }
 
+/** Attach the live transcript to a recording when its session ends. */
+export async function setSermonRecordingTranscript(
+    sessionId: string,
+    liveTranscript: string
+): Promise<void> {
+    const db = getIndexedDB()
+    const existing = await db.sermonRecordingMeta.get(sessionId)
+    await db.sermonRecordingMeta.put({
+        sessionId,
+        starred: existing?.starred ?? false,
+        title: existing?.title,
+        liveTranscript,
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+    })
+}
+
 export async function setSermonRecordingStarred(
     sessionId: string,
     starred: boolean
@@ -586,6 +613,7 @@ export async function setSermonRecordingStarred(
         sessionId,
         starred,
         title: existing?.title,
+        liveTranscript: existing?.liveTranscript,
         createdAt: existing?.createdAt ?? new Date().toISOString(),
     })
 }

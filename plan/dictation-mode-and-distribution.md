@@ -477,14 +477,23 @@ exist before they mean anything.
    Swept at startup, in TypeScript because it depends on starring.
 4. [x] **Star / keep**, exempt from both retention rules.
 
+5. [x] **Join a recording to its transcript.** Stored on the recording's metadata rather
+   than referenced: a reference would have to point at one of two different transcript
+   systems (IndexedDB or Convex) and would dangle whenever history was cleared. A few tens
+   of KB per service. The archive shows the live text above the re-transcribed one rather
+   than replacing it — which is better is the operator's judgement, and they cannot make it
+   against nothing.
+6. [x] **Export a recording** — a copy, not a move, so sending a sermon to the pastor does
+   not remove it from the archive and from retention's view of it.
+
 Still open in this part:
 
-- [ ] Join a recording to the transcript saved from the same service, so the archive can
-      show what was said and offer to replace a poor transcript with a re-transcribed one
-- [ ] Export a recording (copy the WAV somewhere the operator chooses)
-- [ ] Seen working in a running app — as with dictation, none of this has been watched on
-      screen; the WAV-header repair in particular is verified by reasoning about the format
-      rather than by opening a file the app actually died in the middle of
+- [ ] Replace a saved transcript with a re-transcribed one in place. Today the operator
+      copies the better text; wiring it back into the transcript record means deciding
+      which of the two transcript systems owns the result.
+- [ ] Seen working in a running app. The WAV-header repair is no longer only reasoned —
+      six Rust tests exercise it against real files on disk, including one zeroed the way
+      a force-quit leaves it — but nothing here has been watched on screen.
 
 ## 5.5 What not to take from Handy's version
 

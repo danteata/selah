@@ -293,3 +293,133 @@ pub fn list_recordings(dir: &Path) -> Vec<RecordingFile> {
     out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    /// A real WAV, written the way `SessionRecorder` writes one.
+    fn write_wav(path: &Path, samples: usize) {
+        let spec = WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = WavWriter::create(path, spec).expect("create wav");
+        for i in 0..samples {
+            writer.write_sample((i % 1000) as i16).expect("write sample");
+        }
+        writer.finalize().expect("finalize");
+    }
+
+    /// Reproduce what a force-quit leaves behind: all the audio, but the two
+    /// length fields never patched, so every player sees an empty file.
+    fn zero_the_lengths(path: &Path) {
+        let mut file = fs::OpenOptions::new().read(true).write(true).open(path).unwrap();
+        let (data_size_offset, _) = find_data_chunk(&mut file).expect("data chunk");
+        file.seek(SeekFrom::Start(RIFF_SIZE_OFFSET)).unwrap();
+        file.write_all(&0u32.to_le_bytes()).unwrap();
+        file.seek(SeekFrom::Start(data_size_offset)).unwrap();
+        file.write_all(&0u32.to_le_bytes()).unwrap();
+    }
+
+    fn read_u32_at(path: &Path, offset: u64) -> u32 {
+        let mut file = File::open(path).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        let mut buf = [0u8; 4];
+        file.read_exact(&mut buf).unwrap();
+        u32::from_le_bytes(buf)
+    }
+
+    fn temp_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("selah-recorder-tests");
+        fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    #[test]
+    fn repairs_a_recording_the_app_died_during() {
+        let path = temp_path("crashed.wav");
+        write_wav(&path, 16_000); // one second
+        let healthy_len = fs::metadata(&path).unwrap().len();
+        zero_the_lengths(&path);
+
+        assert_eq!(read_u32_at(&path, RIFF_SIZE_OFFSET), 0, "precondition");
+        assert_eq!(wav_duration_secs(&path), Some(1.0), "audio is intact either way");
+
+        let changed = repair_wav_header(&path).expect("repair");
+
+        assert!(changed);
+        assert_eq!(read_u32_at(&path, RIFF_SIZE_OFFSET), (healthy_len - 8) as u32);
+        assert_eq!(wav_duration_secs(&path), Some(1.0));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn leaves_a_healthy_recording_untouched() {
+        let path = temp_path("healthy.wav");
+        write_wav(&path, 8_000);
+        let before = fs::read(&path).unwrap();
+
+        let changed = repair_wav_header(&path).expect("repair");
+
+        assert!(!changed, "a finalized file needs no repair");
+        assert_eq!(fs::read(&path).unwrap(), before, "bytes must not move");
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn repairing_twice_is_a_no_op_the_second_time() {
+        let path = temp_path("twice.wav");
+        write_wav(&path, 4_000);
+        zero_the_lengths(&path);
+
+        assert!(repair_wav_header(&path).unwrap());
+        assert!(!repair_wav_header(&path).unwrap());
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn refuses_a_file_that_is_not_a_wav() {
+        let path = temp_path("truncated.bin");
+        fs::write(&path, b"RIFF").unwrap();
+
+        assert!(repair_wav_header(&path).is_err());
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn duration_reads_the_real_length_not_the_declared_one() {
+        // The case that matters for the archive list: an unrepaired file must
+        // still report how long it is, or the row shows "length unknown" for a
+        // recording that is perfectly playable once repaired.
+        let path = temp_path("duration.wav");
+        write_wav(&path, 16_000 * 3);
+        zero_the_lengths(&path);
+
+        let secs = wav_duration_secs(&path).expect("duration");
+        assert!((secs - 3.0).abs() < 0.01, "expected ~3s, got {secs}");
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn lists_newest_first_and_skips_non_wav_files() {
+        let dir = std::env::temp_dir().join("selah-recorder-tests-list");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        write_wav(&dir.join("older.wav"), 1_000);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_wav(&dir.join("newer.wav"), 1_000);
+        fs::write(dir.join("notes.txt"), b"ignore me").unwrap();
+
+        let listed = list_recordings(&dir);
+
+        assert_eq!(listed.len(), 2, "the .txt must not be listed");
+        assert_eq!(listed[0].session_id, "newer");
+        assert_eq!(listed[1].session_id, "older");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

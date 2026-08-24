@@ -13,6 +13,7 @@ import { useSermonListenerContext } from './SermonListenerContext'
 import { SermonListenerWizard, isSermonListenerWizardComplete } from './SermonListenerWizard'
 import { useTranscripts } from '../../hooks/useTranscripts'
 import { toast } from 'sonner'
+import { setSermonRecordingTranscript } from '../../hooks/useIndexedDB'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
@@ -214,11 +215,21 @@ function SermonListenerPanelInner({
             })
         }
         if (recordingSessionId) {
+            const sessionId = recordingSessionId
+            // Snapshot before stop(), which clears the live transcript.
+            const liveText = transcript.trim()
             setRecordingSessionId(null)
-            // The recording stands on its own, identified by date and length.
-            // Joining it to the saved transcript is a later refinement — it is
-            // not needed to play the audio back or re-transcribe it.
-            void stopSermonRecording()
+            void stopSermonRecording().then(() => {
+                // Keep the live transcript with the recording so the archive can
+                // show what was heard, and compare it against a later
+                // re-transcription rather than presenting the new text with
+                // nothing to judge it by.
+                if (liveText) {
+                    void setSermonRecordingTranscript(sessionId, liveText).catch((err) => {
+                        console.warn('[recordings] could not attach transcript:', err)
+                    })
+                }
+            })
         }
         stop()
     }

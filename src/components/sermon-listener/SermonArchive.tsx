@@ -17,6 +17,7 @@ import {
     Wand2,
     Copy,
     Check,
+    Download,
     Loader2,
     AlertTriangle,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ import { toast } from 'sonner'
 
 import {
     deleteRecording,
+    exportRecording,
     formatBytes,
     formatDuration,
     listRecordings,
@@ -44,6 +46,8 @@ import {
 /** A recording joined to whatever the operator has said about it. */
 interface ArchiveRow extends RecordingFile {
     starred: boolean
+    /** What the live transcription heard, if the session recorded one. */
+    liveTranscript?: string
 }
 
 function recordedOn(modifiedMs: number): string {
@@ -71,8 +75,14 @@ export function SermonArchive() {
 
     const refresh = useCallback(async () => {
         const [files, meta] = await Promise.all([listRecordings(), getSermonRecordingMeta()])
-        const starred = new Set(meta.filter((m) => m.starred).map((m) => m.sessionId))
-        setRows(files.map((file) => ({ ...file, starred: starred.has(file.session_id) })))
+        const byId = new Map(meta.map((row) => [row.sessionId, row]))
+        setRows(
+            files.map((file) => ({
+                ...file,
+                starred: byId.get(file.session_id)?.starred ?? false,
+                liveTranscript: byId.get(file.session_id)?.liveTranscript,
+            })),
+        )
     }, [])
 
     useEffect(() => {
@@ -179,6 +189,18 @@ export function SermonArchive() {
             toast.error('Could not copy to the clipboard')
         }
     }, [result])
+
+    const exportOne = useCallback(async (row: ArchiveRow) => {
+        try {
+            const destination = await exportRecording(row.session_id, row.modified_ms)
+            // Null means the operator dismissed the picker — say nothing.
+            if (destination) toast.success('Recording saved', { description: destination })
+        } catch (err) {
+            toast.error('Could not save the recording', {
+                description: err instanceof Error ? err.message : String(err),
+            })
+        }
+    }, [])
 
     /**
      * Show where the files live.
@@ -320,6 +342,14 @@ export function SermonArchive() {
                                     {isWorking ? 'Working…' : 'Re-transcribe'}
                                 </button>
 
+                                <button
+                                    onClick={() => void exportOne(row)}
+                                    title="Save a copy of this recording"
+                                    className="p-1.5 rounded-md text-gray-400 hover:text-[var(--accent-teal)]"
+                                >
+                                    <Download className="w-4 h-4" />
+                                </button>
+
                                 {isConfirming ? (
                                     <div className="flex items-center gap-1">
                                         <button
@@ -352,11 +382,26 @@ export function SermonArchive() {
                                 </p>
                             )}
 
+                            {result?.sessionId === row.session_id && row.liveTranscript && (
+                                <div className="mt-2.5 rounded-lg border border-gray-200 dark:border-gray-700 p-2.5 space-y-1">
+                                    <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                                        What was heard during the service
+                                    </span>
+                                    {/* Shown next to the new text rather than
+                                        replaced by it. "Better" is the
+                                        operator's judgement to make, and they
+                                        cannot make it against nothing. */}
+                                    <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                                        {row.liveTranscript}
+                                    </p>
+                                </div>
+                            )}
+
                             {result?.sessionId === row.session_id && (
-                                <div className="mt-2.5 rounded-lg bg-gray-50 dark:bg-gray-800 p-2.5 space-y-2">
+                                <div className="mt-2 rounded-lg bg-gray-50 dark:bg-gray-800 p-2.5 space-y-2">
                                     <div className="flex items-center justify-between">
                                         <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">
-                                            New transcript
+                                            {row.liveTranscript ? 'After re-transcribing' : 'New transcript'}
                                         </span>
                                         <button
                                             onClick={() => void copyResult()}

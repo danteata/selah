@@ -332,3 +332,35 @@ export async function retranscribe(
         }
     }
 }
+
+// --- export ------------------------------------------------------------------
+
+/**
+ * Save a copy of a recording somewhere the operator chooses.
+ *
+ * A copy, not a move — exporting to a USB stick for the pastor must not
+ * silently remove the recording from the archive.
+ *
+ * Returns the destination path, or `null` when the save dialog was dismissed.
+ * A dismissed dialog is not an error and must not raise one: cancelling is the
+ * most common thing to do with a file picker.
+ */
+export async function exportRecording(
+    sessionId: string,
+    recordedAtMs: number,
+): Promise<string | null> {
+    if (!isDesktop()) return null
+
+    const { save } = await import('@tauri-apps/plugin-dialog')
+    // A default name someone can find later. `2026-08-24-sermon.wav` sorts
+    // usefully in a folder; the session id would not.
+    const stamp = new Date(recordedAtMs).toISOString().slice(0, 10)
+    const destination = await save({
+        defaultPath: `${stamp}-sermon.wav`,
+        filters: [{ name: 'Audio', extensions: ['wav'] }],
+    })
+    if (!destination) return null
+
+    await invoke('export_sermon_recording', { sessionId, destination })
+    return destination
+}
