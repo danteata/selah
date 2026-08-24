@@ -1,28 +1,28 @@
-## Selah 0.1.21
+## Selah 0.1.22
 
-Speak instead of typing — and voice search now works with no internet at all.
+Keep a recording of the service, so a transcript spoiled by a bad microphone can be redone properly afterwards.
 
-### Dictation: hold a key, speak, and the words appear where you were typing
+### Sermon recordings, and second chances at a transcript
 
-- **New in Settings → Shortcuts.** Turn on Dictation, pick a hotkey, and hold it while you speak. When you let go, the text lands in whatever Selah box the cursor was in — the announcement you are writing onto a slide, sermon notes, a search field. It is off until you turn it on.
-- **Nothing leaves your computer.** It runs on the same offline transcription Selah already installs for the Sermon Listener, so there is no account to create, no subscription, and no audio sent anywhere. It works with the internet unplugged.
-- **Hold-to-talk or toggle.** Hold-to-talk records only while the key is down, which is the safer one mid-service — the microphone cannot be left open by accident. Toggle starts on one press and stops on the next, which suits longer stretches of dictation.
-- **A small indicator shows it is listening**, with a level meter so you can see your voice registering. It sits at the bottom of whichever screen Selah is on and ignores clicks, so it will not get in the way of anything behind it.
-- **If the hotkey you choose is already taken** by another program, Selah says so and names the reason rather than silently doing nothing.
-- Dictation and the Sermon Listener share one microphone and one transcription model, so dictation is unavailable while the Listener is running, and says so.
+- **Selah can now keep the audio of each service.** Off until you turn it on, under Settings → Sermon Listener. A transcript can come out poor for reasons nobody notices at the time — the wrong microphone was selected, the band bled into the vocal feed, the model struggled with an accent — and text alone cannot be fixed afterwards. The audio can.
+- **Re-transcribe a past service with a better model.** During a service Selah uses a model fast enough to keep up. Afterwards, when nobody is waiting, you can run the same recording through a slower and more accurate one and get a much better transcript. The old and new versions are shown together so you can decide which to keep.
+- **Play, star, export or delete any recording** from Settings → Sermon Listener → Manage recordings. Starring means "never delete this automatically".
+- **Recordings are cleaned up on a schedule you choose** — 30 days, 3 months, a year, the 10 most recent, or never. A service is roughly 90 MB, so a year of Sundays runs to several gigabytes; the default keeps 3 months. Starred recordings are always kept.
+- **A recording survives Selah closing unexpectedly.** Audio files store their own length, and that length is only written when a recording finishes normally. A service interrupted by a crash or a force-quit would previously produce a file every player treated as empty, even though the audio was all there. Selah now repairs those automatically.
 
-### Voice search works offline
+**Before you turn this on:** this records everyone the microphone can hear, for the whole service — prayer, testimonies, conversation near the desk. The audio stays on that computer and is never uploaded, and deleting a recording deletes the file immediately. Please make sure your church is comfortable being recorded before switching it on.
 
-- **The microphone button in Bible, Songs, Library and Dictionary searches now uses Selah's own offline transcription** on the desktop app, instead of the browser's speech service. Previously that button needed a working internet connection, needed Chrome or Safari specifically, and on Mac and Windows needed a second system permission separate from the microphone — a lot of ways for it to simply not work, in a building where the Wi-Fi is often the least reliable thing present.
-- **If the Sermon Listener is running**, voice search falls back to the old browser method automatically, because both cannot use the microphone at once. It keeps working either way.
-- **Spoken punctuation is trimmed.** Saying a reference now searches for `John 3:16` rather than `John 3:16.`, which previously failed to match.
+### The microphone list now tells the truth
 
-### Signing in no longer breaks an account's free trial
+- **If your chosen microphone is unplugged mid-service, Selah says so.** It already switched to the default microphone and carried on, but Settings went on displaying the device that had gone — so anyone checking during a service was told the sound desk feed was live when the laptop's own microphone was actually recording. Selah now clears the stale selection and tells you which device disappeared.
+- This only happens when Selah can confirm the device is genuinely gone. A brief audio-system glitch no longer risks discarding a microphone choice you made deliberately.
 
-- **A sign-in fault that could quietly cost an account its 14-day trial has been fixed.** An old bug could leave a single person recorded twice, after which the trial was never started for them and nothing said why — the app looked like it had signed in normally. Affected accounts now repair themselves the next time they sign in, and the code that starts the trial no longer gives up when it finds a duplicate.
+### Smaller things
+
+- **The `fn` (Globe) key can no longer be silently ignored when setting a shortcut.** Most keyboards never send it to the computer at all, so a shortcut using it would work on one Mac and nowhere else. Selah now explains that instead of appearing to ignore the keypress.
+- **Guidance on Bluetooth headset microphones** has been added to the Sermon Listener documentation: on macOS, recording through one degrades whatever is playing through the same headset. It reads like a Selah fault and is not.
 
 ### Worth knowing
 
-- **Dictation has not yet been used in a real service.** It is new, it is off by default, and it has been checked by automated tests rather than by a Sunday. If you plan to rely on it, try it on a weekday first.
-- **The voice search change applies as soon as you update**, without you turning anything on. If it behaves worse than before for you, please say so — the previous browser-based method is still there and can be made the default again.
-- Downloading a smaller, faster transcription model for dictation is optional and lives under Settings → Sermon Listener. Dictation uses whatever the Sermon Listener uses unless you pick something else.
+- **Sermon recording is new and has not been used in a real service.** It is off by default and covered by automated tests rather than a Sunday. Try it on a weekday before relying on it for something you cannot repeat.
+- **The microphone change applies whether or not you use recording.** If your saved microphone is ever cleared when you did not expect it, that is this feature — please say so.
