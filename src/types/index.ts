@@ -516,6 +516,41 @@ export interface AppSettings {
         enableVoiceCommands?: boolean
     }
     /**
+     * Dictation — speak into whatever Selah input has focus, driven by a
+     * system-wide hotkey. Shares the local transcription engine with the sermon
+     * listener, so the two cannot run at once (see `useDictation`).
+     */
+    dictation?: {
+        /** Master switch. Off unregisters the hotkey entirely. */
+        enabled?: boolean
+        /** Tauri accelerator, e.g. "CommandOrControl+Shift+D". */
+        hotkey?: string
+        /**
+         * `push-to-talk` records while the key is held — safest mid-service,
+         * since the mic cannot be left open. `toggle` starts on one press and
+         * stops on the next, which suits longer dictation.
+         */
+        mode?: 'push-to-talk' | 'toggle'
+        /**
+         * Model id, separate from the sermon listener's on purpose. Dictation is
+         * latency-sensitive in a way a sermon transcript is not — the operator is
+         * watching a cursor — so the right default here is a fast small model,
+         * and sharing one setting would force a bad default on one of them.
+         */
+        model?: string
+        /** Native device name; falls back to the sermon listener's choice. */
+        selectedMicrophoneId?: string
+        /** BCP-47 tag, or omitted/'auto' to let the model detect. */
+        language?: string
+        /**
+         * Hard ceiling on one dictation, in seconds. A push-to-talk release can
+         * genuinely go missing — the key is swallowed by a focus change, or the
+         * app loses the keyboard — and without this the session records until
+         * someone notices. Also bounds a `toggle` session left running.
+         */
+        maxSeconds?: number
+    }
+    /**
      * Optional OpenAI-compatible LLM for transcript cleanup + verse extraction.
      * Entirely optional: when `enabled` is false or fields are blank, the app
      * uses only its offline local detection. API key is stored locally.

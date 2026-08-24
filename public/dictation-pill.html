@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dictation</title>
+<style>
+  /*
+   * The dictation pill. Floats over whatever the operator is working in, so it
+   * is a dark HUD capsule in both themes rather than something that follows the
+   * app theme — it has to read against a white document and a projected slide
+   * alike, and it cannot know which is behind it.
+   *
+   * The body stays fully transparent: the window is `transparent(true)`, and a
+   * painted body would show as a rectangle around the capsule.
+   */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+  }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* The window ignores cursor events, but belt and braces: nothing here
+       should ever look selectable or draggable. */
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: rgba(18, 18, 20, 0.82);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.38);
+    color: #f4f4f5;
+    /* Scales in from the centre when the window is shown, so the pill reads as
+       arriving rather than blinking into place. */
+    animation: appear 140ms ease-out;
+  }
+
+  @keyframes appear {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* --- listening: dot + level meter ------------------------------------- */
+
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #ef4444;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
+    animation: breathe 1.6s ease-in-out infinite;
+    flex: none;
+  }
+
+  @keyframes breathe {
+    0%,
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+    50%  { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  }
+
+  .label {
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  .meter {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+    height: 20px;
+  }
+
+  .bar {
+    width: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.22);
+    /* Height is set from script; the transition is what turns a stream of
+       discrete frames into something that reads as a level rather than a
+       flicker. */
+    height: 4px;
+    transition: height 90ms ease-out, background-color 90ms ease-out;
+  }
+
+  .bar.lit { background: var(--accent, #2dd4bf); }
+
+  /* --- transcribing: spinner -------------------------------------------- */
+
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.22);
+    border-top-color: #f4f4f5;
+    animation: spin 720ms linear infinite;
+    flex: none;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* State toggles. Kept as classes on the root so script only ever writes one
+     attribute, and the page cannot end up half in one state. */
+  body[data-state="listening"] .spinner { display: none; }
+  body[data-state="transcribing"] .dot,
+  body[data-state="transcribing"] .meter { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pill { animation: none; }
+    .dot { animation: none; }
+    .spinner { animation-duration: 2s; }
+    .bar { transition: none; }
+  }
+</style>
+</head>
+<body data-state="listening">
+  <div class="pill" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="spinner" aria-hidden="true"></span>
+    <span class="label" id="label">Listening…</span>
+    <span class="meter" id="meter" aria-hidden="true"></span>
+  </div>
+  <script src="/dictation-pill.js"></script>
+</body>
+</html>

@@ -45,6 +45,16 @@ interface StreamTextEvent {
 }
 
 export interface NativeTranscriptionStartOptions {
+    /**
+     * Model to run this session on. Defaults to the sermon listener's choice.
+     *
+     * Dictation overrides it: it is latency-sensitive in a way a sermon
+     * transcript is not — the operator is watching a cursor — so a small fast
+     * model is often the right answer there and the wrong one for a service.
+     * Switching costs a load, which is why the default is to inherit rather
+     * than to pick a fast model on the operator's behalf.
+     */
+    modelId?: string
     language?: string
     initialPrompt?: string
     captureSource?: 'microphone' | 'system'
@@ -58,6 +68,10 @@ export interface NativeTranscriptionStartOptions {
 class NativeTranscriptionService {
     private unlisten: UnlistenFn | null = null
     private unlistenStream: UnlistenFn | null = null
+    /** Terminal-marker listener; see `stop(waitForFinalMs)`. */
+    private unlistenEos: UnlistenFn | null = null
+    /** Armed while draining, fired by the `end_of_stream` marker. */
+    private eosResolve: (() => void) | null = null
     private isRunning = false
 
     isConfigured(): boolean {
@@ -77,7 +91,9 @@ class NativeTranscriptionService {
         if (this.isRunning) return false
 
         const modelId =
-            useAppStore.getState().settings.sermonListener?.whisperModel || DEFAULT_NATIVE_MODEL_ID
+            options.modelId ||
+            useAppStore.getState().settings.sermonListener?.whisperModel ||
+            DEFAULT_NATIVE_MODEL_ID
 
         try {
             // Load the model if it isn't already the one loaded. A load fails when
@@ -122,6 +138,18 @@ class NativeTranscriptionService {
                 }
             })
 
+            // The capture thread flushes the in-progress speech segment when
+            // capture stops, waits for the transcription worker to drain, and
+            // only then emits this terminal marker. Listening for it is what
+            // lets `stop()` hold the result listener open long enough to
+            // receive that last utterance — see the drain in `stop()`.
+            this.unlistenEos = await listen<{ end_of_stream?: boolean }>(
+                'vad-audio-chunk',
+                (event) => {
+                    if (event.payload?.end_of_stream) this.eosResolve?.()
+                },
+            )
+
             await invoke('start_capture_with_vad', {
                 captureType: options.captureSource ?? 'microphone',
                 deviceName: options.microphoneDeviceId,
@@ -135,18 +163,44 @@ class NativeTranscriptionService {
             this.unlisten = null
             this.unlistenStream?.()
             this.unlistenStream = null
+            this.unlistenEos?.()
+            this.unlistenEos = null
             options.onError(err instanceof Error ? err.message : String(err))
             return false
         }
     }
 
-    async stop(): Promise<void> {
+    /**
+     * Stop capture and tear down the listeners.
+     *
+     * `waitForFinalMs` holds the result listener open after `stop_capture`,
+     * until the Rust side signals `end_of_stream` or the wait elapses. That
+     * matters when a caller needs the *last* utterance: the capture thread
+     * flushes whatever speech the VAD was still accumulating and transcribes it
+     * after the stop, so a listener torn down immediately misses it.
+     *
+     * It defaults to 0 — no drain — because a continuous session (the sermon
+     * listener) stops during silence, where there is nothing in flight to lose,
+     * and because a drain on every stop would make teardown feel sticky.
+     * Dictation is the opposite case: push-to-talk releases *mid-sentence* by
+     * design, so the flushed segment is not an edge case, it is the whole
+     * dictation. It passes a real timeout.
+     *
+     * The wait is bounded rather than open-ended for the reason every wait in
+     * this pipeline is: a marker that never arrives must not wedge the caller.
+     */
+    async stop(waitForFinalMs = 0): Promise<void> {
         this.isRunning = false
         try {
             await invoke('stop_capture')
         } catch (err) {
             console.warn('[nativeWhisper] stop_capture failed:', err)
         }
+
+        if (waitForFinalMs > 0) {
+            await this.waitForEndOfStream(waitForFinalMs)
+        }
+
         if (this.unlisten) {
             this.unlisten()
             this.unlisten = null
@@ -155,6 +209,29 @@ class NativeTranscriptionService {
             this.unlistenStream()
             this.unlistenStream = null
         }
+        if (this.unlistenEos) {
+            this.unlistenEos()
+            this.unlistenEos = null
+        }
+    }
+
+    /** Resolves on the `end_of_stream` marker, or when `timeoutMs` elapses. */
+    private waitForEndOfStream(timeoutMs: number): Promise<void> {
+        return new Promise((resolve) => {
+            let settled = false
+            const finish = () => {
+                if (settled) return
+                settled = true
+                this.eosResolve = null
+                clearTimeout(timer)
+                resolve()
+            }
+            const timer = setTimeout(() => {
+                console.warn('[nativeWhisper] end_of_stream did not arrive; committing anyway')
+                finish()
+            }, timeoutMs)
+            this.eosResolve = finish
+        })
     }
 
     /** Native capture has no JS-side MediaStream (audio is captured in Rust). */

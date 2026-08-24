@@ -2,7 +2,7 @@ import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Shield, Database, Book, X, Mic, Ticket } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
-import { useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
+import { useDictation, useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from '../hooks/useLocalBackground'
 import { SettingsModal } from '../components/settings/SettingsModal'
@@ -71,6 +71,8 @@ export default function Dashboard() {
 
     // Sync live state to other windows (for multi-monitor support)
     useLiveSync()
+    // Registers the dictation hotkey (desktop only; no-ops when disabled).
+    useDictation()
 
     // Presence heartbeat — marks this user as online
     usePresence(currentUser?.churchId || undefined, sessionId || undefined, sessionRole)

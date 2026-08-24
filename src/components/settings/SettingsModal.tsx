@@ -18,6 +18,17 @@ import { SongMigrationWizard } from '../admin/SongMigrationWizard'
 import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
+import { isDesktop } from '../../platform'
+import {
+    listGlobalShortcuts,
+    DEFAULT_DICTATION_HOTKEY,
+} from '../../services/dictation/globalShortcuts'
+import {
+    listNativeModels,
+    formatModelSize,
+    type NativeModelStatus,
+} from '../../services/sermon-listener/nativeModelManager'
+import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDevices'
 import { getVersion } from '@tauri-apps/api/app'
 import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
@@ -1509,6 +1520,310 @@ function StorageSettings() {
 }
 
 // Shortcuts Settings Tab
+/**
+ * Dictation — the only *system-wide* binding Selah registers, which is why it
+ * lives at the top of the Shortcuts tab rather than under Sermon Listener. The
+ * list below it is in-app only and needs no configuration.
+ *
+ * This panel deliberately does not call `useDictation`: that hook owns the
+ * hotkey registration and the event listener, and a second instance would run a
+ * second dictation session on every keypress. It edits settings and reads back
+ * what is actually registered, which is also the more useful thing to show —
+ * "this is bound right now" answers the question an operator opens this panel
+ * with.
+ */
+function DictationSettings() {
+    const settings = useAppStore((state) => state.settings)
+    const setAppSettings = useAppStore((state) => state.setAppSettings)
+    const dictation = settings.dictation
+    const enabled = Boolean(dictation?.enabled)
+    const hotkey = dictation?.hotkey || DEFAULT_DICTATION_HOTKEY
+    const mode = dictation?.mode ?? 'push-to-talk'
+
+    const [recording, setRecording] = useState(false)
+    // Derived to null while disabled rather than cleared in the effect: a
+    // synchronous setState in an effect body cascades a render, and there is
+    // nothing to show when the feature is off.
+    const [registeredAccelerator, setRegisteredAccelerator] = useState<string | null>(null)
+    const registered = enabled ? registeredAccelerator : null
+
+    // Only models already on disk. Downloading is the Sermon Listener panel's
+    // job — duplicating that UI here would give the operator two places to
+    // manage one set of files, and two progress bars for one download.
+    const [installedModels, setInstalledModels] = useState<NativeModelStatus[]>([])
+    const {
+        devices: micDevices,
+        isLoading: isLoadingDevices,
+        refresh: refreshDevices,
+    } = useAudioDevices()
+
+    const sermonModel = settings.sermonListener?.whisperModel
+    const sermonMic = settings.sermonListener?.selectedMicrophoneId
+
+    const update = useCallback(
+        (patch: Partial<NonNullable<typeof dictation>>) => {
+            setAppSettings({ ...settings, dictation: { ...dictation, ...patch } })
+        },
+        [dictation, setAppSettings, settings],
+    )
+
+    // Read back what the OS actually accepted. The registration is asynchronous
+    // and can fail (another app owns the combination), so the setting alone is
+    // not evidence the key works.
+    useEffect(() => {
+        if (!enabled) return
+        let cancelled = false
+        const timer = setTimeout(() => {
+            void listGlobalShortcuts().then((bound) => {
+                if (cancelled) return
+                const entry = bound.find((binding) => binding.action.startsWith('dictation.'))
+                setRegisteredAccelerator(entry?.accelerator ?? null)
+            })
+        }, 250) // let the Dashboard's useDictation apply the change first
+        return () => {
+            cancelled = true
+            clearTimeout(timer)
+        }
+    }, [enabled, hotkey, mode])
+
+    useEffect(() => {
+        if (!enabled) return
+        let cancelled = false
+        void listNativeModels().then((models) => {
+            if (cancelled) return
+            setInstalledModels(models.filter((model) => model.is_downloaded))
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [enabled])
+
+    // Build a Tauri accelerator from a real keypress. `CommandOrControl` rather
+    // than the literal key pressed, so a binding chosen on a Mac still works on
+    // the Windows machine in the next church.
+    const captureHotkey = useCallback(
+        (event: React.KeyboardEvent<HTMLButtonElement>) => {
+            if (!recording) return
+            event.preventDefault()
+
+            const code = event.code
+            // A modifier on its own is the operator still reaching for the combo.
+            if (/^(Control|Shift|Alt|Meta)(Left|Right)$/.test(code)) return
+
+            if (code === 'Escape') {
+                setRecording(false)
+                return
+            }
+
+            const parts: string[] = []
+            if (event.metaKey || event.ctrlKey) parts.push('CommandOrControl')
+            if (event.altKey) parts.push('Alt')
+            if (event.shiftKey) parts.push('Shift')
+
+            let key = code
+            if (code.startsWith('Key')) key = code.slice(3)
+            else if (code.startsWith('Digit')) key = code.slice(5)
+            else if (code.startsWith('Arrow')) key = code.slice(5)
+            else if (code.startsWith('Numpad')) key = `num${code.slice(6).toLowerCase()}`
+
+            // A bare letter registered system-wide would swallow that key in
+            // every application on the machine.
+            if (parts.length === 0) {
+                toast.error('Add a modifier', {
+                    description: 'A global hotkey needs Cmd, Ctrl, Alt or Shift.',
+                })
+                return
+            }
+
+            parts.push(key)
+            update({ hotkey: parts.join('+') })
+            setRecording(false)
+        },
+        [recording, update],
+    )
+
+    if (!isDesktop()) return null
+
+    const conflicted = enabled && registered !== null && registered !== hotkey
+    const unregistered = enabled && registered === null
+
+    return (
+        <div className="space-y-4 pb-5 mb-5 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between">
+                <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Dictation
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Hold a key and speak — the text lands in whichever Selah field has focus.
+                        Runs on the offline engine, so nothing leaves this machine.
+                    </p>
+                </div>
+                <button
+                    onClick={() => update({ enabled: !enabled })}
+                    className={`relative w-12 h-6 rounded-full shrink-0 transition-colors ${enabled ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
+                >
+                    <span
+                        className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
+                        style={{ transform: enabled ? 'translateX(28px)' : 'translateX(0)' }}
+                    />
+                </button>
+            </div>
+
+            {enabled && (
+                <>
+                    <div className="flex items-center justify-between gap-4">
+                        <label className="text-sm text-gray-700 dark:text-gray-300">Hotkey</label>
+                        <button
+                            onClick={() => setRecording(true)}
+                            onKeyDown={captureHotkey}
+                            onBlur={() => setRecording(false)}
+                            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                recording
+                                    ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
+                                    : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300'
+                            }`}
+                        >
+                            {recording ? 'Press keys…' : hotkey}
+                        </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <label className="text-sm text-gray-700 dark:text-gray-300">Mode</label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                {mode === 'push-to-talk'
+                                    ? 'Records only while held — the mic cannot be left open.'
+                                    : 'Press once to start, again to stop.'}
+                            </p>
+                        </div>
+                        <div className="w-44 shrink-0">
+                            <SettingsSelect
+                                value={mode}
+                                onChange={(value) =>
+                                    update({ mode: value as 'push-to-talk' | 'toggle' })
+                                }
+                            >
+                                <option value="push-to-talk">Hold to talk</option>
+                                <option value="toggle">Toggle</option>
+                            </SettingsSelect>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <label className="text-sm text-gray-700 dark:text-gray-300">
+                                Microphone
+                            </label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                Dictation is usually a headset, not the room mic the service uses.
+                            </p>
+                        </div>
+                        <div className="w-56 shrink-0 flex items-center gap-1.5">
+                            <div className="flex-1">
+                                <SettingsSelect
+                                    value={dictation?.selectedMicrophoneId ?? ''}
+                                    onChange={(value) => {
+                                        // Persist the label alongside the id: device ids are
+                                        // reassigned across reboots and replugs, and the label
+                                        // is what lets the same interface be found again.
+                                        const device = micDevices.find((entry) => entry.id === value)
+                                        if (device) saveSelectedDeviceLabel(device.label)
+                                        update({ selectedMicrophoneId: value || undefined })
+                                    }}
+                                >
+                                    <option value="">
+                                        {sermonMic
+                                            ? 'Same as Sermon Listener'
+                                            : 'System default'}
+                                    </option>
+                                    {micDevices.map((device) => (
+                                        <option key={device.id} value={device.id}>
+                                            {device.label}
+                                            {device.isDefault ? ' (Default)' : ''}
+                                        </option>
+                                    ))}
+                                </SettingsSelect>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={refreshDevices}
+                                disabled={isLoadingDevices}
+                                title="Refresh devices"
+                                className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                                <RefreshCw
+                                    className={`w-3.5 h-3.5 ${isLoadingDevices ? 'animate-spin' : ''}`}
+                                />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                        <div>
+                            <label className="text-sm text-gray-700 dark:text-gray-300">Model</label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                A smaller model returns text sooner, which matters more here than
+                                in a sermon transcript — you are watching a cursor while it thinks.
+                            </p>
+                        </div>
+                        <div className="w-56 shrink-0">
+                            <SettingsSelect
+                                value={dictation?.model ?? ''}
+                                onChange={(value) => update({ model: value || undefined })}
+                            >
+                                <option value="">Same as Sermon Listener</option>
+                                {installedModels.map((model) => (
+                                    <option key={model.id} value={model.id}>
+                                        {model.name} · {formatModelSize(model.size_bytes)}
+                                    </option>
+                                ))}
+                            </SettingsSelect>
+                        </div>
+                    </div>
+
+                    {/* Only one model is resident at a time, so a dictation model
+                        that differs from the listener's costs a load on the first
+                        use after either one runs. Worth saying out loud — the
+                        symptom is a slow first dictation, which otherwise reads as
+                        the feature being sluggish. */}
+                    {dictation?.model && sermonModel && dictation.model !== sermonModel && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            This differs from the Sermon Listener model, so the first dictation
+                            after a listening session has to load it — expect a pause.
+                        </p>
+                    )}
+
+                    {enabled && installedModels.length === 0 && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                            No other models are downloaded. Add one under Sermon Listener to choose
+                            a faster model for dictation.
+                        </p>
+                    )}
+
+                    {conflicted && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                            {hotkey} was refused — another application owns it. Currently bound to{' '}
+                            {registered}.
+                        </p>
+                    )}
+                    {unregistered && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                            {hotkey} could not be registered. Another application is probably using
+                            it — try a different combination.
+                        </p>
+                    )}
+
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Dictation and Sermon Listener share one microphone and one model, so
+                        dictation is unavailable while the listener is running.
+                    </p>
+                </>
+            )}
+        </div>
+    )
+}
+
 function ShortcutsSettings() {
     const shortcuts = [
         { keys: ['⌘', '/'], description: 'Focus quick actions search' },
@@ -1528,6 +1843,8 @@ function ShortcutsSettings() {
 
     return (
         <div className="space-y-4">
+            <DictationSettings />
+
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Keyboard shortcuts for faster navigation.
             </p>

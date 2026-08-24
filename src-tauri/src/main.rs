@@ -29,6 +29,7 @@
 tauri::embed_plist::embed_info_plist!(concat!(env!("CARGO_MANIFEST_DIR"), "/Info.plist"));
 
 mod audio_capture;
+mod dictation_pill;
 mod license;
 mod logging;
 mod memory;
@@ -36,6 +37,7 @@ mod multi_monitor;
 mod ndi_output;
 mod oauth_listener;
 mod platform;
+mod shortcuts;
 // Model catalog/downloader always compiles; the transcribe-rs engine inside is
 // gated behind the `native-transcription` feature.
 mod transcription;
@@ -132,6 +134,18 @@ use logging::{
     cleanup_old_logs,
 };
 
+use dictation_pill::{
+    close_dictation_pill,
+    ensure_dictation_pill,
+    hide_dictation_pill,
+    show_dictation_pill,
+};
+use shortcuts::{
+    clear_global_shortcuts,
+    list_global_shortcuts,
+    set_global_shortcuts,
+    ShortcutRegistry,
+};
 use transcription::commands::{
     list_native_models,
     download_native_model,
@@ -285,7 +299,17 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // One handler for every global shortcut; `shortcuts.rs` resolves the
+        // fired key back to its logical action and forwards it to the frontend.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    shortcuts::handle_shortcut(app, shortcut, event.state());
+                })
+                .build(),
+        )
         .manage(AudioCaptureState::new())
+        .manage(ShortcutRegistry::default())
         .manage(multi_monitor_state.clone())
         .manage(ndi_manager.clone())
         .invoke_handler(tauri::generate_handler![
@@ -365,6 +389,13 @@ pub fn run() {
             save_license,
             clear_license,
             fetch_and_store_license,
+            set_global_shortcuts,
+            clear_global_shortcuts,
+            list_global_shortcuts,
+            ensure_dictation_pill,
+            show_dictation_pill,
+            hide_dictation_pill,
+            close_dictation_pill,
         ])
         .setup(move |app| {
             // Initialize file logging and crash detection

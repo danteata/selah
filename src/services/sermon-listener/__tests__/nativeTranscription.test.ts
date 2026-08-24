@@ -63,6 +63,47 @@ describe('nativeTranscriptionService', () => {
         expect(onResult).toHaveBeenCalledWith('For God so loved the world', true, undefined)
     })
 
+    it('honours an explicit modelId over the sermon-listener setting', async () => {
+        // Dictation picks its own, usually smaller, model. If this override is
+        // not read the setting is a control that does nothing — the operator
+        // chooses a fast model, the slow one still runs, and nothing says so.
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
+            return Promise.resolve(undefined)
+        })
+
+        await nativeTranscriptionService.start({
+            modelId: 'moonshine-streaming-small',
+            captureSource: 'microphone',
+            onResult: vi.fn(),
+            onError: vi.fn(),
+        })
+
+        expect(invokeMock).toHaveBeenCalledWith('load_native_model', {
+            modelId: 'moonshine-streaming-small',
+        })
+        expect(invokeMock).not.toHaveBeenCalledWith('load_native_model', {
+            modelId: 'whisper-small.en',
+        })
+    })
+
+    it('falls back to the sermon-listener model when no modelId is given', async () => {
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
+            return Promise.resolve(undefined)
+        })
+
+        await nativeTranscriptionService.start({
+            captureSource: 'microphone',
+            onResult: vi.fn(),
+            onError: vi.fn(),
+        })
+
+        expect(invokeMock).toHaveBeenCalledWith('load_native_model', {
+            modelId: 'whisper-small.en',
+        })
+    })
+
     it('forwards the selected input channel to native capture', async () => {
         // The vocal-aux setup this exists for: a desk sending an isolated vocal
         // feed on channel 3 of a multi-channel interface. If the index doesn't

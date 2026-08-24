@@ -113,6 +113,9 @@ transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], o
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2.0"
 tauri-plugin-process = "2.0"
+# System-wide hotkeys. Desktop-only by nature; see src/shortcuts.rs for why the
+# whole set is owned by one registry rather than per-feature.
+tauri-plugin-global-shortcut = "2.0"
 
 [features]
 # Native in-process transcription is now the default engine (transcribe-rs).
