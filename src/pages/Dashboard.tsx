@@ -2,6 +2,12 @@ import { useUser, useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Shield, Database, Book, X, Mic, Ticket } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
+import { getStarredRecordingIds } from '../hooks/useIndexedDB'
+import {
+    DEFAULT_RETENTION,
+    runRetentionOnStartup,
+    type RetentionPolicy,
+} from '../services/sermon-listener/sessionRecordings'
 import { useDictation, useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from '../hooks/useLocalBackground'
@@ -76,6 +82,30 @@ export default function Dashboard() {
 
     // Presence heartbeat — marks this user as online
     usePresence(currentUser?.churchId || undefined, sessionId || undefined, sessionRole)
+
+    // Apply the sermon-recording retention policy once per launch. Runs on the
+    // way up rather than after a service, so a session that ended in a crash
+    // cannot wedge cleanup forever.
+    const retentionSweptRef = useRef(false)
+    useEffect(() => {
+        if (retentionSweptRef.current) return
+        retentionSweptRef.current = true
+        const sermon = useAppStore.getState().settings.sermonListener
+        void getStarredRecordingIds()
+            .then((starred) =>
+                runRetentionOnStartup(
+                    Boolean(sermon?.recordSessions),
+                    (sermon?.recordingRetention as RetentionPolicy) || DEFAULT_RETENTION,
+                    starred,
+                ),
+            )
+            .catch((err) => {
+                // Skip the sweep entirely rather than running it with an empty
+                // starred set — that would treat every deliberately-kept sermon
+                // as ordinary and delete it.
+                console.warn('[recordings] could not read starred sessions; skipping retention', err)
+            })
+    }, [])
 
     const leaveSessionRef = useRef(leaveSession)
     useEffect(() => {

@@ -514,6 +514,25 @@ export interface AppSettings {
          *  the sermon audio. Defaults to on. The Bible panel's push-to-talk
          *  search always honors commands regardless of this setting. */
         enableVoiceCommands?: boolean
+        /**
+         * Keep the session's audio on disk so a poor transcript can be redone
+         * later with a better model.
+         *
+         * Off unless a church deliberately turns it on. This records a room —
+         * congregational prayer, a testimony, children — not one person's own
+         * voice, so it is a decision for someone with the authority to make it
+         * rather than a default. Audio stays on this machine; deleting a
+         * session deletes it. See `plan/dictation-mode-and-distribution.md`
+         * §5.3.
+         */
+        recordSessions?: boolean
+        /**
+         * How long recordings are kept: 'never' | 'last10' | 'days30' |
+         * 'months3' | 'months12'. Applied on app start, sparing starred
+         * sessions. 45 minutes of 16 kHz mono is roughly 86 MB, so weekly
+         * services reach several GB a year — this is not optional in practice.
+         */
+        recordingRetention?: string
     }
     /**
      * Dictation — speak into whatever Selah input has focus, driven by a

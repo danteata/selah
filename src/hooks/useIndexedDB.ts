@@ -133,6 +133,24 @@ export interface SavedSermonTranscriptRecord {
     createdAt: string
 }
 
+/**
+ * Operator-set metadata for an archived sermon recording.
+ *
+ * Separate from the WAV on disk, which Rust owns and knows nothing about. It
+ * exists chiefly for `starred`: retention needs to know which recordings a
+ * person deliberately kept, and deleting one of those would be the worst
+ * failure this feature has.
+ */
+export interface SermonRecordingMetaRecord {
+    /** Matches the WAV's filename stem. */
+    sessionId: string
+    /** Exempt from the automatic retention sweep. */
+    starred: boolean
+    /** Operator-given name; falls back to the date in the UI. */
+    title?: string
+    createdAt: string
+}
+
 export interface OfflineTranscriptRecord {
     id: string
     title: string
@@ -170,6 +188,7 @@ class SelahDatabase extends Dexie {
     localMedia!: Table<LocalMediaItem, string>
     localMediaBlobs!: Table<LocalMediaBlob, string>
     dictionaries!: Table<CachedDictionaryFile, string>
+    sermonRecordingMeta!: Table<SermonRecordingMetaRecord, string>
 
     constructor() {
         super('SelahDatabase')
@@ -225,6 +244,9 @@ class SelahDatabase extends Dexie {
         })
         this.version(9).stores({
             dictionaries: 'id,packId,cachedAt'
+        })
+        this.version(10).stores({
+            sermonRecordingMeta: 'sessionId,starred,createdAt'
         })
     }
 }
@@ -531,6 +553,46 @@ export async function deleteSavedSermonTranscript(id: string): Promise<void> {
 export async function clearSavedSermonTranscripts(): Promise<void> {
     const db = getIndexedDB()
     await db.sermonSavedTranscripts.clear()
+}
+
+// Sermon recording metadata (starred / title) ------------------
+
+export async function getSermonRecordingMeta(): Promise<SermonRecordingMetaRecord[]> {
+    const db = getIndexedDB()
+    return await db.sermonRecordingMeta.toArray()
+}
+
+/**
+ * Session ids the operator starred.
+ *
+ * Returns an empty set if the read fails rather than throwing — but note the
+ * consequence: an empty set means retention treats everything as unstarred. The
+ * caller decides whether that is acceptable; `runRetentionOnStartup` does not
+ * sweep at all when the store cannot be read.
+ */
+export async function getStarredRecordingIds(): Promise<Set<string>> {
+    const db = getIndexedDB()
+    const rows = await db.sermonRecordingMeta.filter((row) => row.starred).toArray()
+    return new Set(rows.map((row) => row.sessionId))
+}
+
+export async function setSermonRecordingStarred(
+    sessionId: string,
+    starred: boolean
+): Promise<void> {
+    const db = getIndexedDB()
+    const existing = await db.sermonRecordingMeta.get(sessionId)
+    await db.sermonRecordingMeta.put({
+        sessionId,
+        starred,
+        title: existing?.title,
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+    })
+}
+
+export async function deleteSermonRecordingMeta(sessionId: string): Promise<void> {
+    const db = getIndexedDB()
+    await db.sermonRecordingMeta.delete(sessionId)
 }
 
 // Offline transcripts queue (failed Convex writes) -------------

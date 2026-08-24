@@ -12,6 +12,7 @@ import { useSermonListener, type UseSermonListenerReturn } from '../../hooks/use
 import { useSermonListenerContext } from './SermonListenerContext'
 import { SermonListenerWizard, isSermonListenerWizardComplete } from './SermonListenerWizard'
 import { useTranscripts } from '../../hooks/useTranscripts'
+import { toast } from 'sonner'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
 import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
@@ -25,6 +26,10 @@ import { downloadTranscript, type ExportFormat } from '../../services/sermon-lis
 import { generateSermonNotes } from '../../services/sermon-listener/sermonNotes'
 import { SongTrackingControl } from './SongTrackingControl'
 import { sessionAudioRecorder } from '../../services/sermon-listener/sessionAudioRecorder'
+import {
+    startRecording as startSermonRecording,
+    stopRecording as stopSermonRecording,
+} from '../../services/sermon-listener/sessionRecordings'
 import { writeSessionSidecar } from '../../services/sermon-listener/devAccuracyReport'
 import { DevAccuracyPanel } from './DevAccuracyPanel'
 
@@ -157,9 +162,33 @@ function SermonListenerPanelInner({
     // the sidecar for a just-finished session actually lands — otherwise it
     // only re-fetches when expanded/toggled and can look permanently empty.
     const [sessionRecordedSignal, setSessionRecordedSignal] = useState(0)
+
+    // The sermon archive (separate from the dev accuracy recorder above): keeps
+    // the session's audio so a poor transcript can be redone later with a
+    // better model. Off unless the church turned it on — see
+    // `sessionRecordings.ts` for why that default is not negotiable.
+    const recordSessions = Boolean(appSettings.sermonListener?.recordSessions)
+    const [recordingSessionId, setRecordingSessionId] = useState<string | null>(null)
+
     const handleStart = () => {
         if (import.meta.env.DEV) {
             void sessionAudioRecorder.start()
+        }
+        if (recordSessions) {
+            const sessionId = crypto.randomUUID()
+            void startSermonRecording(sessionId).then((path) => {
+                if (path) {
+                    setRecordingSessionId(sessionId)
+                    return
+                }
+                // Recording failed but the service is starting anyway. Say so
+                // once rather than letting the operator believe there is an
+                // archive — finding out weeks later that the sermon was never
+                // captured is the failure this feature exists to prevent.
+                toast.error('Session recording could not start', {
+                    description: 'The service will still be transcribed, but no audio is being saved.',
+                })
+            })
         }
         start()
     }
@@ -183,6 +212,13 @@ function SermonListenerPanelInner({
                     })
                 }
             })
+        }
+        if (recordingSessionId) {
+            setRecordingSessionId(null)
+            // The recording stands on its own, identified by date and length.
+            // Joining it to the saved transcript is a later refinement — it is
+            // not needed to play the audio back or re-transcribe it.
+            void stopSermonRecording()
         }
         stop()
     }

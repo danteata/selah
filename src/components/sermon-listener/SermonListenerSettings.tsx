@@ -2,6 +2,14 @@ import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { useNativeAudioCapture } from '../../services/sermon-listener/nativeAudioCapture'
 import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDevices'
+import {
+    DEFAULT_RETENTION,
+    RETENTION_POLICIES,
+    describeRetention,
+    formatBytes,
+    listRecordings,
+    type RetentionPolicy,
+} from '../../services/sermon-listener/sessionRecordings'
 import { audioFeedbackService } from '../../services/sermon-listener/audioFeedback'
 import { DEFAULT_NATIVE_MODEL_ID } from '../../services/sermon-listener/nativeModelManager'
 import { NativeModelPicker } from './NativeModelPicker'
@@ -125,6 +133,26 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
 
     const { devices: micDevices, isLoading: isLoadingDevices, refresh: refreshDevices, resolvedDeviceId } = useAudioDevices()
 
+    const recordSessions = Boolean(sermon?.recordSessions)
+    const retention = (sermon?.recordingRetention as RetentionPolicy) || DEFAULT_RETENTION
+    // `null` while unknown, so the panel can say "checking" rather than
+    // flashing "no recordings" at someone who has a year of them.
+    const [recordingCount, setRecordingCount] = useState<number | null>(null)
+    const [recordingBytes, setRecordingBytes] = useState(0)
+
+    useEffect(() => {
+        if (!recordSessions) return
+        let cancelled = false
+        void listRecordings().then((files) => {
+            if (cancelled) return
+            setRecordingCount(files.length)
+            setRecordingBytes(files.reduce((total, file) => total + file.bytes, 0))
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [recordSessions])
+
     // Use the resolved device ID (from label persistence) if available,
     // otherwise fall back to the stored deviceId
     const activeMicId = sermon?.selectedMicrophoneId || resolvedDeviceId || ''
@@ -214,6 +242,97 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             style={{ transform: audioFeedback ? 'translateX(28px)' : 'translateX(0)' }}
                         />
                     </button>
+                </div>
+
+                {/* Session recording. Placed before voice commands because it is
+                    the only setting here with a consequence outside the app —
+                    it writes a recording of the room to disk. */}
+                <div className="space-y-3 pb-4 mb-1 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <div className="font-medium text-gray-900 dark:text-white">
+                                Keep a recording of each service
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                Saves the audio so a poor transcript can be redone later with a more
+                                accurate model. Without it, a transcript spoiled by a bad microphone
+                                cannot be recovered.
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => update({ recordSessions: !recordSessions })}
+                            className={`relative w-12 h-6 shrink-0 rounded-full transition-colors ${recordSessions ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        >
+                            <span
+                                className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform duration-200"
+                                style={{ transform: recordSessions ? 'translateX(28px)' : 'translateX(0)' }}
+                            />
+                        </button>
+                    </div>
+
+                    {/* Shown on the way in, not buried in a help page. Whoever
+                        flips this switch is deciding on behalf of everyone in
+                        the room, and should be told what that means before
+                        they do it — not after someone asks. */}
+                    <div className="rounded-lg border border-amber-300/60 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 p-3 space-y-1.5">
+                        <div className="text-xs font-medium text-amber-900 dark:text-amber-200">
+                            This records everyone in the room
+                        </div>
+                        <ul className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-200/80 list-disc pl-4 space-y-0.5">
+                            <li>
+                                It captures whatever the microphone hears for the whole service —
+                                prayer, testimonies, conversation near the desk.
+                            </li>
+                            <li>
+                                Audio stays on this computer. It is not uploaded, and no one else can
+                                reach it.
+                            </li>
+                            <li>Deleting a recording deletes the file straight away.</li>
+                            <li>
+                                Make sure your church is comfortable being recorded before turning
+                                this on.
+                            </li>
+                        </ul>
+                    </div>
+
+                    {recordSessions && (
+                        <>
+                            <div className="flex items-center justify-between gap-4">
+                                <div>
+                                    <label className="text-sm text-gray-700 dark:text-gray-300">
+                                        Keep recordings for
+                                    </label>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        A service is roughly 90 MB, so a year of Sundays is several
+                                        gigabytes. Starred recordings are never deleted automatically.
+                                    </p>
+                                </div>
+                                <div className="w-52 shrink-0">
+                                    <select
+                                        value={retention}
+                                        onChange={(e) => update({ recordingRetention: e.target.value })}
+                                        className="w-full p-2 rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-sm appearance-none"
+                                    >
+                                        {RETENTION_POLICIES.map((policy) => (
+                                            <option key={policy} value={policy}>
+                                                {describeRetention(policy)}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-4 text-xs text-gray-500 dark:text-gray-400">
+                                <span>
+                                    {recordingCount === null
+                                        ? 'Checking saved recordings…'
+                                        : recordingCount === 0
+                                          ? 'No recordings saved yet.'
+                                          : `${recordingCount} recording${recordingCount === 1 ? '' : 's'} · ${formatBytes(recordingBytes)} on disk`}
+                                </span>
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 <div className="flex items-center justify-between">

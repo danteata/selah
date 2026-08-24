@@ -80,6 +80,11 @@ use audio_capture::{
     flush_buffer_as_wav,
     start_session_recording,
     stop_session_recording,
+    start_sermon_recording,
+    stop_sermon_recording,
+    list_sermon_recordings,
+    delete_sermon_recording,
+    sermon_recordings_dir,
 };
 
 use multi_monitor::{
@@ -333,6 +338,11 @@ pub fn run() {
             flush_buffer_as_wav,
             start_session_recording,
             stop_session_recording,
+            start_sermon_recording,
+            stop_sermon_recording,
+            list_sermon_recordings,
+            delete_sermon_recording,
+            sermon_recordings_dir,
             get_monitors,
             get_primary_monitor,
             get_best_live_monitor,

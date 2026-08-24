@@ -465,6 +465,141 @@ pub fn stop_session_recording(state: tauri::State<'_, AudioCaptureState>) -> Res
     }
 }
 
+/// Directory holding operator-facing sermon recordings.
+///
+/// Deliberately separate from `dev-sermon-recordings`: that one belongs to the
+/// accuracy tooling, carries its own sidecar files, and is pruned to the last
+/// four. Mixing real services into it would both pollute the accuracy report
+/// and put a sermon behind a four-file limit nobody chose.
+const SERMON_RECORDINGS_DIR: &str = "sermon-recordings";
+
+fn sermon_recordings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?
+        .join(SERMON_RECORDINGS_DIR);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create recordings dir: {e}"))?;
+    Ok(dir)
+}
+
+/// Start archiving the raw session audio to disk.
+///
+/// Unlike `start_session_recording` this ships in release builds — it backs the
+/// sermon archive rather than the accuracy tooling. Retention is deliberately
+/// *not* applied here: it depends on which sessions the operator has starred,
+/// which lives in the frontend, so the sweep runs there (see
+/// `sessionRecordings.ts`). This command only starts writing.
+#[tauri::command]
+pub fn start_sermon_recording(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AudioCaptureState>,
+    session_id: String,
+) -> Result<String, String> {
+    if state.session_recorder.lock().is_some() {
+        return Err("A recording is already in progress".to_string());
+    }
+
+    let dir = sermon_recordings_path(&app)?;
+    let path = dir.join(format!("{session_id}.wav"));
+    let sample_rate = *state.sample_rate.lock();
+    let recorder = SessionRecorder::start(path.clone(), sample_rate)?;
+    *state.session_recorder.lock() = Some(Arc::new(recorder));
+
+    tracing::info!("[recording] started {}", path.display());
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Stop the active recording and finalize the WAV header.
+#[tauri::command]
+pub fn stop_sermon_recording(state: tauri::State<'_, AudioCaptureState>) -> Result<(), String> {
+    if let Some(rec) = state.session_recorder.lock().take() {
+        rec.finish()?;
+    }
+    Ok(())
+}
+
+/// Every archived recording, newest first.
+///
+/// Repairs any file whose header was never finalized before listing it. That is
+/// what a force-quit mid-service leaves behind: the audio is all there, but
+/// `hound` only writes the real length in `finalize()`, so the header claims
+/// zero samples and every player treats it as empty. Repairing on read rather
+/// than on write means it also fixes files left by an earlier crash.
+#[tauri::command]
+pub fn list_sermon_recordings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AudioCaptureState>,
+) -> Result<Vec<session_recorder::RecordingFile>, String> {
+    let dir = sermon_recordings_path(&app)?;
+
+    // Never touch the file currently being written — its header is *supposed*
+    // to be unfinalized, and rewriting it underneath the open writer would
+    // corrupt the recording in progress.
+    let active = state
+        .session_recorder
+        .lock()
+        .as_ref()
+        .map(|rec| rec.path.clone());
+
+    for entry in session_recorder::list_recordings(&dir) {
+        let path = std::path::PathBuf::from(&entry.path);
+        if active.as_ref() == Some(&path) {
+            continue;
+        }
+        match session_recorder::repair_wav_header(&path) {
+            Ok(true) => tracing::info!("[recording] repaired truncated header: {}", path.display()),
+            Ok(false) => {}
+            Err(err) => tracing::warn!("[recording] could not repair {}: {err}", path.display()),
+        }
+    }
+
+    // Re-list so durations reflect any repair just made.
+    Ok(session_recorder::list_recordings(&dir))
+}
+
+/// Delete one recording. Deleting is immediate and permanent — no trash.
+#[tauri::command]
+pub fn delete_sermon_recording(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AudioCaptureState>,
+    session_id: String,
+) -> Result<(), String> {
+    // A path is built from the id rather than accepted from the caller, so a
+    // crafted id cannot reach outside the recordings directory.
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..")
+    {
+        return Err("Invalid recording id".to_string());
+    }
+
+    let path = sermon_recordings_path(&app)?.join(format!("{session_id}.wav"));
+
+    let active = state
+        .session_recorder
+        .lock()
+        .as_ref()
+        .map(|rec| rec.path.clone());
+    if active.as_ref() == Some(&path) {
+        return Err("That recording is still being written".to_string());
+    }
+
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to delete recording: {e}"))?;
+        tracing::info!("[recording] deleted {}", path.display());
+    }
+    Ok(())
+}
+
+/// Absolute path of the recordings directory, for "show in folder".
+#[tauri::command]
+pub fn sermon_recordings_dir(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(sermon_recordings_path(&app)?.to_string_lossy().to_string())
+}
+
 /// Event payload for VAD-processed audio chunk events
 #[derive(Clone, serde::Serialize)]
 struct VadAudioChunkEvent {
@@ -982,13 +1117,16 @@ pub fn start_capture_with_vad(
                 continue;
             }
 
-            // Dev-only: append the raw, continuous (pre-VAD) samples to the
-            // active session recording, if any. Recording the raw buffer
-            // (not just VAD-flagged speech segments) matters — a VAD false
-            // negative would otherwise be invisible to the offline ground
-            // truth pass too, defeating the point of an independent
-            // comparison.
-            #[cfg(debug_assertions)]
+            // Append the raw, continuous (pre-VAD) samples to the active
+            // recording, if one is running. Recording the raw buffer rather
+            // than VAD-flagged speech segments is what makes the file worth
+            // keeping: a VAD false negative would otherwise be missing from
+            // the archive as well as from the live transcript, so a later
+            // re-transcription could never recover it.
+            //
+            // No longer dev-gated — the same slot now backs the operator-facing
+            // sermon archive. It costs nothing when no recording is active,
+            // since the slot is `None`.
             if let Some(rec) = session_recorder.lock().clone() {
                 rec.append(&samples);
             }

@@ -76,6 +76,14 @@
             ]
         },
         {
+            "identifier": "fs:allow-read-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/sermon-recordings/**"
+                }
+            ]
+        },
+        {
             "identifier": "fs:allow-mkdir",
             "allow": [
                 {

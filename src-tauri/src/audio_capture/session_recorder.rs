@@ -108,3 +108,188 @@ pub fn prune_to_last_n(dir: &Path, keep: usize) -> Result<(), String> {
 
     Ok(())
 }
+
+// --- production sermon recordings -------------------------------------------
+//
+// The helpers below serve the operator-facing sermon archive, not the dev
+// accuracy tooling above. They live here because they share `SessionRecorder`
+// and the WAV format it writes.
+
+/// One recording on disk, as the frontend sees it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RecordingFile {
+    /// The session id, taken from the filename stem.
+    pub session_id: String,
+    pub path: String,
+    pub bytes: u64,
+    /// Milliseconds since the Unix epoch, from the file's modified time.
+    pub modified_ms: u64,
+    /// Playing length, read from the WAV header. `None` if it could not be
+    /// parsed — a truncated or in-progress file.
+    pub duration_secs: Option<f64>,
+}
+
+/// Offset of the 32-bit RIFF chunk size, and the fixed header prelude length.
+const RIFF_SIZE_OFFSET: u64 = 4;
+const RIFF_PRELUDE: u64 = 12; // "RIFF" + size + "WAVE"
+
+fn read_u32_le(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+/// Locate the `data` chunk: returns (offset of its size field, declared size).
+fn find_data_chunk(file: &mut File) -> Option<(u64, u32)> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let len = file.metadata().ok()?.len();
+    let mut cursor = RIFF_PRELUDE;
+
+    while cursor + 8 <= len {
+        file.seek(SeekFrom::Start(cursor)).ok()?;
+        let mut header = [0u8; 8];
+        file.read_exact(&mut header).ok()?;
+        let size = read_u32_le(&header[4..8]);
+
+        if &header[0..4] == b"data" {
+            return Some((cursor + 4, size));
+        }
+        // Chunks are word-aligned: an odd size is followed by a pad byte.
+        cursor += 8 + u64::from(size) + u64::from(size % 2);
+    }
+    None
+}
+
+/// Repair a WAV whose header sizes were never patched.
+///
+/// `hound` only writes the real RIFF/data sizes in `finalize()`, so a process
+/// that dies mid-recording leaves a file whose header claims zero samples. For
+/// dev tooling that was an acceptable known caveat; for a sermon nobody can
+/// re-record it is the difference between an archive and a dead file. The audio
+/// itself is intact — only the two length fields are wrong — so this recomputes
+/// them from the actual file length.
+///
+/// Returns `Ok(true)` when it changed something. Safe to call on a healthy
+/// file: the sizes already agree and it does nothing.
+pub fn repair_wav_header(path: &Path) -> Result<bool, String> {
+    use std::io::{Seek, SeekFrom, Write};
+
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("could not open {}: {e}", path.display()))?;
+
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    if len < RIFF_PRELUDE + 8 {
+        return Err("file is too short to be a WAV".to_string());
+    }
+
+    let (data_size_offset, declared_data) =
+        find_data_chunk(&mut file).ok_or_else(|| "no data chunk found".to_string())?;
+
+    let actual_data = len - (data_size_offset + 4);
+    let actual_riff = len - 8;
+
+    file.seek(SeekFrom::Start(RIFF_SIZE_OFFSET))
+        .map_err(|e| e.to_string())?;
+    let mut riff_bytes = [0u8; 4];
+    use std::io::Read;
+    file.read_exact(&mut riff_bytes).map_err(|e| e.to_string())?;
+    let declared_riff = read_u32_le(&riff_bytes);
+
+    if u64::from(declared_riff) == actual_riff && u64::from(declared_data) == actual_data {
+        return Ok(false);
+    }
+
+    // A file larger than 4 GiB cannot be described by these fields at all;
+    // refuse rather than write a wrapped value that looks plausible.
+    if actual_riff > u64::from(u32::MAX) || actual_data > u64::from(u32::MAX) {
+        return Err("recording exceeds the 4 GiB WAV limit".to_string());
+    }
+
+    file.seek(SeekFrom::Start(RIFF_SIZE_OFFSET))
+        .map_err(|e| e.to_string())?;
+    file.write_all(&(actual_riff as u32).to_le_bytes())
+        .map_err(|e| e.to_string())?;
+    file.seek(SeekFrom::Start(data_size_offset))
+        .map_err(|e| e.to_string())?;
+    file.write_all(&(actual_data as u32).to_le_bytes())
+        .map_err(|e| e.to_string())?;
+    file.flush().map_err(|e| e.to_string())?;
+
+    Ok(true)
+}
+
+/// Playing length in seconds, from the `fmt ` and `data` chunks.
+fn wav_duration_secs(path: &Path) -> Option<f64> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+
+    // byte rate lives at offset 8 within the `fmt ` chunk body.
+    let mut cursor = RIFF_PRELUDE;
+    let mut byte_rate: Option<u32> = None;
+
+    while cursor + 8 <= len {
+        file.seek(SeekFrom::Start(cursor)).ok()?;
+        let mut header = [0u8; 8];
+        file.read_exact(&mut header).ok()?;
+        let size = read_u32_le(&header[4..8]);
+
+        if &header[0..4] == b"fmt " && size >= 16 {
+            let mut body = [0u8; 16];
+            file.read_exact(&mut body).ok()?;
+            byte_rate = Some(read_u32_le(&body[8..12]));
+        } else if &header[0..4] == b"data" {
+            // Trust the file length rather than the declared size: an
+            // unrepaired file declares zero, and the bytes are still there.
+            let actual = len - (cursor + 8);
+            let rate = byte_rate?;
+            if rate == 0 {
+                return None;
+            }
+            return Some(actual as f64 / f64::from(rate));
+        }
+        cursor += 8 + u64::from(size) + u64::from(size % 2);
+    }
+    None
+}
+
+/// Every recording in `dir`, newest first.
+pub fn list_recordings(dir: &Path) -> Vec<RecordingFile> {
+    let mut out: Vec<RecordingFile> = Vec::new();
+
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return out, // not created yet — no recordings
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("wav") {
+            continue;
+        }
+        let Some(session_id) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(metadata) = entry.metadata() else { continue };
+        let modified_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        out.push(RecordingFile {
+            session_id: session_id.to_string(),
+            path: path.to_string_lossy().to_string(),
+            bytes: metadata.len(),
+            modified_ms,
+            duration_secs: wav_duration_secs(&path),
+        });
+    }
+
+    out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    out
+}
