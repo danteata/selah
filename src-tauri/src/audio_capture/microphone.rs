@@ -73,6 +73,16 @@ pub struct CaptureStreamErrorEvent {
     /// Rebuilds are exhausted; capture has stopped and will not resume on its
     /// own. The frontend has to restart the session or tell the operator.
     pub fatal: bool,
+    /// The microphone the operator had chosen, when it was confirmed missing
+    /// and the system default was used instead.
+    ///
+    /// Only ever set when enumeration succeeded — a backend error that makes
+    /// every device momentarily invisible must not be reported as the
+    /// operator's interface having vanished. The frontend clears the saved
+    /// preference on this, so a false positive would silently discard a real
+    /// choice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fell_back_from: Option<String>,
 }
 
 /// Tauri command: List audio input devices
@@ -129,20 +139,47 @@ fn enumerate_input_devices() -> Result<Vec<AudioDeviceInfo>, String> {
 /// Resolved on every rebuild rather than captured once: when a USB interface
 /// is unplugged and replugged the OS may hand back a different `Device` for
 /// the same name, and the old handle stays dead forever.
-fn resolve_device(device_name: Option<&str>) -> Option<Device> {
+/// What resolving the operator's microphone preference actually produced.
+pub struct ResolvedDevice {
+    pub device: Option<Device>,
+    /// Set only when enumeration *succeeded* and confirmed the named device is
+    /// gone, so the caller may safely forget the preference.
+    ///
+    /// Left `None` when enumeration itself failed. That distinction is the
+    /// whole point: a backend hiccup makes every device look missing for a
+    /// moment, and treating that as "your interface is gone" would erase a
+    /// preference the operator set deliberately — on a machine where the device
+    /// is sitting right there, plugged in. Taken from Handy's #1874, which
+    /// makes the same distinction for the same reason.
+    pub unavailable: Option<String>,
+}
+
+fn resolve_device(device_name: Option<&str>) -> ResolvedDevice {
     let host = cpal::default_host();
 
-    match device_name {
-        Some(name) => host
-            .input_devices()
-            .map_err(|e| eprintln!("Failed to enumerate devices: {}", e))
-            .ok()
-            .and_then(|mut devices| devices.find(|d| d.name().map_or(false, |n| n == *name)))
-            .or_else(|| {
-                eprintln!("Device '{}' not found, falling back to default", name);
-                host.default_input_device()
-            }),
-        None => host.default_input_device(),
+    let Some(name) = device_name else {
+        return ResolvedDevice { device: host.default_input_device(), unavailable: None };
+    };
+
+    let enumerated = match host.input_devices() {
+        Ok(devices) => devices,
+        Err(e) => {
+            // Transient as far as we can tell. Fall back so the service keeps
+            // running, but say nothing about the preference.
+            eprintln!("[audio] failed to enumerate devices: {}", e);
+            return ResolvedDevice { device: host.default_input_device(), unavailable: None };
+        }
+    };
+
+    let mut devices = enumerated;
+    if let Some(found) = devices.find(|d| d.name().map_or(false, |n| n == *name)) {
+        return ResolvedDevice { device: Some(found), unavailable: None };
+    }
+
+    eprintln!("[audio] device '{}' not found, falling back to default", name);
+    ResolvedDevice {
+        device: host.default_input_device(),
+        unavailable: Some(name.to_string()),
     }
 }
 
@@ -209,10 +246,19 @@ fn open_stream(
     audio_buffer: &Arc<Mutex<Vec<f32>>>,
     buffer_size: &Arc<AtomicUsize>,
     stream_failed: &Arc<AtomicBool>,
+    // Set when the named device was confirmed absent and the default was used
+    // instead; left alone when enumeration failed.
+    fell_back_from: &Arc<Mutex<Option<String>>>,
     failure_message: &Arc<Mutex<String>>,
     saw_samples: &Arc<AtomicBool>,
 ) -> Result<Stream, String> {
-    let device = resolve_device(device_name).ok_or_else(|| "No input device available".to_string())?;
+    let resolved = resolve_device(device_name);
+    if let Some(missing) = resolved.unavailable.as_deref() {
+        *fell_back_from.lock() = Some(missing.to_string());
+    }
+    let device = resolved
+        .device
+        .ok_or_else(|| "No input device available".to_string())?;
 
     let supported_config = device
         .default_input_config()
@@ -295,6 +341,11 @@ pub fn start_microphone_capture(
         // Set by the capture callback the first time this device hands us a
         // chunk. Cleared per stream, immediately before each open.
         let saw_samples = Arc::new(AtomicBool::new(false));
+        // Reported once per fallback rather than per rebuild attempt: a device
+        // that stays unplugged resolves to the default on every retry, and a
+        // banner per attempt would be noise during a service.
+        let fell_back_from: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let mut reported_fallback: Option<String> = None;
         // Consecutive rebuilds not yet separated by a stream that ran long
         // enough to count as good. Indexes REBUILD_BACKOFF; running off the end
         // is what makes a permanently absent device fatal instead of a loop.
@@ -311,13 +362,40 @@ pub fn start_microphone_capture(
                 &audio_buffer,
                 &buffer_size,
                 &stream_failed,
+                &fell_back_from,
                 &failure_message,
                 &saw_samples,
             );
 
             let stream = match opened {
                 Ok(stream) => {
-                    if attempt > 0 {
+                    // Announce a confirmed fallback once, on the open that
+                    // actually succeeded — the frontend clears the saved
+                    // preference on this, and doing that before we know the
+                    // replacement works would leave the operator with neither.
+                    let fallback = fell_back_from.lock().take();
+                    if let Some(missing) = fallback {
+                        if reported_fallback.as_deref() != Some(missing.as_str()) {
+                            println!(
+                                "[audio] '{}' is unavailable; capturing from the default device",
+                                missing
+                            );
+                            let _ = app.emit(
+                                "capture-stream-error",
+                                CaptureStreamErrorEvent {
+                                    message: format!(
+                                        "\"{}\" is no longer available. Selah switched to the default microphone.",
+                                        missing
+                                    ),
+                                    attempt,
+                                    recovered: true,
+                                    fatal: false,
+                                    fell_back_from: Some(missing.clone()),
+                                },
+                            );
+                            reported_fallback = Some(missing);
+                        }
+                    } else if attempt > 0 {
                         let message = failure_message.lock().clone();
                         println!("[audio] input stream reopened after {} attempt(s)", attempt);
                         let _ = app.emit(
@@ -327,6 +405,7 @@ pub fn start_microphone_capture(
                                 attempt,
                                 recovered: true,
                                 fatal: false,
+                                fell_back_from: None,
                             },
                         );
                     }
@@ -429,6 +508,7 @@ fn report_and_back_off(
                 attempt,
                 recovered: false,
                 fatal: true,
+                fell_back_from: None,
             },
         );
         return false;
@@ -441,6 +521,7 @@ fn report_and_back_off(
             attempt,
             recovered: false,
             fatal: false,
+            fell_back_from: None,
         },
     );
 

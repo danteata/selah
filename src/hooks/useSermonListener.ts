@@ -21,6 +21,7 @@ import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
 import { unifiedTranscriptionService } from '../services/sermon-listener'
 import { onCaptureStreamError } from '../services/sermon-listener/nativeAudioCapture'
+import { saveSelectedDeviceLabel } from './useAudioDevices'
 import { audioFeatures, bandsForSampleRate } from '../services/visualizer/audioFeatures'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
 import type { TranscriptionProvider, TranscriptionStatus, WhisperSegmentTiming } from '../services/sermon-listener'
@@ -741,6 +742,33 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         let cancelled = false
 
         onCaptureStreamError((event) => {
+            if (event.fell_back_from) {
+                // Capture is already running on the default device. Forget the
+                // stored choice so Settings stops naming a microphone that is
+                // not the one recording — an operator checking mid-service
+                // should not be told the desk feed is live when it is the
+                // laptop's built-in mic.
+                setError(null)
+                const store = useAppStore.getState()
+                const sermon = store.settings.sermonListener
+                if (sermon?.selectedMicrophoneId) {
+                    store.setAppSettings({
+                        ...store.settings,
+                        sermonListener: {
+                            ...sermon,
+                            selectedMicrophoneId: undefined,
+                            // The channel described the old interface, not this one.
+                            inputChannel: undefined,
+                        },
+                    })
+                }
+                saveSelectedDeviceLabel(null)
+                toast.warning(`${event.fell_back_from} is unavailable`, {
+                    description: 'Recording from the default microphone instead.',
+                    duration: 10000,
+                })
+                return
+            }
             if (event.recovered) {
                 setError(null)
                 toast.success('Microphone reconnected')

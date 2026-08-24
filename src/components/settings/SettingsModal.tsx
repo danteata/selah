@@ -1610,6 +1610,21 @@ function DictationSettings() {
             // A modifier on its own is the operator still reaching for the combo.
             if (/^(Control|Shift|Alt|Meta)(Left|Right)$/.test(code)) return
 
+            // fn / Globe never arrives as a modifier, and on most keyboards
+            // never arrives at all: it is not in the USB HID spec, Apple
+            // reports it through a vendor usage macOS honours only from its own
+            // devices, and third-party keyboards handle it in firmware and send
+            // nothing. Without this the recorder looks broken — the operator
+            // presses a key and the box goes on saying "Press keys…".
+            // (Handy documents the same limitation in its 8282c40.)
+            if (code === 'Fn' || code === 'FnLock') {
+                toast.error('fn cannot be used in a shortcut', {
+                    description:
+                        'Most keyboards never send it, so it would work on this Mac and nowhere else. Use Cmd, Ctrl, Alt or Shift.',
+                })
+                return
+            }
+
             if (code === 'Escape') {
                 setRecording(false)
                 return

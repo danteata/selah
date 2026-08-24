@@ -38,6 +38,17 @@ export interface CaptureStreamErrorEvent {
     attempt: number
     recovered: boolean
     fatal: boolean
+    /**
+     * The microphone the operator had chosen, when Rust confirmed it is gone
+     * and switched to the system default.
+     *
+     * Absent unless device enumeration *succeeded* and the device was genuinely
+     * missing — a backend error that briefly hides every device does not set
+     * this. That matters because the frontend forgets the saved preference on
+     * it, and a false positive would discard a real choice on a machine where
+     * the interface is plugged in and working.
+     */
+    fell_back_from?: string
 }
 
 /**

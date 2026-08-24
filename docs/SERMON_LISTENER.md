@@ -269,6 +269,32 @@ UI component for the sermon listening feature.
 - `compact`: Compact mode for sidebar
 - `onVerseDetected`: Callback when a verse is detected
 
+## Choosing a microphone
+
+### Bluetooth headsets on macOS
+
+A Bluetooth headset microphone forces the headset into bidirectional
+(headset-profile) audio while it is recording, which noticeably degrades whatever
+is playing through the same headphones. If someone is monitoring the service
+through Bluetooth headphones, keep those as the **output** and select the Mac's
+built-in microphone or a wired input as the **input** instead.
+
+Not a Selah limitation — it is how Bluetooth audio profiles work. Noted here
+because the symptom (audio quality collapsing the moment listening starts) reads
+like a Selah bug. Same advice as [Handy's](https://github.com/cjpais/Handy),
+which hit it first.
+
+### If the chosen microphone disappears mid-service
+
+Selah falls back to the system default automatically and tells you which device
+went away. It also clears the saved selection, so Settings stops naming a
+microphone that is not the one recording — the alternative is being told the desk
+feed is live when it is actually the laptop's built-in mic.
+
+The fallback only happens when Selah can confirm the device is genuinely gone. If
+the audio backend fails to enumerate devices at all — a transient state — your
+selection is left alone rather than being erased by a hiccup.
+
 ## Feature Flag
 
 The feature is controlled by the `sermon_listener` feature flag.

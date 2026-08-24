@@ -535,9 +535,12 @@ relationship so the next sync starts from a date rather than from scratch.
 
 ## 6.1 Worth taking
 
+**Status 2026-08-24:** `c89b7bf` and `8282c40` are done; the other two remain notes for
+phases that do not exist yet.
+
 | Handy | What | Why it applies here |
 |---|---|---|
-| `c89b7bf` *fall back to default microphone after disconnect* (#1874) | When the selected mic vanishes, resolve to the system default and **persist that** — but only when device enumeration itself succeeded, so a transient backend error cannot erase the operator's saved preference. Rebuilds a recorder that failed since last use rather than handing back a stalled one. | The complement to Selah's 0.1.20 supervisor. Ours catches a device that opens and never delivers; this catches one that **disappears entirely** mid-session. A USB interface knocked out during a service is not hypothetical. The "don't clobber the preference on a transient enumeration error" detail is the part worth copying exactly. |
+| `c89b7bf` *fall back to default microphone after disconnect* (#1874) — **done** | When the selected mic vanishes, resolve to the system default and **persist that** — but only when device enumeration itself succeeded, so a transient backend error cannot erase the operator's saved preference. | On reading Selah's code, two of the three halves were already here: `stream_failed` is set from cpal's error callback (Handy was adding that), and `resolve_device` already falls back to the default. What was missing is the part Handy's title actually names — *persisting* it. Selah would fall back silently and leave Settings naming a microphone that was not the one recording. Now `resolve_device` distinguishes "enumeration succeeded and the device is gone" from "enumeration failed", only the former reaches the UI, and the frontend clears the stored device **and** its channel index. |
 | `99052ee` *clear stale modifier latch after xdotool type* (#1817) | On Linux, synthesising keystrokes can leave a modifier stuck down afterwards. | Directly relevant to **Phase B**, which needs keystroke synthesis. Worth reading before choosing `enigo`, not after. |
 | `2cf157d` *allow multi-word custom-word phrases* (#1406) | The backend accepted spaced entries; the settings UI rejected them. | Not a bug we have — Selah's `customWords.ts` already handles n-grams ("Charge B" → "ChargeBee") and has **no user-facing UI at all** (`SERMON_PROPER_NOUNS` is hardcoded). It is a design note for **Phase C custom vocabulary**: do not reject spaces, or "Ashale Botwe" cannot be entered. |
 
@@ -571,7 +574,11 @@ crate), `286e66c`, `8fd6691`, `0e50367` (bindings, nix, merge).
 not in the USB HID spec, Apple reports it through a vendor usage macOS honours only from
 its own devices, and third-party keyboards handle it in firmware and send nothing.
 
-This lands on the hotkey recorder shipped in 0.1.21. It already requires a modifier, and
-`fn` does not register as one, so an operator cannot currently bind it — the failure mode
-is a key that appears to do nothing while being recorded. Worth an explicit message if
-anyone tries, rather than silence.
+**Done.** The hotkey recorder now says so instead of ignoring the key: pressing `fn` while
+recording a shortcut explains that most keyboards never send it, so a binding made on this
+Mac would work nowhere else. Previously the box just went on saying "Press keys…", which
+reads as the recorder being broken.
+
+Both doc notes from §6.2 are also taken, as a "Choosing a microphone" section in
+`docs/SERMON_LISTENER.md`: the Bluetooth-headset tradeoff, and what the disconnect fallback
+does.
