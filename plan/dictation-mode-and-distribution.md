@@ -1,6 +1,6 @@
 # Dictation Mode & Distribution — Plan
 
-**Status:** Proposed · **Created:** 2026-08-23 · **Owner:** unassigned
+**Status:** Phase A shipped in 0.1.21 · **Created:** 2026-08-23 · **Updated:** 2026-08-24 · **Owner:** unassigned
 
 ## Provenance
 
@@ -27,6 +27,8 @@ already deferred once and should now revisit.
 | **1** | Dictation Mode (global push-to-talk, paste anywhere) | The one real gap. Build it |
 | **2** | macOS / Windows code signing | Known deferral (`docs/UPDATER.md`). Worth revisiting for our audience |
 | **3** | First-run demo media | Small, cheap, optional |
+| **5** | Session recording & transcript history | Replaced dictation history. The bigger feature, and mostly already written |
+| **6** | Handy upstream sync | Reviewed to 2026-08-23. Three worth taking |
 
 ---
 
@@ -192,7 +194,10 @@ promise Linux support.
       `public/dictation-pill.{html,js}`; see the two notes below
 - [x] `useVoiceSearch` runs on the local engine on desktop, with Web Speech as
       the fallback — the offline-voice-search win; see the note below
-- [ ] Dictation history (reuse the saved-transcript IndexedDB pattern), with copy
+- [ ] Seen working in a running app — the pill's appearance, its placement, and
+      the focus rule below are covered by reasoning and unit tests, not by
+      having been watched on screen
+- ~~Dictation history~~ — **dropped**, and replaced by Part 5. Reasoning there.
 
 **The final-utterance drain.** `nativeTranscriptionService.stop()` invoked
 `stop_capture` and tore its listener down in the same tick. For a continuous
@@ -390,3 +395,158 @@ operator.
   but it is a different product with a different audience, a different support surface, and a
   crowded market (Handy, WhisperFlow, MacWhisper). Dictation *inside* Selah serves our
   operator; a standalone app serves someone else's.
+
+---
+
+# Part 5 — Session recording & transcript history
+
+**Replaces the dictation-history item.** Written 2026-08-24 after reading Handy's
+implementation (`src-tauri/src/managers/history.rs`, `src/components/settings/history/`).
+
+## 5.1 Why dictation history was the wrong feature
+
+Murmur and Handy both keep a scrollback of dictations because in those apps the
+dictation **is the only artifact** — there is nowhere else for it to live. In Selah it
+lands in a slide, the notes panel, or a search box, and *those* are the durable thing. A
+list of "youth meeting Tuesday 7pm" snippets duplicates what is already on the slide, and
+a dictation that comes out wrong is retyped in less time than opening a history panel
+would take.
+
+The asymmetry that matters: **a dictation is recoverable, a sermon is not.** If the mic
+was wrong, the band bled into the vocal aux, or the model struggled with an accent, the
+transcript is poor and the audio is gone. That is the loss worth engineering against.
+
+## 5.2 Most of this is already written, and switched off
+
+Both halves exist in the tree behind `#[cfg(debug_assertions)]`, built for
+`devAccuracyReport.ts`:
+
+| Piece | Where | State |
+|---|---|---|
+| Record a session's raw audio | `start_session_recording` / `stop_session_recording`, `audio_capture/session_recorder.rs` | dev-only. Records the raw buffer, not just VAD-flagged speech — which is what makes re-transcription meaningful |
+| Re-transcribe a saved file | `transcribe_audio_file`, `transcription/commands.rs:217` | dev-only. Explicitly loads a bigger model than realtime affords |
+| Persist transcripts | `saveSermonTranscript` / `getSavedSermonTranscripts` (IndexedDB) | shipped, text only |
+
+So the missing work is: audio persistence in production, a join between audio and
+transcript, a UI, retention, and consent.
+
+> ⚠️ **"Mostly built" is a read of signatures and doc comments, not of behaviour under
+> production conditions.** That dev path only ever ran with a developer watching. Anything
+> promoted out of `debug_assertions` deserves a real read before it carries an estimate —
+> error handling, disk-full, and a session that ends by the app being force-quit are all
+> cases nobody has needed to survive yet.
+
+## 5.3 Consent is the first design question, not a footnote
+
+This is where Selah and Handy genuinely differ, and it is the reason this part is not
+simply "port Handy's history".
+
+Handy records one person's own voice, on their own machine, for a few seconds. Selah would
+record **45 minutes of a room full of people** — congregational prayer, a testimony, a
+pastoral aside, children. That is a different thing ethically and in some places legally,
+and it cannot be a checkbox nobody reads.
+
+Non-negotiables, before any of 5.4:
+
+- **Off by default**, enabled per church by someone with authority to make that call —
+  not per operator, and not by whoever happens to be running the desk.
+- **Unmistakably visible while recording.** Not a subtle dot. The operator must be able to
+  answer "are we recording?" from across the room, and the recording indicator must be
+  distinct from the listening indicator.
+- **Say plainly where the file is and who can reach it** — local disk, this machine, not
+  uploaded. If that ever stops being true, it is a new consent conversation.
+- **Deleting a session deletes the audio**, immediately and for real.
+
+If we cannot do those four well, we should ship the transcript half and not the audio.
+
+## 5.4 What to build, ranked by value per unit of work
+
+1. **Re-transcribe a past session with a better model.** The one capability that cannot be
+   had any other way, and the closest to done. A service transcribed on a fast model
+   during the meeting can be re-run overnight on Large.
+2. **Session list** — date, duration, transcript, play, copy, export, delete. Selah already
+   holds the transcripts; this adds the audio and the join between them.
+3. **Retention policy**, borrowing Handy's shape almost verbatim: never / keep-N /
+   3 days / 2 weeks / 3 months, plus a count cap and "open recordings folder".
+   Non-optional — 45 min of 16 kHz mono is ~86 MB, so weekly services are ~4.5 GB a year
+   on a volunteer's laptop.
+4. **Star / keep**, so a sermon worth archiving survives the retention sweep. Handy's
+   `saved` flag, which its own retention respects.
+
+## 5.5 What not to take from Handy's version
+
+- **`post_processed_text` / `post_process_prompt` on the entry.** Selah's LLM cleanup
+  already lives in `llmSummarization.ts` and `sermonNotes.ts`; a second, entry-scoped
+  prompt would be a competing home for the same idea.
+- **Infinite-scroll pagination at 30/page.** Handy has one entry per dictation, so
+  thousands. Selah has roughly one per service — about 52 a year. A plain list is right.
+- **SQLite (`history.db`).** Handy needs it for that volume. Selah already persists
+  transcripts to IndexedDB; adding a second store for ~52 rows a year is not worth the
+  migration surface.
+
+## 5.6 Open questions
+
+1. Does the audio belong to the operator's machine only, or eventually to the church
+   (synced, shared)? Answering "eventually shared" changes the consent conversation and
+   the storage design, so it is worth deciding before building rather than after.
+2. Is a sermon archive a Pro feature? Unlike dictation, this one has a real cost story
+   (disk, and any future sync).
+3. Should recording follow the Sermon Listener's start/stop, or be independently armed?
+   Following is simpler; independent lets someone record without live verse detection.
+
+---
+
+---
+
+# Part 6 — Handy upstream sync
+
+Selah has twice taken fixes from [Handy](https://github.com/cjpais/Handy) — it runs the
+same transcription engine and meets the same faults first. This records the state of that
+relationship so the next sync starts from a date rather than from scratch.
+
+**Last adopted:** `98a4d80` *disable metal residency on macos* (2026-08-15), shipped as
+`f1e2685` in Selah 0.1.20.
+**Reviewed to:** `8fd6691` (2026-08-23) — 14 upstream commits, all read.
+
+## 6.1 Worth taking
+
+| Handy | What | Why it applies here |
+|---|---|---|
+| `c89b7bf` *fall back to default microphone after disconnect* (#1874) | When the selected mic vanishes, resolve to the system default and **persist that** — but only when device enumeration itself succeeded, so a transient backend error cannot erase the operator's saved preference. Rebuilds a recorder that failed since last use rather than handing back a stalled one. | The complement to Selah's 0.1.20 supervisor. Ours catches a device that opens and never delivers; this catches one that **disappears entirely** mid-session. A USB interface knocked out during a service is not hypothetical. The "don't clobber the preference on a transient enumeration error" detail is the part worth copying exactly. |
+| `99052ee` *clear stale modifier latch after xdotool type* (#1817) | On Linux, synthesising keystrokes can leave a modifier stuck down afterwards. | Directly relevant to **Phase B**, which needs keystroke synthesis. Worth reading before choosing `enigo`, not after. |
+| `2cf157d` *allow multi-word custom-word phrases* (#1406) | The backend accepted spaced entries; the settings UI rejected them. | Not a bug we have — Selah's `customWords.ts` already handles n-grams ("Charge B" → "ChargeBee") and has **no user-facing UI at all** (`SERMON_PROPER_NOUNS` is hardcoded). It is a design note for **Phase C custom vocabulary**: do not reject spaces, or "Ashale Botwe" cannot be entered. |
+
+## 6.2 Worth reading, probably not porting
+
+- `5ec2276` *single writer tray icon* (#1952) — 576 lines reworking tray updates around a
+  single writer, with retry on failed applies. Selah's tray is far simpler (Show / Toggle
+  listening / Quit) and has shown no symptoms. Revisit only if tray state starts drifting.
+- `d55ea7e` *drop the 'gpu' accelerator selector* — Handy collapsing a user-facing
+  acceleration choice. Selah does not expose one; noted in case we are ever tempted to.
+- `b8ad109` *docs: Bluetooth microphone tradeoff* — on macOS a Bluetooth headset mic forces
+  bidirectional audio, degrading playback while recording. Selah has no such note, and the
+  advice (keep the headset as output, pick a different input) is worth a line in our own
+  audio docs.
+- `8758dcc` *docs: macOS Accessibility after local rebuilds* — the grant is tied to the
+  binary, so a rebuild silently invalidates it. Phase B will hit this the first time
+  someone tests a dev build.
+
+## 6.3 Already have it
+
+- `afbf44c` *transcribe.cpp 0.2.0* — Selah is already on 0.2.0 across every target.
+
+## 6.4 Not applicable
+
+`f6fac42` (updater 2.10.1 — we pin `2.0` and take minors), `5c77861` (handy-keys, their
+crate), `286e66c`, `8fd6691`, `0e50367` (bindings, nix, merge).
+
+## 6.5 One more worth knowing
+
+`8282c40` documents that **`fn`/Globe shortcuts only work on Apple keyboards** — `fn` is
+not in the USB HID spec, Apple reports it through a vendor usage macOS honours only from
+its own devices, and third-party keyboards handle it in firmware and send nothing.
+
+This lands on the hotkey recorder shipped in 0.1.21. It already requires a modifier, and
+`fn` does not register as one, so an operator cannot currently bind it — the failure mode
+is a key that appears to do nothing while being recorded. Worth an explicit message if
+anyone tries, rather than silence.
