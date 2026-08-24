@@ -1,11 +1,26 @@
 /**
- * useVoiceSearch — browser-native voice-to-text for short search queries.
+ * useVoiceSearch — voice-to-text for short search queries.
  *
- * Uses the Web Speech API (SpeechRecognition / webkitSpeechRecognition) to
- * stream interim and final transcripts back to the caller. The hook is
- * designed for short search inputs (Bible refs, song titles, etc.), not
- * long-form dictation — Whisper is better suited to the sermon-listener
- * use case.
+ * Two engines behind one interface, chosen per `start()`:
+ *
+ *   - **The local engine**, on desktop, when it is free. Offline, no cloud
+ *     round-trip, and none of the desktop speech-permission maze below.
+ *   - **The Web Speech API**, everywhere else — the browser build, and desktop
+ *     while the sermon listener holds the engine.
+ *
+ * The choice is made at `start()` rather than at render, because "is the engine
+ * free" is only knowable then. Mid-service is exactly when someone reaches for
+ * voice search on the Bible panel *and* exactly when the listener owns the
+ * engine, so falling back rather than refusing is the point.
+ *
+ * The Web Speech path keeps the whole error vocabulary below it accumulated —
+ * macOS wanting a separate Speech Recognition permission and Dictation enabled,
+ * Windows wanting "Online speech recognition", the backend shipping only in
+ * Google Chrome. On the local path none of that applies, which is the reason
+ * for preferring it on desktop.
+ *
+ * The hook is for short search inputs (Bible refs, song titles); long-form
+ * dictation is `useDictation`, and a sermon is the sermon listener.
  *
  * Usage:
  *   const { isListening, transcript, start, stop, isSupported, error } = useVoiceSearch()
@@ -33,6 +48,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isDesktop } from '../platform'
+import {
+    nativeVoiceSearchAvailability,
+    normalizeQuery,
+    startNativeVoiceSearch,
+    type NativeVoiceSearchSession,
+} from '../services/dictation/nativeVoiceSearch'
 
 // The sermon-listener service already declares `SpeechRecognition` /
 // `webkitSpeechRecognition` on the global Window (see
@@ -140,10 +161,15 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
     const [error, setError] = useState<string | null>(null)
 
     const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+    /** Non-null while a local-engine session is in flight. */
+    const nativeSessionRef = useRef<NativeVoiceSearchSession | null>(null)
     const onFinalRef = useRef(onFinal)
     onFinalRef.current = onFinal
 
-    const isSupported = getSpeechRecognitionCtor() !== null
+    // The local engine needs no browser support at all, so on desktop the mic
+    // button must not be hidden just because this WebView lacks Web Speech —
+    // which WKWebView and WebView2 both, at times, do.
+    const isSupported = getSpeechRecognitionCtor() !== null || isDesktop()
 
     // One-shot startup probe so DevTools shows the platform-reported
     // mic permission state before the user ever clicks the mic. On
@@ -157,6 +183,12 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
     // effort: `permissions` is not implemented in every WebView, so
     // we swallow errors.
     useEffect(() => {
+        // Only meaningful for the Web Speech path. On desktop the local engine
+        // is the one that will run, and it holds the microphone permission the
+        // sermon listener already uses — reporting a browser-level denial
+        // before the operator has clicked anything would be an error about a
+        // path we are not going to take.
+        if (nativeVoiceSearchAvailability() !== 'unsupported') return
         if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
         navigator.permissions
             .query({ name: 'microphone' as PermissionName })
@@ -196,10 +228,17 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
                 }
                 recognitionRef.current = null
             }
+            // Never leave the microphone open behind an unmount. The panel
+            // holding this hook closes while listening more often than not —
+            // the operator clicks the mic, changes their mind, and closes it.
+            if (nativeSessionRef.current) {
+                void nativeSessionRef.current.stop()
+                nativeSessionRef.current = null
+            }
         }
     }, [])
 
-    const start = useCallback(() => {
+    const startWebSpeech = useCallback(() => {
         const Ctor = getSpeechRecognitionCtor()
         if (!Ctor) {
             setError('Voice search is not supported in this browser.')
@@ -374,10 +413,11 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
             // We only call `onFinal` if the session actually got off
             // the ground and produced at least one character of
             // finalized text.
-            // Speech recognition often appends sentence punctuation
-            // (e.g. "John 3:16.") which breaks Bible-reference parsing and
-            // exact-phrase search — strip trailing punctuation before commit.
-            const finalText = finalTextRef.current.replace(/[.,!?;]+\s*$/, '').trim()
+            // Speech recognition appends sentence punctuation (e.g. "John
+            // 3:16.") which breaks Bible-reference parsing and exact-phrase
+            // search. Shared with the local path, which needs it more — the
+            // Whisper family punctuates far more readily than Web Speech did.
+            const finalText = normalizeQuery(finalTextRef.current)
             if (didStart && finalText && onFinalRef.current) {
                 onFinalRef.current(finalText)
             }
@@ -394,7 +434,84 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
         }
     }, [lang, continuous])
 
+    /**
+     * Run the utterance on the local engine.
+     *
+     * Returns false when the engine could not take it, so `start()` can fall
+     * through to Web Speech rather than leaving the operator with a dead mic
+     * button.
+     */
+    const startNative = useCallback(async (): Promise<boolean> => {
+        setError(null)
+        setFinalText('')
+        setInterimText('')
+        finalTextRef.current = ''
+        // The local path has no `onstart` to wait for: capture either starts or
+        // throws, so the indicator can go up immediately.
+        setIsListening(true)
+
+        let session: NativeVoiceSearchSession | null = null
+        try {
+            session = await startNativeVoiceSearch({
+                continuous,
+                onInterim: (text) => setInterimText(text),
+                onFinal: (text) => {
+                    nativeSessionRef.current = null
+                    setIsListening(false)
+                    setInterimText('')
+                    finalTextRef.current = text
+                    setFinalText(text)
+                    onFinalRef.current?.(text)
+                },
+                onError: (message) => {
+                    nativeSessionRef.current = null
+                    setIsListening(false)
+                    setInterimText('')
+                    setError(message)
+                },
+            })
+        } catch (err) {
+            console.warn('[voice-search] local engine failed to start:', err)
+            session = null
+        }
+
+        if (!session) {
+            setIsListening(false)
+            return false
+        }
+
+        nativeSessionRef.current = session
+        return true
+    }, [continuous])
+
+    /**
+     * Pick an engine and go.
+     *
+     * Availability is read here rather than at render because `busy` changes
+     * under us: the sermon listener starting or stopping does not re-render
+     * this hook, and a decision cached from mount would be wrong for the whole
+     * of a service.
+     */
+    const start = useCallback(() => {
+        if (nativeVoiceSearchAvailability() === 'available') {
+            void startNative().then((ok) => {
+                // The engine was free a moment ago and is not now — another
+                // panel's search, or a listener that just started. Web Speech is
+                // still there.
+                if (!ok) startWebSpeech()
+            })
+            return
+        }
+        startWebSpeech()
+    }, [startNative, startWebSpeech])
+
     const stop = useCallback(() => {
+        if (nativeSessionRef.current) {
+            const session = nativeSessionRef.current
+            nativeSessionRef.current = null
+            void session.stop()
+            return
+        }
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.stop()
