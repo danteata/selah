@@ -508,10 +508,32 @@ export async function maybeStartTrial(
 ): Promise<void> {
     const email = args.email.toLowerCase()
 
-    const userRow = await ctx.db
+    // Deliberately not `.unique()`. Nothing enforces one row per email, and a
+    // historical clerkId bug left real deployments with duplicates — where
+    // `.unique()` throws on its very first query, so the trial is never granted
+    // and the account is stuck that way forever. A duplicate should degrade the
+    // lookup, not disable trial provisioning outright.
+    //
+    // `upsertUser` heals duplicates on sign-in, so this is the belt to its
+    // braces: pick the row carrying a church (the one that determines whether a
+    // trial is owed at all), else the oldest, which is the row other tables are
+    // most likely to reference.
+    const userRows = await ctx.db
         .query('users')
         .withIndex('by_email', (q) => q.eq('email', email))
-        .unique()
+        .collect()
+
+    if (userRows.length > 1) {
+        console.warn(
+            `[licensing] ${userRows.length} users rows share ${email} ` +
+                `(${userRows.map((row) => row._id).join(', ')}); using the best match`
+        )
+    }
+
+    const userRow =
+        userRows.find((row) => row.churchId) ??
+        userRows.sort((a, b) => a._creationTime - b._creationTime)[0]
+
     const churchId = args.churchId ?? userRow?.churchId ?? undefined
 
     // The trial is ONE per church: if the church already has any subscription
@@ -522,10 +544,14 @@ export async function maybeStartTrial(
         if (churchSub) return
     }
 
+    // `.first()`, not `.unique()`, for the reason given above: duplicates must
+    // not throw. The gate is only "has this email ever had a subscription", and
+    // more than one row answers that just as well as exactly one — whereas a
+    // throw here would hand the account a *second* trial on the next attempt.
     const existing = await ctx.db
         .query('subscriptions')
         .withIndex('by_email', (q) => q.eq('email', email))
-        .unique()
+        .first()
     if (existing) {
         // Backfill churchId onto a legacy per-email row so it becomes the
         // church's subscription (and future members inherit it).

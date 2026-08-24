@@ -85,25 +85,65 @@ export const upsertUser = mutation({
         churchId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const existingUser = await ctx.db
+        // Emails are matched lowercased everywhere downstream (see
+        // `licensing.maybeStartTrial`), so normalise on the way in — a
+        // mixed-case address from Clerk would otherwise miss `by_email`
+        // entirely and read as a brand-new person.
+        const email = args.email.toLowerCase();
+
+        let existingUser = await ctx.db
             .query("users")
             .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
             .first();
 
+        // Fall back to email before concluding this is someone new.
+        //
+        // Matching on clerkId alone is what produced duplicate rows in the
+        // first place: an early bug wrote Clerk *session* ids (`sess_…`) into
+        // `clerkId`, and those rotate on every sign-in, so the next login
+        // missed and inserted a second row for the same person. Any future
+        // cause — account linking, a re-created Clerk account — would do the
+        // same. Adopting the row by email and correcting its clerkId means such
+        // a row heals itself on the next sign-in instead of forking.
+        //
+        // Safe because Clerk enforces one account per email within an instance,
+        // so a match here is the same human, not a collision.
+        if (!existingUser) {
+            const byEmail = await ctx.db
+                .query("users")
+                .withIndex("by_email", (q) => q.eq("email", email))
+                .collect();
+
+            if (byEmail.length > 0) {
+                // Prefer the row with a church — it is the one other tables
+                // reference and the one that decides trial inheritance.
+                existingUser =
+                    byEmail.find((row) => row.churchId) ??
+                    byEmail.sort((a, b) => a._creationTime - b._creationTime)[0];
+
+                console.warn(
+                    `[users] adopting ${existingUser._id} for ${email}: ` +
+                        `clerkId ${existingUser.clerkId ?? "(none)"} -> ${args.clerkId}`
+                );
+            }
+        }
+
         const now = new Date().toISOString();
 
         if (existingUser) {
-            // Update existing user
+            // Update existing user. `clerkId` is written unconditionally so an
+            // adopted row converges on the real Clerk user id.
             await ctx.db.patch(existingUser._id, {
+                clerkId: args.clerkId,
                 fullname: args.fullname,
-                email: args.email,
+                email,
                 avatar: args.avatar || existingUser.avatar,
                 churchId: args.churchId || existingUser.churchId,
                 updatedAt: now,
             });
             // Start the free trial on first sign-in (no-op if they already have
             // a subscription row — trial, comp, or paid).
-            await maybeStartTrial(ctx, { email: args.email, userId: existingUser._id });
+            await maybeStartTrial(ctx, { email, userId: existingUser._id });
             return existingUser._id;
         } else {
             // Check if this is the first user (make them superadmin)
@@ -115,7 +155,7 @@ export const upsertUser = mutation({
             const userId = await ctx.db.insert("users", {
                 clerkId: args.clerkId,
                 fullname: args.fullname,
-                email: args.email,
+                email,
                 role,
                 avatar: args.avatar || "",
                 theme: "light",
@@ -124,7 +164,7 @@ export const upsertUser = mutation({
                 updatedAt: now,
             });
             // Every brand-new account starts a 14-day Pro trial.
-            await maybeStartTrial(ctx, { email: args.email, userId });
+            await maybeStartTrial(ctx, { email, userId });
             return userId;
         }
     },
