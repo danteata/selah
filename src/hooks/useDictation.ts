@@ -100,6 +100,23 @@ export function useDictation(): UseDictationResult {
      * keystroke — re-registering the OS hotkey mid-hold would lose the release.
      */
     const activeRef = useRef(false)
+    /**
+     * Held for the whole of `finish()` — the commit is not instant.
+     *
+     * `finish()` awaits the engine's drain (`FINAL_UTTERANCE_GRACE_MS`) and
+     * only then drains `segmentsRef`, resets the state and hides the pill.
+     * `activeRef` is already false for all of that, so without this a second
+     * hotkey press inside the window started a session that the *previous*
+     * `finish()` then walked over: it took the new session's first words into
+     * the old insert, set the state back to idle, and hid the pill while the
+     * microphone was still open.
+     *
+     * Dropping the press outright is safe here in a way it would not be for a
+     * both-edges external trigger: refusing the whole press leaves the toggle
+     * in the state the operator can see (the pill reads "transcribing"), so
+     * parity is preserved rather than inverted.
+     */
+    const committingRef = useRef(false)
     const segmentsRef = useRef<string[]>([])
     const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const modeRef = useRef(mode)
@@ -121,50 +138,57 @@ export function useDictation(): UseDictationResult {
     const finish = useCallback(async () => {
         if (!activeRef.current) return
         activeRef.current = false
-        clearWatchdog()
-        setState('transcribing')
-        void setPillState('transcribing')
+        committingRef.current = true
+        try {
+            clearWatchdog()
+            setState('transcribing')
+            void setPillState('transcribing')
 
-        // Hold the listener open for the flushed final utterance — with
-        // push-to-talk the operator releases mid-sentence by design, so this is
-        // usually where most of the dictation is.
-        await nativeTranscriptionService.stop(FINAL_UTTERANCE_GRACE_MS)
+            // Hold the listener open for the flushed final utterance — with
+            // push-to-talk the operator releases mid-sentence by design, so this is
+            // usually where most of the dictation is.
+            await nativeTranscriptionService.stop(FINAL_UTTERANCE_GRACE_MS)
 
-        const text = segmentsRef.current.join(' ').replace(/\s+/g, ' ').trim()
-        segmentsRef.current = []
-        setState('idle')
-        // Hidden before the text is placed. `insertTextAtCaret` refuses when
-        // this window has lost keyboard focus, so anything still on screen at
-        // that moment is a thing that could be holding it.
-        await hidePill()
+            const text = segmentsRef.current.join(' ').replace(/\s+/g, ' ').trim()
+            segmentsRef.current = []
+            setState('idle')
+            // Hidden before the text is placed. `insertTextAtCaret` refuses when
+            // this window has lost keyboard focus, so anything still on screen at
+            // that moment is a thing that could be holding it.
+            await hidePill()
 
-        if (!text) {
-            toast.info('Nothing heard', { description: 'No speech was picked up.' })
-            return
-        }
+            if (!text) {
+                toast.info('Nothing heard', { description: 'No speech was picked up.' })
+                return
+            }
 
-        const outcome = insertTextAtCaret(text)
-        if (outcome.ok) return
+            const outcome = insertTextAtCaret(text)
+            if (outcome.ok) return
 
-        // Nowhere to put it. Never drop it silently — the operator just spoke a
-        // sentence and is entitled to know where it went.
-        const copied = await copyToClipboard(text)
-        if (copied) {
-            toast.success('Copied to clipboard', {
-                description:
-                    outcome.reason === 'no-focus'
-                        ? 'Selah was not focused, so the text was copied instead.'
-                        : 'No text field was focused, so the text was copied instead.',
-            })
-        } else {
-            toast.error('Could not place the dictation', { description: text.slice(0, 120) })
+            // Nowhere to put it. Never drop it silently — the operator just spoke a
+            // sentence and is entitled to know where it went.
+            const copied = await copyToClipboard(text)
+            if (copied) {
+                toast.success('Copied to clipboard', {
+                    description:
+                        outcome.reason === 'no-focus'
+                            ? 'Selah was not focused, so the text was copied instead.'
+                            : 'No text field was focused, so the text was copied instead.',
+                })
+            } else {
+                toast.error('Could not place the dictation', { description: text.slice(0, 120) })
+            }
+        } finally {
+            committingRef.current = false
         }
     }, [clearWatchdog])
 
     const begin = useCallback(async () => {
         if (activeRef.current) return
+        // The previous dictation is still committing. See `committingRef`.
+        if (committingRef.current) return
 
-        if (nativeTranscriptionService.getIsRunning()) {
+        if (nativeTranscriptionService.isBusy()) {
             toast.warning('Sermon Listener is running', {
                 description: 'Dictation and the listener share one microphone and model.',
             })

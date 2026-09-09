@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-const { startMock, stopMock, isRunningMock, isConfiguredMock, isDesktopMock, getStateMock } =
+const { startMock, stopMock, isBusyMock, isConfiguredMock, isDesktopMock, getStateMock } =
     vi.hoisted(() => ({
         startMock: vi.fn(),
         stopMock: vi.fn(),
-        isRunningMock: vi.fn(),
+        isBusyMock: vi.fn(),
         isConfiguredMock: vi.fn(),
         isDesktopMock: vi.fn(),
         getStateMock: vi.fn(),
@@ -14,7 +14,9 @@ vi.mock('../../sermon-listener/nativeTranscription', () => ({
     default: {
         start: startMock,
         stop: stopMock,
-        getIsRunning: isRunningMock,
+        // `isBusy()`, not `getIsRunning()`: the engine is unavailable while it
+        // is still draining a previous session, and voice search must see that.
+        isBusy: isBusyMock,
         isConfigured: isConfiguredMock,
     },
 }))
@@ -50,7 +52,7 @@ describe('nativeVoiceSearchAvailability', () => {
     beforeEach(() => {
         isDesktopMock.mockReturnValue(true)
         isConfiguredMock.mockReturnValue(true)
-        isRunningMock.mockReturnValue(false)
+        isBusyMock.mockReturnValue(false)
     })
 
     it('is unsupported in the browser build', () => {
@@ -62,7 +64,7 @@ describe('nativeVoiceSearchAvailability', () => {
         // The sermon listener owns the engine for the length of a service,
         // which is exactly when someone reaches for voice search. `busy` is an
         // expected answer, not a failure — the caller falls back to Web Speech.
-        isRunningMock.mockReturnValue(true)
+        isBusyMock.mockReturnValue(true)
         expect(nativeVoiceSearchAvailability()).toBe('busy')
     })
 
@@ -76,7 +78,7 @@ describe('startNativeVoiceSearch', () => {
         vi.useFakeTimers()
         startMock.mockReset().mockResolvedValue(true)
         stopMock.mockReset().mockResolvedValue(undefined)
-        isRunningMock.mockReset().mockReturnValue(false)
+        isBusyMock.mockReset().mockReturnValue(false)
         isConfiguredMock.mockReset().mockReturnValue(true)
         isDesktopMock.mockReset().mockReturnValue(true)
         getStateMock.mockReturnValue({
@@ -92,7 +94,7 @@ describe('startNativeVoiceSearch', () => {
     })
 
     it('refuses when the engine is busy, without touching it', async () => {
-        isRunningMock.mockReturnValue(true)
+        isBusyMock.mockReturnValue(true)
 
         const session = await startNativeVoiceSearch({
             onInterim: vi.fn(),

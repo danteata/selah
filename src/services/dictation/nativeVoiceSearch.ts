@@ -73,7 +73,7 @@ export interface NativeVoiceSearchSession {
  */
 export function nativeVoiceSearchAvailability(): 'available' | NativeVoiceSearchUnavailable {
     if (!isDesktop() || !nativeTranscriptionService.isConfigured()) return 'unsupported'
-    if (nativeTranscriptionService.getIsRunning()) return 'busy'
+    if (nativeTranscriptionService.isBusy()) return 'busy'
     return 'available'
 }
 

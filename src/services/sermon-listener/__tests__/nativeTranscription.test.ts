@@ -217,6 +217,96 @@ describe('nativeTranscriptionService', () => {
         expect(onError).toHaveBeenCalledWith('model not downloaded')
     })
 
+    /**
+     * Starts a session and returns the three event handlers the service
+     * registered, in registration order.
+     */
+    async function startSession(onResult = vi.fn()) {
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'get_loaded_native_model') return Promise.resolve(null)
+            return Promise.resolve(undefined)
+        })
+        const started = await nativeTranscriptionService.start({
+            captureSource: 'microphone',
+            onResult,
+            onError: vi.fn(),
+        })
+        expect(started).toBe(true)
+        const handlerFor = (event: string) =>
+            listenMock.mock.calls.find((call) => call[0] === event)![1]
+        return {
+            onResult,
+            final: handlerFor('transcription-result') as (e: { payload: { text: string } }) => void,
+            interim: handlerFor('native-stream-text') as (e: {
+                payload: { committed: string; tentative: string }
+            }) => void,
+            eos: handlerFor('vad-audio-chunk') as (e: {
+                payload: { end_of_stream?: boolean }
+            }) => void,
+        }
+    }
+
+    /**
+     * stop() only arms its `end_of_stream` waiter after `stop_capture`
+     * resolves, so a marker fired before that is dropped and the drain runs to
+     * its full timeout. Let the microtasks settle first.
+     */
+    const drainArmed = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+    it('still forwards the final utterance that arrives during the stop drain', async () => {
+        // This is the whole reason stop() waits for `end_of_stream`. The engine
+        // flushes the in-progress segment *after* capture stops, so gating
+        // finals on "is a session live" threw away the last thing that was
+        // said — with push-to-talk, usually most of the dictation.
+        const { onResult, final, eos } = await startSession()
+
+        const stopping = nativeTranscriptionService.stop(2000)
+        await drainArmed()
+        final({ payload: { text: 'in the beginning was the Word' } })
+        eos({ payload: { end_of_stream: true } })
+        await stopping
+
+        expect(onResult).toHaveBeenCalledWith('in the beginning was the Word', true, undefined)
+    })
+
+    it('reports itself busy, and refuses a second session, until the drain finishes', async () => {
+        // `isRunning` goes false at the top of stop(), but the engine and the
+        // microphone are not free until the drain is done. A caller that only
+        // saw `isRunning` would start a second session on top of a singleton
+        // still shutting down — and the first stop() would then tear down the
+        // second session's state as it finished.
+        const { eos } = await startSession()
+        expect(nativeTranscriptionService.isBusy()).toBe(true)
+
+        const stopping = nativeTranscriptionService.stop(2000)
+        expect(nativeTranscriptionService.getIsRunning()).toBe(false)
+        expect(nativeTranscriptionService.isBusy()).toBe(true)
+
+        const rejected = await nativeTranscriptionService.start({
+            captureSource: 'microphone',
+            onResult: vi.fn(),
+            onError: vi.fn(),
+        })
+        expect(rejected).toBe(false)
+
+        await drainArmed()
+        eos({ payload: { end_of_stream: true } })
+        await stopping
+        expect(nativeTranscriptionService.isBusy()).toBe(false)
+    })
+
+    it('suppresses interim text once stopping, so the drain cannot repaint the display', async () => {
+        const { onResult, interim, eos } = await startSession()
+
+        const stopping = nativeTranscriptionService.stop(2000)
+        await drainArmed()
+        interim({ payload: { committed: 'half a thought', tentative: '' } })
+        eos({ payload: { end_of_stream: true } })
+        await stopping
+
+        expect(onResult).not.toHaveBeenCalledWith('half a thought', false)
+    })
+
     it('stop() invokes stop_capture and unlistens', async () => {
         invokeMock.mockImplementation((cmd: string) =>
             cmd === 'get_loaded_native_model' ? Promise.resolve('whisper-small.en') : Promise.resolve(undefined),

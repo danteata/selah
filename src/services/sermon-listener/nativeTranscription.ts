@@ -73,6 +73,18 @@ class NativeTranscriptionService {
     /** Armed while draining, fired by the `end_of_stream` marker. */
     private eosResolve: (() => void) | null = null
     private isRunning = false
+    /**
+     * True from the moment `stop()` is entered until it has finished draining
+     * and unlistening.
+     *
+     * `isRunning` goes false at the top of `stop()` so no *new* audio is taken,
+     * but the session is not over at that point: `stop()` still has up to
+     * `waitForFinalMs` of draining to do, and the last utterance arrives inside
+     * that window. Callers asking "is the engine free?" have to see the drain,
+     * or they start a second session on top of a singleton that is still
+     * shutting down.
+     */
+    private isStopping = false
 
     isConfigured(): boolean {
         return isDesktop()
@@ -82,13 +94,22 @@ class NativeTranscriptionService {
         return this.isRunning
     }
 
+    /**
+     * Whether the engine and microphone are unavailable — live *or* still
+     * shutting down. This, not `getIsRunning()`, is the question to ask before
+     * starting a session.
+     */
+    isBusy(): boolean {
+        return this.isRunning || this.isStopping
+    }
+
     /** Load the selected model into the engine, then start VAD capture. */
     async start(options: NativeTranscriptionStartOptions): Promise<boolean> {
         if (!isDesktop()) {
             options.onError('Native transcription is only available in the desktop app')
             return false
         }
-        if (this.isRunning) return false
+        if (this.isBusy()) return false
 
         const modelId =
             options.modelId ||
@@ -122,8 +143,13 @@ class NativeTranscriptionService {
                 translate: false,
             })
 
+            // `isBusy()`, not `isRunning`: the flushed final utterance arrives
+            // *after* `stop()` has cleared `isRunning`, and catching it is the
+            // entire reason `stop()` waits for `end_of_stream`. Gating finals
+            // on `isRunning` dropped the last thing the operator said —
+            // which, with push-to-talk, is usually most of the dictation.
             this.unlisten = await listen<TranscriptionResultEvent>('transcription-result', (event) => {
-                if (this.isRunning && event.payload.text) {
+                if (this.isBusy() && event.payload.text) {
                     const { text, segments } = event.payload
                     options.onResult(text, true, segments?.length ? segments : undefined)
                 }
@@ -191,27 +217,35 @@ class NativeTranscriptionService {
      */
     async stop(waitForFinalMs = 0): Promise<void> {
         this.isRunning = false
+        this.isStopping = true
         try {
-            await invoke('stop_capture')
-        } catch (err) {
-            console.warn('[nativeWhisper] stop_capture failed:', err)
-        }
+            try {
+                await invoke('stop_capture')
+            } catch (err) {
+                console.warn('[nativeWhisper] stop_capture failed:', err)
+            }
 
-        if (waitForFinalMs > 0) {
-            await this.waitForEndOfStream(waitForFinalMs)
-        }
+            if (waitForFinalMs > 0) {
+                await this.waitForEndOfStream(waitForFinalMs)
+            }
 
-        if (this.unlisten) {
-            this.unlisten()
-            this.unlisten = null
-        }
-        if (this.unlistenStream) {
-            this.unlistenStream()
-            this.unlistenStream = null
-        }
-        if (this.unlistenEos) {
-            this.unlistenEos()
-            this.unlistenEos = null
+            if (this.unlisten) {
+                this.unlisten()
+                this.unlisten = null
+            }
+            if (this.unlistenStream) {
+                this.unlistenStream()
+                this.unlistenStream = null
+            }
+            if (this.unlistenEos) {
+                this.unlistenEos()
+                this.unlistenEos = null
+            }
+        } finally {
+            // Cleared in `finally` on purpose: a throw anywhere above would
+            // otherwise leave the service permanently "busy" and refuse every
+            // later session, which is a worse failure than the one that threw.
+            this.isStopping = false
         }
     }
 
