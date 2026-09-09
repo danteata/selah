@@ -61,7 +61,14 @@ function splitChars(el: HTMLElement) {
 function VerseOfTheMoment() {
     const textRef = useRef<HTMLParagraphElement>(null)
     const refRef = useRef<HTMLParagraphElement>(null)
-    const indexRef = useRef(Math.floor(Math.random() * VERSES.length))
+    // Two halves, deliberately. Which verse renders *first* is render state, so
+    // it lives in useState with a lazy initialiser — the sanctioned place for a
+    // one-off `Math.random()`, which as `useRef(Math.random())` would re-roll on
+    // every render and discard all but the first result. Which verse is showing
+    // *now* is not render state: the interval swaps the text through gsap and
+    // never re-renders, so the rolling cursor stays a ref.
+    const [initialIndex] = useState(() => Math.floor(Math.random() * VERSES.length))
+    const indexRef = useRef(initialIndex)
 
     useEffect(() => {
         let mounted = true
@@ -97,7 +104,7 @@ function VerseOfTheMoment() {
         }
     }, [])
 
-    const initial = VERSES[indexRef.current]
+    const initial = VERSES[initialIndex]
 
     return (
         <div className="relative max-w-2xl">

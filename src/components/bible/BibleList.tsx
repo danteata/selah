@@ -440,7 +440,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const addRecentVerse = useCallback((ref: string) => {
         setRecentVerses(prev => {
             const next = [ref, ...prev.filter(v => v !== ref)].slice(0, MAX_RECENT)
-            try { localStorage.setItem(RECENT_VERSES_KEY, JSON.stringify(next)) } catch { }
+            try { localStorage.setItem(RECENT_VERSES_KEY, JSON.stringify(next)) } catch { /* private mode or blocked site data: recents stay in memory */ }
             return next
         })
     }, [])
@@ -567,8 +567,15 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
     }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse])
 
+    // Latest-callback ref, refreshed in an effect rather than during render.
+    // Assigning in the render body mutates a value already handed to useRef,
+    // which React 19's rules reject outright. Both readers (the two voice
+    // command handlers above) only fire from events, long after commit, so
+    // updating after paint is soon enough.
     const getLiveBibleContextRef = useRef(getLiveBibleContext)
-    getLiveBibleContextRef.current = getLiveBibleContext
+    useEffect(() => {
+        getLiveBibleContextRef.current = getLiveBibleContext
+    }, [getLiveBibleContext])
 
     const updateCurrentLiveBibleSlide = useCallback((scripture: Scripture) => {
         const { activeSlides, liveSlideId } = useAppStore.getState()
@@ -1019,7 +1026,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                     </span>
                                 </button>
                             ))}
-                            <button onClick={() => { setRecentVerses([]); try { localStorage.removeItem(RECENT_VERSES_KEY) } catch { } }} className="shrink-0 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">clear</button>
+                            <button onClick={() => { setRecentVerses([]); try { localStorage.removeItem(RECENT_VERSES_KEY) } catch { /* storage unavailable; the in-memory clear above is what matters */ } }} className="shrink-0 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">clear</button>
                         </div>
                     )}
                 </div>
