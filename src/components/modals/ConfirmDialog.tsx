@@ -79,7 +79,11 @@ export function ConfirmDialog({
 
     const handleBackdropClick = (e: React.MouseEvent) => {
         if (e.target === e.currentTarget) {
-            onClose?.() || onCancel()
+            // One or the other, matching `onClick={onClose || onCancel}` below.
+            // Written as `onClose?.() || onCancel()` this ran *both*: a void
+            // call returns undefined, so the fallback always evaluated too.
+            if (onClose) onClose()
+            else onCancel()
         }
     }
 
