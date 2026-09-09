@@ -525,13 +525,13 @@ Still open in this part:
 
 # Part 6 — Handy upstream sync
 
-Selah has twice taken fixes from [Handy](https://github.com/cjpais/Handy) — it runs the
-same transcription engine and meets the same faults first. This records the state of that
-relationship so the next sync starts from a date rather than from scratch.
+Selah has repeatedly taken fixes from [Handy](https://github.com/cjpais/Handy) — it runs
+the same transcription engine and meets the same faults first. This records the state of
+that relationship so the next sync starts from a date rather than from scratch.
 
-**Last adopted:** `98a4d80` *disable metal residency on macos* (2026-08-15), shipped as
-`f1e2685` in Selah 0.1.20.
-**Reviewed to:** `8fd6691` (2026-08-23) — 14 upstream commits, all read.
+**Last adopted:** `df21683` *stop losing tail audio when a recording ends* and `258899a`
+*redact transcriptions from log*, both 2026-08-25.
+**Reviewed to:** `330b2dd` (2026-09-08) — 14 upstream commits, all read. See §6.6.
 
 ## 6.1 Worth taking
 
@@ -582,3 +582,126 @@ reads as the recorder being broken.
 Both doc notes from §6.2 are also taken, as a "Choosing a microphone" section in
 `docs/SERMON_LISTENER.md`: the Bluetooth-headset tradeoff, and what the disconnect fallback
 does.
+
+## 6.6 Third pass: `8fd6691..330b2dd` (reviewed 2026-09-09)
+
+14 commits. Most of the release is Handy-specific — clipboard and paste behaviour
+(`c7a68fe`, `fe5b23c`, `bc7face`), macOS Secure Input (`00d2554`), launching as a menubar
+accessory (`fbd4e15`), Nix packaging (`b026660`), a release bump (`af48dd6`). Three
+mattered, and two of them named bugs Selah already had.
+
+### Taken
+
+**`df21683` — the resampler's tail.** Handy's fix has two halves. The first, using
+`process_partial` rather than zero-padding a short block to full width, Selah already had.
+The second it did not: an FFT resampler's output lags its input by `output_delay()`
+samples, so when a stream stops that much real audio is still inside the delay line.
+`AudioPreprocessor::flush` only drained `pending` and returned early when `pending` was
+empty — which is exactly the block-aligned case, where the delay line is *all* that is
+left. On top of that, `flush` was never called on the live path at all: `pre` was owned by
+the cpal callback closure and dropped with the stream, tail inside.
+
+Measured against Selah's own resampler parameters, the loss at end of capture is 10.5 ms at
+48 kHz and 12.9 ms at 44.1 kHz (`output_delay()` of 85 and 160 samples), rising to ~17-20 ms
+when the capture ends mid-block. Across a 90-minute service that is nothing, and it is why
+this went unnoticed. Dictation and voice search stop the stream *once per utterance*, so
+each one lost the end of its last word.
+
+`flush` now drains the delay line by clocking the resampler forward on zeros until output
+accounts for input plus delay, trimming the final emit so none of the padding is kept, and
+skipping the drain entirely when nothing was ever fed (a device that opened and delivered
+no callback must not contribute invented silence). `microphone.rs` shares the preprocessor
+with its supervisor through an `Arc<Mutex<_>>` and flushes it after `drop(stream)` — the
+point at which cpal is provably done with the callback — on the rebuild path as well as the
+stop path, since that audio was recorded before the device died and belongs ahead of the gap.
+
+**Not done:** the three `start_system_audio_capture` backends (`linux.rs`, `windows.rs`,
+`macos.rs`) still never flush. They carry the same latent loss, but they are the
+long-running desk-feed path where 15 ms at the end of a service is irrelevant, and two of
+the three cannot be compiled or tested on this machine. The `flush` fix itself is shared,
+so they inherit correct behaviour whenever a stop-flush is wired in. Worth noting while in
+there: `linux.rs` still has the bare `err_fn = |err| eprintln!(...)` that item #15 replaced
+with a supervisor in `microphone.rs`.
+
+**`258899a` — transcripts out of production logs.** Handy added a `redact_text()` that
+passes text through in debug builds and redacts it in release. Selah's `vite.config.ts`
+already drops `console.log`/`debug`/`info` from production builds, which covers most sites,
+but not `console.warn` or `console.error` — and `BibleList.tsx` was logging the verbatim
+voice transcript through `console.warn`. Reaching for `warn` so a debug line survives the
+stripping is precisely how that happens, which is the argument for not trusting the level:
+`src/utils/redact.ts` now carries `redactSpeech()`, and the log site wraps the text in it.
+The Rust side was already clean. This matters more here than upstream for the reason Part 5
+opens with — Handy logs one person's own dictation, Selah's microphone hears a room.
+
+### Taken, and it exposed a bug of our own
+
+**`c6fa60d` — toggle parity when presses arrive mid-pipeline.** Handy's version is about
+both-edges external triggers (pedals, SIGUSR2). Selah's instance is worse and does not need
+an external trigger at all.
+
+`nativeTranscriptionService.stop()` cleared `isRunning` on its first line and then spent up
+to `FINAL_UTTERANCE_GRACE_MS` (2 s) draining. Two things followed from that:
+
+1. The `transcription-result` handler gated on `isRunning`, so **the flushed final utterance
+   the drain exists to catch was being dropped** — with push-to-talk, usually most of the
+   dictation. The drain's own doc comment said it was held open to receive that utterance;
+   the flag made it unreachable, and no test covered it.
+2. `useDictation`'s `begin()` guards on `activeRef` (already false) and `getIsRunning()`
+   (now false), so a second press inside the window started a session while the previous
+   `stop()` was still draining. The in-flight `finish()` then resumed and walked over it:
+   drained `segmentsRef` into the *old* insert, `setState('idle')`, and `await hidePill()`
+   — leaving the microphone open with no pill and the state reading idle, ended only by the
+   60 s watchdog.
+
+Fixed at the root rather than per caller: the service keeps a separate `isStopping`, cleared
+in a `finally` so a throw cannot wedge it busy forever; finals are accepted while
+`isBusy()` (running *or* draining) and interim text is still suppressed once stopping;
+`start()` refuses while busy. `useDictation` also holds a `committingRef` across the whole
+of `finish()`, which is load-bearing beyond the service flag — after `stop()` resolves there
+is still an `await hidePill()`, and `isBusy()` is false for it. Voice search's availability
+check moved to `isBusy()` too; it had the same race in a milder form, since its per-session
+closure state meant overlapping sessions could not steal each other's words.
+
+Refusing the press outright is safe here in a way it would not be for a both-edges trigger:
+the whole press is dropped, so the toggle stays in the state the operator can see rather
+than inverting.
+
+### Considered, not taken
+
+- **`c62a5fc` auto push-to-talk.** Handy collapsed toggle and push-to-talk into one binding
+  that classifies hold-vs-tap against a threshold. Selah has them as two separate bindings,
+  so the operator must pick or bind both. A real UX improvement and a real design change —
+  worth its own decision, not a port.
+- **`df21683`'s VAD half** (`tail_report()`). Purely observational: withheld frames, how
+  many were voiced, and the smoothing counters at the stop boundary. It changes nothing it
+  reports on. Would pair well with the existing offline probe to attribute a lost tail
+  between VAD and resampler, now that the resampler half is closed.
+- **`fe5b23c`** (do not block on external paste scripts) and **`00d2554`** (preserve held
+  Secure Input shortcuts) join `99052ee` from §6.1 as Phase B reading.
+
+### Not applicable — checked rather than assumed
+
+- **`6fa8506`** (`no`/`nb` and `tl`/`fil` language aliases, plus CI for coverage). Selah's
+  catalog really does mix `nb` and `fil` with Whisper's `no` and `tl`, but `ModelInfo.languages`
+  is only ever read for a display label in `nativeModelManager.ts`, and there is no language
+  selector UI and no coercion path for the mismatch to break. A design note for whenever one
+  is added: alias the pairs before matching.
+- **`20ada47`** (experimental Earshot VAD, pure-Rust, ~8 KiB of state). The appeal would be
+  dropping ONNX, but `ort` is already a hard dependency for transcription itself, so it
+  removes nothing — and Selah's Silero is tuned and measured against real recordings
+  (`7ef7d12`, `30ff20c`) while Earshot is upstream-experimental.
+- **`330b2dd`** (custom scrollbars on macOS with a non-Apple mouse — macOS abandons overlay
+  scrollbars when one is connected, exposing WKWebView's light default against a dark
+  theme). Selah's scrollbar styles in `index.css` were never platform-gated. Already correct;
+  recorded so the next pass does not re-derive it.
+
+### Verified
+
+62 Rust tests (2 new) and 1914 frontend tests (8 new) pass; `tsc -b` clean; clippy at 21
+warnings, unchanged from baseline; eslint clean on every changed file except the 13
+pre-existing problems in `BibleList.tsx`, which are identical before and after.
+
+Each new test was confirmed to fail with its fix reverted, including a positive control that
+the dictation guard does not simply refuse everything. Not verified by running the app: the
+resampler tail needs a real device to hear, and the dictation race needs a human
+double-tapping a hotkey.
