@@ -21,6 +21,7 @@ import type { TemplateItem } from '../../hooks/useTemplates'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 import { parseBibleQuery, getRankedBookSuggestions, buildVerseRows as buildVerseRowsUtil, normalizeBibleReference, resolveEnterAction, type BibleVerseLike, type ParsedBibleQuery } from '../../utils/bibleReference'
 import type { VerseRow as VerseRowType } from '../../utils/bibleReference'
+import { redactSpeech } from '../../utils/redact'
 import { BookAutocomplete } from './BookAutocomplete'
 import { ReferenceEditor, type ReferenceEditorHandle } from './ReferenceEditor'
 
@@ -226,7 +227,12 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             //    "open Psalm 23", "switch to NIV"), execute it and
             //    skip the Bible-reference normalization.
             const commands = detectVoiceCommands(text)
-            console.warn('[bible-list] voice final transcript:', JSON.stringify(text), 'commands:', commands.map(c => `${c.type}(${c.confidence})`))
+            console.warn(
+                '[bible-list] voice final transcript:',
+                redactSpeech(text),
+                'commands:',
+                commands.map(c => `${c.type}(${c.confidence})`),
+            )
             if (commands.length > 0) {
                 // The first command wins — same policy as the
                 // sermon listener. Strip it from the transcript so
