@@ -111,7 +111,7 @@ export function ConvexConnectionProvider({
             const wasOffline = wasOfflineRef.current
             setIsConvexConnected(true)
             setIsPlanLimit(false)
-            try { localStorage.removeItem(PLAN_LIMIT_KEY) } catch { }
+            try { localStorage.removeItem(PLAN_LIMIT_KEY) } catch { /* storage unavailable; the state above already cleared the flag */ }
             setConnectionState('connected')
             setLastConnectedAt(new Date())
             if (wasOffline) {
@@ -124,7 +124,7 @@ export function ConvexConnectionProvider({
             setIsConvexConnected(false)
             setIsPlanLimit(result.planLimit)
             if (result.planLimit) {
-                try { localStorage.setItem(PLAN_LIMIT_KEY, 'true') } catch { }
+                try { localStorage.setItem(PLAN_LIMIT_KEY, 'true') } catch { /* storage unavailable: the banner still shows this session */ }
             }
             setConnectionState('disconnected')
             if (justWentOffline && initialCheckDone) {

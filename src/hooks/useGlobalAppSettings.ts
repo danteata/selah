@@ -123,7 +123,10 @@ export function useTranscriptionConfig() {
             try {
                 const cached = await getCachedAppSetting('transcriptionConfig')
                 if (cached) setCachedConfig(cached.data)
-            } catch {}
+            } catch {
+                // A missing or unreadable cache is the normal first-run state,
+                // not an error: the live query supplies the value anyway.
+            }
         }
         loadCached()
     }, [isOffline])

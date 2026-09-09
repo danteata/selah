@@ -251,7 +251,12 @@ export function ContextSectionContent({
         if (typeof template.slideId === 'string') {
             try {
                 templateSlide = JSON.parse(template.slideId)
-            } catch { }
+            } catch {
+                // A slideId that is a string but not JSON is a template saved
+                // by an older format. Falling through to null lets the caller
+                // treat it as "no template slide" rather than failing the
+                // whole panel.
+            }
         } else if (typeof template.slideId === 'object' && template.slideId !== null) {
             templateSlide = template.slideId as Partial<Slide>
         }

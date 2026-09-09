@@ -135,7 +135,6 @@ describe('tracking a real song from real transcription', () => {
 
     it('locks onto the song and stays with it for most of the recording', () => {
         // Reported so a regression run shows the numbers, not just a failure.
-        // eslint-disable-next-line no-console
         console.log(
             `tracked ${outcome.tracked}/${HEARD.length} windows, ` +
                 `${outcome.missed} unplaceable, lost ${outcome.lostEvents}x, ` +
@@ -162,7 +161,6 @@ describe('identifying a real song from real transcription', () => {
 
     it('identifies it from a fair share of the windows', () => {
         const hits = HEARD.filter((h) => identifySong(h.text, index)?.songId === SONG.id).length
-        // eslint-disable-next-line no-console
         console.log(`identified from ${hits}/${HEARD.length} windows`)
         expect(hits).toBeGreaterThan(0)
     })
@@ -213,7 +211,6 @@ function timeToConfirm(opts?: IdentifyOptions): number | null {
 describe('how long until the right song is on screen', () => {
     it('confirms the song, and does so early enough to be useful', () => {
         const at = timeToConfirm()
-        // eslint-disable-next-line no-console
         console.log(
             `confirmed at ${at === null ? 'never' : `${(at / 1000).toFixed(0)}s`} ` +
                 `(recording is ${(HEARD[HEARD.length - 1].atMs / 1000).toFixed(0)}s long)`,
@@ -284,9 +281,7 @@ describe('what a vocal-only feed would buy', () => {
             `(${(((o.correct + o.leading) / Math.max(1, o.correct + o.leading + o.wrong + o.blank)) * 100).toFixed(0)}%) ` +
             `[${o.correct} exact + ${o.leading} leading], wrong ${o.wrong}, blank ${o.blank}, ` +
             `${o.displayed.length} slide changes (${o.backwardMoves} backwards)`
-        // eslint-disable-next-line no-console
         console.log(line('mix/parakeet', mix, HEARD.length))
-        // eslint-disable-next-line no-console
         console.log(line('vocals/whisper', vocals, HEARD_VOCALS_WHISPER.length))
         expect(vocals.tracked).toBeGreaterThan(0)
     })
@@ -297,7 +292,6 @@ describe('accuracy against what was actually being sung', () => {
         const mix = replay(HEARD)
         const scored = mix.correct + mix.leading + mix.wrong + mix.blank
         const right = mix.correct + mix.leading
-        // eslint-disable-next-line no-console
         console.log(
             `ACCURACY mix/parakeet: ${right}/${scored} showing a defensible slide ` +
                 `(${((right / scored) * 100).toFixed(0)}%) — ${mix.correct} exactly the sung ` +
@@ -305,7 +299,6 @@ describe('accuracy against what was actually being sung', () => {
                 `${mix.wrong} genuinely wrong, ${mix.blank} nothing shown, ` +
                 `${mix.unlabelled} of ${HEARD.length} windows unlabelled`,
         )
-        // eslint-disable-next-line no-console
         console.log(
             `ground truth covers ${(labelledMs() / 1000).toFixed(0)}s of 561s ` +
                 `across ${GROUND_TRUTH.filter((s) => s.sectionId).length} spans`,

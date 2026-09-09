@@ -242,7 +242,7 @@ export async function parseEasyWorshipDatabases(files: {
     const sql = await initSqlJs();
 
     // Parse metadata from Songs.db
-    let songsMetadata: Map<number, EWSongSQLite> = new Map();
+    const songsMetadata: Map<number, EWSongSQLite> = new Map();
     if (files.songsDb) {
         const arrayBuffer = await files.songsDb.arrayBuffer();
         const db = new sql.Database(new Uint8Array(arrayBuffer));
@@ -284,7 +284,7 @@ export async function parseEasyWorshipDatabases(files: {
     }
 
     // Parse lyrics from SongWords.db
-    let songsWithLyrics: ParsedSong[] = [];
+    const songsWithLyrics: ParsedSong[] = [];
     if (files.songWordsDb) {
         const arrayBuffer = await files.songWordsDb.arrayBuffer();
         const db = new sql.Database(new Uint8Array(arrayBuffer));
@@ -504,7 +504,7 @@ export async function parseCSV(file: File): Promise<ParsedSong[]> {
 
             const title = values[colIndex['title']] ?? '';
             const author = values[colIndex['author']] ?? values[colIndex['authors']] ?? 'Unknown';
-            let lyricsRaw = values[colIndex['lyrics']] ?? values[colIndex['words']] ?? '';
+            const lyricsRaw = values[colIndex['lyrics']] ?? values[colIndex['words']] ?? '';
             const copyright = values[colIndex['copyright']];
             const ccli = values[colIndex['ccli_number']] ?? values[colIndex['ccli']];
 

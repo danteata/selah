@@ -76,7 +76,7 @@ export function SermonListenerWizard({ onComplete }: FirstRunWizardProps) {
     }, [step, selectedMicId])
 
     const handleComplete = () => {
-        try { localStorage.setItem(WIZARD_COMPLETED_KEY, 'true') } catch {}
+        try { localStorage.setItem(WIZARD_COMPLETED_KEY, 'true') } catch { /* storage unavailable: the wizard reappears next launch, which is survivable */ }
         setAppSettings({
             ...settings,
             sermonListener: {

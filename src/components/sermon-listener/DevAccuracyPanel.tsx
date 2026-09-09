@@ -50,7 +50,6 @@ export function DevAccuracyPanel({ refreshSignal }: DevAccuracyPanelProps) {
         if (expanded) refresh()
         // Also re-fetch (while expanded) whenever a new session finishes
         // recording, not just when the panel is first expanded.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [expanded, refreshSignal])
 
     const handleCompare = async (sessionId: string) => {

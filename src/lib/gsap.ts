@@ -5,7 +5,13 @@
  */
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-// @ts-ignore - GSAP Flip types casing conflict on Linux with case-sensitive FS
+// `@ts-ignore` on purpose, not `@ts-expect-error`: the GSAP Flip casing
+// conflict only surfaces on a case-sensitive filesystem, so on the platforms
+// where this import resolves cleanly `@ts-expect-error` becomes an "unused
+// directive" error and breaks the build there instead. A suppression for a
+// platform-dependent error is exactly what @ts-ignore is for.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
 import { Flip } from 'gsap/Flip'
 import { TextPlugin } from 'gsap/TextPlugin'
 

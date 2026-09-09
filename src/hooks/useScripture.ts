@@ -320,7 +320,7 @@ export function useScripture() {
             }
 
             // Fetch bible data - downloadBibleVersion checks IndexedDB → bundled asset → CDN
-            let bibleData = await downloadBibleVersion(selectedVersion)
+            const bibleData = await downloadBibleVersion(selectedVersion)
 
             if (!bibleData) {
                 console.error(`Bible data not found for version ${selectedVersion}`)

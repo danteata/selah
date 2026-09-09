@@ -464,7 +464,7 @@ export const useAppStore = create<AppStore>()(
                     const exists = state.activeSlides.find((s) => s?.id === slide?.id)
                     if (exists) return state
 
-                    let updatedSlides = [...state.activeSlides]
+                    const updatedSlides = [...state.activeSlides]
                     if (position !== undefined && position >= 0) {
                         updatedSlides.splice(position, 0, slide)
                     } else {
@@ -554,7 +554,7 @@ export const useAppStore = create<AppStore>()(
                 set((state) => {
                     if (!state.activeSchedule) return state
 
-                    let tempSlides = state.activeSlides.filter(
+                    const tempSlides = state.activeSlides.filter(
                         (slide) => slide.scheduleId !== state.activeSchedule?._id
                     )
                     tempSlides.push(...slides)
@@ -794,7 +794,7 @@ export const useAppStore = create<AppStore>()(
                 if (!searchQuery) return
 
                 set((state) => {
-                    let tempArr = [...state.recentBibleSearches]
+                    const tempArr = [...state.recentBibleSearches]
                     if (tempArr.length >= 20) {
                         tempArr.shift()
                     }

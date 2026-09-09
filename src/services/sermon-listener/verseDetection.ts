@@ -655,7 +655,7 @@ function detectSpokenVerses(text: string): DetectedVerse[] {
         if (tokenStartsAnotherBook(tokens, pointer)) continue
 
         // Parse verse - allow spoken style "John three sixteen" or "John 3 vs 16"
-        let verseStart = hasVerseKeyword
+        const verseStart = hasVerseKeyword
             ? parseNumberFromTokens(tokens, pointer, 4)
             : parseNumberFromTokens(tokens, pointer, 2)
 

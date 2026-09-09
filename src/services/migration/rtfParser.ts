@@ -391,6 +391,9 @@ function decodeWindows1252Char(code: number): string {
 // downstream Convex payload stays valid.
 function sanitizeString(text: string): string {
     return text.replace(
+        // Control characters are the point: this strips them (and lone
+        // surrogates) out of decoded RTF, which legitimately contains them.
+        // eslint-disable-next-line no-control-regex
         /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFD\uFEFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/g,
         '',
     )

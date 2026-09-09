@@ -10,7 +10,10 @@ export function setConvexOffline(value: boolean) {
         } else {
             sessionStorage.removeItem(CONNECTION_CONTEXT_KEY)
         }
-    } catch {}
+    } catch {
+        // sessionStorage throws outright in some privacy modes. This flag is a
+        // diagnostic hint, never a correctness requirement.
+    }
 }
 
 export function isConvexOffline(): boolean {

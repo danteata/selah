@@ -31,7 +31,10 @@ function getConvertFileSrcSync(): ((filePath: string) => string) | null {
         if (internals && typeof internals === 'object' && 'convertFileSrc' in internals) {
             return (internals as { convertFileSrc: (p: string) => string }).convertFileSrc
         }
-    } catch {}
+    } catch {
+        // Probing for Tauri internals on a web build throws rather than
+        // returning undefined. Absence is the answer we want.
+    }
     return null
 }
 

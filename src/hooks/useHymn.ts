@@ -72,7 +72,7 @@ export function useHymn() {
         const db = getIndexedDB()
 
         try {
-            let hymnsData = await db.bibleAndHymns.get('hymns')
+            const hymnsData = await db.bibleAndHymns.get('hymns')
             let hymns = hymnsData?.data as unknown as Hymn[]
 
             // If not cached, download it
@@ -102,7 +102,7 @@ export function useHymn() {
         const db = getIndexedDB()
 
         try {
-            let hymnsData = await db.bibleAndHymns.get('hymns')
+            const hymnsData = await db.bibleAndHymns.get('hymns')
             let hymns = hymnsData?.data as unknown as Hymn[]
 
             // If not cached, download it

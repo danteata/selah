@@ -299,13 +299,14 @@ export function QuickActions() {
                     setFocusedActionIndex(prev => prev - 1)
                 }
                 break
-            case 'Enter':
+            case 'Enter': {
                 e.preventDefault()
                 const action = currentActions?.[focusedActionIndex]
                 if (action) {
                     executeAction(action)
                 }
                 break
+            }
         }
     }, [searchInput, searchedActions, actions, focusedActionIndex, executeAction])
 

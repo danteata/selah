@@ -48,6 +48,9 @@ for (const song of songs) {
     }
     
     // Garbage chars
+    // Control characters are the point: this strips them (and lone
+    // surrogates) out of decoded RTF, which legitimately contains them.
+    // eslint-disable-next-line no-control-regex
     const garbage = plainText.match(/[\uFFFD\u0000-\u0008\u000B\u000E-\u001F]/g);
     if (garbage) issues.push(`${garbage.length} garbage chars`);
     
