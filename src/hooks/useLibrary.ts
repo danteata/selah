@@ -85,8 +85,12 @@ export function useLibrary() {
         localStorage.removeItem(LIBRARY_STORAGE_KEY)
     }, [])
 
-    // Use library slide (add to active slides)
-    const useSlide = useCallback((librarySlide: LibrarySlide, position?: number) => {
+    // Add a library slide to the active slides.
+    //
+    // Not named `useSlide`: it is a plain callback, not a React hook, and the
+    // `use` prefix made every caller look like a conditional hook call to
+    // react-hooks/rules-of-hooks.
+    const addSlideToService = useCallback((librarySlide: LibrarySlide, position?: number) => {
         const newSlide: Slide = {
             ...librarySlide,
             id: `slide_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -96,8 +100,8 @@ export function useLibrary() {
         return newSlide
     }, [appendActiveSlide])
 
-    // Use multiple library slides
-    const useSlides = useCallback((libSlides: LibrarySlide[]) => {
+    // The same, for several slides at once.
+    const addSlidesToService = useCallback((libSlides: LibrarySlide[]) => {
         const newSlides: Slide[] = libSlides.map((slide) => ({
             ...slide,
             id: `slide_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -144,8 +148,8 @@ export function useLibrary() {
         addSlidesToLibrary,
         removeFromLibrary,
         clearLibrary,
-        useSlide,
-        useSlides,
+        addSlideToService,
+        addSlidesToService,
         getSlidesByCategory,
         searchLibrary,
         updateLibrarySlide,

@@ -16,7 +16,7 @@ export function LibraryContent({ compact = false }: LibraryContentProps) {
     const {
         librarySlides,
         removeFromLibrary,
-        useSlide,
+        addSlideToService,
         getSlidesByCategory,
         libraryCount,
     } = useLibrary()
@@ -55,7 +55,7 @@ export function LibraryContent({ compact = false }: LibraryContentProps) {
     }, [librarySlides, selectedCategory, searchQuery])
 
     const handleUseSlide = (slide: any) => {
-        useSlide(slide)
+        addSlideToService(slide)
     }
 
     const handleDeleteSlide = async (slideId: string, slideName: string) => {

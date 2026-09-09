@@ -6,7 +6,7 @@ vi.mock('../../../hooks/useLibrary', () => ({
     useLibrary: vi.fn(() => ({
         librarySlides: [],
         removeFromLibrary: vi.fn(),
-        useSlide: vi.fn(),
+        addSlideToService: vi.fn(),
         getSlidesByCategory: vi.fn(() => []),
         libraryCount: 0,
     })),

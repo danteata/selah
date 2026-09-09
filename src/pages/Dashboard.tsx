@@ -542,7 +542,7 @@ export default function Dashboard() {
                 />
             )}
 
-            {/* LibraryPanel handles its own slide usage via useSlide internally */}
+            {/* LibraryPanel handles its own slide usage via addSlideToService internally */}
             {modals.libraryPanel && (
                 <LibraryPanel
                     isOpen={modals.libraryPanel}
