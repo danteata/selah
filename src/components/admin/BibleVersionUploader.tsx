@@ -31,23 +31,6 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
     const [currentUploading, setCurrentUploading] = useState<string | null>(null)
     const [uploadedBy, setUploadedBy] = useState('admin')
 
-    // Redirect non-superadmins
-    if (!roleLoading && !isSuperadmin) {
-        return (
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
-                <div className="text-center py-12">
-                    <div className="text-red-500 text-6xl mb-4">🚫</div>
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                        Access Denied
-                    </h2>
-                    <p className="text-gray-600 dark:text-gray-400">
-                        Only superadmins can upload Bible versions to Convex.
-                    </p>
-                </div>
-            </div>
-        )
-    }
-
     // Initialize versions list
     useEffect(() => {
         const initializeVersions = async () => {
@@ -184,6 +167,30 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
         if (bytes < 1024) return `${bytes} B`
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
         return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+    }
+
+    // Redirect non-superadmins.
+    //
+    // This gate has to sit below every hook, not above them. `roleLoading`
+    // starts true, so the first render fell through and ran all four hooks;
+    // once the role resolved to a non-superadmin the gate returned early and
+    // ran none, and React tears the tree down with "rendered fewer hooks than
+    // expected". It only ever crashed for the users being denied, which is why
+    // it survived — a superadmin never takes this branch.
+    if (!roleLoading && !isSuperadmin) {
+        return (
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 max-w-4xl mx-auto">
+                <div className="text-center py-12">
+                    <div className="text-red-500 text-6xl mb-4">🚫</div>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                        Access Denied
+                    </h2>
+                    <p className="text-gray-600 dark:text-gray-400">
+                        Only superadmins can upload Bible versions to Convex.
+                    </p>
+                </div>
+            </div>
+        )
     }
 
     return (
