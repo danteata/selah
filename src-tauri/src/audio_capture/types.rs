@@ -298,6 +298,12 @@ impl HighpassFilter {
 /// frame the audio ends up in, so nothing downstream waits on it.
 const RESAMPLER_CHUNK_IN: usize = 1024;
 
+/// Cap on the zero-fed rounds [`AudioPreprocessor::flush`] uses to clock the
+/// resampler's delay line out. The tail is a few hundred samples at most, so
+/// this is only here so a resampler that never reaches the expected count
+/// cannot spin on the stop path.
+const MAX_FLUSH_ROUNDS: usize = 8;
+
 /// One capture stream's audio front end: downmix → band-limited resample to
 /// [`TARGET_SAMPLE_RATE`] → highpass → gain.
 ///
@@ -321,6 +327,14 @@ pub struct AudioPreprocessor {
     source_channels: u16,
     selected_channel: Option<u16>,
     resampler: Option<FftFixedIn<f32>>,
+    /// Kept for [`Self::flush`], which needs the in/out ratio to work out how
+    /// much real audio the resampler's delay line still owes us.
+    source_sample_rate: u32,
+    /// Source-rate samples handed to the resampler, against 16 kHz samples it
+    /// has given back. [`Self::flush`] compares the pair with `output_delay()`
+    /// to find the tail still inside the FFT delay line.
+    in_count: usize,
+    out_count: usize,
     /// Mono source-rate frames not yet handed to the resampler. It consumes a
     /// fixed block; capture callbacks deliver whatever the device felt like.
     pending: Vec<f32>,
@@ -377,6 +391,9 @@ impl AudioPreprocessor {
             source_channels,
             selected_channel,
             resampler,
+            source_sample_rate,
+            in_count: 0,
+            out_count: 0,
             pending: Vec::with_capacity(RESAMPLER_CHUNK_IN * 2),
             in_buf,
             out_buf,
@@ -402,12 +419,15 @@ impl AudioPreprocessor {
             in_buf,
             out_buf,
             warned,
+            in_count,
+            out_count,
             ..
         } = self;
 
         let mut out = match resampler.as_mut() {
             None => mono,
             Some(rs) => {
+                *in_count += mono.len();
                 pending.extend_from_slice(&mono);
                 let mut out = Vec::new();
                 loop {
@@ -420,7 +440,10 @@ impl AudioPreprocessor {
                     pending.drain(..need);
 
                     match rs.process_into_buffer(in_buf, out_buf, None) {
-                        Ok((_, written)) => out.extend_from_slice(&out_buf[0][..written]),
+                        Ok((_, written)) => {
+                            *out_count += written;
+                            out.extend_from_slice(&out_buf[0][..written]);
+                        }
                         Err(e) => {
                             if !*warned {
                                 *warned = true;
@@ -452,28 +475,79 @@ impl AudioPreprocessor {
         out
     }
 
-    /// Push the resampler's remaining buffered frames out at end of stream, so
-    /// an offline run does not silently lose its last block.
+    /// Push the resampler's remaining audio out at end of stream: first the
+    /// partial block still in `pending`, then the tail sitting in the FFT
+    /// delay line.
+    ///
+    /// Both halves are audio the microphone really captured, and both used to
+    /// be dropped. The delay line is the less obvious one: an FFT resampler's
+    /// output lags its input by `output_delay()` samples, so when a stream
+    /// stops, the last 10-20 ms at typical device rates has been consumed but
+    /// not yet emitted. Draining `pending` cannot recover it — and when the
+    /// capture happens to end on a block boundary `pending` is empty, which is
+    /// precisely when the old early-return meant *nothing* came out.
+    ///
+    /// Across a 90-minute service that tail is nothing. Across a push-to-talk
+    /// dictation or a voice search — which stop the stream once per utterance
+    /// — it is the end of the last word, and the last word is usually the one
+    /// that carried the reference.
     pub fn flush(&mut self) -> Vec<f32> {
         let Self {
             resampler,
             pending,
             out_buf,
+            source_sample_rate,
+            in_count,
+            out_count,
             ..
         } = self;
 
         let Some(rs) = resampler.as_mut() else {
+            // A 16 kHz source goes straight to the filter, so there is no
+            // block buffering and no delay line to drain.
             return Vec::new();
         };
-        if pending.is_empty() {
-            return Vec::new();
+
+        let mut out = Vec::new();
+
+        // 1. The partial block. `process_partial_into_buffer` takes a short
+        //    input as-is, so we never pad the audio itself with silence to
+        //    reach a full block.
+        if !pending.is_empty() {
+            let tail = std::mem::take(pending);
+            if let Ok((_, written)) = rs.process_partial_into_buffer(Some(&[tail]), out_buf, None) {
+                *out_count += written;
+                out.extend_from_slice(&out_buf[0][..written]);
+            }
         }
 
-        let tail = std::mem::take(pending);
-        let mut out = Vec::new();
-        if let Ok((_, written)) = rs.process_partial_into_buffer(Some(&[tail]), out_buf, None) {
-            out.extend_from_slice(&out_buf[0][..written]);
+        // 2. The delay line. Passing `None` clocks the resampler forward on
+        //    zeros; output up to `expected` is audio it already took in, and
+        //    everything past that is the zero-padding used to push it out, so
+        //    the final emit is trimmed instead of appended whole.
+        //
+        //    Skipped entirely when nothing was ever fed: draining then would
+        //    emit `output_delay()` samples of pure padding for a stream that
+        //    never delivered a callback.
+        if *in_count > 0 {
+            let expected = *in_count * TARGET_SAMPLE_RATE as usize
+                / *source_sample_rate as usize
+                + rs.output_delay();
+            for _ in 0..MAX_FLUSH_ROUNDS {
+                if *out_count >= expected {
+                    break;
+                }
+                match rs.process_partial_into_buffer::<&[f32], Vec<f32>>(None, out_buf, None) {
+                    Ok((_, written)) => {
+                        let take = (expected - *out_count).min(written);
+                        *out_count += take;
+                        out.extend_from_slice(&out_buf[0][..take]);
+                    }
+                    Err(_) => break,
+                }
+            }
         }
+
         self.highpass.process_slice(&mut out);
         out
     }
@@ -627,6 +701,66 @@ mod resampler_tests {
             "1 s of 48 kHz gave {} samples, expected ~{expected}",
             out.len()
         );
+    }
+
+    /// The audio a resampler is still holding when a capture stops is real
+    /// recorded audio, and a push-to-talk dictation ends on exactly that
+    /// boundary once per utterance.
+    ///
+    /// Both endings matter. Stopping mid-block leaves `pending` non-empty, and
+    /// that half always worked. Stopping *on* a block boundary leaves it
+    /// empty, which is the case the old early-return dropped whole — the
+    /// delay line went with it.
+    #[test]
+    fn flush_recovers_the_tail_the_resampler_still_holds() {
+        for (label, len) in [
+            ("block-aligned", 4 * super::RESAMPLER_CHUNK_IN),
+            ("mid-block", 4 * super::RESAMPLER_CHUNK_IN + 300),
+        ] {
+            // Silence, then a 1 kHz burst across the final 400 source samples
+            // (~8 ms at 48 kHz) — inside the delay line when the stream stops.
+            let mut input = vec![0.0f32; len];
+            let burst = 400;
+            for (i, sample) in input[len - burst..].iter_mut().enumerate() {
+                *sample =
+                    (2.0 * std::f32::consts::PI * 1_000.0 * i as f32 / 48_000.0).sin() * 0.5;
+            }
+
+            let mut pre = AudioPreprocessor::new(48_000, 1, None);
+            let live = pre.process(&input);
+            let flushed = pre.flush();
+            let peak = |v: &[f32]| v.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+
+            assert!(
+                !flushed.is_empty(),
+                "{label}: flush() gave nothing back, so the delay line was never drained"
+            );
+            assert!(
+                peak(&flushed) > 0.05,
+                "{label}: the flushed tail is silent (peak {}) — it is zero-padding, \
+                 not the burst that was recorded",
+                peak(&flushed)
+            );
+
+            // The whole point: what comes out has to account for what went in.
+            let total = live.len() + flushed.len();
+            let real = len * TARGET_SAMPLE_RATE as usize / 48_000;
+            assert!(
+                total >= real,
+                "{label}: {total} samples out for {real} samples of captured audio — \
+                 {} ms is still being lost",
+                (real - total) as f32 * 1000.0 / TARGET_SAMPLE_RATE as f32
+            );
+        }
+    }
+
+    /// A device that opened and never delivered a callback must flush to
+    /// nothing. Draining the delay line unconditionally would hand the VAD
+    /// `output_delay()` samples of invented silence.
+    #[test]
+    fn flush_emits_nothing_when_no_audio_was_ever_fed() {
+        let mut pre = AudioPreprocessor::new(48_000, 1, None);
+        assert!(pre.flush().is_empty());
     }
 
     /// Streaming in ragged callback-sized pieces must give the same audio as

@@ -189,9 +189,7 @@ fn build_stream<T>(
     device: &Device,
     config: &StreamConfig,
     convert: fn(T) -> f32,
-    source_sample_rate: u32,
-    source_channels: u16,
-    selected_channel: Option<u16>,
+    pre: Arc<Mutex<AudioPreprocessor>>,
     is_capturing: Arc<AtomicBool>,
     audio_buffer: Arc<Mutex<Vec<f32>>>,
     buffer_size: Arc<AtomicUsize>,
@@ -202,10 +200,6 @@ fn build_stream<T>(
 where
     T: cpal::SizedSample + Send + 'static,
 {
-    // Owned by the callback and carried across it: the resampler and the
-    // highpass both hold state that must not restart per chunk.
-    let mut pre = AudioPreprocessor::new(source_sample_rate, source_channels, selected_channel);
-
     device
         .build_input_stream(
             config,
@@ -219,7 +213,11 @@ where
                 // survived the resampler's block buffering.
                 saw_samples.store(true, Ordering::Relaxed);
                 let samples: Vec<f32> = data.iter().copied().map(convert).collect();
-                let processed = pre.process(&samples);
+                // Shared with the supervisor so the tail still inside the
+                // resampler can be flushed once the stream is down; see
+                // `start_microphone_capture`. One more uncontended lock on a
+                // thread that already takes `audio_buffer` below.
+                let processed = pre.lock().process(&samples);
                 let mut buf = audio_buffer.lock();
                 buf.extend_from_slice(&processed);
                 buffer_size.store(buf.len(), Ordering::SeqCst);
@@ -251,7 +249,7 @@ fn open_stream(
     fell_back_from: &Arc<Mutex<Option<String>>>,
     failure_message: &Arc<Mutex<String>>,
     saw_samples: &Arc<AtomicBool>,
-) -> Result<Stream, String> {
+) -> Result<(Stream, Arc<Mutex<AudioPreprocessor>>), String> {
     let resolved = resolve_device(device_name);
     if let Some(missing) = resolved.unavailable.as_deref() {
         *fell_back_from.lock() = Some(missing.to_string());
@@ -282,15 +280,21 @@ fn open_stream(
         None => println!("[audio] averaging all {} input channels", source_channels),
     }
 
+    // One per stream, and rebuilt with the stream: a different device or rate
+    // needs fresh resampler and highpass state, not the previous device's.
+    let pre = Arc::new(Mutex::new(AudioPreprocessor::new(
+        source_sample_rate,
+        source_channels,
+        selected_channel,
+    )));
+
     macro_rules! build {
         ($t:ty, $conv:expr) => {
             build_stream::<$t>(
                 &device,
                 &config,
                 $conv,
-                source_sample_rate,
-                source_channels,
-                selected_channel,
+                pre.clone(),
                 is_capturing.clone(),
                 audio_buffer.clone(),
                 buffer_size.clone(),
@@ -315,7 +319,7 @@ fn open_stream(
         .play()
         .map_err(|e| format!("Failed to start stream: {}", e))?;
 
-    Ok(stream)
+    Ok((stream, pre))
 }
 
 /// Start microphone capture in a background thread.
@@ -367,8 +371,8 @@ pub fn start_microphone_capture(
                 &saw_samples,
             );
 
-            let stream = match opened {
-                Ok(stream) => {
+            let (stream, pre) = match opened {
+                Ok((stream, pre)) => {
                     // Announce a confirmed fallback once, on the open that
                     // actually succeeded — the frontend clears the saved
                     // preference on this, and doing that before we know the
@@ -409,7 +413,7 @@ pub fn start_microphone_capture(
                             },
                         );
                     }
-                    stream
+                    (stream, pre)
                 }
                 Err(e) => {
                     eprintln!("[audio] {}", e);
@@ -451,6 +455,23 @@ pub fn start_microphone_capture(
             // Release the device before asking the host for it again — and
             // promptly on the stop path too.
             drop(stream);
+
+            // The stream is down, so cpal is done calling the callback and
+            // this is the only remaining holder: the resampler's last partial
+            // block and its delay line can come out safely. Without this the
+            // final 10-20 ms of every capture stays inside the resampler and
+            // is dropped with it — the end of the last word for a dictation
+            // or a voice search, which stop the stream once per utterance.
+            //
+            // Done on the rebuild path too, not just on stop: that audio was
+            // recorded before the device died and belongs ahead of the gap.
+            let tail = pre.lock().flush();
+            if !tail.is_empty() {
+                let mut buf = audio_buffer.lock();
+                buf.extend_from_slice(&tail);
+                buffer_size.store(buf.len(), Ordering::SeqCst);
+            }
+
             if !died {
                 break 'session;
             }
