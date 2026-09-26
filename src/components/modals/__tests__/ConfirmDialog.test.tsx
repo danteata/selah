@@ -69,6 +69,7 @@ describe('ConfirmDialog', () => {
         const { container } = render(<ConfirmDialog {...baseProps} onClose={onClose} />)
         const backdrop = container.querySelector('.bg-black\\/50')
         expect(backdrop).toBeTruthy()
+        fireEvent.mouseDown(backdrop!)
         fireEvent.click(backdrop!)
         expect(onClose).toHaveBeenCalledTimes(1)
     })

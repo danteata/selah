@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Modal } from './Modal'
 import { X, AlertTriangle, CheckCircle, Info } from 'lucide-react'
 
 export type ConfirmDialogType = 'info' | 'warning' | 'danger' | 'success'
@@ -26,50 +26,25 @@ export function ConfirmDialog({
     onCancel,
     onClose,
 }: ConfirmDialogProps) {
-    // Handle escape key
-    useEffect(() => {
-        const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                onCancel()
-            }
-        }
-
-        if (isOpen) {
-            document.addEventListener('keydown', handleEscape)
-            document.body.style.overflow = 'hidden'
-        }
-
-        return () => {
-            document.removeEventListener('keydown', handleEscape)
-            document.body.style.overflow = ''
-        }
-    }, [isOpen, onCancel])
-
-    if (!isOpen) return null
-
     const typeConfig = {
         info: {
             icon: Info,
-            iconColor: 'text-blue-500',
-            bgColor: 'bg-blue-50 dark:bg-blue-900/20',
+            iconColor: 'text-[var(--accent-teal)]',
             confirmButton: 'bg-[var(--accent-teal)] hover:brightness-110 transition-all shadow-sm',
         },
         warning: {
             icon: AlertTriangle,
-            iconColor: 'text-yellow-500',
-            bgColor: 'bg-yellow-50 dark:bg-yellow-900/20',
+            iconColor: 'text-[var(--accent-amber)]',
             confirmButton: 'bg-yellow-600 hover:bg-yellow-700',
         },
         danger: {
             icon: AlertTriangle,
-            iconColor: 'text-red-500',
-            bgColor: 'bg-red-50 dark:bg-red-900/20',
+            iconColor: 'text-[var(--accent-rose)]',
             confirmButton: 'bg-red-600 hover:bg-red-700',
         },
         success: {
             icon: CheckCircle,
-            iconColor: 'text-green-500',
-            bgColor: 'bg-green-50 dark:bg-green-900/20',
+            iconColor: 'text-[var(--accent-emerald)]',
             confirmButton: 'bg-green-600 hover:bg-green-700',
         },
     }
@@ -77,72 +52,58 @@ export function ConfirmDialog({
     const config = typeConfig[type]
     const Icon = config.icon
 
-    const handleBackdropClick = (e: React.MouseEvent) => {
-        if (e.target === e.currentTarget) {
-            // One or the other, matching `onClick={onClose || onCancel}` below.
-            // Written as `onClose?.() || onCancel()` this ran *both*: a void
-            // call returns undefined, so the fallback always evaluated too.
-            if (onClose) onClose()
-            else onCancel()
-        }
-    }
-
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={handleBackdropClick}
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose ?? onCancel}
+            role="alertdialog"
+            labelledBy="confirm-dialog-title"
+            describedBy="confirm-dialog-message"
+            className="w-full max-w-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
         >
-            <div
-                role="alertdialog"
-                aria-modal="true"
-                aria-labelledby="confirm-dialog-title"
-                aria-describedby="confirm-dialog-message"
-                className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
-            >
-                {/* Header */}
-                <div className={`flex items-center gap-3 p-4 ${config.bgColor}`}>
-                    <Icon className={`w-6 h-6 ${config.iconColor}`} />
-                    <h3 id="confirm-dialog-title" className="text-lg font-semibold text-gray-900 dark:text-white">
-                        {title}
-                    </h3>
-                    <button
-                        aria-label="Close"
-                        onClick={onClose || onCancel}
-                        className="ml-auto p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-black/5"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
-
-                {/* Content */}
-                <div className="p-4">
-                    <p id="confirm-dialog-message" className="text-gray-600 dark:text-gray-300">
-                        {message}
-                    </p>
-                </div>
-
-                {/* Actions */}
-                <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-800">
-                    {/* Focus moves into the dialog so Enter answers it — before, it
-                        re-pressed whatever button behind it had opened it. A
-                        destructive confirm starts on Cancel. */}
-                    <button
-                        autoFocus={type === 'danger'}
-                        onClick={onCancel}
-                        className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-                    >
-                        {cancelText}
-                    </button>
-                    <button
-                        autoFocus={type !== 'danger'}
-                        onClick={onConfirm}
-                        className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${config.confirmButton}`}
-                    >
-                        {confirmText}
-                    </button>
-                </div>
+            {/* Header */}
+            <div className="flex items-center gap-3 p-4 border-b border-[var(--border-subtle)]">
+                <Icon className={`w-6 h-6 ${config.iconColor}`} />
+                <h3 id="confirm-dialog-title" className="text-lg font-semibold text-[var(--text-primary)]">
+                    {title}
+                </h3>
+                <button
+                    aria-label="Close"
+                    onClick={onClose || onCancel}
+                    className="ml-auto p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
+                >
+                    <X className="w-5 h-5" />
+                </button>
             </div>
-        </div>
+
+            {/* Content */}
+            <div className="p-4">
+                <p id="confirm-dialog-message" className="text-[var(--text-secondary)]">
+                    {message}
+                </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-3 p-4 border-t border-[var(--border-subtle)]">
+                {/* Focus moves into the dialog so Enter answers it — before, it
+                    re-pressed whatever button behind it had opened it. A
+                    destructive confirm starts on Cancel. */}
+                <button
+                    autoFocus={type === 'danger'}
+                    onClick={onCancel}
+                    className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] bg-[var(--bg-tertiary)] rounded-lg hover:text-[var(--text-primary)] transition-colors"
+                >
+                    {cancelText}
+                </button>
+                <button
+                    autoFocus={type !== 'danger'}
+                    onClick={onConfirm}
+                    className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${config.confirmButton}`}
+                >
+                    {confirmText}
+                </button>
+            </div>
+        </Modal>
     )
 }
 

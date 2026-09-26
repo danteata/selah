@@ -13,6 +13,7 @@ import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from '../hooks/useLocalBackground'
 import type { MediaItem } from '../components/media/MediaPicker'
 import type { CountdownData } from '../components/countdown/AddCountdownModal'
+import { Modal } from '../components/modals/Modal'
 import { AppShell } from '../components/layout/AppShell'
 import { StudioWorkspace } from '../components/layout/StudioWorkspace'
 import { DashboardLayout } from '../components/dashboard'
@@ -624,105 +625,101 @@ export default function Dashboard() {
             <EmbeddingSyncIndicator />
 
             {/* Admin Panel Modal */}
-            {showAdminPanel && (
-                <div className="fixed inset-0 z-50 overflow-y-auto">
-                    <div className="flex min-h-full items-center justify-center p-4">
-                        <div
-                            className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
-                            onClick={() => setShowAdminPanel(false)}
-                        />
-                        <div className="relative bg-[var(--bg-secondary)] rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] overflow-hidden border border-[var(--border-default)]">
-                            {/* Header */}
-                            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
-                                <div className="flex items-center gap-3">
-                                    <Shield className="w-5 h-5 text-[var(--accent-indigo)]" />
-                                    <h2 className="text-lg font-semibold text-[var(--text-primary)]" style={{ fontFamily: "'Crimson Pro', Georgia, serif" }}>
-                                        Admin Panel
-                                    </h2>
-                                </div>
-                                <button
-                                    onClick={() => setShowAdminPanel(false)}
-                                    className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
-                                >
-                                    <X className="w-5 h-5" />
-                                </button>
-                            </div>
-
-                            {/* Tabs */}
-                            <div className="flex border-b border-[var(--border-subtle)]">
-                                <button
-                                    onClick={() => setAdminTab('bible')}
-                                    className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'bible'
-                                        ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                                        : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
-                                        }`}
-                                >
-                                    <Book className="w-4 h-4" />
-                                    Bible Versions
-                                </button>
-                                <button
-                                    onClick={() => setAdminTab('embeddings')}
-                                    className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'embeddings'
-                                        ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                                        : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
-                                        }`}
-                                >
-                                    <Database className="w-4 h-4" />
-                                    Verse Embeddings
-                                </button>
-                                <button
-                                    onClick={() => setAdminTab('sermon-settings')}
-                                    className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'sermon-settings'
-                                        ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                                        : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
-                                        }`}
-                                >
-                                    <Mic className="w-4 h-4" />
-                                    Sermon Settings
-                                </button>
-                                {isSuperadmin && (
-                                    <button
-                                        onClick={() => setAdminTab('promos')}
-                                        className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'promos'
-                                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                                            : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
-                                            }`}
-                                    >
-                                        <Ticket className="w-4 h-4" />
-                                        Promo Codes
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Content */}
-                            <div className="p-6 overflow-y-auto max-h-[calc(80vh-140px)]">
-                                {adminTab === 'bible' && (
-                                    <Suspense fallback={null}>
-                                        <BibleVersionUploader onClose={() => setShowAdminPanel(false)} />
-                                    </Suspense>
-                                )}
-                                {adminTab === 'embeddings' && (
-                                    <Suspense fallback={null}>
-                                        <VerseEmbeddingUploader onClose={() => setShowAdminPanel(false)} />
-                                    </Suspense>
-                                )}
-                                {adminTab === 'sermon-settings' && (
-                                    <Suspense fallback={null}>
-                                        <GlobalSermonListenerSettingsPanel
-                                            onClose={() => setShowAdminPanel(false)}
-                                        />
-                                    </Suspense>
-                                )}
-                                {adminTab === 'promos' && isSuperadmin && (
-                                    <Suspense fallback={null}>
-                                        <PromoCodeManager onClose={() => setShowAdminPanel(false)} />
-                                    </Suspense>
-                                )}
-                            </div>
-                        </div>
+            <Modal
+                isOpen={showAdminPanel}
+                onClose={() => setShowAdminPanel(false)}
+                labelledBy="admin-panel-title"
+                className="relative bg-[var(--bg-secondary)] rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] overflow-hidden border border-[var(--border-default)]"
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
+                    <div className="flex items-center gap-3">
+                        <Shield className="w-5 h-5 text-[var(--accent-indigo)]" />
+                        <h2 id="admin-panel-title" className="text-lg font-semibold text-[var(--text-primary)]" style={{ fontFamily: "'Crimson Pro', Georgia, serif" }}>
+                            Admin Panel
+                        </h2>
                     </div>
+                    <button
+                        onClick={() => setShowAdminPanel(false)}
+                        aria-label="Close"
+                        className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
                 </div>
-            )}
+
+                {/* Tabs */}
+                <div className="flex overflow-x-auto border-b border-[var(--border-subtle)]">
+                    <button
+                        onClick={() => setAdminTab('bible')}
+                        className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'bible'
+                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                            : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                            }`}
+                    >
+                        <Book className="w-4 h-4" />
+                        Bible Versions
+                    </button>
+                    <button
+                        onClick={() => setAdminTab('embeddings')}
+                        className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'embeddings'
+                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                            : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                            }`}
+                    >
+                        <Database className="w-4 h-4" />
+                        Verse Embeddings
+                    </button>
+                    <button
+                        onClick={() => setAdminTab('sermon-settings')}
+                        className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'sermon-settings'
+                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                            : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                            }`}
+                    >
+                        <Mic className="w-4 h-4" />
+                        Sermon Settings
+                    </button>
+                    {isSuperadmin && (
+                        <button
+                            onClick={() => setAdminTab('promos')}
+                            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'promos'
+                                ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
+                                : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                                }`}
+                        >
+                            <Ticket className="w-4 h-4" />
+                            Promo Codes
+                        </button>
+                    )}
+                </div>
+
+                {/* Content */}
+                <div className="p-6 overflow-y-auto max-h-[calc(80vh-140px)]">
+                    {adminTab === 'bible' && (
+                        <Suspense fallback={null}>
+                            <BibleVersionUploader onClose={() => setShowAdminPanel(false)} />
+                        </Suspense>
+                    )}
+                    {adminTab === 'embeddings' && (
+                        <Suspense fallback={null}>
+                            <VerseEmbeddingUploader onClose={() => setShowAdminPanel(false)} />
+                        </Suspense>
+                    )}
+                    {adminTab === 'sermon-settings' && (
+                        <Suspense fallback={null}>
+                            <GlobalSermonListenerSettingsPanel
+                                onClose={() => setShowAdminPanel(false)}
+                            />
+                        </Suspense>
+                    )}
+                    {adminTab === 'promos' && isSuperadmin && (
+                        <Suspense fallback={null}>
+                            <PromoCodeManager onClose={() => setShowAdminPanel(false)} />
+                        </Suspense>
+                    )}
+                </div>
+            </Modal>
         </AppShell>
     )
 }
