@@ -116,6 +116,13 @@ export class SpeechRecognitionService {
     private options: SpeechRecognitionOptions = {}
     private fullTranscript: string[] = []
     private restartAttempts = 0
+    // True from the first `start` of a session until it really ends. The
+    // browser ends and restarts recognition on its own (network blips, the
+    // ~30s silence cut-off, the zombie watchdog), and each of those used to
+    // reach the caller as a full stop then start: the listening indicator
+    // flickered, segment timestamps went back to zero, the start chime and
+    // analytics fired again, and the free tier's 40-minute cap re-armed.
+    private sessionActive = false
     private restartTimer: number | null = null
     private consecutiveRecoverableErrors = 0
     private lastResultTime = 0
@@ -138,6 +145,33 @@ export class SpeechRecognitionService {
     /**
      * Initialize the speech recognition instance
      */
+    /** The session is over for good: tell the caller, once. */
+    private endSession(): void {
+        if (!this.sessionActive) return
+        this.sessionActive = false
+        this.options.onEnd?.()
+    }
+
+    /**
+     * Abort an instance being replaced, with its handlers detached first. A
+     * late `onend` from a retired instance otherwise arrived after the new
+     * one had started, marked the session stopped, and scheduled a restart
+     * that aborted the working instance — which could repeat.
+     */
+    private retireRecognition(): void {
+        const old = this.recognition
+        if (!old) return
+        old.onstart = null
+        old.onend = null
+        old.onresult = null
+        old.onerror = null
+        try {
+            old.abort()
+        } catch {
+            // ignore — the instance may already be dead
+        }
+    }
+
     private initialize(): void {
         if (!this.isSupported()) {
             console.warn('Web Speech API is not supported in this browser')
@@ -164,16 +198,18 @@ export class SpeechRecognitionService {
             this.consecutiveRecoverableErrors = 0
             this.lastResultTime = Date.now()
             this.startWatchdog()
-            this.options.onStart?.()
+            // A restart of the same session is not news to the caller.
+            if (!this.sessionActive) {
+                this.sessionActive = true
+                this.options.onStart?.()
+            }
         }
 
         this.recognition.onend = () => {
             this.isListening = false
-            this.options.onEnd?.()
-
-            if (this.shouldBeListening) {
-                this.scheduleRestart('Recognition ended unexpectedly')
-            }
+            // Still wanted and a restart is on its way: carry on quietly.
+            if (this.shouldBeListening && this.scheduleRestart('Recognition ended unexpectedly')) return
+            this.endSession()
         }
 
         this.recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -341,7 +377,11 @@ export class SpeechRecognitionService {
         this.shouldBeListening = false
         this.clearRestartTimer()
         this.stopWatchdog()
-        if (!this.recognition || !this.isListening) return
+        // Stopped between restarts: no `onend` is coming, so end it here.
+        if (!this.recognition || !this.isListening) {
+            this.endSession()
+            return
+        }
 
         try {
             this.recognition.stop()
@@ -357,7 +397,10 @@ export class SpeechRecognitionService {
         this.shouldBeListening = false
         this.clearRestartTimer()
         this.stopWatchdog()
-        if (!this.recognition) return
+        if (!this.recognition) {
+            this.endSession()
+            return
+        }
 
         try {
             this.recognition.abort()
@@ -460,12 +503,7 @@ export class SpeechRecognitionService {
      */
     private forceRestartZombie(): void {
         this.clearRestartTimer()
-
-        try {
-            this.recognition?.abort()
-        } catch {
-            // ignore — instance may already be dead
-        }
+        this.retireRecognition()
 
         this.isListening = false
         this.initialize()
@@ -475,7 +513,7 @@ export class SpeechRecognitionService {
             this.recognition?.start()
         } catch (err) {
             console.error('[SpeechRecognition] Zombie restart failed:', err)
-            this.scheduleRestart('Zombie restart failed')
+            if (!this.scheduleRestart('Zombie restart failed')) this.endSession()
         }
     }
 
@@ -508,11 +546,7 @@ export class SpeechRecognitionService {
 
             // Recreate the recognition instance to avoid InvalidStateError
             // after Chrome stops the stream after extended use
-            try {
-                this.recognition?.abort()
-            } catch {
-                // ignore
-            }
+            this.retireRecognition()
             this.initialize()
             this.configure(this.options)
 
@@ -520,7 +554,7 @@ export class SpeechRecognitionService {
                 this.recognition?.start()
             } catch (err) {
                 console.warn('Failed to auto-restart speech recognition:', reason, err)
-                this.scheduleRestart('Auto-restart failed')
+                if (!this.scheduleRestart('Auto-restart failed')) this.endSession()
             }
         }, delayMs)
         return true

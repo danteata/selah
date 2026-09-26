@@ -98,11 +98,10 @@ function getWorker(): Worker {
 
     workerInstance.onerror = (err) => {
         console.error('[Embeddings] Worker error:', err)
-        // Reject all pending
-        for (const [, h] of pending) {
-            h.reject(new Error('Worker failed'))
-        }
-        pending.clear()
+        // Discard the broken worker (and its setup) so the next request builds
+        // a fresh one. Kept, one crash disabled semantic detection for the
+        // rest of the service: every later embed went to a dead worker.
+        disposeEmbedder()
     }
 
     return workerInstance
@@ -121,25 +120,49 @@ function ensureWorkerSetup(): Promise<void> {
         // Even on web we send a setup message so the worker isn't ambiguous
         // about which mode it's in. Null path => fall back to HF Hub.
         const id = ++nextRequestId
-        await new Promise<void>((resolve, reject) => {
+        await withTimeout(new Promise<void>((resolve, reject) => {
             pending.set(id, {
                 resolve: () => resolve(),
                 reject,
             })
             worker.postMessage({ id, setup: { localModelPath } })
-        })
+        }), id)
     })()
+    // A failed setup must not stay cached: that rejected every later embed.
+    setupPromise.catch(() => { setupPromise = null })
     return setupPromise
+}
+
+// Generous: the first request waits for the model to download and load.
+const WORKER_REQUEST_TIMEOUT_MS = 120_000
+
+/**
+ * Give up on a request the worker never answers, and replace the worker —
+ * it is presumed hung. Without this, a search whose reply never came left
+ * the semantic detector waiting for it forever.
+ */
+function withTimeout<T>(request: Promise<T>, id: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            if (!pending.has(id)) return
+            pending.delete(id)
+            console.warn('[Embeddings] Worker did not answer; restarting it')
+            disposeEmbedder()
+            reject(new Error('Embedding worker timed out'))
+        }, WORKER_REQUEST_TIMEOUT_MS)
+    })
+    return Promise.race([request, timeout]).finally(() => clearTimeout(timer))
 }
 
 function postToWorker(texts: string[]): Promise<WorkerSuccessResponse> {
     return ensureWorkerSetup().then(() => {
         const worker = getWorker()
         const id = ++nextRequestId
-        return new Promise((resolve, reject) => {
+        return withTimeout(new Promise<WorkerSuccessResponse>((resolve, reject) => {
             pending.set(id, { resolve, reject })
             worker.postMessage({ id, texts })
-        })
+        }), id)
     })
 }
 

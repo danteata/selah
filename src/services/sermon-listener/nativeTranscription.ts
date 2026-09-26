@@ -18,6 +18,9 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+
+// Consecutive failed segments before the operator is told transcription is failing.
+const NATIVE_FAILURES_BEFORE_ERROR = 3
 import { isDesktop } from '@/platform'
 import { useAppStore } from '../../store/appStore'
 import { DEFAULT_NATIVE_MODEL_ID } from './nativeModelManager'
@@ -70,6 +73,7 @@ class NativeTranscriptionService {
     private unlistenStream: UnlistenFn | null = null
     /** Terminal-marker listener; see `stop(waitForFinalMs)`. */
     private unlistenEos: UnlistenFn | null = null
+    private unlistenError: UnlistenFn | null = null
     /** Armed while draining, fired by the `end_of_stream` marker. */
     private eosResolve: (() => void) | null = null
     private isRunning = false
@@ -148,7 +152,13 @@ class NativeTranscriptionService {
             // entire reason `stop()` waits for `end_of_stream`. Gating finals
             // on `isRunning` dropped the last thing the operator said —
             // which, with push-to-talk, is usually most of the dictation.
+            // A segment the engine fails on is reported here. One can be a
+            // fluke; several in a row mean the engine is broken, and the
+            // operator needs to know rather than watch an empty transcript.
+            let consecutiveFailures = 0
+
             this.unlisten = await listen<TranscriptionResultEvent>('transcription-result', (event) => {
+                consecutiveFailures = 0
                 if (this.isBusy() && event.payload.text) {
                     const { text, segments } = event.payload
                     options.onResult(text, true, segments?.length ? segments : undefined)
@@ -176,6 +186,19 @@ class NativeTranscriptionService {
                 },
             )
 
+            this.unlistenError = await listen<string>('native-transcription-error', (event) => {
+                if (!this.isRunning) return
+                consecutiveFailures += 1
+                console.warn('[nativeWhisper] segment failed:', event.payload)
+                if (consecutiveFailures === NATIVE_FAILURES_BEFORE_ERROR) {
+                    // Stop capture ourselves: the caller treats onError as
+                    // the session ending, and would otherwise leave the
+                    // microphone running behind a stopped UI.
+                    const message = `Transcription is failing: ${event.payload}`
+                    void this.stop().catch(() => {}).finally(() => options.onError(message))
+                }
+            })
+
             await invoke('start_capture_with_vad', {
                 captureType: options.captureSource ?? 'microphone',
                 deviceName: options.microphoneDeviceId,
@@ -191,6 +214,8 @@ class NativeTranscriptionService {
             this.unlistenStream = null
             this.unlistenEos?.()
             this.unlistenEos = null
+            this.unlistenError?.()
+            this.unlistenError = null
             options.onError(err instanceof Error ? err.message : String(err))
             return false
         }
@@ -240,6 +265,10 @@ class NativeTranscriptionService {
             if (this.unlistenEos) {
                 this.unlistenEos()
                 this.unlistenEos = null
+            }
+            if (this.unlistenError) {
+                this.unlistenError()
+                this.unlistenError = null
             }
         } finally {
             // Cleared in `finally` on purpose: a throw anywhere above would

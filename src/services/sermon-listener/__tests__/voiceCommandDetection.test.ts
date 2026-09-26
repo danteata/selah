@@ -488,3 +488,27 @@ describe('voiceCommandDetection', () => {
         })
     })
 })
+
+describe('version switching covers every shipped version', () => {
+    const versionOf = (text: string) =>
+        detectVoiceCommands(text).find((c) => c.type === 'change_version')?.versionId
+
+    it.each([
+        ['switch to NASB', 'NASB'],
+        ['use TPT', 'TPT'],
+        ['switch to the new american standard bible', 'NASB'],
+        ['change to the passion translation', 'TPT'],
+    ])('"%s" → %s (the hand-written code list had fallen behind)', (text, id) => {
+        expect(versionOf(text)).toBe(id)
+    })
+
+    it.each([
+        ['switch to new king james version', 'NKJV'],
+        ['change to new american standard version', 'NASB'],
+        ['switch to the king james version', 'KJV'],
+    ])('"%s" → %s (the most specific name wins)', (text, id) => {
+        // Matched in list order by substring, the first two used to come
+        // out as KJV and ASV.
+        expect(versionOf(text)).toBe(id)
+    })
+})

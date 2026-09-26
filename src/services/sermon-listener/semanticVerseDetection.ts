@@ -81,19 +81,45 @@ function getTextWorker(): Worker {
     }
     textWorkerInstance.onerror = (err) => {
         console.error('[SemanticDetector] Text worker error:', err)
-        for (const [, h] of textWorkerPending) {
-            h.reject(new Error('Worker failed'))
-        }
-        textWorkerPending.clear()
+        discardTextWorker('Worker failed')
     }
     return textWorkerInstance
 }
+
+/**
+ * Drop the text worker so the next request makes a new one. It used to be
+ * kept after an error, so every later request went to a dead worker and
+ * semantic detection was off for the rest of the service.
+ */
+function discardTextWorker(reason: string) {
+    try {
+        textWorkerInstance?.terminate()
+    } catch {
+        /* best-effort */
+    }
+    textWorkerInstance = null
+    for (const [, h] of textWorkerPending) {
+        h.reject(new Error(reason))
+    }
+    textWorkerPending.clear()
+}
+
+// Text preparation is quick; a request unanswered this long means the worker hung.
+const TEXT_WORKER_TIMEOUT_MS = 15_000
 
 function postToTextWorker(text: string, excludedRanges: ExcludedRange[]): Promise<WorkerPrepareSuccess> {
     const worker = getTextWorker()
     const id = ++textWorkerNextId
     return new Promise((resolve, reject) => {
-        textWorkerPending.set(id, { resolve, reject })
+        const timer = setTimeout(() => {
+            if (!textWorkerPending.has(id)) return
+            console.warn('[SemanticDetector] Text worker did not answer; restarting it')
+            discardTextWorker('Text worker timed out')
+        }, TEXT_WORKER_TIMEOUT_MS)
+        textWorkerPending.set(id, {
+            resolve: (v) => { clearTimeout(timer); resolve(v) },
+            reject: (e) => { clearTimeout(timer); reject(e) },
+        })
         worker.postMessage({ id, text, excludedRanges } satisfies WorkerPrepareRequest)
     })
 }
@@ -410,8 +436,14 @@ export class SemanticVerseDetector {
         const searchText = this.textBuffer.slice(-MAX_TEXT_LENGTH)
 
         this.pendingSearch = this.performSegmentedSearch(searchText, excludedRanges, onUpgrade)
-        const results = await this.pendingSearch
-        this.pendingSearch = null
+        let results: SemanticVerseMatch[]
+        try {
+            results = await this.pendingSearch
+        } finally {
+            // Always released: a search that threw used to leave this set,
+            // and every later chunk was skipped as "search pending".
+            this.pendingSearch = null
+        }
 
         if (results.length > 0 || this.textBuffer.length > MAX_TEXT_LENGTH * 2) {
             this.textBuffer = ''

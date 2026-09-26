@@ -30,15 +30,15 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 
 ## 3. Sermon listener over a long service
 
-- ⬜ The audio level re-renders the whole studio ~60 times a second.
-- ⬜ Each utterance reprocesses the entire transcript (grows with the sermon).
-- ⬜ Settings changed mid-service are ignored until Stop/Start.
-- ⬜ Chrome's automatic speech restarts are treated as stop/start: timestamps
+- ✅ The audio level re-renders the whole studio ~60 times a second.
+- ✅ Each utterance reprocesses the entire transcript (grows with the sermon).
+- ✅ Settings changed mid-service are ignored until Stop/Start.
+- ✅ Chrome's automatic speech restarts are treated as stop/start: timestamps
   reset and the free-tier 40-minute cap re-arms.
-- ⬜ Stop pressed during "Starting…" is ignored.
-- ⬜ A verse-search worker failure disables semantic detection for the rest of
+- ✅ Stop pressed during "Starting…" is ignored.
+- ✅ A verse-search worker failure disables semantic detection for the rest of
   the service; native transcription errors never reach the UI.
-- ⬜ Voice commands miss NASB/TPT/YBCV, and "new king james" resolves to KJV.
+- ✅ Voice commands miss NASB/TPT/YBCV, and "new king james" resolves to KJV.
 
 ## 4. Live output polish
 

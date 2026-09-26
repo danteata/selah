@@ -61,6 +61,8 @@ import { extractVersesWithLLM } from '../services/sermon-listener/llmVerseExtrac
 import { isLlmConfigured } from '../services/sermon-listener/llmClient'
 import { startKeepAwake, stopKeepAwake, setupVisibilityKeepAwake } from '../services/sermon-listener/keepAwake'
 import { getNextChapter, getPreviousChapter } from '../utils/bibleReference'
+import { audioLevel } from '../services/sermon-listener/audioLevel'
+import { cleanIncrementally, createCleanCache } from '../services/sermon-listener/incrementalClean'
 import {
     getLiveSermonState,
     saveLiveSermonState,
@@ -209,7 +211,6 @@ export interface SermonListenerState {
     /** Whether speech is currently being detected (audio activity) */
     isSpeechDetected: boolean
     /** Real-time audio level (0-1) for waveform visualization */
-    audioLevel: number
     /** Active Bible version for lookups (tracks voice command changes) */
     activeBibleVersion: string
     /** Last detected voice command */
@@ -356,7 +357,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [isSpeechDetected, setIsSpeechDetected] = useState(false)
 
     // Real-time audio level (0-1) for waveform visualization
-    const [audioLevel, setAudioLevel] = useState(0)
     const [captureSource, setCaptureSource] = useState<'microphone' | 'system' | null>(null)
     const audioAnalyserRef = useRef<AnalyserNode | null>(null)
     const audioContextRef = useRef<AudioContext | null>(null)
@@ -475,6 +475,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Debounce timer for interim transcript processing
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const cleanCacheRef = useRef(createCleanCache())
     // `stop` reads this rather than the state: its identity only changes with
     // `provider`, so the captured value was the mount-time `false` forever —
     // the stop chime never played and the stop was never recorded.
@@ -592,7 +593,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // capture speaker output.
             if (isDesktop() && (provider === 'native' || userCaptureSource === 'system')) {
                 setCaptureSource(userCaptureSource === 'system' ? 'system' : 'microphone')
-                const unlisten = await startNativeAudioFeatures((rms) => setAudioLevel(rms))
+                const unlisten = await startNativeAudioFeatures((rms) => audioLevel.set(rms))
                 if (isStale()) {
                     unlisten()
                     return
@@ -703,7 +704,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 const sum = dataArray.reduce((a, b) => a + b, 0)
                 const avg = sum / dataArray.length
                 const level = Math.min(avg / 128, 1)
-                setAudioLevel(level)
+                audioLevel.set(level)
                 // Feed the audio-reactive visualizer from the unsmoothed tap on
                 // the same stream, so we don't open a second audio stream
                 // (Phase 4) but also don't inherit the meter's smoothing.
@@ -736,7 +737,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             audioStreamRef.current.getTracks().forEach(t => t.stop())
             audioStreamRef.current = null
         }
-        setAudioLevel(0)
+        audioLevel.set(0)
         setCaptureSource(null)
     }, [])
 
@@ -1833,37 +1834,47 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             }
         }
 
-        // Strip voice commands from transcript before running verse detection
-        const commandsForStripping = enableVoiceCommands ? detectVoiceCommands(text) : []
-        let cleanText = commandsForStripping.length > 0
-            ? stripCommandsFromTranscript(text, commandsForStripping)
-            : text
+        // Clean before detection: voice commands stripped, then
+        // raw → hallucination → filler → custom-words (each layer assumes a
+        // clean input from the previous one — see fillerFilter.ts). Only the
+        // text added since the last committed transcript is cleaned; see
+        // incrementalClean.ts for why re-cleaning it all was O(n²).
+        const cleanForDetection = (input: string) => {
+            const commandsForStripping = enableVoiceCommands ? detectVoiceCommands(input) : []
+            let cleaned = commandsForStripping.length > 0
+                ? stripCommandsFromTranscript(input, commandsForStripping)
+                : input
 
-        // Filter hallucination patterns before verse detection
-        const hallucinationResult = filterHallucinations(cleanText)
-        if (hallucinationResult.hadHallucination) {
-            console.log('[SermonListener] Filtered hallucination:', {
-                repetitionsRemoved: hallucinationResult.repetitionsRemoved,
-                fillersRemoved: hallucinationResult.fillersRemoved,
-                profanityRemoved: hallucinationResult.profanityRemoved,
-                confidence: hallucinationResult.confidence,
+            const hallucinationResult = filterHallucinations(cleaned)
+            if (hallucinationResult.hadHallucination) {
+                console.log('[SermonListener] Filtered hallucination:', {
+                    repetitionsRemoved: hallucinationResult.repetitionsRemoved,
+                    fillersRemoved: hallucinationResult.fillersRemoved,
+                    profanityRemoved: hallucinationResult.profanityRemoved,
+                    confidence: hallucinationResult.confidence,
+                })
+                cleaned = hallucinationResult.cleanedText
+            }
+
+            // Filler/stutter removal is language-aware; custom-word correction
+            // fixes distinctive proper nouns Whisper mangles (e.g.
+            // "Nebuchadnezzar"). Safe profile for an always-on vocabulary:
+            // single-token matching only (no n-gram word-eating) and no
+            // phonetic boost (no cross-word collisions). The length pre-filter
+            // + tight Levenshtein threshold keep it from touching short words.
+            cleaned = filterFillers(cleaned, { lang: language })
+            return applyCustomWords(cleaned, [...SERMON_PROPER_NOUNS], 0.25, {
+                maxNgram: 1,
+                usePhonetic: false,
             })
-            cleanText = hallucinationResult.cleanedText
         }
-
-        // Post-process in the order: raw → hallucination → filler → custom-words
-        // (each layer assumes a clean input from the previous one — see fillerFilter.ts).
-        // Filler/stutter removal is language-aware; custom-word correction fixes
-        // distinctive proper nouns Whisper mangles (e.g. "Nebuchadnezzar").
-        cleanText = filterFillers(cleanText, { lang: language })
-        // Safe profile for an always-on vocabulary: single-token matching only
-        // (no n-gram word-eating) and no phonetic boost (no cross-word
-        // collisions). The length pre-filter + tight Levenshtein threshold keep
-        // it from touching short common words.
-        cleanText = applyCustomWords(cleanText, [...SERMON_PROPER_NOUNS], 0.25, {
-            maxNgram: 1,
-            usePhonetic: false,
-        })
+        const cleanText = cleanIncrementally(
+            text,
+            cleanForDetection,
+            cleanCacheRef.current,
+            `${enableVoiceCommands}:${language}`,
+            text === transcriptBufferRef.current.trim(),
+        )
 
         const regexDetectionIdAtStart = regexVerseDetectionRef.current
         const inVersionSwitchCooldown = Date.now() < versionSwitchCooldownUntilRef.current
@@ -2551,7 +2562,16 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     setIsSemanticSearching(false)
                 })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, projectScriptureSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, recordAnnouncedVerse, applyBibleVersionChange, scheduleLlmExtraction])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, projectScriptureSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, recordAnnouncedVerse, applyBibleVersionChange, scheduleLlmExtraction, language])
+
+    // The transcription callbacks are handed to the provider once, at start.
+    // Calling processTranscript through this ref means a setting changed
+    // mid-service (auto-display, confidence, voice commands, language) takes
+    // effect on the next utterance instead of at the next Stop/Start.
+    const processTranscriptRef = useRef(processTranscript)
+    useEffect(() => {
+        processTranscriptRef.current = processTranscript
+    }, [processTranscript])
 
     /**
      * Set transcription provider
@@ -2775,7 +2795,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // Skip transcript append for duplicates, but still process commands in the chunk.
                     if (isDuplicateText(cleanedText)) {
                         console.log('[useSermonListener] Skipping duplicate text:', cleanedText.substring(0, 50))
-                        processTranscript(transcriptBufferRef.current, cleanedText)
+                        processTranscriptRef.current(transcriptBufferRef.current, cleanedText)
                         return
                     }
 
@@ -2852,7 +2872,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         }
 
                         const newFullTranscript = `${transcriptBufferRef.current}`.trim()
-                        processTranscript(newFullTranscript, cleanedText)
+                        processTranscriptRef.current(newFullTranscript, cleanedText)
                         chunkStartTimeRef.current = 0
                         // Debounced transcript event — fire only on final results so
                         // we don't flood Amplitude with interim chunks.
@@ -2876,7 +2896,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             clearTimeout(interimDebounceRef.current)
                         }
                         interimDebounceRef.current = setTimeout(() => {
-                            processTranscript(rollingContext, cleanedText)
+                            processTranscriptRef.current(rollingContext, cleanedText)
                             interimDebounceRef.current = null
                         }, INTERIM_DEBOUNCE_MS)
                     }
@@ -2928,12 +2948,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         language,
         onError,
         onTranscriptUpdate,
-        processTranscript,
         cleanRepeatedPhrases,
         isDuplicateText,
         stripOverlap,
         appendToTranscriptBuffer,
-        provider,
         sermonSettings?.captureSource,
         sermonSettings?.selectedMicrophoneId,
         sermonSettings?.inputChannel,
@@ -3205,7 +3223,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         semanticDetectorReady,
         isSemanticSearching,
         isSpeechDetected,
-        audioLevel,
         captureSource,
         activeBibleVersion,
         lastVoiceCommand,

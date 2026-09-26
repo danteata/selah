@@ -33,6 +33,7 @@ import {
 } from '../../services/sermon-listener/sessionRecordings'
 import { writeSessionSidecar } from '../../services/sermon-listener/devAccuracyReport'
 import { DevAccuracyPanel } from './DevAccuracyPanel'
+import { useAudioLevel } from '../../services/sermon-listener/audioLevel'
 
 interface SermonListenerPanelProps {
     autoDisplay?: boolean
@@ -41,6 +42,32 @@ interface SermonListenerPanelProps {
     onVerseDetected?: (verse: DetectedVerse, scripture: Scripture | null) => void
     compact?: boolean
     onHide?: () => void
+}
+
+/**
+ * The level bars. Its own component, reading the level from outside React
+ * state, so a frame's new level re-renders these eight bars and nothing else.
+ */
+function AudioLevelMeter({ isSpeechDetected }: { isSpeechDetected: boolean }) {
+    const level = useAudioLevel()
+    const active = isSpeechDetected || level > 0.02
+    return (
+        <div className={`flex items-end justify-center gap-[2px] h-6 min-w-[48px] ${active ? 'opacity-100' : 'opacity-35'} transition-opacity duration-200`}>
+            {[4, 7, 5, 9, 6, 8, 5, 7].map((weight, i) => {
+                const minH = 3
+                const maxH = 22
+                const scaled = Math.min(level * weight * 0.7, 1)
+                const h = minH + scaled * (maxH - minH)
+                return (
+                    <div
+                        key={i}
+                        className={`w-[3px] rounded-full transition-[height] duration-75 ${active ? 'bg-gradient-to-t from-emerald-600 via-emerald-400 to-cyan-300 shadow-[0_0_6px_rgba(16,185,129,0.6)]' : 'bg-gray-400 dark:bg-gray-500'}`}
+                        style={{ height: `${h}px` }}
+                    />
+                )
+            })}
+        </div>
+    )
 }
 
 export function SermonListenerPanel(props: SermonListenerPanelProps) {
@@ -133,7 +160,6 @@ function SermonListenerPanelInner({
         error,
         provider,
         isSpeechDetected,
-        audioLevel,
         captureSource,
         isInitializingProvider,
         providerReady,
@@ -488,23 +514,7 @@ function SermonListenerPanelInner({
                 </div>
 
                 {/* Live audio level — driven by the real signal for mic and system */}
-                {isListening && (
-                    <div className={`flex items-end justify-center gap-[2px] h-6 min-w-[48px] ${(isSpeechDetected || audioLevel > 0.02) ? 'opacity-100' : 'opacity-35'} transition-opacity duration-200`}>
-                        {[4, 7, 5, 9, 6, 8, 5, 7].map((weight, i) => {
-                            const minH = 3
-                            const maxH = 22
-                            const scaled = Math.min(audioLevel * weight * 0.7, 1)
-                            const h = minH + scaled * (maxH - minH)
-                            return (
-                                <div
-                                    key={i}
-                                    className={`w-[3px] rounded-full transition-[height] duration-75 ${(isSpeechDetected || audioLevel > 0.02) ? 'bg-gradient-to-t from-emerald-600 via-emerald-400 to-cyan-300 shadow-[0_0_6px_rgba(16,185,129,0.6)]' : 'bg-gray-400 dark:bg-gray-500'}`}
-                                    style={{ height: `${h}px` }}
-                                />
-                            )
-                        })}
-                    </div>
-                )}
+                {isListening && <AudioLevelMeter isSpeechDetected={isSpeechDetected} />}
 
                 <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium truncate text-gray-700 dark:text-gray-300">

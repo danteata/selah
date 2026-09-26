@@ -74,6 +74,10 @@ export interface TranscriptionStatus {
 class UnifiedTranscriptionService {
     private currentProvider: TranscriptionProvider = 'web-speech'
     private isListening = false
+    // Stop pressed while a start is still in flight (the native model can take
+    // seconds to load). stop() used to return early because nothing was
+    // listening yet; the start then finished and the session went live anyway.
+    private stopRequested = false
     private isReady = false
     private isLoading = false
     private error: string | null = null
@@ -154,6 +158,7 @@ class UnifiedTranscriptionService {
         this.error = null
         this.options.onStatusChange?.(this.getStatus())
 
+        this.stopRequested = false
         try {
             if (this.currentProvider === 'web-speech') {
                 return await this.startWebSpeech()
@@ -178,6 +183,12 @@ class UnifiedTranscriptionService {
             continuous: this.options.continuous ?? true,
             interimResults: this.options.interimResults ?? true,
             onStart: () => {
+                // Stopped before recognition came up: don't go live.
+                if (this.stopRequested) {
+                    this.stopRequested = false
+                    speechRecognitionService.stop()
+                    return
+                }
                 this.isListening = true
                 this.options.onStart?.()
                 this.options.onStatusChange?.(this.getStatus())
@@ -237,6 +248,12 @@ class UnifiedTranscriptionService {
             return false
         }
 
+        if (this.stopRequested) {
+            this.stopRequested = false
+            await nativeTranscriptionService.stop()
+            return false
+        }
+
         this.isListening = true
         this.options.onStart?.()
         this.options.onStatusChange?.(this.getStatus())
@@ -247,7 +264,12 @@ class UnifiedTranscriptionService {
      * Stop transcription
      */
     async stop(): Promise<void> {
-        if (!this.isListening) return
+        if (!this.isListening) {
+            // Remembered even after start() has returned: web speech's
+            // onstart can still be on its way. start() clears it.
+            this.stopRequested = true
+            return
+        }
 
         if (this.currentProvider === 'web-speech') {
             speechRecognitionService.stop()

@@ -888,7 +888,15 @@ fn handle_speech_segment(
                             );
                         }
                     }
-                    Err(e) => eprintln!("[native-transcription] {}", e),
+                    Err(e) => {
+                        // Printed to stderr alone, a failing engine was
+                        // invisible: capture (and its audio-features
+                        // heartbeat) carried on, so the operator saw
+                        // "Listening" and an empty transcript. The frontend
+                        // turns repeated failures into a visible error.
+                        tracing::error!("[native-transcription] {}", e);
+                        let _ = app.emit("native-transcription-error", e.to_string());
+                    }
                 }
                 return;
             }

@@ -317,4 +317,28 @@ describe('nativeTranscriptionService', () => {
         expect(invokeMock).toHaveBeenCalledWith('stop_capture')
         expect(unlistenMock).toHaveBeenCalled()
     })
+
+    it('reports repeated engine failures — and stops capture — instead of listening in silence', async () => {
+        invokeMock.mockImplementation((cmd: string) =>
+            Promise.resolve(cmd === 'get_loaded_native_model' ? null : undefined))
+        const onError = vi.fn()
+        await nativeTranscriptionService.start({ language: 'en-US', onResult: vi.fn(), onError })
+
+        const handlerFor = (name: string) =>
+            listenMock.mock.calls.find(([event]) => event === name)?.[1] as (e: { payload: unknown }) => void
+        const failed = handlerFor('native-transcription-error')
+        const result = handlerFor('transcription-result')
+
+        failed({ payload: 'decode failed' })
+        failed({ payload: 'decode failed' })
+        // A success in between resets the count: two failures are a fluke.
+        result({ payload: { text: 'amen' } })
+        failed({ payload: 'decode failed' })
+        failed({ payload: 'decode failed' })
+        expect(onError).not.toHaveBeenCalled()
+
+        failed({ payload: 'decode failed' })
+        await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('Transcription is failing: decode failed'))
+        expect(invokeMock).toHaveBeenCalledWith('stop_capture')
+    })
 })

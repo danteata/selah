@@ -16,28 +16,48 @@ export interface VoiceCommand {
     verse?: number
 }
 
-const AVAILABLE_VERSIONS: Array<{ id: string; names: string[] }> = (() => {
-    const allVersions = bibleVersionObjects as BibleVersion[]
-    return allVersions.map(v => {
-        const id = v.id.toUpperCase()
-        const fullName = v.name.toLowerCase()
-        const names = [id, fullName]
+// Spoken names for each version, beyond its code and full name.
+const VERSION_ALIASES: Record<string, string[]> = {
+    KJV: ['king james', 'king james version', 'authorized', 'authorized version'],
+    NKJV: ['new king james', 'new king james version'],
+    NIV: ['new international', 'new international version'],
+    NLT: ['new living translation', 'new living'],
+    ASV: ['american standard', 'american standard version'],
+    AMP: ['amplified', 'amplified bible', 'amplified version'],
+    CEV: ['contemporary english', 'contemporary english version'],
+    MSG: ['the message', 'message'],
+    YLT: ["young's literal", 'young literal'],
+    WEB: ['world english', 'world english bible'],
+    NASB: ['new american standard', 'new american standard bible', 'new american standard version'],
+    TPT: ['passion translation', 'the passion translation', 'the passion'],
+    YBCV: ['yoruba', 'yoruba bible', 'bibeli mimo'],
+}
 
-        if (id === 'KJV') names.push('king james', 'king james version', 'authorized', 'authorized version')
-        else if (id === 'NKJV') names.push('new king james', 'new king james version')
-        else if (id === 'NIV') names.push('new international', 'new international version')
-        else if (id === 'NLT') names.push('new living translation', 'new living')
-        else if (id === 'ESV') names.push('english standard', 'english standard version')
-        else if (id === 'ASV') names.push('american standard', 'american standard version')
-        else if (id === 'AMP') names.push('amplified', 'amplified bible', 'amplified version')
-        else if (id === 'CEV') names.push('contemporary english', 'contemporary english version')
-        else if (id === 'MSG') names.push('the message', 'message')
-        else if (id === 'YLT') names.push("young's literal", 'young literal')
-        else if (id === 'WEB') names.push('world english', 'world english bible')
+const SHIPPED_VERSIONS = (bibleVersionObjects as BibleVersion[]).filter((v) => /^[A-Z0-9]+$/.test(v.id))
 
-        return { id: v.id, names }
-    })
-})()
+function escapeRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Every shipped version's code, as one alternation. Built from the version
+ * list rather than written out: the hand-written one had fallen behind it, so
+ * "switch to NASB" or "use TPT" matched nothing.
+ */
+const VERSION_CODE_ALT = SHIPPED_VERSIONS.map((v) => v.id)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join('|')
+
+/**
+ * (phrase, version) pairs, longest phrase first. Matched in that order on word
+ * boundaries: in list order by substring, "new king james" hit KJV's "king
+ * james" first, and "new american standard" came out as the ASV.
+ */
+const VERSION_PHRASES: Array<{ text: string; phrase: RegExp; id: string }> = SHIPPED_VERSIONS
+    .flatMap((v) => [v.name.toLowerCase(), ...(VERSION_ALIASES[v.id] ?? [])].map((phrase) => ({ phrase, id: v.id })))
+    .sort((a, b) => b.phrase.length - a.phrase.length)
+    .map(({ phrase, id }) => ({ text: phrase, phrase: new RegExp(`(?:^|[^\\p{L}])${escapeRegExp(phrase)}(?:$|[^\\p{L}])`, 'u'), id }))
 
 // "WEB" (World English Bible) and "AMP" (Amplified) are ordinary English
 // words too ("the web", "turn up the amp") — matching them bare is a
@@ -46,24 +66,21 @@ const AVAILABLE_VERSIONS: Array<{ id: string; names: string[] }> = (() => {
 const AMBIGUOUS_VERSION_CODES = new Set(['WEB', 'AMP'])
 const BIBLE_CONTEXT_RE = /\b(bible|version|translation|scripture)\b/i
 
-function findVersionMatch(text: string): { id: string; name: string } | null {
-    const lower = text.toLowerCase()
+function versionById(id: string): { id: string; name: string } | null {
+    const version = SHIPPED_VERSIONS.find((v) => v.id === id.toUpperCase())
+    return version ? { id: version.id, name: version.name } : null
+}
 
-    const exactRegex = /\b(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i
-    const exactMatch = exactRegex.exec(text)
+function findVersionMatch(text: string): { id: string; name: string } | null {
+    const exactMatch = new RegExp(`\\b(${VERSION_CODE_ALT})\\b`, 'i').exec(text)
     if (exactMatch) {
-        const id = exactMatch[1].toUpperCase()
-        const version = (bibleVersionObjects as BibleVersion[]).find(v => v.id === id)
-        if (version) return { id: version.id, name: version.name }
+        const version = versionById(exactMatch[1])
+        if (version) return version
     }
 
-    for (const v of AVAILABLE_VERSIONS) {
-        for (const name of v.names) {
-            if (lower.includes(name)) {
-                const version = (bibleVersionObjects as BibleVersion[]).find(bv => bv.id === v.id)
-                if (version) return { id: version.id, name: version.name }
-            }
-        }
+    const lower = text.toLowerCase()
+    for (const { phrase, id } of VERSION_PHRASES) {
+        if (phrase.test(lower)) return versionById(id)
     }
 
     return null
@@ -103,10 +120,10 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
 
     if (commands.length === 0) {
         const standalonePatterns = [
-            /(?:let'?s? |let us |we should |can you |please )?(?:use|switch to|change to|go to|turn to|read from|pull up|bring up|open) (?:the )?(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i,
-            /(?:read|show|display) (?:that |it |this )?(?:in|from|using|with) (?:the )?(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i,
-            /(?:give me|get me|i want|i need|i'd like|load|make it|set (?:it )?to) (?:the )?(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i,
-            /(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b\s*(?:please|now|if you will|if you would)/i,
+            new RegExp(`(?:let'?s? |let us |we should |can you |please )?(?:use|switch to|change to|go to|turn to|read from|pull up|bring up|open) (?:the )?(${VERSION_CODE_ALT})\\b`, 'i'),
+            new RegExp(`(?:read|show|display) (?:that |it |this )?(?:in|from|using|with) (?:the )?(${VERSION_CODE_ALT})\\b`, 'i'),
+            new RegExp(`(?:give me|get me|i want|i need|i'd like|load|make it|set (?:it )?to) (?:the )?(${VERSION_CODE_ALT})\\b`, 'i'),
+            new RegExp(`(${VERSION_CODE_ALT})\\b\\s*(?:please|now|if you will|if you would)`, 'i'),
         ]
 
         for (const pattern of standalonePatterns) {
@@ -154,28 +171,23 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
         // and one of these words (e.g. "he wants to read the message on the
         // wall", "we should use the amplified version of grace").
         if (BIBLE_CONTEXT_RE.test(lower)) {
-            for (const v of AVAILABLE_VERSIONS) {
-                for (const name of v.names) {
-                    if (name.length >= 3 && lower.includes(name)) {
-                        const beforeText = lower.substring(0, lower.indexOf(name))
-                        const actionWords = ['switch', 'change', 'use', 'go', 'turn', 'read', 'show', 'display', 'look', 'give me', 'get me', 'pull up', 'bring up', 'open', 'see', 'try', 'need', 'want', 'like', 'make it', 'set to', 'please']
-                        const hasActionContext = actionWords.some(w => beforeText.includes(w))
-                        if (hasActionContext) {
-                            const version = (bibleVersionObjects as BibleVersion[]).find(bv => bv.id === v.id)
-                            if (version) {
-                                commands.push({
-                                    type: 'change_version',
-                                    raw: text.substring(lower.indexOf(name), lower.indexOf(name) + name.length),
-                                    confidence: 'medium',
-                                    versionId: version.id,
-                                    versionName: version.name,
-                                })
-                                break
-                            }
-                        }
-                    }
+            for (const { text: name, phrase, id } of VERSION_PHRASES) {
+                if (name.length < 3 || !phrase.test(lower)) continue
+                const at = lower.indexOf(name)
+                const beforeText = lower.substring(0, at)
+                const actionWords = ['switch', 'change', 'use', 'go', 'turn', 'read', 'show', 'display', 'look', 'give me', 'get me', 'pull up', 'bring up', 'open', 'see', 'try', 'need', 'want', 'like', 'make it', 'set to', 'please']
+                if (!actionWords.some(w => beforeText.includes(w))) continue
+                const version = versionById(id)
+                if (version) {
+                    commands.push({
+                        type: 'change_version',
+                        raw: text.substring(at, at + name.length),
+                        confidence: 'medium',
+                        versionId: version.id,
+                        versionName: version.name,
+                    })
+                    break
                 }
-                if (commands.length > 0) break
             }
         }
     }
@@ -707,7 +719,7 @@ const COMMAND_KEYWORDS = [
 function hasCommandIntent(text: string): boolean {
     const lower = text.toLowerCase()
     return COMMAND_KEYWORDS.some(k => lower.includes(k)) ||
-        /\b(KJV|NKJV|NIV|NLT|ESV|ASV|AMP|CEV|MSG|YLT|WEB)\b/i.test(text)
+        new RegExp(`\\b(${VERSION_CODE_ALT})\\b`, 'i').test(text)
 }
 
 export interface DetectVoiceCommandsOptions {
