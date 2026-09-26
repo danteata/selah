@@ -70,12 +70,8 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 
 ## 7. Engineering hygiene
 
-- ✅ Clear the lint backlog. ⏭️ Gating CI on lint: one error is left, in
-  `src/components/countdown/AddCountdownModal.tsx` (the effect that fills
-  the form from the slide being edited, `react-hooks/set-state-in-effect`).
-  The automated pass couldn't open that file, so it was left alone. Once
-  that's fixed, add `bun run lint` to the verify job in
-  `.github/workflows/fly-deploy.yml`.
+- ✅ Clear the lint backlog (zero errors), and CI now runs eslint in the
+  deploy's verify job.
 - ✅ `convex-test` coverage for the backend authorization rules and the
   Paystack webhook (`convex/security.test.ts`, `convex/billing.test.ts`,
   run by `bun run test:convex` and in CI).
