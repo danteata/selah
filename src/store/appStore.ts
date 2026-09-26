@@ -298,6 +298,20 @@ function pushHistory(state: Pick<AppState, 'pastStates' | 'activeSlides' | 'live
     return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** `saved` over `defaults`, recursing into plain objects; arrays and values replace. */
+export function mergeWithDefaults<T>(defaults: T, saved: unknown): T {
+    if (!isPlainObject(defaults) || !isPlainObject(saved)) return (saved === undefined ? defaults : saved) as T
+    const merged: Record<string, unknown> = { ...defaults }
+    for (const [key, value] of Object.entries(saved)) {
+        merged[key] = key in defaults ? mergeWithDefaults((defaults as Record<string, unknown>)[key], value) : value
+    }
+    return merged as T
+}
+
 function ensureUniqueIds(arr: Slide[]): Slide[] {
     const seenIds = new Set<string>()
     return arr.filter((obj) => {
@@ -1434,13 +1448,36 @@ export const useAppStore = create<AppStore>()(
         {
             name: 'app-storage',
             storage: createJSONStorage(() => localStorage),
+            version: 1,
+            migrate: (persisted, version) => {
+                const state = (persisted ?? {}) as Record<string, unknown>
+                // v0 persisted the shipped Bible version list.
+                if (version < 1) delete state.bibleVersions
+                return state as Partial<AppState>
+            },
+            // Persisted values over the current defaults, nested objects
+            // included. The default shallow merge replaced `settings` and
+            // `alternateOutput` wholesale, so a setting added in a later release
+            // was simply missing (undefined) on every existing install.
+            merge: (persisted, current) => {
+                const saved = (persisted ?? {}) as Partial<AppState>
+                return {
+                    ...current,
+                    ...saved,
+                    bibleVersions: current.bibleVersions,
+                    settings: mergeWithDefaults(current.settings, saved.settings),
+                    alternateOutput: mergeWithDefaults(current.alternateOutput, saved.alternateOutput),
+                    songTracking: mergeWithDefaults(current.songTracking, saved.songTracking),
+                }
+            },
             partialize: (state) => ({
                 settings: state.settings,
                 schedules: state.schedules,
                 activeSchedule: state.activeSchedule,
                 recentBibleSearches: state.recentBibleSearches,
                 bannerVisible: state.bannerVisible,
-                bibleVersions: state.bibleVersions,
+                // Not bibleVersions: it's the list the app ships, and persisting it
+                // froze it — installs never saw versions added in later releases.
                 // Persist studio layout preferences
                 contextPanelOpen: state.contextPanelOpen,
                 contextPanelWidth: state.contextPanelWidth,

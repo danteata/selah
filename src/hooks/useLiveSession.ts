@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { toast } from 'sonner'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import type { Id } from '../../convex/_generated/dataModel'
@@ -151,6 +152,25 @@ function syncQueueFromServer(params: {
 const pendingQueue = { ids: [] as string[] }
 
 const EMPTY_SLIDES: Slide[] = []
+
+// One toast per message in this window: a flaky connection makes every sync
+// fail at once, and a wall of identical toasts would bury the studio.
+const SESSION_ERROR_TOAST_WINDOW_MS = 8000
+const lastSessionErrorAt = new Map<string, number>()
+
+/**
+ * A live-session action that failed. These were console-only, so a slide
+ * sent live, a blank, or a handover that never reached the team looked like it
+ * had worked.
+ */
+function reportSessionError(message: string, err?: unknown) {
+    console.error(`[useLiveSession] ${message}:`, err)
+    const now = Date.now()
+    if (now - (lastSessionErrorAt.get(message) ?? 0) < SESSION_ERROR_TOAST_WINDOW_MS) return
+    lastSessionErrorAt.set(message, now)
+    const reason = err instanceof Error ? err.message.match(/Uncaught Error:\s*(.+?)(?:\n|\s+at |$)/)?.[1] : undefined
+    toast.error(message, reason ? { description: reason } : undefined)
+}
 
 interface UseLiveSessionReturn {
     sessionId: Id<"liveSessions"> | null
@@ -483,7 +503,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             })
             return newSessionId
         } catch (err) {
-            console.error('[useLiveSession] Failed to start session:', err)
+            reportSessionError("Couldn't start the live session", err)
             return null
         } finally {
             setIsStarting(false)
@@ -507,7 +527,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             setSessionRole('contributor')
             sessionStartTimeRef.current = null
         } catch (err) {
-            console.error('[useLiveSession] Failed to end session:', err)
+            reportSessionError("Couldn't end the live session", err)
         }
     }, [resolvedSessionId, endSessionMutation, trackEvent, collaborationMode])
 
@@ -524,7 +544,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             })
             return true
         } catch (err) {
-            console.error('[useLiveSession] Failed to join session:', err)
+            reportSessionError("Couldn't join the live session", err)
             return false
         }
     }, [isConvexConnected, isOffline, joinSessionMutation, trackEvent])
@@ -537,7 +557,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             setSessionId(null)
             setSessionRole('contributor')
         } catch (err) {
-            console.error('[useLiveSession] Failed to leave session:', err)
+            reportSessionError("Couldn't leave the live session", err)
         }
     }, [resolvedSessionId, leaveSessionMutation])
 
@@ -577,7 +597,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                 const serverSlideId = liveSession?.liveSlideId || ''
                 setLiveSlideStore(serverSlideId)
                 previousLiveSlideRef.current = serverSlideId || null
-                console.error('[useLiveSession] Failed to set live slide:', err)
+                reportSessionError("Couldn't send that slide live for the team", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, collaborationMode, liveSession?.collaborationMode, liveSession?.liveSlideId, resolvedActiveSession?.collaborationMode, sessionScheduleId, upsertScheduleSlideMutation, setLiveSlideMutation, setLiveSlideStore])
@@ -596,7 +616,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
 
         // Shared session exists but connection is unavailable: avoid fake local-only sync.
         if (!isSharedSessionConnected) {
-            console.warn('[useLiveSession] Shared session queue update skipped: not connected')
+            reportSessionError("Not connected to the live session — that suggestion wasn't sent")
             return
         }
 
@@ -632,7 +652,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                             slide: toSyncableSlide(slide, 0),
                         })
                     } catch (err) {
-                        console.error('[useLiveSession] Failed to upsert slide content:', err)
+                        reportSessionError("Couldn't share that slide with the team", err)
                     }
                 }
             }
@@ -650,7 +670,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                 })
                 console.log('[useLiveSession] open-mode add to operator deck: success')
             } catch (err) {
-                console.error('[useLiveSession] Failed to add to operator deck:', err)
+                reportSessionError("Couldn't add that slide to the operator's deck", err)
             }
             return
         }
@@ -666,7 +686,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         } catch (err) {
             pendingQueue.ids = removeByOccurrence(pendingQueue.ids, slideIds)
             useAppStore.getState().removeSharedQueueSlideIds(slideIds)
-            console.error('[useLiveSession] Failed to add to queue:', err)
+            reportSessionError("Couldn't suggest that slide", err)
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, addToQueueMutation, addToOperatorDeckMutation, isOpenMode, setLiveOutputSlidesId, sessionScheduleId, upsertScheduleSlideMutation])
 
@@ -680,7 +700,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                 await removeFromQueueMutation({ sessionId: resolvedSessionId, slideIds })
             } catch (err) {
                 useAppStore.getState().setSharedQueueSlideIds(prevQueue)
-                console.error('[useLiveSession] Failed to remove from queue:', err)
+                reportSessionError("Couldn't remove that suggestion", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, removeFromQueueMutation])
@@ -694,7 +714,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                     slide_count: orderedSlideIds.length,
                 })
             } catch (err) {
-                console.error('[useLiveSession] Failed to reorder queue:', err)
+                reportSessionError("Couldn't reorder the suggestions", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, reorderQueueMutation, trackEvent])
@@ -708,7 +728,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                     slide_count: slideIds.length,
                 })
             } catch (err) {
-                console.error('[useLiveSession] Failed to sync operator slides:', err)
+                reportSessionError("Couldn't share the slide order with the team", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation, trackEvent])
@@ -722,7 +742,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                 slide: toSyncableSlide(slide, 0),
             })
         } catch (err) {
-            console.error('[useLiveSession] Failed to sync slide content:', err)
+            reportSessionError("Couldn't share that slide change with the team", err)
         }
     }, [sessionScheduleId, isConvexConnected, isOffline, upsertScheduleSlideMutation])
 
@@ -736,7 +756,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             } catch (err) {
                 const addLocally = useAppStore.getState().addSharedQueueSlideIds
                 addLocally(slideIds)
-                console.error('[useLiveSession] Failed to accept from queue:', err)
+                reportSessionError("Couldn't accept that suggestion", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, acceptFromQueueMutation])
@@ -746,7 +766,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             try {
                 await toggleBlankMutation({ sessionId: resolvedSessionId, isBlank })
             } catch (err) {
-                console.error('[useLiveSession] Failed to toggle blank:', err)
+                reportSessionError("Couldn't clear the screen for the team", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, toggleBlankMutation])
@@ -763,7 +783,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             try {
                 await setOverlayMutation({ sessionId: resolvedSessionId, overlay, alertId })
             } catch (err) {
-                console.error('[useLiveSession] Failed to set overlay:', err)
+                reportSessionError("Couldn't show that overlay for the team", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, setOverlayMutation, setActiveOverlay, trackEvent])
@@ -773,7 +793,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             try {
                 await transferOperatorMutation({ sessionId: resolvedSessionId, newOperatorId: newOperatorId as Id<"users"> })
             } catch (err) {
-                console.error('[useLiveSession] Failed to transfer operator:', err)
+                reportSessionError("Couldn't hand over control", err)
             }
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, transferOperatorMutation])
@@ -790,7 +810,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             await updateCollaborationModeMutation({ sessionId: resolvedSessionId, collaborationMode: mode })
             setCollaborationMode(mode)
         } catch (err) {
-            console.error('[useLiveSession] Failed to update collaboration mode:', err)
+            reportSessionError("Couldn't change the collaboration mode", err)
         }
     }, [resolvedSessionId, isConvexConnected, isOffline, sessionRole, updateCollaborationModeMutation])
 
@@ -809,7 +829,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                         lastSyncedSlidesRef.current = slidesKey
                     })
                     .catch((err: unknown) => {
-                        console.error('[useLiveSession] Failed to sync operator slides:', err)
+                        reportSessionError("Couldn't share the slide order with the team", err)
                     })
             }
         }, 500)
@@ -836,7 +856,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                     slideBaselineRef.current = next
                 })
                 .catch((err: unknown) => {
-                    console.error('[useLiveSession] Failed to sync schedule slides:', err)
+                    reportSessionError("Couldn't share your slide changes with the team", err)
                 })
         }, 750)
 
@@ -856,7 +876,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                 if (sessionRole !== 'operator') {
                     addToQueueMutation({ sessionId: resolvedSessionId, slideIds: pendingIds })
                         .catch(err => {
-                            console.error('[useLiveSession] Failed to replay pending queue on reconnect:', err)
+                            reportSessionError("Couldn't resend your suggestions after reconnecting", err)
                         })
                 }
             }

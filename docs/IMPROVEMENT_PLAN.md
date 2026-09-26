@@ -62,11 +62,11 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 
 ## 6. Data-layer leftovers
 
-- ⬜ Templates deleted elsewhere come back from the local cache.
-- ⬜ The saved-slide library has three independent copies; last write wins.
-- ⬜ The persisted store has no version/migration; new Bible versions never
+- ✅ Templates deleted elsewhere come back from the local cache.
+- ✅ The saved-slide library has three independent copies; last write wins.
+- ✅ The persisted store has no version/migration; new Bible versions never
   appear for existing installs.
-- ⬜ Live-session mutation failures are only logged.
+- ✅ Live-session mutation failures are only logged.
 
 ## 7. Engineering hygiene
 

@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
+import { toast } from 'sonner'
 import { useAppStore } from '../store/appStore'
 import type { Slide } from '../types'
 
@@ -9,80 +10,102 @@ interface LibrarySlide extends Slide {
 
 const LIBRARY_STORAGE_KEY = 'selah_library_slides'
 
-export function useLibrary() {
-    const [librarySlides, setLibrarySlides] = useState<LibrarySlide[]>(() => {
-        try {
-            const stored = localStorage.getItem(LIBRARY_STORAGE_KEY)
-            return stored ? JSON.parse(stored) : []
-        } catch {
-            return []
-        }
-    })
+/**
+ * The saved-slide library, held once for the whole app.
+ *
+ * It used to be `useState` in each of the three components that show it, each
+ * seeded from localStorage and each persisting its own full copy — so saving a
+ * slide from the preview was undone the next time the library panel wrote its
+ * stale list, and the last writer won. Now there is one list; every component
+ * reads it, and a change in another tab arrives through the `storage` event.
+ */
+function readStoredLibrary(): LibrarySlide[] {
+    try {
+        const stored = localStorage.getItem(LIBRARY_STORAGE_KEY)
+        const parsed = stored ? JSON.parse(stored) : []
+        return Array.isArray(parsed) ? parsed : []
+    } catch {
+        return []
+    }
+}
 
-    const activeSlides = useAppStore((state) => state.activeSlides)
+let library: LibrarySlide[] = readStoredLibrary()
+const listeners = new Set<() => void>()
+
+function commit(next: LibrarySlide[]) {
+    library = next
+    try {
+        localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(next))
+    } catch (error) {
+        // Usually the quota: slides can carry image backgrounds as data URLs.
+        // This used to be a console message only, so the slide looked saved
+        // and was gone after a reload.
+        console.error('Failed to save library to localStorage:', error)
+        toast.error("Couldn't save the library on this device — it's full. Remove some saved slides and try again.")
+    }
+    listeners.forEach((listener) => listener())
+}
+
+function subscribe(listener: () => void) {
+    listeners.add(listener)
+    const onStorage = (event: StorageEvent) => {
+        if (event.key !== LIBRARY_STORAGE_KEY) return
+        library = readStoredLibrary()
+        listener()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => {
+        listeners.delete(listener)
+        window.removeEventListener('storage', onStorage)
+    }
+}
+
+const getLibrary = () => library
+
+function newLibraryId() {
+    return `lib_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+}
+
+export function useLibrary() {
+    const librarySlides = useSyncExternalStore(subscribe, getLibrary, getLibrary)
+
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const appendActiveSlides = useAppStore((state) => state.appendActiveSlides)
-
-    // Save to localStorage
-    const persistLibrary = useCallback((slides: LibrarySlide[]) => {
-        try {
-            localStorage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(slides))
-        } catch (error) {
-            console.error('Failed to save library to localStorage:', error)
-        }
-    }, [])
 
     // Add slide to library
     const addToLibrary = useCallback((slide: Slide, category?: LibrarySlide['category']) => {
         const librarySlide: LibrarySlide = {
             ...slide,
-            id: `lib_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            id: newLibraryId(),
             savedAt: new Date().toISOString(),
             category: category || inferCategory(slide),
             saved: true,
         }
-
-        setLibrarySlides((prev) => {
-            const updated = [...prev, librarySlide]
-            persistLibrary(updated)
-            return updated
-        })
-
+        commit([...library, librarySlide])
         return librarySlide
-    }, [persistLibrary])
+    }, [])
 
     // Add multiple slides to library
     const addSlidesToLibrary = useCallback((slides: Slide[], category?: LibrarySlide['category']) => {
-        const librarySlides: LibrarySlide[] = slides.map((slide) => ({
+        const added: LibrarySlide[] = slides.map((slide) => ({
             ...slide,
-            id: `lib_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            id: newLibraryId(),
             savedAt: new Date().toISOString(),
             category: category || inferCategory(slide),
             saved: true,
         }))
-
-        setLibrarySlides((prev) => {
-            const updated = [...prev, ...librarySlides]
-            persistLibrary(updated)
-            return updated
-        })
-
-        return librarySlides
-    }, [persistLibrary])
+        commit([...library, ...added])
+        return added
+    }, [])
 
     // Remove slide from library
     const removeFromLibrary = useCallback((slideId: string) => {
-        setLibrarySlides((prev) => {
-            const updated = prev.filter((s) => s.id !== slideId)
-            persistLibrary(updated)
-            return updated
-        })
-    }, [persistLibrary])
+        commit(library.filter((s) => s.id !== slideId))
+    }, [])
 
     // Clear all library slides
     const clearLibrary = useCallback(() => {
-        setLibrarySlides([])
-        localStorage.removeItem(LIBRARY_STORAGE_KEY)
+        commit([])
     }, [])
 
     // Add a library slide to the active slides.
@@ -128,14 +151,8 @@ export function useLibrary() {
 
     // Update library slide
     const updateLibrarySlide = useCallback((slideId: string, updates: Partial<LibrarySlide>) => {
-        setLibrarySlides((prev) => {
-            const updated = prev.map((s) =>
-                s.id === slideId ? { ...s, ...updates } : s
-            )
-            persistLibrary(updated)
-            return updated
-        })
-    }, [persistLibrary])
+        commit(library.map((s) => (s.id === slideId ? { ...s, ...updates } : s)))
+    }, [])
 
     // Check if slide is in library
     const isInLibrary = useCallback((slideId: string) => {

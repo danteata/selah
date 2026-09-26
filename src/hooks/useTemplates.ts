@@ -369,6 +369,76 @@ export function useFileUrl(storageId: string | null) {
     return getCachedSignedUrl(storageId) ?? templateObjectUrls.get(storageId) ?? null
 }
 
+let templateSync: Promise<number> | null = null
+
+/**
+ * Upload templates created offline and changes made offline, oldest first.
+ * One pass at a time across the app — useTemplates has many instances, and
+ * each running its own pass would create every template several times.
+ */
+function syncOfflineTemplates(server: {
+    create: (template: {
+        name: string
+        description?: string
+        slideId: string
+        category: TemplateCategory
+        appliesTo?: SlideType[]
+        thumbnail?: string
+        backgroundStorageId?: string
+    }) => Promise<string>
+    update: (templateId: string, updates: {
+        name?: string
+        description?: string
+        slideId?: string
+        category?: TemplateCategory
+        appliesTo?: SlideType[]
+        thumbnail?: string
+        backgroundStorageId?: string
+    }) => Promise<unknown>
+}): Promise<number> {
+    if (templateSync) return templateSync
+    templateSync = (async () => {
+        let synced = 0
+        try {
+            const pending = (await getLocalTemplates())
+                .filter((t) => t.synced === false)
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+            for (const t of pending) {
+                const fields = {
+                    name: t.name,
+                    description: t.description,
+                    slideId: t.slideId,
+                    category: t.category as TemplateCategory,
+                    appliesTo: t.appliesTo as SlideType[] | undefined,
+                    thumbnail: t.thumbnail,
+                    backgroundStorageId: t.backgroundStorageId,
+                }
+                try {
+                    if (t.id.startsWith('local_')) {
+                        const serverId = await server.create(fields)
+                        await deleteLocalTemplateFromDB(t.id)
+                        await saveLocalTemplate({ ...t, id: serverId, createdBy: undefined, synced: true })
+                    } else {
+                        await server.update(t.id, fields)
+                        await updateLocalTemplateFromDB(t.id, { synced: true })
+                    }
+                    synced++
+                } catch (err) {
+                    // Refused (e.g. deleted elsewhere): the server's view wins.
+                    console.warn('[useTemplates] offline template change not synced:', t.id, err)
+                    if (!t.id.startsWith('local_')) await deleteLocalTemplateFromDB(t.id).catch(() => {})
+                }
+            }
+        } catch (err) {
+            console.warn('[useTemplates] offline template sync skipped:', err)
+        } finally {
+            templateSync = null
+        }
+        return synced
+    })()
+    return templateSync
+}
+
 export function useTemplates(): UseTemplatesReturn {
     const { isOffline } = useConvexConnection()
     const templates = useQuery(api.templates.getTemplates)
@@ -392,6 +462,18 @@ export function useTemplates(): UseTemplatesReturn {
         setLocalTemplates(locals)
     }, [])
 
+    // Send what was made or changed offline once the server is reachable.
+    // Templates created offline were never uploaded at all before.
+    useEffect(() => {
+        if (isOffline) return
+        void syncOfflineTemplates({
+            create: (template) => createTemplateMutation(template),
+            update: (templateId, updates) => updateTemplateMutation({ templateId, updates }),
+        }).then((synced) => {
+            if (synced > 0) void refreshLocalTemplates()
+        })
+    }, [isOffline, createTemplateMutation, updateTemplateMutation, refreshLocalTemplates])
+
     const effectiveTemplates: TemplateItem[] | undefined = useMemo(() => {
         const localList = localTemplates.map(localTemplateToTemplateItem)
         const serverList = (templates || []) as TemplateItem[]
@@ -399,21 +481,21 @@ export function useTemplates(): UseTemplatesReturn {
         // Preserve loading state when online and templates haven't loaded yet
         if (!isOffline && templates === undefined) return undefined
 
+        // Offline, the cache is all there is.
+        if (isOffline) return localList
+
+        // Online, the server's list is the truth, and a cached copy only
+        // adds to it or overrides it while it holds a change the server
+        // doesn't have yet (`synced: false`). Merging every cached copy
+        // brought back templates deleted on other devices, forever — and a
+        // failed update, stamped newer than the server, overrode it for good.
         const map = new Map<string, TemplateItem>()
         for (const t of serverList) {
             map.set(t._id, t)
         }
-        for (const t of localList) {
-            const existing = map.get(t._id)
-            if (!existing) {
-                map.set(t._id, t)
-            } else {
-                const localTime = new Date(t.updatedAt || 0).getTime()
-                const serverTime = new Date(existing.updatedAt || 0).getTime()
-                if (localTime > serverTime) {
-                    map.set(t._id, t)
-                }
-            }
+        for (const local of localTemplates) {
+            if (local.synced !== false) continue
+            map.set(local.id, localTemplateToTemplateItem(local))
         }
         return Array.from(map.values())
     }, [isOffline, templates, localTemplates])
@@ -530,17 +612,24 @@ export function useTemplates(): UseTemplatesReturn {
                 : t
         ))
 
-        // Persist to IndexedDB so the optimistic cache survives reloads
-        await updateLocalTemplateFromDB(templateId, {
-            name: updates.name,
-            description: updates.description,
-            slideId: typeof slideSnapshot === 'string' ? slideSnapshot : slideSnapshot ? JSON.stringify(slideSnapshot) : undefined,
-            category: updates.category,
-            appliesTo,
-            thumbnail: updates.thumbnail,
-            backgroundStorageId: updates.backgroundStorageId,
-        })
-        await refreshLocalTemplates()
+        // Persist to IndexedDB so the optimistic cache survives reloads —
+        // marked unsynced until the server has it. Best-effort: without
+        // IndexedDB (private mode) this threw before the server was ever told.
+        try {
+            await updateLocalTemplateFromDB(templateId, {
+                name: updates.name,
+                description: updates.description,
+                slideId: typeof slideSnapshot === 'string' ? slideSnapshot : slideSnapshot ? JSON.stringify(slideSnapshot) : undefined,
+                category: updates.category,
+                appliesTo,
+                thumbnail: updates.thumbnail,
+                backgroundStorageId: updates.backgroundStorageId,
+                synced: false,
+            })
+            await refreshLocalTemplates()
+        } catch (err) {
+            console.warn('[useTemplates] local template cache not updated:', err)
+        }
 
         if (isOffline || isLocal) {
             return templateId
@@ -550,14 +639,24 @@ export function useTemplates(): UseTemplatesReturn {
         // snapshot rather than taken from the `...updates` spread, and only
         // when the caller actually supplied one — spreading an explicit
         // `slideId: undefined` is not the same as omitting the field.
-        await updateTemplateMutation({
-            templateId,
-            updates: {
-                ...updates,
-                ...(slideSnapshot !== undefined ? { slideId: slideSnapshot } : {}),
-                ...(updates.appliesTo !== undefined ? { appliesTo } : {}),
-            },
-        })
+        try {
+            await updateTemplateMutation({
+                templateId,
+                updates: {
+                    ...updates,
+                    ...(slideSnapshot !== undefined ? { slideId: slideSnapshot } : {}),
+                    ...(updates.appliesTo !== undefined ? { appliesTo } : {}),
+                },
+            })
+        } catch (err) {
+            // The server refused: drop the optimistic copy so its version
+            // shows again, rather than a local edit that never happened.
+            await deleteLocalTemplateFromDB(templateId).catch(() => {})
+            await refreshLocalTemplates().catch(() => {})
+            throw err
+        }
+        await updateLocalTemplateFromDB(templateId, { synced: true }).catch(() => {})
+        await refreshLocalTemplates().catch(() => {})
         return templateId
     }
 
@@ -566,7 +665,9 @@ export function useTemplates(): UseTemplatesReturn {
         await deleteLocalTemplateFromDB(templateId)
         await refreshLocalTemplates()
 
-        if (isOffline && templateId.startsWith('local_')) {
+        // Never reached the server, so there's nothing there to delete — and
+        // asking it to delete an id it has never seen threw.
+        if (templateId.startsWith('local_')) {
             return true
         }
 

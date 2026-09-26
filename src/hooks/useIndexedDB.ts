@@ -487,8 +487,11 @@ export async function deleteLocalTemplate(id: string): Promise<void> {
 
 export async function updateLocalTemplate(id: string, updates: Partial<LocalTemplate>): Promise<void> {
     const db = getIndexedDB()
+    // Dexie deletes a field given as `undefined`, so a partial update ("just
+    // the name") used to wipe slideId and category from the cached copy.
+    const defined = Object.fromEntries(Object.entries(updates).filter(([, value]) => value !== undefined))
     await db.localTemplates.update(id, {
-        ...updates,
+        ...defined,
         updatedAt: new Date().toISOString(),
     })
 }
