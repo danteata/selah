@@ -178,6 +178,18 @@ describe('AddCountdownModal', () => {
         expect(screen.getByDisplayValue('Service starts')).toBeInTheDocument()
     })
 
+    it('refills the form when a different slide is opened', () => {
+        const { rerender } = render(<AddCountdownModal {...baseProps} editingSlide={editingSlide} />)
+        const other: Slide = { ...editingSlide, id: 'countdown-2', contents: ['Prayer', '02:15'] }
+        rerender(<AddCountdownModal {...baseProps} editingSlide={other} />)
+        expect(screen.getByDisplayValue('Prayer')).toBeInTheDocument()
+        const minutesInput = screen.getByText('Minutes').closest('.text-center')!.querySelector('input')!
+        expect(minutesInput).toHaveValue(2)
+
+        rerender(<AddCountdownModal {...baseProps} editingSlide={null} />)
+        expect(minutesInput).toHaveValue(5)
+    })
+
     it('calls onAdd with existing id when editing', () => {
         render(<AddCountdownModal {...baseProps} editingSlide={editingSlide} />)
         fireEvent.click(screen.getByText('UPDATE'))

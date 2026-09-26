@@ -1,2 +1,2 @@
-export { AddCountdownModal, CountdownDisplay } from './AddCountdownModal'
+export { AddCountdownModal } from './AddCountdownModal'
 export type { CountdownData } from './AddCountdownModal'

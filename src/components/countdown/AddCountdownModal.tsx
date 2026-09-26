@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
-import { X, Clock, Plus, Play, Pause, RotateCcw } from 'lucide-react'
+import { useState } from 'react'
+import { X, Clock, Plus } from 'lucide-react'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 import type { Slide } from '../../types'
-import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { Modal } from '../modals/Modal'
 
 interface AddCountdownModalProps {
     isOpen?: boolean
@@ -30,51 +30,56 @@ const DEFAULT_BG: BackgroundSelection = {
     backgroundType: 'gradient',
 }
 
-export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide, isInline = false }: AddCountdownModalProps) {
-    const backdropDismiss = useBackdropDismiss(onClose)
-    const [hours, setHours] = useState(0)
-    const [minutes, setMinutes] = useState(5)
-    const [seconds, setSeconds] = useState(0)
-    const [title, setTitle] = useState('')
-    const [selectedBg, setSelectedBg] = useState<BackgroundSelection>(DEFAULT_BG)
+interface CountdownForm {
+    hours: number
+    minutes: number
+    seconds: number
+    title: string
+    background: BackgroundSelection
+}
 
-    // Pre-populate form when editing an existing slide
-    useEffect(() => {
-        if (editingSlide && editingSlide.type === 'countdown') {
-            // Parse time from contents[1] (format: "HH:MM:SS" or "MM:SS")
-            const timeStr = editingSlide.contents?.[1] || '00:05:00'
-            const parts = timeStr.split(':').map(Number)
-            if (parts.length === 3) {
-                setHours(parts[0] || 0)
-                setMinutes(parts[1] || 0)
-                setSeconds(parts[2] || 0)
-            } else if (parts.length === 2) {
-                setHours(0)
-                setMinutes(parts[0] || 0)
-                setSeconds(parts[1] || 0)
+const NEW_COUNTDOWN: CountdownForm = { hours: 0, minutes: 5, seconds: 0, title: '', background: DEFAULT_BG }
+
+/** The form for a slide being edited, or a fresh one. */
+function formFromSlide(slide: Slide | null | undefined): CountdownForm {
+    if (!slide || slide.type !== 'countdown') return NEW_COUNTDOWN
+    // contents[1] is "HH:MM:SS" or "MM:SS"; contents[0] is the title as HTML.
+    const parts = (slide.contents?.[1] || '00:05:00').split(':').map(Number)
+    const [hours, minutes, seconds] =
+        parts.length === 3 ? parts : parts.length === 2 ? [0, ...parts] : [0, 5, 0]
+    return {
+        hours: hours || 0,
+        minutes: minutes || 0,
+        seconds: seconds || 0,
+        title: (slide.contents?.[0] || '').replace(/<[^>]*>/g, '').trim(),
+        background: slide.background
+            ? {
+                background: slide.background,
+                backgroundType: slide.backgroundType || 'gradient',
+                backgroundStorageId: slide.backgroundStorageId,
+                localFilePath: slide.localFilePath,
             }
-            // Parse title from contents[0]
-            const titleContent = editingSlide.contents?.[0] || ''
-            const strippedTitle = titleContent.replace(/<[^>]*>/g, '').trim()
-            setTitle(strippedTitle)
-            // Set background
-            if (editingSlide.background) {
-                setSelectedBg({
-                    background: editingSlide.background,
-                    backgroundType: editingSlide.backgroundType || 'gradient',
-                    backgroundStorageId: editingSlide.backgroundStorageId,
-                    localFilePath: editingSlide.localFilePath,
-                })
-            }
-        } else {
-            // Reset to defaults for new countdown
-            setHours(0)
-            setMinutes(5)
-            setSeconds(0)
-            setTitle('')
-            setSelectedBg(DEFAULT_BG)
-        }
-    }, [editingSlide, isOpen, isInline])
+            : DEFAULT_BG,
+    }
+}
+
+export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide, isInline = false }: AddCountdownModalProps) {
+    const [form, setForm] = useState(() => formFromSlide(editingSlide))
+    const { hours, minutes, seconds, title, background: selectedBg } = form
+    const update = (patch: Partial<CountdownForm>) => setForm((prev) => ({ ...prev, ...patch }))
+    const setHours = (h: number) => update({ hours: h })
+    const setMinutes = (m: number) => update({ minutes: m })
+    const setSeconds = (sec: number) => update({ seconds: sec })
+    const setTitle = (t: string) => update({ title: t })
+    const setSelectedBg = (bg: BackgroundSelection) => update({ background: bg })
+
+    // Refill the form when another slide is opened for editing, or the modal
+    // reopens (adjusted during render, so it never shows the old values).
+    const [formFor, setFormFor] = useState({ editingSlide, isOpen, isInline })
+    if (formFor.editingSlide !== editingSlide || formFor.isOpen !== isOpen || formFor.isInline !== isInline) {
+        setFormFor({ editingSlide, isOpen, isInline })
+        setForm(formFromSlide(editingSlide))
+    }
 
     const presets = [
         { label: '1m', h: 0, m: 1, s: 0 },
@@ -101,20 +106,13 @@ export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide,
         })
 
         if (!isInline) {
-            // Reset form
-            setHours(0)
-            setMinutes(5)
-            setSeconds(0)
-            setTitle('')
-            setSelectedBg(DEFAULT_BG)
+            setForm(NEW_COUNTDOWN)
             onClose?.()
         }
     }
 
     const applyPreset = (preset: { h: number; m: number; s: number }) => {
-        setHours(preset.h)
-        setMinutes(preset.m)
-        setSeconds(preset.s)
+        update({ hours: preset.h, minutes: preset.m, seconds: preset.s })
     }
 
     if (!isOpen && !isInline) return null
@@ -132,7 +130,7 @@ export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide,
                     <div className="p-2 bg-[var(--accent-teal)]/10 rounded-lg">
                         <Clock className="w-5 h-5 text-[var(--accent-teal)]" />
                     </div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                    <h3 id="countdown-modal-title" className="font-semibold text-gray-900 dark:text-white">
                         {editingSlide ? 'Edit Countdown' : 'Add Countdown'}
                     </h3>
                     <button
@@ -266,90 +264,13 @@ export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide,
     if (isInline) return content
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            {...backdropDismiss}
+        <Modal
+            isOpen={isOpen}
+            onClose={() => onClose?.()}
+            labelledBy="countdown-modal-title"
+            className="w-full max-w-md"
         >
             {content}
-        </div>
-    )
-}
-
-// Countdown Display Component
-interface CountdownDisplayProps {
-    data: CountdownData
-    onComplete?: () => void
-    className?: string
-}
-
-export function CountdownDisplay({ data, onComplete, className = '' }: CountdownDisplayProps) {
-    const [timeLeft, setTimeLeft] = useState(
-        data.hours * 3600 + data.minutes * 60 + data.seconds
-    )
-    const [isPaused, setIsPaused] = useState(false)
-    const intervalRef = useRef<NodeJS.Timeout | null>(null)
-
-    useEffect(() => {
-        if (!isPaused && timeLeft > 0) {
-            intervalRef.current = setInterval(() => {
-                setTimeLeft((prev) => {
-                    if (prev <= 1) {
-                        clearInterval(intervalRef.current!)
-                        onComplete?.()
-                        return 0
-                    }
-                    return prev - 1
-                })
-            }, 1000)
-        }
-
-        return () => {
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current)
-            }
-        }
-    }, [isPaused, timeLeft, onComplete])
-
-    const hours = Math.floor(timeLeft / 3600)
-    const minutes = Math.floor((timeLeft % 3600) / 60)
-    const seconds = timeLeft % 60
-
-    const formatNum = (n: number) => n.toString().padStart(2, '0')
-
-    const reset = () => {
-        setTimeLeft(data.hours * 3600 + data.minutes * 60 + data.seconds)
-        setIsPaused(false)
-    }
-
-    return (
-        <div className={`flex flex-col items-center ${className}`}>
-            {data.title && (
-                <p className="text-lg text-gray-600 dark:text-gray-300 mb-2">{data.title}</p>
-            )}
-            <div className="text-6xl font-bold font-mono text-gray-900 dark:text-white">
-                {hours > 0 && <span>{formatNum(hours)}:</span>}
-                <span>{formatNum(minutes)}</span>
-                <span>:</span>
-                <span>{formatNum(seconds)}</span>
-            </div>
-            <div className="flex gap-2 mt-4">
-                <button
-                    onClick={() => setIsPaused(!isPaused)}
-                    className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
-                >
-                    {isPaused ? (
-                        <Play className="w-5 h-5" />
-                    ) : (
-                        <Pause className="w-5 h-5" />
-                    )}
-                </button>
-                <button
-                    onClick={reset}
-                    className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"
-                >
-                    <RotateCcw className="w-5 h-5" />
-                </button>
-            </div>
-        </div>
+        </Modal>
     )
 }
