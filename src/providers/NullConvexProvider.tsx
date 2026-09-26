@@ -63,7 +63,11 @@ class NullConvexReactClient {
     }
 }
 
-const nullClient = new NullConvexReactClient() as unknown as ConvexReactClient
+/**
+ * The stand-in client. Exported so ConvexConnectionProvider can switch its one
+ * provider between this and the real client without remounting the app.
+ */
+export const nullClient = new NullConvexReactClient() as unknown as ConvexReactClient
 
 /**
  * Stands in for the real Convex provider while offline — including when the

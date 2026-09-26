@@ -75,36 +75,25 @@ const ANALYTICS_KEY =
             ? import.meta.env.VITE_AMPLITUDE_KEY ?? ''
             : '' // console / none don't need a real key
 
-function OfflineApp() {
-    const { isSignedIn, isLoaded } = useAuth()
-
-    if (!isLoaded) {
-        return <AppLoading label="Signing you in" />
-    }
-
-    if (isSignedIn) {
-        return <Dashboard />
-    }
-
-    if (isDesktop()) {
-        return <DesktopWelcome />
-    }
-
-    return <Landing />
-}
-
 /**
- * `/` once online. `<SignedIn>`/`<SignedOut>` both render nothing until Clerk
- * has loaded, and the boot splash is gone by then — so every cold start showed
- * a blank page for however long Clerk took. The offline tree already waited
- * with a spinner; this does the same.
+ * `/`: the studio for a signed-in operator, the welcome screen otherwise.
+ *
+ * One component whether or not Convex is reachable. There were two — one per
+ * route tree — so connectivity changing swapped the component at `/` and
+ * remounted Dashboard with everything open in it. Offline, the landing page
+ * renders in place (the redirect to /landing is for the connected web app).
+ *
+ * `<SignedIn>`/`<SignedOut>` both render nothing until Clerk has loaded, and
+ * the boot splash is gone by then, so this waits with a spinner instead.
  */
-function OnlineHome() {
+function Home() {
     const { isSignedIn, isLoaded } = useAuth()
+    const { isOffline } = useConvexConnection()
 
     if (!isLoaded) return <AppLoading label="Signing you in" />
     if (isSignedIn) return <Dashboard />
-    return isDesktop() ? <DesktopWelcome /> : <Navigate to="/landing" replace />
+    if (isDesktop()) return <DesktopWelcome />
+    return isOffline ? <Landing /> : <Navigate to="/landing" replace />
 }
 
 function JoinChurchRoute() {
@@ -122,7 +111,6 @@ function JoinChurchRoute() {
 }
 
 function AppRoutes() {
-    const { isOffline } = useConvexConnection()
     const { analytics } = useAnalyticsContext()
     const location = useLocation()
     useDarkModeSync()
@@ -210,9 +198,8 @@ function AppRoutes() {
         )
     }
 
-    // Routes common to both trees. Kept in one place: the two tables had
-    // already drifted (the offline one had /desktop-oauth-done, the online one
-    // didn't).
+    // One route table whether or not Convex is reachable. There used to be two,
+    // and switching between them on a connectivity change remounted the app.
     const sharedRoutes = (
         <>
             {/* The projector: fails to black and recovers by itself, never to
@@ -234,36 +221,12 @@ function AppRoutes() {
         </>
     )
 
-    if (isOffline) {
-        return (
-            <>
-                <Suspense fallback={<RouteFallback />}>
-                    <Routes>
-                        {sharedRoutes}
-                        <Route
-                            path="/"
-                            element={<RouteErrorBoundary name="home"><OfflineApp /></RouteErrorBoundary>}
-                        />
-                    </Routes>
-                </Suspense>
-                <Toaster position="top-right" />
-            </>
-        )
-    }
-
     return (
         <>
             <Suspense fallback={<RouteFallback />}>
                 <Routes>
                     {sharedRoutes}
-                    <Route
-                        path="/"
-                        element={
-                            <RouteErrorBoundary name="dashboard">
-                                <OnlineHome />
-                            </RouteErrorBoundary>
-                        }
-                    />
+                    <Route path="/" element={<RouteErrorBoundary name="home"><Home /></RouteErrorBoundary>} />
                 </Routes>
             </Suspense>
             <Toaster position="top-right" />
