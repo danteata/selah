@@ -50,6 +50,12 @@ export default function LiveView() {
     const [searchParams] = useSearchParams()
     const [isFullscreen, setIsFullscreen] = useState(false)
     const [currentSlideId, setCurrentSlideId] = useState(searchParams.get('slide') || '')
+    // Read by the channel effect's one-off snapshot check without making that
+    // effect re-subscribe on every slide change.
+    const currentSlideIdRef = useRef(currentSlideId)
+    useEffect(() => {
+        currentSlideIdRef.current = currentSlideId
+    }, [currentSlideId])
     const [liveState, setLiveState] = useState<LiveState | null>(null)
     const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
     const [isDesktop, setIsDesktop] = useState(false)
@@ -196,10 +202,14 @@ export default function LiveView() {
         broadcastChannelRef.current.onmessage = (event) => {
             if (event.data?.type === 'state-update') {
                 setLiveState(event.data.state)
-                if (event.data.state.liveSlideId) {
-                    setCurrentSlideId(event.data.state.liveSlideId)
+                // Adopt an empty live slide too: that is how "Stop Live Output"
+                // clears the projector. Skipping falsy ids left the last slide
+                // up in front of the congregation. The alternate output takes
+                // its content from messages addressed to it, never the feed.
+                if (outputRole !== 'alternate') {
+                    setCurrentSlideId(event.data.state.liveSlideId || '')
                 }
-            } else if (event.data?.type === 'slide-update') {
+            } else if (event.data?.type === 'slide-update' && outputRole !== 'alternate') {
                 setCurrentSlideId(event.data.slideId)
             }
         }
@@ -224,7 +234,7 @@ export default function LiveView() {
                 // The alternate output must not adopt the projector's slide — its
                 // own content arrives addressed to its window. The rest of this
                 // snapshot (fonts, verse-reference styling) is still wanted.
-                if (outputRole !== 'alternate' && !currentSlideId && parsed.liveSlideId) {
+                if (outputRole !== 'alternate' && !currentSlideIdRef.current && parsed.liveSlideId) {
                     setCurrentSlideId(parsed.liveSlideId)
                 }
             } catch (e) {
@@ -251,7 +261,10 @@ export default function LiveView() {
             flashChannel.close()
             window.removeEventListener('storage', handleStorageChange)
         }
-    }, [isSessionMode, currentSlideId, monitorId])
+        // Not keyed on the current slide: that closed and reopened both
+        // channels on every slide change, dropping any message sent in
+        // between and re-parsing the whole snapshot at each transition.
+    }, [isSessionMode, monitorId, outputRole])
 
     const resolvedSlides = useMemo(() => {
         if (isSessionMode) {

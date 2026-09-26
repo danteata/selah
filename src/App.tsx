@@ -7,6 +7,7 @@ import { ConvexConnectionProvider, useConvexConnection } from './providers/Conve
 import { ConvexErrorBoundary } from './components/offline/ConvexErrorBoundary'
 import { LicenseProvider } from './providers/LicenseProvider'
 import { RouteErrorBoundary } from './components/offline/RouteErrorBoundary'
+import { OutputErrorBoundary } from './components/offline/OutputErrorBoundary'
 import { AnalyticsProvider, useAnalyticsContext } from './providers/AnalyticsProvider'
 import type { AnalyticsProviderType as AnalyticsType } from './services/analytics/types'
 import { AnalyticsEventType } from './services/analytics/types'
@@ -214,7 +215,9 @@ function AppRoutes() {
     // didn't).
     const sharedRoutes = (
         <>
-            <Route path="/live" element={<RouteErrorBoundary name="live"><LiveView /></RouteErrorBoundary>} />
+            {/* The projector: fails to black and recovers by itself, never to
+                the operator-facing error card nobody there can click. */}
+            <Route path="/live" element={<OutputErrorBoundary><LiveView /></OutputErrorBoundary>} />
             <Route path="/landing" element={<RouteErrorBoundary name="landing"><Landing /></RouteErrorBoundary>} />
             <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
             <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />

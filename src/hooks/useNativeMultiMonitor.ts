@@ -37,7 +37,8 @@ export interface UseNativeMultiMonitorReturn {
 
     // Actions
     detectMonitors: () => Promise<MonitorInfo[]>
-    openLiveWindow: (config?: LiveWindowConfig) => Promise<void>
+    /** Resolves true once an output window is up; false if none could open. */
+    openLiveWindow: (config?: LiveWindowConfig) => Promise<boolean>
     closeLiveWindow: () => Promise<void>
     toggleFullscreen: () => Promise<boolean>
     moveToMonitor: (monitorId: string) => Promise<void>
@@ -288,10 +289,12 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 method: 'tauri_window',
                 fullscreen: config?.fullscreen !== false,
             })
+            return true
         } else {
             // Web fallback: start Presentation API or open popup window
             const liveViewUrl = `${window.location.origin}/#/live`
             let method = 'popup'
+            let opened = false
             if (config?.monitor_id && config.monitor_id !== 'presentation-api') {
                 // Open on a specific screen
                 const win = await multiMonitorService.openLiveViewOnScreen(
@@ -300,6 +303,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     config.initial_slide_id
                 )
                 if (win) {
+                    opened = true
                     setLiveWindowState('Open')
                     setSelectedMonitorId(config.monitor_id)
                     persistMonitorId(config.monitor_id)
@@ -309,6 +313,7 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                 // Use Presentation API or best available screen
                 const started = await multiMonitorService.startPresentation(liveViewUrl)
                 if (started) {
+                    opened = true
                     setLiveWindowState('Fullscreen')
                     method = 'presentation_api'
                 } else {
@@ -318,17 +323,21 @@ export function useNativeMultiMonitor(): UseNativeMultiMonitorReturn {
                     // close it, which is how duplicate outputs pile up.
                     const win = window.open(liveViewUrl, 'selah-live', 'width=1280,height=720')
                     if (win) {
+                        opened = true
                         multiMonitorService.registerLiveWindow(win)
                         setLiveWindowState('Open')
                     }
                 }
             }
-            trackEvent(AnalyticsEventType.MULTI_MONITOR_OPENED, {
-                is_desktop: false,
-                monitor_count: monitors.length,
-                method,
-                fullscreen: config?.fullscreen !== false,
-            })
+            if (opened) {
+                trackEvent(AnalyticsEventType.MULTI_MONITOR_OPENED, {
+                    is_desktop: false,
+                    monitor_count: monitors.length,
+                    method,
+                    fullscreen: config?.fullscreen !== false,
+                })
+            }
+            return opened
         }
     }, [isDesktop, monitors.length, trackEvent, closeLiveWindow])
 

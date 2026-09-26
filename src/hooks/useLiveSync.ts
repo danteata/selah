@@ -6,7 +6,8 @@ const STORAGE_KEY = 'selah-live-state'
 
 export function useLiveSync() {
     const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
-    const { isDesktop, sendSlideToLive, sendSettingsToLive } = useNativeMultiMonitor()
+    const { isDesktop, sendSlideToLive, sendSettingsToLive, clearLiveOutput } = useNativeMultiMonitor()
+    const hadLiveSlideRef = useRef(false)
 
     const activeSlides = useAppStore((state) => state.activeSlides)
     const liveSlideId = useAppStore((state) => state.liveSlideId)
@@ -62,7 +63,16 @@ export function useLiveSync() {
             alert: activeAlert,
         }
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(liveState))
+        // The snapshot is only for a live window opening later; the channel
+        // below is what updates an open one. Slides can carry image
+        // backgrounds as data URLs, so this can exceed the storage quota — and
+        // an exception thrown here, inside an effect, took down the whole
+        // operator screen mid-service and skipped the post below as well.
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(liveState))
+        } catch (err) {
+            console.warn('[useLiveSync] live snapshot not stored:', err)
+        }
 
         broadcastChannelRef.current?.postMessage({
             type: 'state-update',
@@ -71,10 +81,18 @@ export function useLiveSync() {
     }, [activeSlides, liveSlideId, liveSettings, activeOverlay, activeAlert])
 
     useEffect(() => {
-        if (isDesktop && liveSlideId && liveSlide) {
+        if (!isDesktop) return
+        if (liveSlideId && liveSlide) {
+            hadLiveSlideRef.current = true
             sendSlideToLive(liveSlideId, liveSlide as unknown as Record<string, unknown>)
+        } else if (!liveSlideId && hadLiveSlideRef.current) {
+            // "Stop Live Output" / clearing the queue sets no live slide. Only
+            // a slide was ever sent to the native window, never its absence,
+            // so the congregation kept seeing the last one.
+            hadLiveSlideRef.current = false
+            void clearLiveOutput('clear')
         }
-    }, [isDesktop, liveSlideId, liveSlide, sendSlideToLive])
+    }, [isDesktop, liveSlideId, liveSlide, sendSlideToLive, clearLiveOutput])
 
     // Desktop's live window is a separate native WebviewWindow — it can't be
     // relied on to receive BroadcastChannel/localStorage `storage` events the

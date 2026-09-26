@@ -236,6 +236,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const syncScheduleSlidesMutation = useMutation(api.slides.syncScheduleSlides)
     const upsertScheduleSlideMutation = useMutation(api.slides.upsertScheduleSlide)
 
+    const previousServerBlankRef = useRef<boolean | null>(null)
     const previousLiveSlideRef = useRef<string | null>(null)
     const lastSyncedSlidesRef = useRef<string | null>(null)
     const lastSyncedScheduleSlidesRef = useRef<string | null>(null)
@@ -364,9 +365,18 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             }
         }
 
-        // Explicit blank command overrides liveSlideId
-        if (liveSession.isBlank) {
-            setLiveSlideStore('')
+        // Mirror the shared blank flag into the local one the output reads.
+        // Only on a change of the server value, so a local toggle isn't undone
+        // by an unrelated session update landing before its mutation does.
+        //
+        // This used to clear the live slide instead. The server's toggleBlank
+        // keeps liveSlideId, so un-blanking never re-applied it: the operator
+        // was left with "nothing is live", and the next arrow key restarted
+        // the service from slide 1.
+        const serverBlank = !!liveSession.isBlank
+        if (serverBlank !== previousServerBlankRef.current) {
+            previousServerBlankRef.current = serverBlank
+            useAppStore.getState().setLiveOutputBlanked(serverBlank)
         }
 
         if (liveSession.activeOverlay !== undefined) {
