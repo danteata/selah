@@ -14,7 +14,7 @@ import { useLocalBackground } from '../../hooks/useLocalBackground'
 import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
-import type { Slide, Scripture, Countdown, SlideStyle } from '../../types'
+import type { Slide, Scripture, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
 import { SlideChip } from '../slides/SlideChip'
 import { LocalMediaPlaceholder } from '../slides/LocalMediaPlaceholder'
@@ -32,23 +32,11 @@ import { AudioReactiveBackground } from './AudioReactiveBackground'
 import { Play, Pause, Volume2, VolumeX, RotateCcw, Repeat } from 'lucide-react'
 import { getVerseRefStyle } from '../../utils/verseRefStyle'
 import { slideCaptionHtml } from '../../utils/slideCaption'
+import { countdownDurationSeconds, formatCountdownTime, isCountdownPaused, pauseCountdown, resumeCountdown, useCountdownSeconds } from '../../utils/countdown'
+import { slideBackgroundFilter } from '../../utils/slideBackground'
 
-// Helper: parse "HH:MM:SS" or "MM:SS" to total seconds
-function parseTimeStringToSeconds(timeStr: string): number {
-    const parts = timeStr.split(':').map(Number)
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    if (parts.length === 2) return parts[0] * 60 + parts[1]
-    return 0
-}
-
-// Helper: format total seconds to "HH:MM:SS" or "MM:SS"
-function formatSecondsToTime(totalSeconds: number): string {
-    const h = Math.floor(totalSeconds / 3600)
-    const m = Math.floor((totalSeconds % 3600) / 60)
-    const s = totalSeconds % 60
-    const pad = (n: number) => String(n).padStart(2, '0')
-    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
-}
+// Shared with the projector so both format time the same way.
+const formatSecondsToTime = formatCountdownTime
 
 export function LiveOutput() {
     const { trackEvent } = useAnalytics()
@@ -72,8 +60,6 @@ export function LiveOutput() {
     const setLayoutMode = useAppStore((s) => s.setLiveOutputLayout)
 
     // Countdown preview state
-    const [previewCountdownSeconds, setPreviewCountdownSeconds] = useState(0)
-    const previewIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
     // Live media transport state — self-reported by the operator's own muted
     // preview player (see MediaContent's onProgress), used to drive the seek
@@ -545,53 +531,39 @@ export function LiveOutput() {
         setShowScreenPicker(false)
     }, [isDesktop, openLiveWindow, liveSlideId])
 
-    // Initialize & run countdown preview when live slide is a countdown
+    // The countdown on the live slide, from the slide's own clock
+    // (utils/countdown) — the same one the projector reads.
+    const previewCountdownSeconds = useCountdownSeconds(liveSlide)
+    const countdownPaused = !!liveSlide && isCountdownPaused(liveSlide)
+
+    // Analytics: a countdown going live, and reaching zero (once each).
+    const countdownTrackedRef = useRef<{ started?: string; completed?: string }>({})
     useEffect(() => {
-        // Clear any existing interval
-        if (previewIntervalRef.current) {
-            clearInterval(previewIntervalRef.current)
-            previewIntervalRef.current = null
-        }
-
-        if (!liveSlide || liveSlide.type !== 'countdown') {
-            setPreviewCountdownSeconds(0)
-            return
-        }
-
-        // Parse initial time from slide data
-        const countdownData = liveSlide.data as Countdown | undefined
-        const timeStr = countdownData?.time || liveSlide.contents[1] || '00:05:00'
-        const initialSeconds = parseTimeStringToSeconds(timeStr)
-        setPreviewCountdownSeconds(initialSeconds)
+        if (liveSlide?.type !== 'countdown' || countdownTrackedRef.current.started === liveSlide.id) return
+        countdownTrackedRef.current = { started: liveSlide.id }
         trackEvent(AnalyticsEventType.COUNTDOWN_STARTED, {
             slide_id: liveSlide.id,
-            duration_seconds: initialSeconds,
+            duration_seconds: countdownDurationSeconds(liveSlide),
         })
+    }, [liveSlide, trackEvent])
+    useEffect(() => {
+        if (liveSlide?.type !== 'countdown' || previewCountdownSeconds > 0) return
+        if (countdownTrackedRef.current.completed === liveSlide.id) return
+        countdownTrackedRef.current.completed = liveSlide.id
+        trackEvent(AnalyticsEventType.COUNTDOWN_COMPLETED, {
+            slide_id: liveSlide.id,
+            duration_seconds: countdownDurationSeconds(liveSlide),
+        })
+    }, [liveSlide, previewCountdownSeconds, trackEvent])
 
-        // Start ticking
-        previewIntervalRef.current = setInterval(() => {
-            setPreviewCountdownSeconds((prev) => {
-                if (prev <= 1) {
-                    clearInterval(previewIntervalRef.current!)
-                    previewIntervalRef.current = null
-                    trackEvent(AnalyticsEventType.COUNTDOWN_COMPLETED, {
-                        slide_id: liveSlide.id,
-                        duration_seconds: initialSeconds,
-                    })
-                    return 0
-                }
-                return prev - 1
-            })
-        }, 1000)
-
-        return () => {
-            if (previewIntervalRef.current) {
-                clearInterval(previewIntervalRef.current)
-                previewIntervalRef.current = null
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [liveSlide?.id, liveSlide?.type])
+    // Pause/resume changes the slide's clock, which reaches the projector
+    // (and a live session) the way any slide edit does.
+    const handleToggleCountdown = useCallback(() => {
+        if (!liveSlide || liveSlide.type !== 'countdown') return
+        const now = Date.now()
+        const updated = isCountdownPaused(liveSlide) ? resumeCountdown(liveSlide, now) : pauseCountdown(liveSlide, now)
+        useAppStore.getState().updateActiveSlide(updated)
+    }, [liveSlide])
 
     // Handle stop presenting
     const handleStopLive = useCallback(async () => {
@@ -1081,11 +1053,16 @@ export function LiveOutput() {
                                         className={`w-full h-full relative studio-slide-transition ${animationsEnabled ? '' : 'no-transition'} ${isBeatTransition ? 'beat-punch' : ''}`}
                                         style={{
                                             '--studio-transition-duration': `${isBeatTransition ? Math.min(transitionInterval, 0.35) : transitionInterval}s`,
-                                            backgroundImage: liveSlide.type !== slideTypes.media && !isLiveSlideVideo && liveSlideBackground ? `url(${liveSlideBackground})` : undefined,
-                                            backgroundSize: 'cover',
-                                            backgroundPosition: 'center',
                                         } as React.CSSProperties}
                                     >
+                                        {/* The background as the projector draws it: its own
+                                            layer, so the dimming filter doesn't reach the text. */}
+                                        {liveSlide.type !== slideTypes.media && !isLiveSlideVideo && liveSlideBackground && (
+                                            <div
+                                                className="absolute inset-0 bg-cover bg-center"
+                                                style={{ backgroundImage: `url(${liveSlideBackground})`, filter: slideBackgroundFilter(liveSlide) }}
+                                            />
+                                        )}
                                         {liveSlide.type === slideTypes.media ? (
                                             liveSlide.backgroundType !== backgroundTypes.external && !liveSlideBackground ? (
                                                 <LocalMediaPlaceholder backgroundType={liveSlide.backgroundType} />
@@ -1102,6 +1079,7 @@ export function LiveOutput() {
                                             <VideoBackground
                                                 src={liveSlideBackground}
                                                 className="absolute inset-0 w-full h-full object-cover"
+                                                style={{ filter: slideBackgroundFilter(liveSlide) }}
                                             />
                                         )}
                                         <AudioReactiveBackground />
@@ -1114,6 +1092,14 @@ export function LiveOutput() {
                                                     maxPx={320}
                                                     style={{ lineHeight: 1 }}
                                                 />
+                                                <button
+                                                    type="button"
+                                                    onClick={handleToggleCountdown}
+                                                    className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-medium hover:bg-black/80 transition-colors"
+                                                    aria-label={countdownPaused ? 'Resume countdown' : 'Pause countdown'}
+                                                >
+                                                    {countdownPaused ? '▶ Resume' : '⏸ Pause'}
+                                                </button>
                                             </div>
                                         ) : liveSlide.layout === 'lower-third' ? (
                                             /* Lower Third Preview — body auto-fits inside a bottom strip, reference as caption */
@@ -1279,7 +1265,7 @@ export function LiveOutput() {
                                     {liveSlide.backgroundType === backgroundTypes.video && (
                                         <>
                                             <button
-                                                onClick={() => handleMediaTransportChange({ mediaSeekPosition: 0, isMediaPlaying: true })}
+                                                onClick={() => handleMediaTransportChange({ mediaSeekPosition: 0, mediaSeekNonce: Date.now(), isMediaPlaying: true })}
                                                 className="p-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] text-[var(--text-primary)] flex-shrink-0"
                                                 title="Restart"
                                             >
@@ -1291,7 +1277,7 @@ export function LiveOutput() {
                                                 max={liveMediaProgress?.duration || 0}
                                                 step={0.1}
                                                 value={liveMediaProgress?.currentTime || 0}
-                                                onChange={(e) => handleMediaTransportChange({ mediaSeekPosition: Number(e.target.value) })}
+                                                onChange={(e) => handleMediaTransportChange({ mediaSeekPosition: Number(e.target.value), mediaSeekNonce: Date.now() })}
                                                 className="flex-1 accent-[var(--accent-teal)] min-w-0"
                                             />
                                             <span className="text-[10px] font-mono text-[var(--text-muted)] tabular-nums flex-shrink-0 w-20 text-right">

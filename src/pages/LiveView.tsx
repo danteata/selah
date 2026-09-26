@@ -4,7 +4,7 @@ import { Maximize2, Minimize2, X } from 'lucide-react'
 import { useQuery } from 'convex/react'
 import { useAuth } from '@clerk/clerk-react'
 import { api } from '../../convex/_generated/api'
-import type { Slide, Countdown } from '../types'
+import type { Slide } from '../types'
 import { slideTypes } from '../types'
 import { useFileUrl } from '../hooks/useTemplates'
 import { useLocalBackground } from '../hooks/useLocalBackground'
@@ -21,6 +21,8 @@ import { useAnalytics } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { getVerseRefStyle, VERSE_REF_BOUNDS } from '../utils/verseRefStyle'
 import { isCaptionedSlideType, slideCaptionHtml } from '../utils/slideCaption'
+import { formatCountdownTime, useCountdownSeconds } from '../utils/countdown'
+import { slideBackgroundFilter } from '../utils/slideBackground'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -91,9 +93,6 @@ export default function LiveView() {
             : 'skip'
     )
 
-    const [countdownSeconds, setCountdownSeconds] = useState<number>(0)
-    const [countdownPaused, setCountdownPaused] = useState(false)
-    const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
     const previousSessionSlideRef = useRef<string | null>(null)
 
     const sessionSlideId = useMemo(() => {
@@ -279,6 +278,10 @@ export default function LiveView() {
         return resolvedSlides.find(s => s.id === currentSlideId) || null
     }, [resolvedSlides, currentSlideId])
 
+    // Driven by the slide's own clock (utils/countdown), so it agrees with the
+    // operator's preview and survives this window being reopened.
+    const countdownSeconds = useCountdownSeconds(slide)
+
     // Get file URL if slide has a backgroundStorageId
     const fileUrl = useFileUrl(slide?.backgroundStorageId || null)
 
@@ -341,78 +344,6 @@ export default function LiveView() {
         }
     }, [settings.liveWindowFullscreen, isDesktop])
 
-    // Parse "HH:MM:SS" time string into total seconds
-    const parseTimeToSeconds = useCallback((timeStr: string): number => {
-        const parts = timeStr.split(':').map(Number)
-        if (parts.length === 3) {
-            return parts[0] * 3600 + parts[1] * 60 + parts[2]
-        } else if (parts.length === 2) {
-            return parts[0] * 60 + parts[1]
-        }
-        return 0
-    }, [])
-
-    // Initialize countdown when a countdown slide becomes active
-    useEffect(() => {
-        if (!slide || slide.type !== 'countdown') {
-            // Clean up interval if not a countdown slide
-            if (countdownIntervalRef.current) {
-                clearInterval(countdownIntervalRef.current)
-                countdownIntervalRef.current = null
-            }
-            return
-        }
-
-        // Parse the total seconds from the slide data
-        const countdownData = slide.data as Countdown | undefined
-        const timeStr = countdownData?.time || slide.contents[1] || '00:05:00'
-        const totalSeconds = parseTimeToSeconds(timeStr)
-
-        setCountdownSeconds(totalSeconds)
-        setCountdownPaused(false)
-    }, [slide?.id, slide?.type]) // Re-initialize when the slide changes
-
-    // Run the countdown interval
-    useEffect(() => {
-        if (!slide || slide.type !== 'countdown' || countdownPaused) {
-            if (countdownIntervalRef.current) {
-                clearInterval(countdownIntervalRef.current)
-                countdownIntervalRef.current = null
-            }
-            return
-        }
-
-        countdownIntervalRef.current = setInterval(() => {
-            setCountdownSeconds((prev) => {
-                if (prev <= 1) {
-                    clearInterval(countdownIntervalRef.current!)
-                    countdownIntervalRef.current = null
-                    return 0
-                }
-                return prev - 1
-            })
-        }, 1000)
-
-        return () => {
-            if (countdownIntervalRef.current) {
-                clearInterval(countdownIntervalRef.current)
-                countdownIntervalRef.current = null
-            }
-        }
-    }, [slide?.id, slide?.type, countdownPaused])
-
-    // Format seconds into HH:MM:SS or MM:SS
-    const formatCountdownTime = useCallback((totalSeconds: number): string => {
-        const h = Math.floor(totalSeconds / 3600)
-        const m = Math.floor((totalSeconds % 3600) / 60)
-        const s = totalSeconds % 60
-        const pad = (n: number) => String(n).padStart(2, '0')
-        if (h > 0) {
-            return `${pad(h)}:${pad(m)}:${pad(s)}`
-        }
-        return `${pad(m)}:${pad(s)}`
-    }, [])
-
     // Keyboard shortcut for fullscreen (F key)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -466,9 +397,13 @@ export default function LiveView() {
     }
 
     return (
+        // Only the text is keyed by slide. The whole screen used to be, so every
+        // slide change remounted the background too: a song's motion
+        // background restarted — and flashed black — on each of its slides.
+        // The background is keyed by its source instead and fades only when
+        // that actually changes; the visualizer layer never remounts.
         <div
-            key={slide?.id}
-            className={`h-screen w-screen bg-black relative overflow-hidden studio-slide-transition ${settings.animations === false ? 'no-transition' : ''} ${isBeatTransition ? 'beat-punch' : ''}`}
+            className="h-screen w-screen bg-black relative overflow-hidden"
             style={
                 {
                     ...(monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : {}),
@@ -478,6 +413,10 @@ export default function LiveView() {
             onDoubleClick={toggleFullscreen}
         >
             {/* Background */}
+            <div
+                key={slide.type === slideTypes.media ? 'media' : (backgroundUrl || 'none')}
+                className={`absolute inset-0 studio-slide-transition ${settings.animations === false ? 'no-transition' : ''}`}
+            >
             {slide.type === slideTypes.media ? (
                 /* Media slides render their own full-bleed content below —
                    no dimming filter, since the media IS the content, not a
@@ -488,7 +427,7 @@ export default function LiveView() {
                     src={backgroundUrl}
                     className="absolute inset-0 w-full h-full object-cover"
                     style={{
-                        filter: `blur(${slide.slideStyle?.blur || 0}px) brightness(${slide.slideStyle?.brightness || 50}%)`
+                        filter: slideBackgroundFilter(slide)
                     }}
                 />
             ) : backgroundUrl ? (
@@ -496,12 +435,13 @@ export default function LiveView() {
                     className="absolute inset-0 bg-cover bg-center"
                     style={{
                         backgroundImage: `url(${backgroundUrl})`,
-                        filter: `blur(${slide.slideStyle?.blur || 0}px) brightness(${slide.slideStyle?.brightness || 50}%)`
+                        filter: slideBackgroundFilter(slide)
                     }}
                 />
             ) : (
                 <div className="absolute inset-0 bg-gradient-to-br from-gray-900 to-black" />
             )}
+            </div>
 
             {/* Audio-reactive motion layer (behind lyrics). Passes the synced
                 `visualizerEnabled` explicitly — this window's own Zustand
@@ -509,6 +449,10 @@ export default function LiveView() {
                 see the operator toggling it live in the main window. */}
             <AudioReactiveBackground enabled={settings.visualizerEnabled ?? false} />
 
+            <div
+                key={slide.id}
+                className={`absolute inset-0 studio-slide-transition ${settings.animations === false ? 'no-transition' : ''} ${isBeatTransition ? 'beat-punch' : ''}`}
+            >
             {/* Content — suppressed while the operator has "Cleared" the
                 output, keeping the background above so the audience still
                 sees the projector is live, just with the text/media hidden
@@ -651,16 +595,8 @@ export default function LiveView() {
                         </div>
                     )}
 
-                    {/* Pause/Resume controls (hover) */}
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            setCountdownPaused((p) => !p)
-                        }}
-                        className="absolute bottom-12 left-1/2 -translate-x-1/2 opacity-0 hover:opacity-100 focus:opacity-100 transition-opacity px-6 py-3 bg-black/50 text-white rounded-full text-sm backdrop-blur-sm"
-                    >
-                        {countdownPaused ? '▶ Resume' : '⏸ Pause'}
-                    </button>
+                    {/* Pause/Resume is the operator's (LiveOutput); a button here
+                        paused only this screen, so the two disagreed. */}
                 </div>
             ) : (
                 /* Default Centered Layout — auto-fit body fills the screen, references pinned above/below */
@@ -766,6 +702,8 @@ export default function LiveView() {
                     Double-click to enter fullscreen • Ctrl+F
                 </div>
             )}
+
+            </div>
 
             {/* Monitor identification flash overlay */}
             {flashColor && (

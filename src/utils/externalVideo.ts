@@ -44,7 +44,9 @@ export function getEmbedUrl(video: ExternalVideo, muted: boolean, playing: boole
     if (video.type === 'youtube') {
         const id = extractYouTubeId(video.url)
         if (!id) return null
-        return `https://www.youtube.com/embed/${id}?autoplay=${autoplay}&mute=${mute}&playsinline=1&rel=0`
+        // enablejsapi lets MediaContent pause/mute/seek the running player
+        // instead of reloading it (which restarted the video from 0:00).
+        return `https://www.youtube.com/embed/${id}?autoplay=${autoplay}&mute=${mute}&playsinline=1&rel=0&enablejsapi=1`
     }
 
     if (video.type === 'vimeo') {

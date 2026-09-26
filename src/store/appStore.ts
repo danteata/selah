@@ -19,6 +19,7 @@ import { bibleVersionObjects } from '../types'
 import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
 import type { NavSection, SplitPanelMode } from '../types/studio'
 import { readStoredTheme, storeTheme } from '../utils/theme'
+import { startCountdown } from '../utils/countdown'
 
 // UI State types
 export type QuickActionsPage = '' | 'bible' | 'search-bible' | 'hymn' | 'song' | 'dictionary' | 'media' | 'youtube' | 'vimeo' | 'library' | 'templates' | 'alert' | 'countdown'
@@ -729,7 +730,20 @@ export const useAppStore = create<AppStore>()(
             },
 
             setLiveSlide: (slideId) => {
-                set({ liveSlideId: slideId })
+                set((state) => {
+                    // A countdown starts its shared clock the moment it goes
+                    // live (utils/countdown), so the operator's preview and
+                    // the projector count down from the same instant.
+                    const goingLive = slideId && slideId !== state.liveSlideId
+                        ? state.activeSlides.find((slide) => slide.id === slideId)
+                        : undefined
+                    if (goingLive?.type !== 'countdown') return { liveSlideId: slideId }
+                    const started = startCountdown(goingLive, Date.now())
+                    return {
+                        liveSlideId: slideId,
+                        activeSlides: state.activeSlides.map((slide) => (slide.id === slideId ? started : slide)),
+                    }
+                })
             },
 
             setLiveOutputBlanked: (blanked) => {

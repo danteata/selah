@@ -389,6 +389,12 @@ export interface SlideStyle {
     repeatMedia?: boolean
     isMediaPlaying?: boolean
     mediaSeekPosition?: number
+    /** Changes with every seek command, so seeking to the same spot twice (Restart, Restart) still seeks. */
+    mediaSeekNonce?: number
+    /** A running countdown's end (epoch ms); see utils/countdown. */
+    countdownEndsAt?: number
+    /** Time left on a paused countdown (ms); set only while paused. */
+    countdownPausedRemainingMs?: number
     isMediaMuted?: boolean
     windowPadding?: {
         left?: number
