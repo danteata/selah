@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
+import { Modal } from '../modals/Modal'
 import { useSermonListener, type UseSermonListenerReturn } from '../../hooks/useSermonListener'
 import { useSermonListenerContext } from './SermonListenerContext'
 import { SermonListenerWizard, isSermonListenerWizardComplete } from './SermonListenerWizard'
@@ -924,70 +925,74 @@ function SermonListenerPanelInner({
             )}
 
             {/* Save Dialog */}
-            {showSaveDialog && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-                    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 w-80 max-w-[90vw]">
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                                Save Transcript
-                            </h3>
-                            <button
-                                onClick={() => setShowSaveDialog(false)}
-                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                            >
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-
-                        <div className="mb-3">
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Title
-                            </label>
-                            <input
-                                type="text"
-                                value={transcriptTitle}
-                                onChange={(e) => setTranscriptTitle(e.target.value)}
-                                placeholder={`Sermon Transcript ${new Date().toLocaleDateString()}`}
-                                className="w-full px-2 py-1.5 text-sm border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white"
-                            />
-                        </div>
-
-                        {activeSchedule && (
-                            <div className="mb-3 p-2 rounded bg-[var(--accent-teal)]/5 text-[var(--accent-teal)]">
-                                <Calendar className="w-3 h-3 inline mr-1" />
-                                Will be associated with: {activeSchedule.name}
-                            </div>
-                        )}
-
-                        {detectedVerses.length > 0 && (
-                            <div className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-                                {detectedVerses.length} detected verse{detectedVerses.length !== 1 ? 's' : ''} will be saved with this transcript
-                            </div>
-                        )}
-
-                        <div className="flex justify-end gap-2">
-                            <button
-                                onClick={() => setShowSaveDialog(false)}
-                                className="px-3 py-1.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleSaveTranscript}
-                                disabled={isSaving || !transcript.trim()}
-                                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-[var(--accent-teal)] text-white hover:brightness-110 disabled:opacity-50 transition-all shadow-sm"
-                            >
-                                {isSaving ? (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                ) : (
-                                    <Save className="w-3 h-3" />
-                                )}
-                                Save
-                            </button>
-                        </div>
-                    </div>
+            <Modal
+                isOpen={showSaveDialog}
+                onClose={() => setShowSaveDialog(false)}
+                closeOnBackdrop={false}
+                labelledBy="save-transcript-title"
+                overlayClassName="bg-black/50"
+                className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-lg p-4 w-80 max-w-[90vw]"
+            >
+                <div className="flex items-center justify-between mb-3">
+                    <h3 id="save-transcript-title" className="text-sm font-semibold text-[var(--text-primary)]">
+                        Save Transcript
+                    </h3>
+                    <button
+                        aria-label="Close"
+                        onClick={() => setShowSaveDialog(false)}
+                        className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
                 </div>
-            )}
+
+                <div className="mb-3">
+                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
+                        Title
+                    </label>
+                    <input
+                        type="text"
+                        value={transcriptTitle}
+                        onChange={(e) => setTranscriptTitle(e.target.value)}
+                        placeholder={`Sermon Transcript ${new Date().toLocaleDateString()}`}
+                        className="w-full px-2 py-1.5 text-sm border rounded bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-primary)]"
+                    />
+                </div>
+
+                {activeSchedule && (
+                    <div className="mb-3 p-2 rounded bg-[var(--accent-teal)]/5 text-[var(--accent-teal)]">
+                        <Calendar className="w-3 h-3 inline mr-1" />
+                        Will be associated with: {activeSchedule.name}
+                    </div>
+                )}
+
+                {detectedVerses.length > 0 && (
+                    <div className="mb-3 text-xs text-[var(--text-muted)]">
+                        {detectedVerses.length} detected verse{detectedVerses.length !== 1 ? 's' : ''} will be saved with this transcript
+                    </div>
+                )}
+
+                <div className="flex justify-end gap-2">
+                    <button
+                        onClick={() => setShowSaveDialog(false)}
+                        className="px-3 py-1.5 text-xs rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={handleSaveTranscript}
+                        disabled={isSaving || !transcript.trim()}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs rounded bg-[var(--accent-teal)] text-white hover:brightness-110 disabled:opacity-50 transition-all shadow-sm"
+                    >
+                        {isSaving ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                            <Save className="w-3 h-3" />
+                        )}
+                        Save
+                    </button>
+                </div>
+            </Modal>
 
             {/* Saved Transcripts Section */}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-1">

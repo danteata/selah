@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
+import { Modal } from '../modals/Modal'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import {
@@ -564,179 +565,185 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
     }
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                        Invite Team Member
-                    </h3>
-                    <button
-                        aria-label="Close"
-                        onClick={onClose}
-                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
-                </div>
+        // A backdrop click would throw away a typed message, so only the
+        // buttons and Escape close it.
+        <Modal
+            isOpen
+            onClose={onClose}
+            closeOnBackdrop={false}
+            labelledBy="invite-modal-title"
+            className="w-full max-w-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden"
+        >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-[var(--border-subtle)]">
+                <h3 id="invite-modal-title" className="text-lg font-semibold text-[var(--text-primary)]">
+                    Invite Team Member
+                </h3>
+                <button
+                    aria-label="Close"
+                    onClick={onClose}
+                    className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
+                >
+                    <X className="w-5 h-5" />
+                </button>
+            </div>
 
-                {/* Content */}
-                <div className="p-4">
-                    {success ? (
-                        <div className="text-center py-4">
-                            <div className="w-12 h-12 mx-auto mb-4 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
-                                <Check className="w-6 h-6 text-green-600 dark:text-green-400" />
-                            </div>
-                            <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                                {inviteType === 'email' ? 'Invitation Sent!' : 'Invite Link Created!'}
-                            </h4>
-                            {inviteType === 'email' && success.email && (
-                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                                    An invitation has been sent to {success.email}
-                                </p>
-                            )}
-                            <div className="flex items-center gap-2 p-3 bg-gray-100 dark:bg-gray-800 rounded-lg mb-4">
-                                <input
-                                    type="text"
-                                    value={success.url}
-                                    readOnly
-                                    className="flex-1 bg-transparent text-sm text-gray-700 dark:text-gray-300 outline-none"
-                                />
-                                <button
-                                    onClick={handleCopy}
-                                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-                                >
-                                    {copied ? (
-                                        <>
-                                            <Check className="w-4 h-4" />
-                                            Copied
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Copy className="w-4 h-4" />
-                                            Copy
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                            <button
-                                onClick={onClose}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                            >
-                                Done
-                            </button>
+            {/* Content */}
+            <div className="p-4">
+                {success ? (
+                    <div className="text-center py-4">
+                        <div className="w-12 h-12 mx-auto mb-4 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
+                            <Check className="w-6 h-6 text-green-600 dark:text-green-400" />
                         </div>
-                    ) : (
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Error */}
-                            {error && (
-                                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
-                                    {error}
-                                </div>
-                            )}
-
-                            {/* Invite Type Toggle */}
-                            <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                                <button
-                                    type="button"
-                                    onClick={() => setInviteType('link')}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${inviteType === 'link'
-                                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow'
-                                        : 'text-gray-600 dark:text-gray-400'
-                                        }`}
-                                >
-                                    <Link2 className="w-4 h-4" />
-                                    Share Link
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setInviteType('email')}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${inviteType === 'email'
-                                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow'
-                                        : 'text-gray-600 dark:text-gray-400'
-                                        }`}
-                                >
-                                    <Mail className="w-4 h-4" />
-                                    Send Email
-                                </button>
-                            </div>
-
-                            {/* Email Input (for email type) */}
-                            {inviteType === 'email' && (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                        Email Address
-                                    </label>
-                                    <input
-                                        type="email"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        placeholder="colleague@church.com"
-                                        required
-                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    />
-                                </div>
-                            )}
-
-                            {/* Expiration */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                    Expires After
-                                </label>
-                                <select
-                                    value={expiresInDays}
-                                    onChange={(e) => setExpiresInDays(Number(e.target.value))}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                >
-                                    <option value={7}>7 days</option>
-                                    <option value={14}>14 days</option>
-                                    <option value={30}>30 days</option>
-                                    <option value={0}>Never</option>
-                                </select>
-                            </div>
-
-                            {/* Personal Message */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                    Personal Message (optional)
-                                </label>
-                                <textarea
-                                    value={message}
-                                    onChange={(e) => setMessage(e.target.value)}
-                                    placeholder="Join our media team at Grace Community Church!"
-                                    rows={2}
-                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
-                                />
-                            </div>
-
-                            {/* Submit Button */}
+                        <h4 className="text-lg font-medium text-[var(--text-primary)] mb-2">
+                            {inviteType === 'email' ? 'Invitation Sent!' : 'Invite Link Created!'}
+                        </h4>
+                        {inviteType === 'email' && success.email && (
+                            <p className="text-sm text-[var(--text-muted)] mb-4">
+                                An invitation has been sent to {success.email}
+                            </p>
+                        )}
+                        <div className="flex items-center gap-2 p-3 bg-[var(--bg-tertiary)] rounded-lg mb-4">
+                            <input
+                                type="text"
+                                value={success.url}
+                                readOnly
+                                className="flex-1 bg-transparent text-sm text-[var(--text-secondary)] outline-none"
+                            />
                             <button
-                                type="submit"
-                                disabled={isLoading}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                onClick={handleCopy}
+                                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110"
                             >
-                                {isLoading ? (
+                                {copied ? (
                                     <>
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                        Creating...
-                                    </>
-                                ) : inviteType === 'email' ? (
-                                    <>
-                                        <Mail className="w-4 h-4" />
-                                        Send Invitation
+                                        <Check className="w-4 h-4" />
+                                        Copied
                                     </>
                                 ) : (
                                     <>
-                                        <Link2 className="w-4 h-4" />
-                                        Generate Link
+                                        <Copy className="w-4 h-4" />
+                                        Copy
                                     </>
                                 )}
                             </button>
-                        </form>
-                    )}
-                </div>
+                        </div>
+                        <button
+                            onClick={onClose}
+                            className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
+                        >
+                            Done
+                        </button>
+                    </div>
+                ) : (
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        {/* Error */}
+                        {error && (
+                            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
+                                {error}
+                            </div>
+                        )}
+
+                        {/* Invite Type Toggle */}
+                        <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
+                            <button
+                                type="button"
+                                onClick={() => setInviteType('link')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${inviteType === 'link'
+                                    ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow'
+                                    : 'text-[var(--text-secondary)]'
+                                    }`}
+                            >
+                                <Link2 className="w-4 h-4" />
+                                Share Link
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setInviteType('email')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${inviteType === 'email'
+                                    ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow'
+                                    : 'text-[var(--text-secondary)]'
+                                    }`}
+                            >
+                                <Mail className="w-4 h-4" />
+                                Send Email
+                            </button>
+                        </div>
+
+                        {/* Email Input (for email type) */}
+                        {inviteType === 'email' && (
+                            <div>
+                                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                                    Email Address
+                                </label>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder="colleague@church.com"
+                                    required
+                                    className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                                />
+                            </div>
+                        )}
+
+                        {/* Expiration */}
+                        <div>
+                            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                                Expires After
+                            </label>
+                            <select
+                                value={expiresInDays}
+                                onChange={(e) => setExpiresInDays(Number(e.target.value))}
+                                className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                            >
+                                <option value={7}>7 days</option>
+                                <option value={14}>14 days</option>
+                                <option value={30}>30 days</option>
+                                <option value={0}>Never</option>
+                            </select>
+                        </div>
+
+                        {/* Personal Message */}
+                        <div>
+                            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                                Personal Message (optional)
+                            </label>
+                            <textarea
+                                value={message}
+                                onChange={(e) => setMessage(e.target.value)}
+                                placeholder="Join our media team at Grace Community Church!"
+                                rows={2}
+                                className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent resize-none"
+                            />
+                        </div>
+
+                        {/* Submit Button */}
+                        <button
+                            type="submit"
+                            disabled={isLoading}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            {isLoading ? (
+                                <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Creating...
+                                </>
+                            ) : inviteType === 'email' ? (
+                                <>
+                                    <Mail className="w-4 h-4" />
+                                    Send Invitation
+                                </>
+                            ) : (
+                                <>
+                                    <Link2 className="w-4 h-4" />
+                                    Generate Link
+                                </>
+                            )}
+                        </button>
+                    </form>
+                )}
             </div>
-        </div>
+        </Modal>
     )
 }
 

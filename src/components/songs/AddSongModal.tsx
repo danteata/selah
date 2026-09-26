@@ -3,6 +3,7 @@ import { X, Music, Plus, Lightbulb, Globe, Eye, EyeOff } from 'lucide-react'
 import { useSongs } from '../../hooks/useSongs'
 import type { Song } from '../../types'
 import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { useDialog } from '../../hooks/useDialog'
 
 interface AddSongModalProps {
     isOpen: boolean
@@ -72,6 +73,7 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
         }
     }
     const backdropDismiss = useBackdropDismiss(handleClose)
+    const panelRef = useDialog({ isOpen, onClose: handleClose })
 
     if (!isOpen) return null
 
@@ -79,10 +81,9 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
     const canSubmit = title.trim() && lyrics.trim() && !loading
 
     return (
+        // Its own overlay rather than <Modal>: the key fence below has to wrap the
+        // whole dialog, panel included, and Modal takes no key handler.
         <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={isEditing ? 'Edit song' : 'Add song'}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
             {...backdropDismiss}
             // Keys typed in this editor belong to this editor. Every surface that
@@ -92,23 +93,32 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
             // and React propagates events up the React tree even through a
             // portal. So without this, Enter in the lyrics box reached the search
             // results' handler, which sent the song being edited straight to the
-            // live output and called preventDefault() on the newline.
-            onKeyDown={(e) => e.stopPropagation()}
+            // live output and called preventDefault() on the newline. Escape is
+            // let through: stopping it here would stop it at React's root too,
+            // before it reaches useDialog's document listener that closes this.
+            onKeyDown={(e) => { if (e.key !== 'Escape') e.stopPropagation() }}
         >
-            <div className="w-full max-w-2xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+            <div
+                ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="add-song-modal-title"
+                tabIndex={-1}
+                className="w-full max-w-2xl max-h-[90vh] outline-none bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            >
                 {/* Header */}
-                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
-                    <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
-                        <Music className="w-5 h-5 text-primary-600" />
+                <div className="flex items-center gap-3 p-4 border-b border-[var(--border-subtle)] shrink-0">
+                    <div className="p-2 bg-[var(--accent-teal)]/10 rounded-lg">
+                        <Music className="w-5 h-5 text-[var(--accent-teal)]" />
                     </div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                    <h3 id="add-song-modal-title" className="font-semibold text-[var(--text-primary)]">
                         {isEditing ? 'Edit Song' : 'Add New Song'}
                     </h3>
                     <button
                         aria-label="Close"
                         onClick={handleClose}
                         disabled={loading}
-                        className="ml-auto p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                        className="ml-auto p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] disabled:opacity-50"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -126,7 +136,7 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
 
                         {/* Title */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                                 Title <span className="text-red-500">*</span>
                             </label>
                             <input
@@ -135,13 +145,13 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
                                 onChange={(e) => setTitle(e.target.value)}
                                 placeholder="e.g., Hallelujah Eh"
                                 required
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                             />
                         </div>
 
                         {/* Artist */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                                 Artist
                             </label>
                             <input
@@ -149,17 +159,17 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
                                 value={artist}
                                 onChange={(e) => setArtist(e.target.value)}
                                 placeholder="e.g., Nathaniel Bassey"
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                             />
                         </div>
 
                         {/* Hint */}
-                        <div className="rounded-lg bg-primary-50 dark:bg-primary-900/20 p-4 border border-primary-100 dark:border-primary-800">
-                            <div className="text-sm text-primary-700 dark:text-primary-300 font-semibold flex items-center gap-2">
+                        <div className="rounded-lg bg-[var(--accent-teal)]/10 p-4 border border-[var(--accent-teal)]/20">
+                            <div className="text-sm text-[var(--accent-teal)] font-semibold flex items-center gap-2">
                                 <Lightbulb className="w-4 h-4" />
                                 Hint
                             </div>
-                            <p className="mt-1 text-sm text-primary-600 dark:text-primary-400">
+                            <p className="mt-1 text-sm text-[var(--text-secondary)]">
                                 Add an <span className="font-bold">empty line</span> if you wish to forcefully
                                 break your lyrics into verses. This feature is especially useful for
                                 adding a worship lineup.
@@ -169,13 +179,13 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
                         {/* Lyrics */}
                         <div>
                             <div className="flex items-center justify-between mb-1">
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                <label className="block text-sm font-medium text-[var(--text-secondary)]">
                                     Lyrics <span className="text-red-500">*</span>
                                 </label>
                                 <button
                                     type="button"
                                     onClick={() => setShowPreview(!showPreview)}
-                                    className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                                    className="flex items-center gap-1 text-xs text-[var(--accent-teal)] hover:brightness-110"
                                 >
                                     {showPreview ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                                     {showPreview ? 'Hide Preview' : 'Preview Verses'}
@@ -187,22 +197,22 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
                                 placeholder="Paste your lyrics here..."
                                 rows={10}
                                 required
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none font-mono text-sm leading-relaxed"
+                                className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent resize-none font-mono text-sm leading-relaxed"
                             />
 
                             {/* Verse Preview */}
                             {showPreview && parsedVerses.length > 0 && (
-                                <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                                    <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                                <div className="mt-3 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-subtle)]">
+                                    <div className="text-xs font-medium text-[var(--text-muted)] mb-2">
                                         Preview: {parsedVerses.length} verse{parsedVerses.length !== 1 ? 's' : ''} detected
                                     </div>
                                     <div className="space-y-2 max-h-48 overflow-y-auto">
                                         {parsedVerses.map((verse, index) => (
-                                            <div key={index} className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                                <div className="text-xs font-medium text-primary-600 dark:text-primary-400 mb-1">
+                                            <div key={index} className="p-2 bg-[var(--bg-elevated)] rounded border border-[var(--border-subtle)]">
+                                                <div className="text-xs font-medium text-[var(--accent-teal)] mb-1">
                                                     Verse {index + 1}
                                                 </div>
-                                                <p className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-line">
+                                                <p className="text-xs text-[var(--text-secondary)] whitespace-pre-line">
                                                     {verse}
                                                 </p>
                                             </div>
@@ -213,7 +223,7 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
 
                             {/* Verse count indicator */}
                             {lyrics.trim() && !showPreview && (
-                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                <div className="mt-1 text-xs text-[var(--text-muted)]">
                                     {parsedVerses.length} verse{parsedVerses.length !== 1 ? 's' : ''} will be created
                                 </div>
                             )}
@@ -221,13 +231,13 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
 
                         {/* Public Toggle - Only for new songs */}
                         {!isEditing && (
-                            <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                                <Globe className="w-5 h-5 text-gray-500" />
+                            <div className="flex items-center gap-3 p-3 bg-[var(--bg-secondary)] rounded-lg">
+                                <Globe className="w-5 h-5 text-[var(--text-muted)]" />
                                 <div className="flex-1">
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    <label className="block text-sm font-medium text-[var(--text-secondary)]">
                                         Share this song with other users?
                                     </label>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    <p className="text-xs text-[var(--text-muted)]">
                                         Public songs can be discovered by other churches
                                     </p>
                                 </div>
@@ -235,7 +245,7 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
                                     type="button"
                                     onClick={() => setIsPublic(!isPublic)}
                                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${isPublic
-                                        ? 'bg-primary-600'
+                                        ? 'bg-[var(--accent-teal)]'
                                         : 'bg-gray-300 dark:bg-gray-600'
                                         }`}
                                 >
@@ -249,12 +259,12 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
                     </div>
 
                     {/* Actions */}
-                    <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-800 shrink-0">
+                    <div className="flex justify-end gap-3 p-4 border-t border-[var(--border-subtle)] shrink-0">
                         <button
                             type="button"
                             onClick={handleClose}
                             disabled={loading}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-50"
+                            className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors disabled:opacity-50"
                         >
                             Cancel
                         </button>

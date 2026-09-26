@@ -85,7 +85,14 @@ describe('AddSongModal', () => {
 
         it('is announced as a modal dialog', () => {
             render(<AddSongModal {...baseProps} song={existingSong} />)
-            expect(screen.getByRole('dialog', { name: 'Edit song' })).toBeInTheDocument()
+            expect(screen.getByRole('dialog', { name: 'Edit Song' })).toBeInTheDocument()
+        })
+
+        it('still lets Escape through to close the dialog', () => {
+            const onClose = vi.fn()
+            render(<AddSongModal {...baseProps} onClose={onClose} song={existingSong} />)
+            fireEvent.keyDown(screen.getByPlaceholderText('Paste your lyrics here...'), { key: 'Escape' })
+            expect(onClose).toHaveBeenCalledTimes(1)
         })
     })
 

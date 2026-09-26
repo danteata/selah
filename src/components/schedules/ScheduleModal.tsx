@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Calendar, Plus, CalendarDays } from 'lucide-react'
 import { useSchedules } from '../../hooks/useSchedules'
-import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { Modal } from '../modals/Modal'
 
 interface ScheduleModalProps {
     isOpen: boolean
@@ -9,7 +9,6 @@ interface ScheduleModalProps {
 }
 
 export function ScheduleModal({ isOpen, onClose }: ScheduleModalProps) {
-    const backdropDismiss = useBackdropDismiss(onClose)
     const [scheduleName, setScheduleName] = useState('')
     const { createSchedule } = useSchedules()
 
@@ -37,82 +36,80 @@ export function ScheduleModal({ isOpen, onClose }: ScheduleModalProps) {
         setScheduleName(generateDefaultName())
     }
 
-    if (!isOpen) return null
-
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            {...backdropDismiss}
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            labelledBy="schedule-modal-title"
+            className="w-full max-w-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden"
         >
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
-                    <div className="p-2 bg-[var(--accent-teal)]/10 rounded-lg">
-                        <Calendar className="w-5 h-5 text-[var(--accent-teal)]" />
-                    </div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">
-                        Create New Schedule
-                    </h3>
+            {/* Header */}
+            <div className="flex items-center gap-3 p-4 border-b border-[var(--border-subtle)]">
+                <div className="p-2 bg-[var(--accent-teal)]/10 rounded-lg">
+                    <Calendar className="w-5 h-5 text-[var(--accent-teal)]" />
+                </div>
+                <h3 id="schedule-modal-title" className="font-semibold text-[var(--text-primary)]">
+                    Create New Schedule
+                </h3>
+                <button
+                    aria-label="Close"
+                    onClick={onClose}
+                    className="ml-auto p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
+                >
+                    <X className="w-5 h-5" />
+                </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                {/* Schedule Name Input */}
+                <div>
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                        Schedule Name
+                    </label>
+                    <input
+                        type="text"
+                        value={scheduleName}
+                        onChange={(e) => setScheduleName(e.target.value)}
+                        placeholder="Enter your schedule name"
+                        className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                        autoFocus
+                    />
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        Leave field blank to create schedule with name "{generateDefaultName()}"
+                    </p>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="flex gap-2">
                     <button
-                        aria-label="Close"
-                        onClick={onClose}
-                        className="ml-auto p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                        type="button"
+                        onClick={useDefaultName}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-[var(--text-secondary)] bg-[var(--bg-tertiary)] rounded-lg hover:text-[var(--text-primary)] transition-colors"
                     >
-                        <X className="w-5 h-5" />
+                        <CalendarDays className="w-4 h-4" />
+                        Use Date
                     </button>
                 </div>
 
-                {/* Form */}
-                <form onSubmit={handleSubmit} className="p-4 space-y-4">
-                    {/* Schedule Name Input */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Schedule Name
-                        </label>
-                        <input
-                            type="text"
-                            value={scheduleName}
-                            onChange={(e) => setScheduleName(e.target.value)}
-                            placeholder="Enter your schedule name"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                            autoFocus
-                        />
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Leave field blank to create schedule with name "{generateDefaultName()}"
-                        </p>
-                    </div>
-
-                    {/* Quick Actions */}
-                    <div className="flex gap-2">
-                        <button
-                            type="button"
-                            onClick={useDefaultName}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-                        >
-                            <CalendarDays className="w-4 h-4" />
-                            Use Date
-                        </button>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex justify-end gap-3 pt-2">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg transition-colors shadow-sm"
-                        >
-                            <Plus className="w-4 h-4" />
-                            Create Schedule
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+                {/* Actions */}
+                <div className="flex justify-end gap-3 pt-2">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg transition-colors shadow-sm"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Create Schedule
+                    </button>
+                </div>
+            </form>
+        </Modal>
     )
 }

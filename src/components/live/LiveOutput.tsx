@@ -17,6 +17,7 @@ import { AnalyticsEventType } from '../../services/analytics/types'
 import type { Slide, Scripture, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
 import { ScreenPicker } from './ScreenPicker'
+import { Modal } from '../modals/Modal'
 import { SlideView } from './SlideView'
 import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/BibleVerseNavigator'
@@ -1043,14 +1044,22 @@ export function LiveOutput() {
             </div>
 
             {/* Screen Picker Modal */}
-            {showScreenPicker && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-                    <ScreenPicker
-                        onSelect={handleScreenSelect}
-                        onClose={() => setShowScreenPicker(false)}
-                    />
-                </div>
-            )}
+            {/* ScreenPicker draws its own panel and has no key handling, so
+                Escape here is Modal's alone. */}
+            <Modal
+                isOpen={showScreenPicker}
+                onClose={() => setShowScreenPicker(false)}
+                closeOnBackdrop={false}
+                ariaLabel="Select display"
+                overlayClassName="bg-black/80 backdrop-blur-sm"
+                zIndexClassName="z-[100]"
+                className="max-w-full"
+            >
+                <ScreenPicker
+                    onSelect={handleScreenSelect}
+                    onClose={() => setShowScreenPicker(false)}
+                />
+            </Modal>
         </div>
     )
 }

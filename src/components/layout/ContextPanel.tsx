@@ -27,6 +27,7 @@ import { TemplateBrowser } from '../templates/TemplateBrowser'
 import { TemplateSelector } from '../templates/TemplateSelector'
 import { AddCountdownModal } from '../countdown/AddCountdownModal'
 import { AddAlertModal } from '../alerts/AddAlertModal'
+import { useConfirmDialog } from '../modals/ConfirmDialog'
 
 
 const SECTION_META: Record<NavSection, { icon: React.ElementType; title: string }> = {
@@ -459,9 +460,19 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
     // (or any) template could not be applied to anything found here.
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
     const [songToEdit, setSongToEdit] = useState<Song | null>(null)
-    const [songToDelete, setSongToDelete] = useState<Song | null>(null)
+    const { confirm, ConfirmDialog } = useConfirmDialog()
     const [showAddSong, setShowAddSong] = useState(false)
     const searchInputRef = useRef<HTMLInputElement>(null)
+
+    const handleDeleteSong = useCallback(async (song: Song) => {
+        if (!await confirm({
+            title: 'Delete Song?',
+            message: `Delete “${song.title}”? This can’t be undone.`,
+            type: 'danger',
+            confirmText: 'Delete',
+        })) return
+        await deleteSong(song._id || song.id)
+    }, [confirm, deleteSong])
 
     useEffect(() => {
         let alive = true
@@ -656,7 +667,7 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                                                 <Edit className="w-3.5 h-3.5" />
                                             </button>
                                             <button
-                                                onClick={() => setSongToDelete(hit.song!)}
+                                                onClick={() => handleDeleteSong(hit.song!)}
                                                 className="flex-shrink-0 p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/10 hidden group-hover:flex items-center justify-center"
                                                 title="Delete song"
                                             >
@@ -734,33 +745,7 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
             />
 
             {/* Delete confirmation for a song removed from the search results. */}
-            {songToDelete && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                    <div className="w-full max-w-sm bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-xl shadow-2xl p-6">
-                        <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">Delete Song?</h3>
-                        <p className="text-[var(--text-secondary)] mb-4">
-                            Delete &ldquo;{songToDelete.title}&rdquo;? This can&rsquo;t be undone.
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setSongToDelete(null)}
-                                className="px-4 py-2 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={async () => {
-                                    await deleteSong(songToDelete._id || songToDelete.id)
-                                    setSongToDelete(null)
-                                }}
-                                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ConfirmDialog />
         </div>
     )
 }

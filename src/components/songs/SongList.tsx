@@ -9,6 +9,7 @@ import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
 import { AddSongModal } from './AddSongModal'
+import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { TemplateSelector } from '../templates/TemplateSelector'
 import type { TemplateItem } from '../../hooks/useTemplates'
 import type { Song } from '../../types'
@@ -26,8 +27,8 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
     const [selectedSong, setSelectedSong] = useState<Song | null>(null)
     const [songToEdit, setSongToEdit] = useState<Song | null>(null)
     const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-    const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
+    const { confirm, ConfirmDialog } = useConfirmDialog()
 
     const { songs, loading: songsLoading, deleteSong } = useSongs()
     const { getSong } = useSong()
@@ -152,14 +153,19 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
     }, [selectedSong, getSong, createSongSlides, appendActiveSlide, selectedTemplate, trackEvent])
 
     const handleDeleteSong = useCallback(async (songId: string) => {
+        if (!await confirm({
+            title: 'Delete Song?',
+            message: 'Are you sure you want to delete this song? This action cannot be undone.',
+            type: 'danger',
+            confirmText: 'Delete',
+        })) return
         const success = await deleteSong(songId)
         if (success) {
             if (selectedSong?._id === songId || selectedSong?.id === songId) {
                 setSelectedSong(null)
             }
         }
-        setDeleteConfirmId(null)
-    }, [deleteSong, selectedSong])
+    }, [confirm, deleteSong, selectedSong])
 
     const handleEditSong = useCallback((song: Song) => {
         setSongToEdit(song)
@@ -347,7 +353,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                                     <Edit className="w-4 h-4" />
                                                 </button>
                                                 <button
-                                                    onClick={() => setDeleteConfirmId(song._id || song.id)}
+                                                    onClick={() => handleDeleteSong(song._id || song.id)}
                                                     className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
                                                     title="Delete song"
                                                 >
@@ -439,33 +445,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                     </div>
                 )}
 
-                {/* Delete Confirmation */}
-                {deleteConfirmId && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                        <div className="w-full max-w-sm bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-6">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                                Delete Song?
-                            </h3>
-                            <p className="text-gray-600 dark:text-gray-400 mb-4">
-                                Are you sure you want to delete this song? This action cannot be undone.
-                            </p>
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    onClick={() => setDeleteConfirmId(null)}
-                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={() => handleDeleteSong(deleteConfirmId)}
-                                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                <ConfirmDialog />
             </div>
 
             {/* Add/Edit Song Modal */}

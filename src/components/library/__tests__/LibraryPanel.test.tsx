@@ -37,9 +37,27 @@ describe('LibraryPanel', () => {
         const onClose = vi.fn()
         mockUseLibrary.mockReturnValue({ libraryCount: 0 })
         render(<LibraryPanel isOpen={true} onClose={onClose} />)
-        const backdrop = screen.getByText('My Library').closest('div')!.parentElement!.previousElementSibling
-        expect(backdrop).toBeTruthy()
-        fireEvent.click(backdrop!)
+        const backdrop = screen.getByRole('dialog', { name: 'My Library' }).parentElement!
+        fireEvent.mouseDown(backdrop)
+        fireEvent.click(backdrop)
+        expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not close on a click inside the drawer', () => {
+        const onClose = vi.fn()
+        mockUseLibrary.mockReturnValue({ libraryCount: 0 })
+        render(<LibraryPanel isOpen={true} onClose={onClose} />)
+        const content = screen.getByTestId('library-content')
+        fireEvent.mouseDown(content)
+        fireEvent.click(content)
+        expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('calls onClose on Escape', () => {
+        const onClose = vi.fn()
+        mockUseLibrary.mockReturnValue({ libraryCount: 0 })
+        render(<LibraryPanel isOpen={true} onClose={onClose} />)
+        fireEvent.keyDown(document, { key: 'Escape' })
         expect(onClose).toHaveBeenCalledTimes(1)
     })
 
