@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { PresenceAvatars } from '../PresenceAvatars'
 
 vi.mock('convex/react', () => ({
@@ -52,7 +52,7 @@ describe('PresenceAvatars — pure helpers', () => {
             contributor: 'Contributor',
             viewer: 'Viewer',
         }
-        for (const [role, label] of Object.entries(labels)) {
+        for (const label of Object.values(labels)) {
             expect(label).toBeTruthy()
         }
     })

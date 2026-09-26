@@ -470,7 +470,7 @@ export function VerseEmbeddingUploader({ onClose }: VerseEmbeddingUploaderProps)
                 setActiveUpload(null)
             }
         }
-    }, [bibleVersions, convex, loadModel, seedEmbeddingsFromClient, showNotification])
+    }, [bibleVersions, downloadBibleVersion, loadModel, seedEmbeddingsFromClient, showNotification])
 
     // Upload all pending versions
     const uploadAllPending = useCallback(async () => {

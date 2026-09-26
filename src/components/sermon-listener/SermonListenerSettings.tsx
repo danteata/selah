@@ -42,7 +42,7 @@ interface SermonListenerSettingsProps {
     onClose?: () => void
 }
 
-export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps = {}) {
+export function SermonListenerSettings(_props: SermonListenerSettingsProps = {}) {
     const settings = useAppStore((state) => state.settings)
     const setAppSettings = useAppStore((state) => state.setAppSettings)
     const songAutoDetect = useAppStore((state) => state.songTracking.autoDetect)
@@ -115,6 +115,7 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
         const baseUrl = llm?.baseUrl
         const apiKey = llm?.apiKey
         if (!llm?.enabled || !baseUrl || !apiKey?.trim()) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the model list for the network fetch this effect owns
             setFetchedModels([])
             return
         }

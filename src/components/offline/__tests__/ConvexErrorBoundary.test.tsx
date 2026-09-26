@@ -4,11 +4,6 @@ import { ConvexErrorBoundary } from '../ConvexErrorBoundary'
 
 vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-function Bomb({ shouldThrow }: { shouldThrow: boolean }) {
-    if (shouldThrow) throw new Error('exceeded the free plan')
-    return <div>ok</div>
-}
-
 describe('ConvexErrorBoundary', () => {
     it('renders children when there is no error', () => {
         render(

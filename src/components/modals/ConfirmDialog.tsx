@@ -157,6 +157,7 @@ interface ConfirmOptions {
     cancelText?: string
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; the useConfirmDialog hook lives beside its dialog
 export function useConfirmDialog() {
     const [isOpen, setIsOpen] = useState(false)
     const [options, setOptions] = useState<ConfirmOptions>({

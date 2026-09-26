@@ -40,7 +40,9 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
         modelReady,
     } = useEmbeddingStatus()
 
-    const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default')
+    const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
+        () => ('Notification' in window ? Notification.permission : 'default'),
+    )
     const [showSuccess, setShowSuccess] = useState<string | null>(null)
 
     const [withFragments, setWithFragments] = useState(false)
@@ -50,12 +52,6 @@ export function LocalEmbeddingSync({ onClose }: LocalEmbeddingSyncProps = {}) {
             checkAllStatuses(bibleVersions.map(v => v.id))
         }
     }, [bibleVersions, checkAllStatuses])
-
-    useEffect(() => {
-        if ('Notification' in window) {
-            setNotificationPermission(Notification.permission)
-        }
-    }, [])
 
     const requestNotificationPermission = useCallback(async () => {
         if (!('Notification' in window)) return

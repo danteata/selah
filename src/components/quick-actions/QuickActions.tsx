@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Search, X } from 'lucide-react'
 import fuzzysort from 'fuzzysort'
 import { useHymn, useScripture, useSlideCreation } from '../../hooks'
-import { useAppStore, type QuickActionsPage } from '../../store/appStore'
+import { useAppStore } from '../../store/appStore'
 import {
     slideTypes,
     quickActionsArr,
@@ -91,11 +91,13 @@ export function QuickActions() {
         initHymns()
     }, [getAllHymns])
 
-    // Reset focus when page changes
-    useEffect(() => {
+    // Reset focus when page changes (adjusted during render)
+    const [prevPage, setPrevPage] = useState(page)
+    if (page !== prevPage) {
+        setPrevPage(page)
         setFocusedActionIndex(0)
         setSearchInput('')
-    }, [page])
+    }
 
     // Parse bible chapter and verse from search input
     const bibleChapterAndVerse = useMemo(() => {
@@ -249,7 +251,7 @@ export function QuickActions() {
             try {
                 const hymn = await getHymnByNumber(hymnNumber)
                 if (hymn) {
-                    const slides = createHymnSlides(hymn as any)
+                    const slides = createHymnSlides(hymn)
                     slides.forEach(slide => {
                         appendActiveSlide(slide)
                     })
@@ -333,11 +335,6 @@ export function QuickActions() {
         setQuickActionsPage('')
     }, [setQuickActionsPage])
 
-    // Build flat action list for keyboard navigation index tracking
-    const allVisibleActions = useMemo(() => {
-        if (searchInput.length >= 2) return searchedActions
-        return [...primaryActions, ...createActions, ...otherActions]
-    }, [searchInput, searchedActions, primaryActions, createActions, otherActions])
 
     return (
         <div className="relative">

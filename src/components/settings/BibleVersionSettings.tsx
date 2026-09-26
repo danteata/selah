@@ -72,11 +72,13 @@ export function BibleVersionSettings() {
     // nothing while the arrows worked. Same mechanism as the slide queue.
     const reorder = usePointerReorder({ onReorder: moveVersion })
 
-    useEffect(() => {
-        if (bibleVersions && bibleVersions.length > 0) {
-            setBibleVersionOptions(bibleVersions.map(v => ({ ...v, isDownloaded: false })))
-        }
-    }, [bibleVersions])
+    // Seed the list (all "not downloaded") whenever the versions change; the
+    // effect below then fills in the real statuses. Adjusted during render.
+    const [prevBibleVersions, setPrevBibleVersions] = useState<typeof bibleVersions | null>(null)
+    if (bibleVersions && bibleVersions.length > 0 && bibleVersions !== prevBibleVersions) {
+        setPrevBibleVersions(bibleVersions)
+        setBibleVersionOptions(bibleVersions.map(v => ({ ...v, isDownloaded: false })))
+    }
 
     const refreshDownloadStatuses = useCallback(async () => {
         if (!bibleVersions || bibleVersions.length === 0) return
@@ -92,6 +94,7 @@ export function BibleVersionSettings() {
     useEffect(() => {
         if (bibleVersions && bibleVersions.length > 0) {
             Promise.all([
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- async IndexedDB status check; sets a loading flag then the results
                 refreshDownloadStatuses(),
                 checkAllStatuses(bibleVersions.map(v => v.id)),
             ]).finally(() => setStatusesLoading(false))

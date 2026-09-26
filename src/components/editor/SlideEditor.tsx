@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import {
     AlignLeft, AlignCenter, AlignRight,
-    Bold, Italic, Underline, Type, ImageIcon, Palette,
-    ZoomIn, ZoomOut, RotateCcw, Trash2, Save, X,
+    Bold, Italic, Underline, Type,
+    ZoomIn, ZoomOut, RotateCcw, Save, X,
     ArrowUpToLine, ArrowDownToLine
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
@@ -28,17 +28,20 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
     const requestClose = useGuardedClose(isDirty, onClose)
     const backdropDismiss = useBackdropDismiss(requestClose)
     const [activeContentIndex, setActiveContentIndex] = useState(0)
-    const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-    const settings = useAppStore((state) => state.settings)
-    const resolvedBg = useLocalBackground(editedSlide?.background, editedSlide?.localFilePath)
-
-    useEffect(() => {
+    // Re-seed the working copy whenever a new slide comes in (adjusted
+    // during render rather than in an effect).
+    const [prevSlide, setPrevSlide] = useState<Slide | null>(null)
+    if (slide !== prevSlide) {
+        setPrevSlide(slide)
         if (slide) {
             setEditedSlide({ ...slide })
             setActiveContentIndex(0)
         }
-    }, [slide])
+    }
+
+    const settings = useAppStore((state) => state.settings)
+    const resolvedBg = useLocalBackground(editedSlide?.background, editedSlide?.localFilePath)
 
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
@@ -440,7 +443,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                                         ? '#0a0a0a'
                                         : (resolvedBg || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'),
                                     fontFamily: editedSlide.slideStyle?.font || settings.defaultFont,
-                                    textAlign: (editedSlide.slideStyle?.alignment as any) || 'center',
+                                    textAlign: (editedSlide.slideStyle?.alignment as React.CSSProperties['textAlign']) || 'center',
                                 }}
                             >
                                 {editedSlide.backgroundType === 'video' && resolvedBg && (

@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
-import type { Id } from '../../../convex/_generated/dataModel'
+import type { FunctionReturnType } from 'convex/server'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { inviteLink } from '../../constants/links'
@@ -44,10 +44,7 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
     // Authoritative plan + team-size cap from the server (single source of truth
     // for the "free = solo, Pro = up to 5" model — never drifts from enforcement).
     const billing = useQuery(api.paystack.getMyChurchBilling)
-    const { trackEvent } = useAnalytics()
     const { startProCheckout } = useEntitlements()
-    const seenMemberIdsRef = useRef<Set<string>>(new Set())
-    const hasInitializedMembersRef = useRef(false)
 
     const plan = billing?.plan ?? 'free'
     const maxTeamMembers = billing?.maxTeamMembers ?? 1
@@ -180,8 +177,11 @@ export function TeamManagementPanel({ churchId, isAdmin }: TeamManagementPanelPr
     )
 }
 
+type TeamMember = NonNullable<FunctionReturnType<typeof api.invitations.getTeamMembers>>[number]
+type Invitation = NonNullable<FunctionReturnType<typeof api.invitations.getInvitations>>[number]
+
 // Members List Component
-function MembersList({ members }: { members: any[] }) {
+function MembersList({ members }: { members: TeamMember[] }) {
     const { trackEvent } = useAnalytics()
     const seenMemberIdsRef = useRef<Set<string>>(new Set())
     const hasInitializedRef = useRef(false)
@@ -281,10 +281,10 @@ function MembersList({ members }: { members: any[] }) {
 // Invitations List Component
 function InvitationsList({
     invitations,
-    churchId,
+    churchId: _churchId,
     isAdmin,
 }: {
-    invitations: any[]
+    invitations: Invitation[]
     churchId: string
     isAdmin: boolean
 }) {
@@ -535,8 +535,8 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
                     email: result.email,
                 })
             }
-        } catch (err: any) {
-            setError(err.message || 'Failed to create invitation')
+        } catch (err: unknown) {
+            setError((err instanceof Error && err.message) || 'Failed to create invitation')
         } finally {
             setIsLoading(false)
         }

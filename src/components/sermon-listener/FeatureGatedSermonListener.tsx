@@ -6,13 +6,15 @@
 import { useState, useEffect } from 'react'
 import { featureFlags } from '../../services/feature-flags'
 import { SermonListenerPanel } from './SermonListenerPanel'
+import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
+import type { Scripture } from '../../types'
 
 interface FeatureGatedSermonListenerProps {
     autoDisplay?: boolean
     autoLookup?: boolean
     language?: string
     compact?: boolean
-    onVerseDetected?: (verse: any, scripture: any) => void
+    onVerseDetected?: (verse: DetectedVerse, scripture: Scripture | null) => void
 }
 
 export function FeatureGatedSermonListener(props: FeatureGatedSermonListenerProps) {

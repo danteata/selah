@@ -27,7 +27,7 @@ export class ConvexErrorBoundary extends Component<Props, State> {
         return null
     }
 
-    componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    componentDidCatch(error: Error, _errorInfo: ErrorInfo) {
         console.warn('[ConvexErrorBoundary] Convex error caught and suppressed:', error.message?.substring(0, 80))
     }
 

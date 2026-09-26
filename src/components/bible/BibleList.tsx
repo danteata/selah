@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2, AlignJustify, Layers } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { generateSlideContent, calculateScreenFontSize, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
 import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
@@ -96,6 +96,11 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const addToQueueRef = useRef<
         ((bookIndex: number, chapter: number, verse: number, preText?: string) => Promise<void>) | null
     >(null)
+    // Same idea for `getLiveBibleContext`; the real function is mirrored in
+    // by an effect after it is declared further down.
+    const getLiveBibleContextRef = useRef<
+        () => { bookIndex: number; chapter: number; startVerse: number; endVerse: number } | null
+    >(() => null)
     const [recentVerses, setRecentVerses] = useState<string[]>(() => {
         try {
             const stored = localStorage.getItem(RECENT_VERSES_KEY)
@@ -286,8 +291,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const setLiveSlideLocal = useAppStore((s) => s.setLiveSlide)
     const updateActiveSlide = useAppStore((s) => s.updateActiveSlide)
     const defaultBibleVersion = useAppStore((s) => s.settings.defaultBibleVersion)
-    const { templates, getTemplatesForSlideType } = useTemplates()
-    const bibleTemplates = getTemplatesForSlideType('bible')
+    useTemplates()
     const {
         setLiveSlide: setLiveSlideShared,
         addToQueue: addToSharedQueue,
@@ -308,7 +312,6 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         isSearching: isSemanticSearching,
         hasEmbeddings,
         isEmbedderReady,
-        isLoadingEmbedder,
         search: semanticSearch,
         clearResults: clearSemanticResults,
         initEmbedder,
@@ -320,9 +323,44 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         version: selectedVersion || undefined,
     })
 
-    useEffect(() => {
-        if (!selectedVersion) setSelectedVersion(defaultBibleVersion || 'KJV')
-    }, [defaultBibleVersion, selectedVersion])
+    // Fall back to the default version whenever none is selected (adjusted
+    // during render rather than in an effect).
+    if (!selectedVersion) setSelectedVersion(defaultBibleVersion || 'KJV')
+
+    const updateCurrentLiveBibleSlide = useCallback((scripture: Scripture) => {
+        const { activeSlides, liveSlideId } = useAppStore.getState()
+        const liveSlide = activeSlides.find((slide) => slide.id === liveSlideId)
+
+        if (!liveSlide || liveSlide.type !== 'bible') return false
+
+        // Recompute font size from the new scripture's own content — a slide
+        // that previously held a long, illegible range must not keep that
+        // tiny font size after being narrowed to fewer verses.
+        const contentString = typeof scripture.content === 'string'
+            ? scripture.content
+            : Array.isArray(scripture.content)
+                ? scripture.content.map((v) => v.scripture).join(' ')
+                : ''
+        const displayVerseNumbers = Array.isArray(scripture.content)
+            ? scripture.content.map((v) => Number(v.verse))
+            : undefined
+
+        const updatedSlide = {
+            ...liveSlide,
+            name: scripture.label || liveSlide.name,
+            data: scripture,
+            contents: generateSlideContent(liveSlide, scripture),
+            displayVerseNumbers,
+            slideStyle: {
+                ...liveSlide.slideStyle,
+                fontSize: Number(calculateScreenFontSize(contentString)),
+            },
+        }
+
+        updateActiveSlide(updatedSlide)
+        window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
+        return true
+    }, [updateActiveSlide])
 
     // Mirrors useSermonListener's `applyBibleVersionChange` for the
     // voice command. Re-fetches the currently displayed verse in
@@ -357,6 +395,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     }, [
         selectedVersion,
         fetchScripture,
+        updateCurrentLiveBibleSlide,
     ])
 
     useEffect(() => {
@@ -366,19 +405,12 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     useEffect(() => { inputRef.current?.focus() }, [])
 
     useEffect(() => {
+        // Consume-and-clear handoff from the global store; clearing the store
+        // during render would update other subscribers mid-render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- consumes a one-shot request from the external app store
         if (biblePanelQuery) { setQuery(biblePanelQuery); setBiblePanelQuery('') }
     }, [biblePanelQuery, setBiblePanelQuery])
 
-    useEffect(() => { setFocusedIndex(-1) }, [semanticResults, currentVerses, neighborVerses])
-    useEffect(() => {
-        const rows = buildVerseRows()
-        // Whenever result rows are on screen, focus one by default so Enter
-        // presents it and ↑/↓ navigate immediately — no throwaway "search"
-        // keystroke first. Prefer the looked-up verse when we have one.
-        if (rows.length === 0 || focusedIndex !== -1) return
-        const currentIdx = rows.findIndex(r => r.isCurrent)
-        setFocusedIndex(currentIdx >= 0 ? currentIdx : 0)
-    })
 
     // Only offer book autocomplete while the user is still typing the book
     // portion (no chapter/verse yet) and hasn't run a search — otherwise the
@@ -524,8 +556,12 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
     // Mirror the function into the ref so the voice command
     // handler (defined higher up) can call it without a TDZ error.
-    goLiveWithScriptureRef.current = goLiveWithScripture
-    applyVersionChangeRef.current = applyVersionChange
+    // Done in an effect (not during render) per React 19's ref rules;
+    // every reader fires from an event, after commit.
+    useEffect(() => {
+        goLiveWithScriptureRef.current = goLiveWithScripture
+        applyVersionChangeRef.current = applyVersionChange
+    }, [goLiveWithScripture, applyVersionChange])
     // (loadVerseWithNeighborsRef is set right after the function
     // is declared further down — see below — to avoid a TDZ error
     // on first render.)
@@ -567,50 +603,14 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
     }, [currentBookIndex, currentChapter, currentStartVerse, currentEndVerse])
 
-    // Latest-callback ref, refreshed in an effect rather than during render.
-    // Assigning in the render body mutates a value already handed to useRef,
-    // which React 19's rules reject outright. Both readers (the two voice
-    // command handlers above) only fire from events, long after commit, so
-    // updating after paint is soon enough.
-    const getLiveBibleContextRef = useRef(getLiveBibleContext)
+    // Latest-callback ref (declared at the top), refreshed in an effect rather
+    // than during render. Assigning in the render body mutates a value already
+    // handed to useRef, which React 19's rules reject outright. Both readers
+    // (the two voice command handlers above) only fire from events, long after
+    // commit, so updating after paint is soon enough.
     useEffect(() => {
         getLiveBibleContextRef.current = getLiveBibleContext
     }, [getLiveBibleContext])
-
-    const updateCurrentLiveBibleSlide = useCallback((scripture: Scripture) => {
-        const { activeSlides, liveSlideId } = useAppStore.getState()
-        const liveSlide = activeSlides.find((slide) => slide.id === liveSlideId)
-
-        if (!liveSlide || liveSlide.type !== 'bible') return false
-
-        // Recompute font size from the new scripture's own content — a slide
-        // that previously held a long, illegible range must not keep that
-        // tiny font size after being narrowed to fewer verses.
-        const contentString = typeof scripture.content === 'string'
-            ? scripture.content
-            : Array.isArray(scripture.content)
-                ? scripture.content.map((v) => v.scripture).join(' ')
-                : ''
-        const displayVerseNumbers = Array.isArray(scripture.content)
-            ? scripture.content.map((v) => Number(v.verse))
-            : undefined
-
-        const updatedSlide = {
-            ...liveSlide,
-            name: scripture.label || liveSlide.name,
-            data: scripture,
-            contents: generateSlideContent(liveSlide, scripture),
-            displayVerseNumbers,
-            slideStyle: {
-                ...liveSlide.slideStyle,
-                fontSize: Number(calculateScreenFontSize(contentString)),
-            },
-        }
-
-        updateActiveSlide(updatedSlide)
-        window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
-        return true
-    }, [updateActiveSlide])
 
     const addToQueue = useCallback(async (bookIndex: number, chapter: number, verse: number, preText?: string) => {
         const label = `${bookIndex}:${chapter}:${verse}`
@@ -640,7 +640,9 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
             }
         }
     }, [fetchScripture, selectedVersion, createBibleSlide, selectedTemplate, appendActiveSlide, addRecentVerse, isConnected, isStrict, addToSharedQueue])
-    addToQueueRef.current = addToQueue
+    useEffect(() => {
+        addToQueueRef.current = addToQueue
+    }, [addToQueue])
 
     const loadVerseWithNeighbors = useCallback(async (bookIndex: number, chapter: number, verseArg: number) => {
         // Callers reach this through refs, voice commands and row data whose
@@ -688,7 +690,9 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     // Mirror `loadVerseWithNeighbors` into the ref NOW that the
     // function is defined. Voice commands earlier in the file
     // reach for it through the ref so the TDZ is avoided.
-    loadVerseWithNeighborsRef.current = loadVerseWithNeighbors
+    useEffect(() => {
+        loadVerseWithNeighborsRef.current = loadVerseWithNeighbors
+    }, [loadVerseWithNeighbors])
 
     const handleSearch = useCallback(async () => {
         const parsed = parseQuery(query)
@@ -826,6 +830,26 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
     const verseRows = useMemo(() => buildVerseRows(), [buildVerseRows])
 
+    // Focus is adjusted during render rather than in effects. New results
+    // reset it; then, whenever result rows are on screen, one is focused by
+    // default so Enter presents it and ↑/↓ navigate immediately — no
+    // throwaway "search" keystroke first. Prefer the looked-up verse.
+    const [prevRowSources, setPrevRowSources] = useState({ semanticResults, currentVerses, neighborVerses })
+    let nextFocusedIndex = focusedIndex
+    if (
+        prevRowSources.semanticResults !== semanticResults ||
+        prevRowSources.currentVerses !== currentVerses ||
+        prevRowSources.neighborVerses !== neighborVerses
+    ) {
+        setPrevRowSources({ semanticResults, currentVerses, neighborVerses })
+        nextFocusedIndex = -1
+    }
+    if (verseRows.length > 0 && nextFocusedIndex === -1) {
+        const currentIdx = verseRows.findIndex(r => r.isCurrent)
+        nextFocusedIndex = currentIdx >= 0 ? currentIdx : 0
+    }
+    if (nextFocusedIndex !== focusedIndex) setFocusedIndex(nextFocusedIndex)
+
     // Highest verse we've actually loaded for the current chapter — used to
     // clamp the verse stepper's upper bound (there's no static verse-count
     // table). Neighbors can spill into adjacent chapters, so filter by chapter.
@@ -950,7 +974,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
         // Tab is left to the browser's normal focus traversal — use the `
         // backtick shortcut to jump into the book/chapter/verse steppers instead.
-    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, onClose, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion, ghostCompletion])
+    }, [focusedIndex, verseRows, hasSearched, handleSearch, goLiveWithScripture, addToQueue, onClose, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion, ghostCompletion, query, currentBookIndex, currentChapter, currentStartVerse])
 
     // Global ` shortcut — jump into the book/chapter/verse steppers, advancing
     // book → chapter → verse on each press, even when the search box isn't focused

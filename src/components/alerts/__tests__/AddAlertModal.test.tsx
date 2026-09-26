@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { AddAlertModal } from '../AddAlertModal'
 import type { Slide } from '../../../types'
 
@@ -22,7 +22,7 @@ vi.mock('../../../store/appStore', () => ({
 }))
 
 vi.mock('../../utils/BackgroundPicker', () => ({
-    BackgroundPicker: ({ value, onChange, previewChildren }: any) => (
+    BackgroundPicker: ({ onChange, previewChildren }: any) => (
         <div data-testid="background-picker">
             <div data-testid="preview">{previewChildren}</div>
             <button onClick={() => onChange({ background: '#ff0000', backgroundType: 'color', label: 'Red' })}>

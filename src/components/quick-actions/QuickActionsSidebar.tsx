@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap, Sparkles, PanelBottom, Radio } from 'lucide-react'
+import { Search, X, ChevronRight, Book, Music, FileText, Image, Video, Clock, AlertCircle, Layout, Settings, Calendar, Keyboard, Zap, PanelBottom, Radio } from 'lucide-react'
 import fuzzysort from 'fuzzysort'
 import { useHymn, useScripture, useSlideCreation, useSemanticVerseSearch } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
@@ -184,7 +184,7 @@ export function QuickActionsSidebar() {
                     if (isMounted) {
                         setPreviewScripture({ action: actionStr, scripture })
                     }
-                } catch (e) {
+                } catch {
                     // Ignore fetch failures for preview
                     if (isMounted) setPreviewScripture({ action: actionStr, scripture: null })
                 }
@@ -351,7 +351,7 @@ export function QuickActionsSidebar() {
             try {
                 const hymn = await getHymnByNumber(hymnNumber)
                 if (hymn) {
-                    const slides = createHymnSlides(hymn as any)
+                    const slides = createHymnSlides(hymn)
                     slides.forEach((slide, idx) => {
                         appendActiveSlide(slide)
                         if (goLive && idx === 0) {

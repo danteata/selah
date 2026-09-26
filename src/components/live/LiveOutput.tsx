@@ -16,7 +16,6 @@ import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import type { Slide, Scripture, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
-import { SlideChip } from '../slides/SlideChip'
 import { LocalMediaPlaceholder } from '../slides/LocalMediaPlaceholder'
 import { ScreenPicker } from './ScreenPicker'
 import { AutoFitText } from './AutoFitText'
@@ -47,7 +46,6 @@ export function LiveOutput() {
     // Hide sermon listener panel when the ContextPanel sidebar is already showing it
     const sermonShownInSidebar = activeNavSection === 'sermon' && contextPanelOpen
 
-    const [ctrlOrMetaActive, setCtrlOrMetaActive] = useState(false)
     const [showScreenPicker, setShowScreenPicker] = useState(false)
 
     // Center layout mode — how Preview / Program / context are arranged:
@@ -83,7 +81,6 @@ export function LiveOutput() {
     const {
         isAvailable: ndiAvailable,
         isRunning: ndiRunning,
-        isLoading: ndiLoading,
         startOutput: ndiStart,
         stopOutput: ndiStop,
         state: ndiState,
@@ -149,10 +146,6 @@ export function LiveOutput() {
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
     const liveOutputBlanked = useAppStore((state) => state.liveOutputBlanked)
     const setLiveOutputBlanked = useAppStore((state) => state.setLiveOutputBlanked)
-    const setLiveOutputSlidesId = useAppStore((state) => state.setLiveOutputSlidesId)
-    const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
-    const setEditingSlide = useAppStore((state) => state.setEditingSlide)
-    const openModal = useAppStore((state) => state.openModal)
     // Global default for verse reference position (per-slide setting overrides this at render time).
     const globalVerseRefPosition = useAppStore((state) => state.settings.slideStyles?.verseRefPosition)
     // Global defaults for verse reference color/weight/style/underline/size (per-slide overrides at render time).
@@ -186,7 +179,6 @@ export function LiveOutput() {
         isOpen,
         isStrict,
         sessionScheduleId,
-        collaborationMode,
         setLiveSlide: setLiveSlideShared,
         syncSlideContent,
         addToQueue,
@@ -348,27 +340,6 @@ export function LiveOutput() {
         }
     }, [isConnected, isOperator, addToQueue])
 
-    // Keyboard shortcuts for navigation
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.ctrlKey || e.metaKey) {
-                setCtrlOrMetaActive(true)
-            }
-        }
-
-        const handleKeyUp = () => {
-            setCtrlOrMetaActive(false)
-        }
-
-        window.addEventListener('keydown', handleKeyDown)
-        window.addEventListener('keyup', handleKeyUp)
-
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown)
-            window.removeEventListener('keyup', handleKeyUp)
-        }
-    }, [])
-
     // Arrow key navigation. While mounted this is the only ↑/↓ handler — the
     // Dashboard's schedule-order fallback stands down (useClaimLiveNavigation).
     useClaimLiveNavigation()
@@ -421,27 +392,6 @@ export function LiveOutput() {
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [liveOutputSlides, handleSetLiveSlide])
-
-    const handleDeleteSlide = useCallback((slide: Slide) => {
-        trackEvent(AnalyticsEventType.SLIDE_DELETED, {
-            slide_type: slide.type || 'unknown',
-        })
-        removeActiveSlide(slide)
-    }, [removeActiveSlide, trackEvent])
-
-    const handleEditSlide = useCallback((slide: Slide) => {
-        setEditingSlide(slide)
-        // Open the appropriate editor based on slide type and layout
-        if (slide.layout === 'lower-third') {
-            openModal('lowerThirdEditor')
-        } else if (slide.type === 'countdown') {
-            openModal('countdownModal')
-        } else if (slide.type === 'alert') {
-            openModal('alertModal')
-        } else {
-            openModal('editor')
-        }
-    }, [setEditingSlide, openModal])
 
     const liveOutputMonitorId = useAppStore((state) => state.settings.liveOutputMonitorId)
 
@@ -610,7 +560,7 @@ export function LiveOutput() {
         }
 
         void syncSlideContent(updatedSlide)
-    }, [liveSlide, generateSlideContent, isDesktop, sendSlideToLive, syncSlideContent])
+    }, [liveSlide, isDesktop, sendSlideToLive, syncSlideContent])
 
     // Push a media transport-control change (play/pause/seek/mute/loop) to
     // the live output window, through the same mutate-and-push channel used

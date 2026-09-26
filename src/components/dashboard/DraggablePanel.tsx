@@ -27,7 +27,7 @@ interface DraggablePanelProps {
 }
 
 export function DraggablePanel({
-    id,
+    id: _id,
     title,
     icon,
     children,

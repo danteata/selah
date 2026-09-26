@@ -4,7 +4,7 @@ import { AddCountdownModal } from '../AddCountdownModal'
 import type { Slide } from '../../../types'
 
 vi.mock('../../utils/BackgroundPicker', () => ({
-    BackgroundPicker: ({ value, onChange, previewChildren }: any) => (
+    BackgroundPicker: ({ onChange, previewChildren }: any) => (
         <div data-testid="background-picker">
             <div data-testid="preview">{previewChildren}</div>
             <button onClick={() => onChange({ background: '#00ff00', backgroundType: 'color', label: 'Green' })}>

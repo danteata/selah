@@ -54,7 +54,7 @@ export function LibraryContent({ compact = false }: LibraryContentProps) {
         return slides
     }, [librarySlides, selectedCategory, searchQuery])
 
-    const handleUseSlide = (slide: any) => {
+    const handleUseSlide = (slide: (typeof librarySlides)[number]) => {
         addSlideToService(slide)
     }
 

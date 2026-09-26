@@ -1,20 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { LayoutTemplate, ChevronDown, X } from 'lucide-react'
 import { useTemplates, templateCategory, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
-
-const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
-    bible: 'Bible',
-    song: 'Song',
-    hymn: 'Hymn',
-    dictionary: 'Definition',
-    text: 'Text',
-    media: 'Media',
-    announcement: 'Announcement',
-    sermon: 'Sermon',
-    prayer: 'Prayer',
-    countdown: 'Countdown',
-    any: 'Any',
-}
 
 interface TemplateSelectorProps {
     slideType: SlideType

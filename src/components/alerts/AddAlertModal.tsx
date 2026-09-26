@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { X, Bell, Plus, AlertCircle } from 'lucide-react'
+import { useState } from 'react'
+import { X, Plus, AlertCircle } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Alert, Slide } from '../../types'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
@@ -48,8 +48,16 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
     const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
 
-    // Pre-populate form when editing an existing slide
-    useEffect(() => {
+    // Pre-populate form when editing an existing slide (adjusted during render
+    // whenever the slide or open state changes, including the first render)
+    const [prevFormKey, setPrevFormKey] = useState<[typeof editingSlide, boolean, boolean] | null>(null)
+    if (
+        prevFormKey === null ||
+        prevFormKey[0] !== editingSlide ||
+        prevFormKey[1] !== isOpen ||
+        prevFormKey[2] !== isInline
+    ) {
+        setPrevFormKey([editingSlide, isOpen, isInline])
         if (editingSlide && editingSlide.type === 'alert') {
             // Parse title and content from contents array
             const contents = editingSlide.contents || []
@@ -84,7 +92,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
             setAlertStyle('fullscreen')
             setSelectedBg(DEFAULT_BG)
         }
-    }, [editingSlide, isOpen, isInline])
+    }
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()

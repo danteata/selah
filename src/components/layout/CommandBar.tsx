@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-    Search, Command, Zap, Play, Eye, Book, BookA,
+    Search, Command, Zap, Play, Book, BookA,
     Music, Image, Settings, HelpCircle, ArrowRight,
     Layout, Clock, AlertCircle
 } from 'lucide-react'
@@ -22,7 +22,6 @@ export function CommandBar() {
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const activeSlides = useAppStore((s) => s.activeSlides)
-    const liveSlideId = useAppStore((s) => s.liveSlideId)
     const setLiveSlide = useAppStore((s) => s.setLiveSlide)
     const activeSchedule = useAppStore((s) => s.activeSchedule)
     
@@ -31,12 +30,18 @@ export function CommandBar() {
     const inputRef = useRef<HTMLInputElement>(null)
     const listRef = useRef<HTMLDivElement>(null)
 
-    useEffect(() => {
+    // Clear the previous search each time the bar opens (adjusted during render)
+    const [prevCommandBarOpen, setPrevCommandBarOpen] = useState(commandBarOpen)
+    if (commandBarOpen !== prevCommandBarOpen) {
+        setPrevCommandBarOpen(commandBarOpen)
         if (commandBarOpen) {
-            inputRef.current?.focus()
             setQuery('')
             setSelectedIndex(0)
         }
+    }
+
+    useEffect(() => {
+        if (commandBarOpen) inputRef.current?.focus()
     }, [commandBarOpen])
 
     const handleClose = useCallback(() => {

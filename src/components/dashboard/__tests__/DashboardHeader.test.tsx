@@ -47,7 +47,7 @@ describe('DashboardHeader', () => {
     })
 
     it('shows active mic indicator when showSermonListener is true', () => {
-        const { container } = render(
+        render(
             <DashboardHeader {...baseProps} showSermonListener={true} />
         )
         const micBtn = screen.getByTitle('Sermon Listener')

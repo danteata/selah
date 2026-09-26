@@ -22,7 +22,7 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
     const [error, setError] = useState('')
     const [showPreview, setShowPreview] = useState(false)
 
-    const { createSong, updateSong, loading, parseSongLyrics } = useSongs()
+    const { createSong, updateSong, loading } = useSongs()
 
     // Parse verses for preview
     const parsedVerses = lyrics.trim() ? lyrics.split(/\n\s*\n/).filter(v => v.trim()) : []

@@ -3,14 +3,22 @@ import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import { useUserRole } from '../../hooks/useUserRole'
 import { Building2, ChevronDown, Check } from 'lucide-react'
-import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { cacheChurch, getCachedChurch, getAllCachedChurches } from '../../hooks/useIndexedDB'
 import { toast } from 'sonner'
+
+// A church as either the server returns it or the IndexedDB cache stores it.
+type ChurchOption = {
+    _id?: string
+    id?: string
+    serverId?: string
+    name: string
+    type: string
+    address: string
+}
 
 export function ChurchContext() {
     const [isOpen, setIsOpen] = useState(false)
     const { isSuperadmin, isAdmin, currentUser, isOfflineMode } = useUserRole()
-    const { isConvexConnected } = useConvexConnection()
 
     const currentChurch = useQuery(
         api.churches.getChurchById,
@@ -22,13 +30,21 @@ export function ChurchContext() {
         isSuperadmin ? {} : 'skip'
     )
 
-    const [cachedCurrentChurch, setCachedCurrentChurch] = useState<any>(null)
-    const [cachedAllChurches, setCachedAllChurches] = useState<any[]>([])
+    const [cachedCurrentChurch, setCachedCurrentChurch] = useState<ChurchOption | null>(null)
+    const [cachedAllChurches, setCachedAllChurches] = useState<ChurchOption[]>([])
+
+    // Remember the last server answers so they survive going offline
+    // (adjusted during render; the IndexedDB writes stay in effects).
+    if (currentChurch && currentUser?.churchId && currentChurch !== cachedCurrentChurch) {
+        setCachedCurrentChurch(currentChurch)
+    }
+    if (allChurches && allChurches !== cachedAllChurches) {
+        setCachedAllChurches(allChurches)
+    }
 
     useEffect(() => {
         if (currentChurch && currentUser?.churchId) {
             cacheChurch(currentChurch).catch(() => {})
-            setCachedCurrentChurch(currentChurch)
         }
     }, [currentChurch, currentUser?.churchId])
 
@@ -37,7 +53,6 @@ export function ChurchContext() {
             for (const church of allChurches) {
                 cacheChurch(church).catch(() => {})
             }
-            setCachedAllChurches(allChurches)
         }
     }, [allChurches])
 
@@ -108,10 +123,10 @@ export function ChurchContext() {
                         </div>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
-                        {effectiveAllChurches.map((church: any) => (
+                        {effectiveAllChurches.map((church: ChurchOption) => (
                             <button
                                 key={church._id || church.id}
-                                onClick={() => handleSwitchChurch(church._id || church.serverId)}
+                                onClick={() => handleSwitchChurch(church._id || church.serverId || '')}
                                 className={`w-full flex items-center justify-between px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg ${church._id === currentUser.churchId ? 'bg-primary-50 dark:bg-primary-900/20' : ''
                                     }`}
                             >

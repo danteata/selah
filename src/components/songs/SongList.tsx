@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Search, Plus, ChevronLeft, Music, Trash2, Edit, CloudOff, Zap } from 'lucide-react'
+import { Search, Plus, ChevronLeft, Music, Trash2, Edit, Zap } from 'lucide-react'
 import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
 import { useGoLive } from '../../hooks/useGoLive'
@@ -10,7 +10,7 @@ import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
 import { AddSongModal } from './AddSongModal'
 import { TemplateSelector } from '../templates/TemplateSelector'
-import { useTemplates, type TemplateItem } from '../../hooks/useTemplates'
+import type { TemplateItem } from '../../hooks/useTemplates'
 import type { Song } from '../../types'
 
 interface SongListProps {
@@ -29,7 +29,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
     const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
 
-    const { songs, loading: songsLoading, searchSongs, deleteSong, parseSongLyrics } = useSongs()
+    const { songs, loading: songsLoading, deleteSong } = useSongs()
     const { getSong } = useSong()
     const { createSongSlides } = useSlideCreation()
     const { trackEvent } = useAnalytics()
@@ -133,7 +133,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
             console.log('Verses parsed:', songWithVerses?.verses)
 
             if (songWithVerses) {
-                const slides = createSongSlides(songWithVerses as any, { template: selectedTemplate })
+                const slides = createSongSlides(songWithVerses, { template: selectedTemplate })
                 console.log('Created slides count:', slides.length)
                 slides.forEach(slide => {
                     appendActiveSlide(slide)

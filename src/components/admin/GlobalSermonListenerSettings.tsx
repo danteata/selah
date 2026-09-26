@@ -12,16 +12,14 @@ import { useGlobalSermonListenerSettings } from '../../hooks/useGlobalAppSetting
 import { unifiedTranscriptionService } from '../../services/sermon-listener'
 import type { TranscriptionProvider } from '../../services/sermon-listener'
 import { IconWrapper } from '../utils/IconWrapper'
-import { Info, Check, AlertTriangle, Shield, Loader2, Monitor } from 'lucide-react'
+import { Check, Shield, Loader2, Monitor } from 'lucide-react'
 import { isDesktop } from '@/platform'
-
-const DEFAULT_CHUNK_DURATION_MS = 2500
 
 interface GlobalSermonListenerSettingsPanelProps {
     onClose?: () => void
 }
 
-export function GlobalSermonListenerSettingsPanel({ onClose }: GlobalSermonListenerSettingsPanelProps) {
+export function GlobalSermonListenerSettingsPanel(_props: GlobalSermonListenerSettingsPanelProps) {
     const { isSuperadmin, isLoading: isRoleLoading } = useUserRole()
     const { settings, isLoading: isSettingsLoading, canEdit, updateSettings } = useGlobalSermonListenerSettings()
 

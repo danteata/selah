@@ -13,7 +13,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Upload, FileText, Music, AlertCircle, CheckCircle, XCircle, ChevronRight, ChevronLeft, Loader2, Database, FileStack } from 'lucide-react';
 import { parseEasyWorshipFile, parseEasyWorshipDatabases, toSelahSong } from '../../services/migration/easyWorshipParser';
-import type { ParsedSong, MigrationStatus, EasyWorshipFileType } from '../../services/migration/types';
+import type { ParsedSong } from '../../services/migration/types';
 import { openFileDialog, filePathsToFiles } from '../../utils/fileDialog';
 import { useSongs } from '../../hooks/useSongs';
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider';
@@ -32,13 +32,11 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         songWordsDb?: File;
         singleFile?: File;
     }>({});
-    const [fileType, setFileType] = useState<EasyWorshipFileType>('unknown');
     const [parsedSongs, setParsedSongs] = useState<ParsedSong[]>([]);
     const [selectedSongs, setSelectedSongs] = useState<Set<number>>(new Set());
     const [parseErrors, setParseErrors] = useState<string[]>([]);
     const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
     const [importErrors, setImportErrors] = useState<string[]>([]);
-    const [importedIds, setImportedIds] = useState<string[]>([]);
     const [isParsing, setIsParsing] = useState(false);
     const [replaceExisting, setReplaceExisting] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
@@ -61,11 +59,6 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         return map
     }, [existingSongs]);
 
-    const existingTitles = useMemo(
-        () => new Set(existingByTitle.keys()),
-        [existingByTitle],
-    );
-
     // Handle single file upload
     const handleSingleFileUpload = useCallback(async (file: File) => {
         setIsParsing(true);
@@ -74,7 +67,6 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
 
         try {
             const result = await parseEasyWorshipFile(file);
-            setFileType(result.fileType);
             setParsedSongs(result.songs);
             setParseErrors(result.errors);
 
@@ -145,7 +137,6 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     const handleMultipleFilesUpload = useCallback(async (songsDb: File, songWordsDb: File) => {
         setIsParsing(true);
         setFiles({ songsDb, songWordsDb });
-        setFileType('sqlite');
         setParseErrors([]);
 
         try {
@@ -236,14 +227,12 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         setStep('importing');
         setImportProgress({ current: 0, total: selectedSongs.size });
         setImportErrors([]);
-        setImportedIds([]);
 
         const songsToImport = Array.from(selectedSongs)
             .map(i => parsedSongs[i])
             .filter(Boolean)
             .map(toSelahSong);
 
-        const allImportedIds: string[] = [];
         const allErrors: string[] = [];
         let imported = 0;
         let updated = 0;
@@ -259,7 +248,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         const SONG_TIMEOUT_MS = 45_000;
         let cursor = 0;
 
-        const withSongTimeout = <T,>(p: Promise<T>, title: string): Promise<T> =>
+        const withSongTimeout = <T,>(p: Promise<T>, _title: string): Promise<T> =>
             new Promise<T>((resolve, reject) => {
                 const timer = setTimeout(
                     () => reject(new Error(`Timed out after ${SONG_TIMEOUT_MS}ms`)),
@@ -301,7 +290,6 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             song.title,
                         );
                         if (ok) {
-                            allImportedIds.push(existingId);
                             updated++;
                         } else {
                             allErrors.push(`Failed to update "${song.title}"`);
@@ -320,8 +308,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             song.title,
                         );
                         if (created) {
-                            const newId = (created as any)._id || (created as any).id || '';
-                            allImportedIds.push(newId);
+                            const newId = created._id || created.id || '';
                             existingByTitle.set(titleKey, newId);
                             imported++;
                         } else {
@@ -358,7 +345,6 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
             allErrors.unshift(`Imported ${imported} song${imported === 1 ? '' : 's'} locally — they will sync to the server when you reconnect.`);
         }
 
-        setImportedIds(allImportedIds);
         setImportErrors(allErrors);
         setStep('complete');
     }, [selectedSongs, parsedSongs, createSong, updateSong, existingByTitle, replaceExisting, isOffline]);

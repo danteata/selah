@@ -132,7 +132,7 @@ describe('SlideCard', () => {
     })
 
     it('shows checkmark when selectable and isSelected are both true', () => {
-        const { container } = renderSlideCard({ selectable: true, isSelected: true })
+        renderSlideCard({ selectable: true, isSelected: true })
         expect(screen.getByText('✓')).toBeInTheDocument()
     })
 

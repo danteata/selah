@@ -10,6 +10,7 @@ interface FirstRunWizardProps {
 
 const WIZARD_COMPLETED_KEY = 'selah-sermon-listener-wizard-completed'
 
+// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; isSermonListenerWizardComplete reads the wizard's completion flag
 export function isSermonListenerWizardComplete(): boolean {
     try {
         return localStorage.getItem(WIZARD_COMPLETED_KEY) === 'true'

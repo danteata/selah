@@ -44,8 +44,10 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
     const [position, setPosition] = useState<NonNullable<SlideStyle['lowerThirdPosition']>>('left')
     const [accentColor, setAccentColor] = useState('#0d9488')
 
-    // Initialize state when slide changes
-    useEffect(() => {
+    // Initialize state when slide changes (adjusted during render)
+    const [prevSlide, setPrevSlide] = useState<Slide | null>(null)
+    if (slide !== prevSlide) {
+        setPrevSlide(slide)
         if (slide) {
             // Parse title from contents
             const rawTitle = slide.contents?.[0] || ''
@@ -56,7 +58,7 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
             setPosition(slide.slideStyle?.lowerThirdPosition || 'left')
             setAccentColor(slide.slideStyle?.lowerThirdAccentColor || '#0d9488')
         }
-    }, [slide])
+    }
 
     // Keyboard shortcut to close — guarded, so Esc can't silently discard edits.
     const isDirty = !!slide && (

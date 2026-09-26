@@ -1,6 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render } from '@testing-library/react'
-import { ChurchContext } from '../ChurchContext'
+import { describe, it, expect } from 'vitest'
 
 // ChurchContext has complex Convex dependencies that are hard to mock
 // Skipping for now - focus on simpler components

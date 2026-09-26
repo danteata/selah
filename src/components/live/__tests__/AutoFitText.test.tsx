@@ -62,7 +62,6 @@ describe('AutoFitText', () => {
         Reflect.deleteProperty(HTMLElement.prototype, 'scrollWidth')
         Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight')
         // Stub ResizeObserver — jsdom doesn't ship one.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ;(globalThis as any).ResizeObserver = class {
             observe() { /* noop */ }
             unobserve() { /* noop */ }

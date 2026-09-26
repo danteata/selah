@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import type { AppSettings, SlideStyle } from '../../types'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -64,11 +65,14 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
     const setVerseRefUnderline = useAppStore((state) => state.setVerseRefUnderline)
     const setVerseRefSizePercent = useAppStore((state) => state.setVerseRefSizePercent)
 
-    useEffect(() => {
+    // Follow a new initialTab from the caller (adjusted during render)
+    const [prevInitialTab, setPrevInitialTab] = useState(initialTab)
+    if (initialTab !== prevInitialTab) {
+        setPrevInitialTab(initialTab)
         if (initialTab) {
             setActiveTab(initialTab)
         }
-    }, [initialTab])
+    }
 
     // Track settings opened
     useEffect(() => {
@@ -254,13 +258,16 @@ function DisplaySettings({
     settings,
     onUpdate,
 }: {
-    settings: any
+    // `slideStyle` is not a real AppSettings key (the store writes
+    // linesPerSlide under `slideStyles`), so the slider below always reads 4.
+    // Typed as-is to keep behaviour unchanged; left for a separate fix.
+    settings: AppSettings & { slideStyle?: Pick<SlideStyle, 'linesPerSlide'> }
     onUpdate: {
-        setSlideStyles: any
-        setDefaultFont: any
-        setAnimations: any
-        setLinesPerSlide: any
-        setTransitionInterval: any
+        setSlideStyles: (styles: SlideStyle) => void
+        setDefaultFont: (font: string) => void
+        setAnimations: (animations: boolean) => void
+        setLinesPerSlide: (lines: number) => void
+        setTransitionInterval: (interval: number) => void
     }
 }) {
     const setLiveOutputMonitorId = useAppStore((state) => state.setLiveOutputMonitorId)
@@ -857,8 +864,8 @@ function LiveSessionSettings({
     settings,
     setAppSettings,
 }: {
-    settings: any
-    setAppSettings: (s: any) => void
+    settings: AppSettings
+    setAppSettings: (s: AppSettings) => void
 }) {
     type CollabMode = 'strict' | 'moderated' | 'open'
     const currentMode: CollabMode = settings.defaultCollaborationMode || 'moderated'
@@ -1043,10 +1050,10 @@ function BibleSettings({
     settings,
     onUpdate,
 }: {
-    settings: any
+    settings: AppSettings
     onUpdate: {
-        setDefaultBibleVersion: any
-        setFootnotes: any
+        setDefaultBibleVersion: (version: string) => void
+        setFootnotes: (footnotes: boolean) => void
         setVerseRefPosition: (position: 'top' | 'bottom') => void
         setVerseRefColor: (color: string | undefined) => void
         setVerseRefBold: (bold: boolean) => void
@@ -1466,18 +1473,16 @@ function ProfileSettings() {
 
 // Storage Settings Tab
 function StorageSettings() {
-    const [storageUsed, setStorageUsed] = useState(0)
-
-    useEffect(() => {
-        // Calculate localStorage usage
+    // Calculate localStorage usage once, on mount
+    const [storageUsed] = useState(() => {
         let total = 0
         for (const key in localStorage) {
             if (Object.prototype.hasOwnProperty.call(localStorage, key)) {
                 total += localStorage[key].length * 2 // UTF-16 = 2 bytes per char
             }
         }
-        setStorageUsed(total)
-    }, [])
+        return total
+    })
 
     const formatBytes = (bytes: number) => {
         if (bytes < 1024) return bytes + ' B'
@@ -1906,7 +1911,7 @@ function ShortcutsSettings() {
 function UpdatesSettings() {
     const { state, message, available, install, runCheck } = useAppUpdater()
 
-    const isDesktop = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+    const isDesktop = typeof window !== 'undefined' && !!(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 
     // The old `window.__TAURI__.metadata.version` path isn't populated in
     // Tauri v2, so it always fell through to the hardcoded "0.1.0". Read the

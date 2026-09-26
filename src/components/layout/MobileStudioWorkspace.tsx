@@ -19,7 +19,6 @@
 
 import { useMemo, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Play, Mic, FileText, Lightbulb, Check, X } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../store/appStore'
 import { slideCaptionHtml } from '../../utils/slideCaption'
 import { useLiveSession } from '../../hooks/useLiveSession'
@@ -72,8 +71,6 @@ export function MobileStudioWorkspace() {
 
     const currentIndex = liveOutputSlides.findIndex(slide => slide.id === liveSlideId)
     const liveSlide = currentIndex >= 0 ? liveOutputSlides[currentIndex] : activeSlides.find(s => s.id === liveSlideId) ?? null
-    const nextSlide = liveOutputSlides[currentIndex + 1] ?? null
-    const prevSlide = liveOutputSlides[currentIndex - 1] ?? null
 
     // The active queue is everything the operator wants to project. If no
     // queue has been pushed yet, we fall back to all active slides so the
@@ -138,8 +135,6 @@ export function MobileStudioWorkspace() {
 
     const liveBodyHtml = effectiveLiveSlide?.contents[0] ?? ''
     const liveRefHtml = slideCaptionHtml(effectiveLiveSlide)
-    const nextBodyHtml = effectiveNextSlide?.contents[0] ?? ''
-    const nextRefHtml = slideCaptionHtml(effectiveNextSlide)
 
     const liveBg = effectiveLiveSlide?.background || SLIDE_PREVIEW_BG
     const isLiveVideo = effectiveLiveSlide?.backgroundType === 'video'

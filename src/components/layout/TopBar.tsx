@@ -51,7 +51,7 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
     const onlineScheduleCount = useMemo(() => {
         if (!scheduleViewers || !currentSchedule) return 0
         return scheduleViewers.filter(
-            (u: any) =>
+            (u) =>
                 u.activeScheduleId === currentSchedule._id &&
                 u.userId !== currentUser?._id
         ).length

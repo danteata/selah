@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Radio, Mic, PanelRight, Keyboard, Monitor, Search, Wifi, WifiOff, ChevronRight } from 'lucide-react'
+import { Mic, PanelRight, Monitor, Search, ChevronRight } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { SlideChip } from '../slides/SlideChip'
 import { OfflineIndicator } from '../offline/OfflineIndicator'
@@ -32,14 +32,6 @@ export function StatusBar() {
     const embeddingStatus = useEmbeddingStatus() as EmbeddingStatusAPI | null
 
     // Determine status levels for each subsystem
-    const liveStatus: StatusLevel = liveSlideId ? 'ready' : 'off'
-    const sermonStatus: StatusLevel = sermonListener?.isListening
-        ? 'ready'
-        : sermonListener?.isInitializingProvider
-            ? 'loading'
-            : sermonListener?.error
-                ? 'error'
-                : 'off'
     const searchStatus: StatusLevel = embeddingStatus?.status?.stage === 'completed'
         ? 'ready'
         : embeddingStatus?.status?.stage === 'generating' || embeddingStatus?.status?.stage === 'importing'

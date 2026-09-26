@@ -3,7 +3,6 @@ import { Zap, Plus, X, Loader2, BookOpen, ChevronLeft, ChevronRight } from 'luci
 import { motion, AnimatePresence } from 'framer-motion'
 import { useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession, useVerseNavigationShortcuts, VERSE_NAV_PRIORITY } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
-import { bibleBooks, bibleVersionObjects } from '../../types'
 import type { Scripture, BibleVerse } from '../../types'
 import { parseBibleQuery, normalizeBibleReference, getRankedBookSuggestions, formatReferenceQuery, type ParsedBibleQuery } from '../../utils/bibleReference'
 import { BookAutocomplete } from './BookAutocomplete'
@@ -55,14 +54,22 @@ export function QuickBibleBar() {
         version: defaultBibleVersion || undefined,
     })
 
-    useEffect(() => {
-        if (quickBibleBarOpen) {
-            setTimeout(() => inputRef.current?.focus(), 100)
-        } else {
+    // Reset the local form whenever the bar closes (adjusted during render).
+    const [prevBarOpen, setPrevBarOpen] = useState(quickBibleBarOpen)
+    if (quickBibleBarOpen !== prevBarOpen) {
+        setPrevBarOpen(quickBibleBarOpen)
+        if (!quickBibleBarOpen) {
             setQuery('')
             setCurrentScripture(null)
             setCurrentPosition(null)
             setNeighboringVerses({ prev: [], next: [] })
+        }
+    }
+
+    useEffect(() => {
+        if (quickBibleBarOpen) {
+            setTimeout(() => inputRef.current?.focus(), 100)
+        } else {
             clearSemanticResults()
         }
     }, [quickBibleBarOpen, clearSemanticResults])
@@ -89,12 +96,14 @@ export function QuickBibleBar() {
     }, [query, currentScripture])
     const suggestionsOpen = bookSuggestions.length > 0 && !currentScripture
 
-    useEffect(() => {
-        // Auto-highlight the top result so a meaning search is a single
-        // keystroke: type → Enter presents the best match, no arrow/mouse
-        // needed first (matches the BibleList panel).
+    // Auto-highlight the top result so a meaning search is a single
+    // keystroke: type → Enter presents the best match, no arrow/mouse
+    // needed first (matches the BibleList panel). Adjusted during render.
+    const [prevSemanticResults, setPrevSemanticResults] = useState<typeof semanticResults | null>(null)
+    if (semanticResults !== prevSemanticResults) {
+        setPrevSemanticResults(semanticResults)
         setFocusedIndex(semanticResults.length > 0 ? 0 : -1)
-    }, [semanticResults])
+    }
 
     const fetchAndSetScripture = useCallback(async (parsed: { bookIndex: number; chapter: number; startVerse: number; endVerse: number; bookName: string }) => {
         setLoading(true)

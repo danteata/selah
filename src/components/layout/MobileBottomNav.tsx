@@ -53,7 +53,6 @@ const LABELS: Record<NavSection, string> = {
 export function MobileBottomNav() {
     const activeNavSection = useAppStore((s) => s.activeNavSection)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
-    const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const sermonListener = useSermonListenerContext()
     const [moreOpen, setMoreOpen] = useState(false)

@@ -107,7 +107,7 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
 
     const handleCreateSlides = useCallback(() => {
         if (selectedHymn) {
-            const slides = createHymnSlides(selectedHymn as any, { template: selectedTemplate })
+            const slides = createHymnSlides(selectedHymn, { template: selectedTemplate })
             slides.forEach(slide => {
                 appendActiveSlide(slide)
             })

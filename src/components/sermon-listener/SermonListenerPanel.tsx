@@ -23,7 +23,6 @@ import type { VoiceCommand } from '../../services/sermon-listener/voiceCommandDe
 import type { Transcript } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
 import { classifyTranscriptionError, getUserAction, transcriptionErrorCodes, isRetryableError } from '../../services/sermon-listener/transcriptionErrors'
-import { downloadTranscript, type ExportFormat } from '../../services/sermon-listener/transcriptExport'
 import { generateSermonNotes } from '../../services/sermon-listener/sermonNotes'
 import { SongTrackingControl } from './SongTrackingControl'
 import { sessionAudioRecorder } from '../../services/sermon-listener/sessionAudioRecorder'

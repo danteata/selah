@@ -1,20 +1,16 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, Copy, LayoutGrid, BookOpen, BookA, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, Layers, type LucideIcon } from 'lucide-react'
+import { Trash2, LayoutGrid, BookOpen, BookA, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, Layers, type LucideIcon } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
 import { bibleBooks } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
 import { EmptyState } from '../utils/EmptyState'
-import { BibleVersionSelect } from '../bible/BibleVersionSelect'
 import { SongVerseBrowser } from '../slides/SongVerseBrowser'
 import { groupQueueItems, type SongGroupItem } from './groupQueueItems'
 
 export function PreviewContent() {
     const [activeSlide, setActiveSlide] = useState<Slide | undefined>()
-    const [relatedVerses, setRelatedVerses] = useState<{ prev: BibleVerse[]; next: BibleVerse[] }>({ prev: [], next: [] })
-    const [currentVerses, setCurrentVerses] = useState<BibleVerse[]>([])
-    const [loadingVerses, setLoadingVerses] = useState(false)
 
     const alternateSlide = useAppStore((state) => state.alternateSlide)
     const setAlternateSlide = useAppStore((state) => state.setAlternateSlide)
@@ -81,6 +77,7 @@ export function PreviewContent() {
             activeSlideRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
             userClickedSlideRef.current = false
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the slide id only; content edits to the same slide must not re-scroll
     }, [activeSlide?.id])
 
     // Keep the LIVE slide centered in the queue so the operator always sees it
@@ -325,50 +322,31 @@ export function PreviewContent() {
         }
     }, [activeSlide])
 
-    // Fetch related verses when scripture reference changes
+    // Fetch the passage and its neighbouring verses when the scripture
+    // reference changes. Nothing here reads the results any more, but the
+    // fetches still pull the version into the local cache (IndexedDB → CDN)
+    // ahead of verse navigation, so they are kept.
     useEffect(() => {
-        if (!scriptureRef) {
-            setRelatedVerses({ prev: [], next: [] })
-            setCurrentVerses([])
-            return
-        }
+        if (!scriptureRef) return
 
-        const fetchRelatedVerses = async () => {
-            setLoadingVerses(true)
+        const prefetchRelatedVerses = async () => {
             const { bookIndex, chapter, startVerse, endVerse, version } = scriptureRef
 
-            // Fetch current verses
+            // Current verses
             const currentLabel = `${bookIndex}:${chapter}:${startVerse}${endVerse !== startVerse ? `-${endVerse}` : ''}`
-            const currentResult = await fetchScripture(currentLabel, version)
-            if (currentResult && Array.isArray(currentResult.content)) {
-                setCurrentVerses(currentResult.content as BibleVerse[])
-            }
+            await fetchScripture(currentLabel, version)
 
-            // Fetch previous verses (5 before)
+            // Previous verses (5 before)
             const prevStart = Math.max(1, startVerse - 5)
             if (prevStart < startVerse) {
-                const prevLabel = `${bookIndex}:${chapter}:${prevStart}-${startVerse - 1}`
-                const prevResult = await fetchScripture(prevLabel, version)
-                if (prevResult && Array.isArray(prevResult.content)) {
-                    setRelatedVerses(prev => ({ ...prev, prev: prevResult.content as BibleVerse[] }))
-                }
-            } else {
-                setRelatedVerses(prev => ({ ...prev, prev: [] }))
+                await fetchScripture(`${bookIndex}:${chapter}:${prevStart}-${startVerse - 1}`, version)
             }
 
-            // Fetch next verses (5 after)
-            const nextLabel = `${bookIndex}:${chapter}:${endVerse + 1}-${endVerse + 5}`
-            const nextResult = await fetchScripture(nextLabel, version)
-            if (nextResult && Array.isArray(nextResult.content)) {
-                setRelatedVerses(prev => ({ ...prev, next: nextResult.content as BibleVerse[] }))
-            } else {
-                setRelatedVerses(prev => ({ ...prev, next: [] }))
-            }
-
-            setLoadingVerses(false)
+            // Next verses (5 after)
+            await fetchScripture(`${bookIndex}:${chapter}:${endVerse + 1}-${endVerse + 5}`, version)
         }
 
-        fetchRelatedVerses()
+        void prefetchRelatedVerses()
     }, [scriptureRef, fetchScripture])
 
     // Handle verse selection for bible slides
@@ -425,40 +403,6 @@ export function PreviewContent() {
         () => navigateVerse('prev'),
         { enabled: activeSlide?.type === 'bible' }
     )
-
-    // Handle version change
-    const handleVersionChange = useCallback(async (newVersion: string) => {
-        if (!scriptureRef || !activeSlide) return
-
-        const { bookIndex, chapter, startVerse, endVerse, bookName } = scriptureRef
-        const label = `${bookIndex}:${chapter}:${startVerse}${endVerse !== startVerse ? `-${endVerse}` : ''}`
-        const result = await fetchScripture(label, newVersion)
-
-        if (result && Array.isArray(result.content)) {
-            const verses = result.content as BibleVerse[]
-            const contents = verses.map(v => `<p><sup>${v.verse}</sup> ${v.scripture}</p>`)
-
-            const updatedSlide: Slide = {
-                ...activeSlide,
-                data: {
-                    label: `${bookName} ${chapter}:${startVerse}${endVerse !== startVerse ? `-${endVerse}` : ''}`,
-                    labelShortFormat: `${bookIndex}:${chapter}:${startVerse}${endVerse !== startVerse ? `-${endVerse}` : ''}`,
-                    version: newVersion,
-                    content: result.content,
-                } as Scripture,
-                contents: [
-                    `<p class="scripture-content">${contents.join(' ')}</p>`,
-                    `<p class="scripture-label"><b>${bookName} ${chapter}:${startVerse}${endVerse !== startVerse ? `-${endVerse}` : ''}</b> · ${newVersion}</p>`,
-                ],
-            }
-
-            const updatedSlides = activeSlides.map(s =>
-                s.id === updatedSlide.id ? updatedSlide : s
-            )
-            setActiveSlides(updatedSlides)
-            setActiveSlide(updatedSlide)
-        }
-    }, [scriptureRef, activeSlide, fetchScripture, activeSlides, setActiveSlides, setActiveSlide])
 
     const handleSelectVerseFromBrowser = useCallback((slideId: string) => {
         setLiveSlide(slideId)

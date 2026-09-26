@@ -28,8 +28,7 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
 
     const [versions, setVersions] = useState<VersionUploadStatus[]>([])
     const [isUploading, setIsUploading] = useState(false)
-    const [currentUploading, setCurrentUploading] = useState<string | null>(null)
-    const [uploadedBy, setUploadedBy] = useState('admin')
+    const [uploadedBy] = useState('admin')
 
     // Initialize versions list
     useEffect(() => {
@@ -74,7 +73,6 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
         const versionInfo = bibleVersionObjects.find(v => v.id === versionId)
         if (!versionInfo) return
 
-        setCurrentUploading(versionId)
         setVersions(prev => prev.map(v =>
             v.id === versionId ? { ...v, status: 'downloading' as const } : v
         ))
@@ -85,7 +83,6 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
             setVersions(prev => prev.map(v =>
                 v.id === versionId ? { ...v, status: 'error' as const, error: 'Failed to download from CDN' } : v
             ))
-            setCurrentUploading(null)
             return
         }
 
@@ -141,8 +138,6 @@ export function BibleVersionUploader({ onClose }: BibleVersionUploaderProps) {
                 v.id === versionId ? { ...v, status: 'error' as const, error: String(error) } : v
             ))
         }
-
-        setCurrentUploading(null)
     }, [downloadFromCdn, generateUploadUrl, saveBibleVersion, uploadedBy])
 
     // Upload all pending versions

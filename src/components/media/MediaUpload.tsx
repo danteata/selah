@@ -224,7 +224,6 @@ export function MediaUpload({
     }
 
     const validFiles = files.filter((f) => f.status !== 'error')
-    const hasErrors = files.some((f) => f.status === 'error')
 
     return (
         <div className={`space-y-4 ${className}`}>

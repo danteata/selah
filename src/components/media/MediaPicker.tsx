@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Search, Upload, Image, Film, Grid, List, Check, Loader2, Link2, Trash2, CloudUpload, CloudCheck } from 'lucide-react'
+import { X, Search, Image, Film, Grid, List, Check, Loader2, Link2, Trash2, CloudUpload, CloudCheck } from 'lucide-react'
 import { MediaUpload, type UploadedFile } from './MediaUpload'
 import { detectExternalVideoPlatform, getExternalVideoThumbnail } from '../../utils/externalVideo'
 import { useMediaLibrary, type MediaLibraryItem } from '../../hooks/useMediaLibrary'

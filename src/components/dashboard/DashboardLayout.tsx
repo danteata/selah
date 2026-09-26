@@ -323,15 +323,15 @@ export function DashboardLayout({
                 rowHeight={40}
                 containerPadding={[12, 12]}
                 margin={[12, 12]}
-                onLayoutChange={(layout: any, allLayouts: any) => {
+                onLayoutChange={(_layout, allLayouts) => {
                     // While locked there are no user drags to capture, so never
                     // feed RGL's own compaction back into state (belt-and-braces
                     // against the self-moving-panel loop).
                     if (editLocked) return
                     const converted: { [key: string]: LayoutItem[] } = {}
                     Object.entries(allLayouts).forEach(([key, items]) => {
-                        const layoutItems = items as any[]
-                        converted[key] = layoutItems.map(item => ({
+                        if (!items) return
+                        converted[key] = items.map(item => ({
                             i: item.i,
                             x: item.x,
                             y: item.y,
