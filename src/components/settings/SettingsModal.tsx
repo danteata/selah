@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import type { AppSettings, SlideStyle } from '../../types'
+import type { AppSettings, SlideStyle, SettingsTab } from '../../types'
 import { useTemplates } from '../../hooks/useTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
@@ -34,9 +34,8 @@ import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDe
 import { getVersion } from '@tauri-apps/api/app'
 import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
-import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { Modal } from '../modals/Modal'
 
-type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'billing' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
 interface SettingsModalProps {
     isOpen: boolean
@@ -45,7 +44,6 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: SettingsModalProps) {
-    const backdropDismiss = useBackdropDismiss(onClose)
     const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
     const { isAdmin, isSuperadmin, currentUser } = useUserRole()
     const { trackEvent } = useAnalytics()
@@ -88,24 +86,6 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         trackEvent(AnalyticsEventType.SETTINGS_TAB_CHANGED, { tab })
     }, [trackEvent])
 
-    useEffect(() => {
-        const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                onClose()
-            }
-        }
-
-        if (isOpen) {
-            document.addEventListener('keydown', handleEscape)
-            document.body.style.overflow = 'hidden'
-        }
-
-        return () => {
-            document.removeEventListener('keydown', handleEscape)
-            document.body.style.overflow = ''
-        }
-    }, [isOpen, onClose])
-
     if (!isOpen) return null
 
     const tabs = [
@@ -133,25 +113,28 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
         : []
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            {...backdropDismiss}
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            labelledBy="settings-modal-title"
+            // Fits short windows, and on narrow ones the page list becomes a
+            // scrolling strip above the page instead of a sidebar beside it.
+            className="w-full max-w-4xl h-[min(600px,90vh)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden flex flex-col sm:flex-row"
         >
-            <div className="w-full max-w-4xl h-[600px] bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden flex">
                 {/* Sidebar */}
-                <div className="w-56 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col min-h-0">
-                    <div className="flex items-center gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-                        <Settings className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                        <h2 className="font-semibold text-gray-900 dark:text-white">Settings</h2>
+                <div className="sm:w-56 flex-shrink-0 bg-[var(--bg-secondary)] border-b sm:border-b-0 sm:border-r border-[var(--border-subtle)] flex flex-col min-h-0">
+                    <div className="hidden sm:flex items-center gap-2 p-4 border-b border-[var(--border-subtle)] flex-shrink-0">
+                        <Settings className="w-5 h-5 text-[var(--text-secondary)]" />
+                        <h2 className="font-semibold text-[var(--text-primary)]">Settings</h2>
                     </div>
-                    <nav className="p-2 flex-1 overflow-y-auto">
+                    <nav className="p-2 flex gap-1 sm:block sm:flex-1 overflow-x-auto sm:overflow-x-visible sm:overflow-y-auto">
                         {tabs.map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => handleTabChange(tab.id)}
-                                className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
-                                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                className={`flex items-center gap-2 flex-shrink-0 whitespace-nowrap sm:w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
+                                    ? 'bg-[var(--accent-teal)]/15 text-[var(--accent-teal)]'
+                                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
                                     }`}
                             >
                                 <tab.icon className="w-4 h-4" />
@@ -161,8 +144,8 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
 
                         {adminTabs.length > 0 && (
                             <>
-                                <div className="my-3 border-t border-gray-200 dark:border-gray-700" />
-                                <div className="flex items-center gap-1.5 px-3 py-1.5 mb-1">
+                                <div className="hidden sm:block my-3 border-t border-[var(--border-subtle)]" />
+                                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 mb-1">
                                     <Shield className="w-3.5 h-3.5 text-amber-500" />
                                     <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">Admin</span>
                                 </div>
@@ -170,9 +153,9 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                     <button
                                         key={tab.id}
                                         onClick={() => handleTabChange(tab.id)}
-                                        className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
-                                            ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'
-                                            : 'text-gray-600 dark:text-gray-400 hover:bg-amber-50 dark:hover:bg-amber-900/10'
+                                        className={`flex items-center gap-2 flex-shrink-0 whitespace-nowrap sm:w-full px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === tab.id
+                                            ? 'bg-[var(--accent-amber)]/15 text-[var(--accent-amber)]'
+                                            : 'text-[var(--text-secondary)] hover:bg-[var(--accent-amber)]/10'
                                             }`}
                                     >
                                         <tab.icon className="w-4 h-4" />
@@ -185,21 +168,21 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 flex flex-col">
-                    <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                    <div className="flex items-center justify-between p-4 border-b border-[var(--border-subtle)]">
+                        <h3 id="settings-modal-title" className="text-lg font-semibold text-[var(--text-primary)]">
                             {activeTab.startsWith('admin-') ? 'Admin — ' : ''}{tabs.find((t) => t.id === activeTab)?.label || adminTabs.find((t) => t.id === activeTab)?.label || ''} Settings
                         </h3>
                         <button
                             aria-label="Close"
                             onClick={onClose}
-                            className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                            className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
                         >
                             <X className="w-5 h-5" />
                         </button>
                     </div>
 
-                    <div className="flex-1 p-6 overflow-y-auto">
+                    <div className="flex-1 p-4 sm:p-6 overflow-y-auto">
                         {activeTab === 'display' && (
                             <DisplaySettings
                                 settings={settings}
@@ -249,8 +232,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                         {activeTab === 'admin-sermon' && isSuperadmin && <GlobalSermonListenerSettingsPanel onClose={onClose} />}
                     </div>
                 </div>
-            </div>
-        </div>
+        </Modal>
     )
 }
 

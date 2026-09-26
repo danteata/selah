@@ -73,7 +73,7 @@ export function Modal({
         }
 
         const onKeyDown = (e: KeyboardEvent) => {
-            if (stack[stack.length - 1] !== id) return
+            if (stack[stack.length - 1] !== id || e.defaultPrevented) return
             if (e.key === 'Escape' && closeOnEscapeRef.current) {
                 e.stopPropagation()
                 onCloseRef.current()
@@ -96,10 +96,12 @@ export function Modal({
                 first.focus()
             }
         }
-        document.addEventListener('keydown', onKeyDown, true)
+        // Bubble phase: a control inside that handles Escape itself (a
+        // dropdown, the shortcut recorder) and stops it keeps the dialog open.
+        document.addEventListener('keydown', onKeyDown)
 
         return () => {
-            document.removeEventListener('keydown', onKeyDown, true)
+            document.removeEventListener('keydown', onKeyDown)
             const at = stack.indexOf(id)
             if (at !== -1) stack.splice(at, 1)
             if (--scrollLocks === 0) document.body.style.overflow = ''

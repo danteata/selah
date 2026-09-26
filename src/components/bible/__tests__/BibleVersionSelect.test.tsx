@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { BibleVersionSelect } from '../BibleVersionSelect'
 
+const openSettings = vi.fn()
+
 vi.mock('../../../store/appStore', () => ({
     useAppStore: vi.fn((selector: any) => {
         const state = {
@@ -11,7 +13,7 @@ vi.mock('../../../store/appStore', () => ({
                 { id: 'WEB', name: 'World English Bible' },
             ],
             settings: { defaultBibleVersion: 'KJV' },
-            openModal: vi.fn(),
+            openSettings,
         }
         return selector ? selector(state) : state
     }),
@@ -60,6 +62,13 @@ describe('BibleVersionSelect', () => {
         await waitFor(() => {
             expect(screen.getByText('King James Version')).toBeInTheDocument()
         })
+    })
+
+    it('opens settings on the Bible page for More Versions', async () => {
+        render(<BibleVersionSelect onChange={vi.fn()} />)
+        fireEvent.click(screen.getByText('KJV'))
+        fireEvent.click(await screen.findByText('More Versions'))
+        expect(openSettings).toHaveBeenCalledWith('bible')
     })
 
     it('closes dropdown on backdrop click', async () => {

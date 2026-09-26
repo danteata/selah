@@ -23,7 +23,7 @@ export function BibleVersionSelect({
 
     const bibleVersions = useAppStore((state) => state.bibleVersions) as BibleVersion[]
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
-    const openModal = useAppStore((state) => state.openModal)
+    const openSettings = useAppStore((state) => state.openSettings)
 
     const currentVersion = selectedVersion || defaultBibleVersion || 'KJV'
 
@@ -49,7 +49,8 @@ export function BibleVersionSelect({
 
     const handleSelect = (versionId: string) => {
         if (versionId === '+ More Versions') {
-            openModal('settings')
+            // Straight to the page that downloads versions, not the settings home.
+            openSettings('bible')
             setIsOpen(false)
         } else {
             trackEvent(AnalyticsEventType.BIBLE_VERSION_SELECTED, {

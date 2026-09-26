@@ -71,6 +71,7 @@ export default function Dashboard() {
     const clearSelectedSlides = useAppStore((state) => state.clearSelectedSlides)
 
     // Get modal state and actions from Zustand store
+    const settingsInitialTab = useAppStore((state) => state.settingsInitialTab)
     const modals = useAppStore((state) => state.modals)
     const editingSlide = useAppStore((state) => state.editingSlide)
     const closeModal = useAppStore((state) => state.closeModal)
@@ -502,6 +503,7 @@ export default function Dashboard() {
                     <SettingsModal
                         isOpen={modals.settings}
                         onClose={() => closeModal('settings')}
+                        initialTab={settingsInitialTab ?? undefined}
                     />
                 </Suspense>
             )}

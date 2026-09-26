@@ -10,6 +10,7 @@ import type {
     SlideStyle,
     Advert,
     BibleVersion,
+    SettingsTab,
 } from '../types'
 import { DEFAULT_ALTERNATE_OUTPUT, type AlternateOutputConfig } from '../types/alternateOutput'
 import { bibleVersionObjects } from '../types'
@@ -142,6 +143,8 @@ export interface AppState {
 
     // UI State (formerly event-driven)
     modals: ModalState
+    /** The page the settings modal opens on; null for its default. */
+    settingsInitialTab: SettingsTab | null
     quickActionsPage: QuickActionsPage
     editingSlide: Slide | null
     isDarkMode: boolean
@@ -249,6 +252,7 @@ const initialState: AppState = {
     mainDisplayScreen: null,
     // UI State
     modals: initialModalState,
+    settingsInitialTab: null,
     quickActionsPage: '',
     editingSlide: null,
     // Seeded from the same source main.tsx paints with, so state and document
@@ -411,6 +415,8 @@ interface AppStore extends AppState {
 
     // UI Actions (formerly event-driven)
     openModal: (modal: keyof ModalState) => void
+    /** Open settings on a given page. */
+    openSettings: (tab: SettingsTab) => void
     closeModal: (modal: keyof ModalState) => void
     closeAllModals: () => void
     setQuickActionsPage: (page: QuickActionsPage) => void
@@ -1277,7 +1283,15 @@ export const useAppStore = create<AppStore>()(
             // UI Actions (formerly event-driven)
             openModal: (modal) => {
                 set((state) => ({
-                    modals: { ...state.modals, [modal]: true }
+                    modals: { ...state.modals, [modal]: true },
+                    settingsInitialTab: modal === 'settings' ? null : state.settingsInitialTab,
+                }))
+            },
+
+            openSettings: (tab) => {
+                set((state) => ({
+                    modals: { ...state.modals, settings: true },
+                    settingsInitialTab: tab,
                 }))
             },
 
