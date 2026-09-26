@@ -13,15 +13,9 @@
 - Pre-compiles the sentence-split regex at module scope (no recompilation per call).
 - Main thread posts `text + excludedRanges`, worker returns `{ sentences, dedupedSentences, windows }`.
 
-### WAV Encoding Worker (`src/services/sermon-listener/wav.worker.ts`)
-- Offloads audio resampling (cubic Hermite), mono mixing, and WAV encoding from the main thread.
-- Used by `whisperCppTranscription.ts` for both live chunk encoding (`encodeChunk`) and blob conversion (`convertBlob`).
-- Keeps the UI responsive during live sermon transcription where previously `ScriptProcessorNode` blocked the main thread.
-
-### AudioWorklet (`whisper-capture-processor` inline module)
-- Replaces deprecated `ScriptProcessorNode` in `whisperCppTranscription.ts`.
-- Runs on the audio rendering thread, accumulating PCM samples and posting full chunks to the main thread.
-- The desktop web fallback (`desktopWhisperTranscription.ts`) encodes WAV **directly inside the AudioWorklet** and posts the blob back, eliminating main-thread `pcmToWav()` entirely.
+### Transcription providers
+- Only two remain: **Web Speech** (browser) and **native** (in-process Whisper/Parakeet in Rust, desktop). `unifiedTranscription.ts` routes between them.
+- The whisper.cpp / faster-whisper / remote Whisper / ElevenLabs / browser-VAD providers, their WAV worker and the `public/` VAD/ONNX assets were unreachable and were removed in September 2026. Older docs in `docs/` still describe them.
 
 ### Embedding Sync Manager (`src/services/sermon-listener/embeddingSyncManager.ts`)
 - Central singleton that manages the full verse-embedding pipeline: download → model load → generate → cache.

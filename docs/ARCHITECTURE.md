@@ -1,5 +1,10 @@
 # Selah Architecture Documentation
 
+> **Note (September 2026):** only the Web Speech and native (desktop, in-process)
+> providers exist now. The faster-whisper, whisper.cpp, remote Whisper and
+> ElevenLabs providers described below were unreachable from the app and were
+> removed. This document is kept for history.
+
 A comprehensive technical documentation of the Selah worship presentation application's architecture, design patterns, and implementation details.
 
 ---

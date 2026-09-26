@@ -26,11 +26,9 @@ A modern, real-time worship presentation application built with React, TypeScrip
 - **Draggable Dashboard** — Fully customisable panel layout using react-grid-layout; panel positions and sizes are persisted
 
 ### Sermon Listener (AI-Powered)
-- **Real-time Transcription** — Listen to a sermon and transcribe it live using one of four providers:
+- **Real-time Transcription** — Listen to a sermon and transcribe it live:
   - **Web Speech API** — Built-in browser speech recognition; no setup required
-  - **Whisper.cpp (Local/Offline)** — Self-hosted Docker service for fully offline, high-accuracy transcription
-  - **Whisper API (Remote)** — Any OpenAI-compatible Whisper endpoint
-  - **ElevenLabs** — Cloud-based transcription via the ElevenLabs API
+  - **Native (desktop)** — Whisper or Parakeet running in the app itself, fully offline
 - **Regex Verse Detection** — Automatically detects spoken Bible references (e.g., "John 3 16") and queues them
 - **Semantic Verse Detection** — Uses local ML embeddings (`@xenova/transformers`) to surface contextually relevant scriptures even when an exact reference isn't spoken
 - **Transcript Persistence** — Full transcripts are saved to Convex and viewable per-session

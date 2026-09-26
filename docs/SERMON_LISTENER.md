@@ -1,5 +1,10 @@
 # Sermon Listener Feature
 
+> **Note (September 2026):** only the Web Speech and native (desktop, in-process)
+> providers exist now. The faster-whisper, whisper.cpp, remote Whisper and
+> ElevenLabs providers described below were unreachable from the app and were
+> removed. This document is kept for history.
+
 A real-time sermon transcription and Bible verse detection feature that listens to sermons via microphone and automatically detects when Bible verses are mentioned, looking them up and presenting them live.
 
 ## Overview

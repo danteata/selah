@@ -55,8 +55,6 @@ export { useGlobalAppSettings, useTranscriptionConfig, useGlobalSermonListenerSe
 export type { GlobalAppSettings, TranscriptionConfig, UseGlobalAppSettingsReturn, GlobalSermonListenerSettings, UseGlobalSermonListenerSettingsReturn } from './useGlobalAppSettings'
 export { useOnlineStatus } from './offline/useOnlineStatus'
 export type { OnlineStatus } from './offline/useOnlineStatus'
-export { useLocalFirst } from './offline/useLocalFirst'
-export type { LocalFirstOptions, LocalFirstResult } from './offline/useLocalFirst'
 export { useAnalytics } from './useAnalytics'
 export { useDictation } from './useDictation'
 export type { DictationState, UseDictationResult } from './useDictation'

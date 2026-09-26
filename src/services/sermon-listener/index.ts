@@ -9,7 +9,6 @@ export {
     NUMBER_TO_BOOK,
 } from './verseDetection'
 export type { DetectedVerse } from './verseDetection'
-export { fasterWhisperTranscriptionService } from './fasterWhisperTranscription'
 export { unifiedTranscriptionService } from './unifiedTranscription'
 export type { TranscriptionProvider, UnifiedTranscriptionOptions, TranscriptionStatus, WhisperSegmentTiming } from './unifiedTranscription'
 
