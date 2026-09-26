@@ -155,6 +155,17 @@ export default defineSchema({
         // it hits 0 we create the normal-priced subscription. Null = not on an
         // intro discount.
         introCyclesRemaining: v.optional(v.union(v.number(), v.null())),
+        // A discount checkout started but not yet paid. Held apart from the
+        // live fields above until Paystack reports a charge or subscription on
+        // the intro plan: written onto the row at checkout, an abandoned
+        // checkout made an existing full-price subscription count down
+        // "discounted" cycles and then start a second, full-price one.
+        pendingPromo: v.optional(v.object({
+            promoCode: v.string(),
+            introPlanCode: v.string(),
+            introCycles: v.number(),
+            revertPlanCode: v.string(),
+        })),
         // Timestamps for auditing / debugging the webhook stream.
         lastEventAt: v.optional(v.string()),
         lastChargeAt: v.optional(v.string()),

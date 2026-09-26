@@ -22,7 +22,7 @@
  *   - Rotate by bumping LICENSE_KEY_ID and shipping an app that trusts both keys.
  */
 
-import { internalQuery, internalMutation, mutation, type MutationCtx } from './_generated/server'
+import { internalAction, internalQuery, internalMutation, mutation, type MutationCtx } from './_generated/server'
 import { v } from 'convex/values'
 import { internal } from './_generated/api'
 import { getEffectiveSubscription, getChurchSubscription } from './entitlements'
@@ -168,6 +168,7 @@ export interface SubscriptionRow {
     paystackCustomerCode?: string
     paystackSubscriptionCode?: string
     paystackPlanCode?: string
+    source?: 'paystack' | 'promo' | 'trial'
     currentPeriodEnd: string | null
     gracePeriodDays: number
     lastEventAt?: string
@@ -200,10 +201,12 @@ export const getEffectiveSubscriptionByEmail = internalQuery({
     args: { email: v.string() },
     handler: async (ctx, args) => {
         const email = args.email.toLowerCase()
+        // `.first()`: a duplicated user row made `.unique()` throw, blocking
+        // checkout and licence issuance for that person entirely.
         const user = await ctx.db
             .query('users')
             .withIndex('by_email', (q) => q.eq('email', email))
-            .unique()
+            .first()
         return await getEffectiveSubscription(ctx, { churchId: user?.churchId ?? null, email })
     },
 })
@@ -295,10 +298,19 @@ export const applyPaystackEvent = internalMutation({
                 : existing.currentPeriodEnd
         })()
 
+        // A discount checkout that has now been paid for: its intro plan is
+        // what this event is about, so the discount starts here.
+        const pending = existing?.pendingPromo
+        const promoTakesEffect = !!pending && args.paystackPlanCode === pending.introPlanCode
+        const promoFields = promoTakesEffect
+            ? { promoCode: pending!.promoCode, revertPlanCode: pending!.revertPlanCode, pendingPromo: undefined }
+            : {}
+        const revertPlanCode = promoTakesEffect ? pending!.revertPlanCode : existing?.revertPlanCode
+
         // Intro-discount countdown: spend one discounted cycle per charge. When
         // the last one is spent and a revert plan is set, signal the caller to
         // start the normal-priced subscription off the saved card.
-        let introCyclesRemaining = existing?.introCyclesRemaining ?? null
+        let introCyclesRemaining = promoTakesEffect ? pending!.introCycles : (existing?.introCyclesRemaining ?? null)
         let rollover:
             | {
                   customerCode?: string
@@ -309,12 +321,12 @@ export const applyPaystackEvent = internalMutation({
             | null = null
         if (args.isCharge && introCyclesRemaining != null && introCyclesRemaining > 0) {
             introCyclesRemaining -= 1
-            if (introCyclesRemaining <= 0 && existing?.revertPlanCode) {
+            if (introCyclesRemaining <= 0 && revertPlanCode) {
                 rollover = {
-                    customerCode: args.paystackCustomerCode ?? existing.paystackCustomerCode,
+                    customerCode: args.paystackCustomerCode ?? existing?.paystackCustomerCode,
                     authorizationCode:
-                        args.authorizationCode ?? existing.paystackAuthorizationCode,
-                    revertPlanCode: existing.revertPlanCode,
+                        args.authorizationCode ?? existing?.paystackAuthorizationCode,
+                    revertPlanCode,
                     startDate: mergedEnd,
                 }
             }
@@ -329,12 +341,18 @@ export const applyPaystackEvent = internalMutation({
             .first()
         const churchId = existing?.churchId ?? userByEmail?.churchId ?? undefined
 
+        // Paystack doesn't promise delivery order, and `eventAt` is its own
+        // timestamp for the event. One older than the last applied must not
+        // overwrite the status — a late "payment failed" landing after the
+        // success that followed it left a paying church marked past-due. The
+        // period end still only moves forward, and a late charge still counts.
         const now = args.eventAt
+        const isStale = !!existing?.lastEventAt && now < existing.lastEventAt
         const patch = {
             email,
             churchId,
-            plan: args.plan,
-            status: args.status,
+            plan: isStale ? existing!.plan : args.plan,
+            status: isStale ? existing!.status : args.status,
             paystackCustomerCode: args.paystackCustomerCode ?? existing?.paystackCustomerCode,
             paystackSubscriptionCode:
                 args.paystackSubscriptionCode ?? existing?.paystackSubscriptionCode,
@@ -344,9 +362,23 @@ export const applyPaystackEvent = internalMutation({
             currentPeriodEnd: mergedEnd,
             gracePeriodDays: existing?.gracePeriodDays ?? DEFAULT_GRACE_PERIOD_DAYS,
             introCyclesRemaining,
-            lastEventAt: now,
+            ...promoFields,
+            lastEventAt: isStale ? existing!.lastEventAt : now,
             lastChargeAt: args.chargedAt ?? existing?.lastChargeAt,
-            updatedAt: now,
+            updatedAt: new Date().toISOString(),
+        }
+
+        // Scheduled in this transaction, so a recorded event always has its
+        // rollover queued — never one without the other.
+        if (rollover?.customerCode && rollover.authorizationCode) {
+            await ctx.scheduler.runAfter(0, internal.licensing.startRollover, {
+                email,
+                customerCode: rollover.customerCode,
+                authorizationCode: rollover.authorizationCode,
+                revertPlanCode: rollover.revertPlanCode,
+                startDate: rollover.startDate ?? null,
+                attempt: 0,
+            })
         }
 
         if (existing) {
@@ -456,19 +488,18 @@ export const preparePromoSubscription = internalMutation({
             .withIndex('by_email', (q) => q.eq('email', email))
             .unique()
 
-        const fields = {
-            plan: 'pro' as const,
-            status: 'attention' as const,
-            source: 'paystack' as const,
+        const pendingPromo = {
             promoCode: args.promoCode,
-            paystackPlanCode: args.introPlanCode,
+            introPlanCode: args.introPlanCode,
+            introCycles: args.introCycles,
             revertPlanCode: args.revertPlanCode,
-            introCyclesRemaining: args.introCycles,
-            updatedAt: nowIso,
         }
 
+        // Only the intent is recorded; nothing about the live subscription
+        // changes until the discounted plan is actually paid for (see
+        // applyPaystackEvent).
         if (existing) {
-            await ctx.db.patch(existing._id, fields)
+            await ctx.db.patch(existing._id, { pendingPromo, updatedAt: nowIso })
             return existing._id
         }
 
@@ -480,11 +511,15 @@ export const preparePromoSubscription = internalMutation({
         return await ctx.db.insert('subscriptions', {
             email,
             userId: user?._id,
+            plan: 'free',
+            status: 'attention',
+            source: 'paystack',
             currentPeriodEnd: null,
             gracePeriodDays: DEFAULT_GRACE_PERIOD_DAYS,
+            pendingPromo,
             lastEventAt: nowIso,
             createdAt: nowIso,
-            ...fields,
+            updatedAt: nowIso,
         })
     },
 })
@@ -512,6 +547,87 @@ export const finalizeRollover = internalMutation({
             promoCode: undefined,
             updatedAt: new Date().toISOString(),
         })
+    },
+})
+
+// How often to try starting the normal-priced subscription, and how long to
+// wait between tries (1m, 5m, 30m, 2h, 6h).
+const ROLLOVER_RETRY_DELAYS_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000]
+
+/** Whether a row's intro→normal rollover has already happened. */
+export const rolloverDone = internalQuery({
+    args: { email: v.string(), revertPlanCode: v.string() },
+    handler: async (ctx, args) => {
+        const row = await ctx.db
+            .query('subscriptions')
+            .withIndex('by_email', (q) => q.eq('email', args.email.toLowerCase()))
+            .first()
+        return !row || (row.paystackPlanCode === args.revertPlanCode && row.introCyclesRemaining == null)
+    },
+})
+
+/**
+ * Start the normal-priced subscription once an intro discount is used up.
+ *
+ * Scheduled from the webhook rather than run inside it. Inline, a failure was
+ * swallowed (so as not to fail the webhook) and never retried, leaving the
+ * customer silently unbilled after the discount. Now it retries with backoff,
+ * and checks first that an earlier attempt hasn't already succeeded.
+ */
+export const startRollover = internalAction({
+    args: {
+        email: v.string(),
+        customerCode: v.string(),
+        authorizationCode: v.string(),
+        revertPlanCode: v.string(),
+        startDate: v.union(v.string(), v.null()),
+        attempt: v.number(),
+    },
+    handler: async (ctx, args) => {
+        if (await ctx.runQuery(internal.licensing.rolloverDone, { email: args.email, revertPlanCode: args.revertPlanCode })) {
+            return { status: 'already-done' as const }
+        }
+
+        const secret = process.env.PAYSTACK_SECRET_KEY
+        let failure: string
+        if (!secret) {
+            failure = 'PAYSTACK_SECRET_KEY is not configured'
+        } else {
+            try {
+                const res = await fetch('https://api.paystack.co/subscription', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        customer: args.customerCode,
+                        plan: args.revertPlanCode,
+                        authorization: args.authorizationCode,
+                        // Begin right when the discounted period ends (omit to start now).
+                        ...(args.startDate ? { start_date: args.startDate } : {}),
+                    }),
+                })
+                const body = (await res.json()) as { status: boolean; message?: string; data?: { subscription_code: string } }
+                if (res.ok && body.status && body.data?.subscription_code) {
+                    await ctx.runMutation(internal.licensing.finalizeRollover, {
+                        email: args.email,
+                        newSubscriptionCode: body.data.subscription_code,
+                        planCode: args.revertPlanCode,
+                    })
+                    return { status: 'started' as const }
+                }
+                failure = body.message || `Paystack returned ${res.status}`
+            } catch (err) {
+                failure = err instanceof Error ? err.message : String(err)
+            }
+        }
+
+        const delay = ROLLOVER_RETRY_DELAYS_MS[args.attempt]
+        if (delay === undefined) {
+            console.error(`[licensing] rollover for ${args.email} failed for good: ${failure}`)
+            return { status: 'failed' as const }
+        }
+        console.warn(`[licensing] rollover for ${args.email} failed (attempt ${args.attempt + 1}): ${failure}; retrying`)
+        await ctx.scheduler.runAfter(delay, internal.licensing.startRollover, { ...args, attempt: args.attempt + 1 })
+        return { status: 'retrying' as const }
     },
 })
 

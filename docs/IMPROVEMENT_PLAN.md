@@ -54,11 +54,11 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 
 ## 5. Billing robustness
 
-- ⬜ Webhook events are ordered by arrival time, so a late "payment failed" can
+- ✅ Webhook events are ordered by arrival time, so a late "payment failed" can
   overwrite a success.
-- ⬜ A failed intro→full-price rollover is never retried.
-- ⬜ An abandoned discount checkout can later double-bill.
-- ⬜ The billing return page says "Payment received" even when nothing was paid.
+- ✅ A failed intro→full-price rollover is never retried.
+- ✅ An abandoned discount checkout can later double-bill.
+- ✅ The billing return page says "Payment received" even when nothing was paid.
 
 ## 6. Data-layer leftovers
 

@@ -19,6 +19,7 @@ import { v } from 'convex/values'
 import { normalizeCode } from './promos'
 import { getEffectiveSubscription, churchIsPro, countTeamMembers, PLAN_LIMITS } from './entitlements'
 import { getCurrentUser } from './lib/auth'
+import { isProActive } from './licensing'
 
 const PAYSTACK_API = 'https://api.paystack.co'
 
@@ -108,6 +109,20 @@ export const initializeProCheckout = action({
             throw new Error('Only a church admin can manage the subscription.')
         }
         const churchId = me.churchId
+
+        // Already paying: a second checkout would create a second subscription
+        // and bill twice — the discount path used to set this up by patching
+        // the live subscription. A subscription winding down (non-renewing) may
+        // resubscribe.
+        const current = await ctx.runQuery(internal.licensing.getEffectiveSubscriptionByEmail, { email })
+        if (
+            current &&
+            current.source === 'paystack' &&
+            ['active', 'attention', 'past_due'].includes(current.status) &&
+            isProActive(current, new Date())
+        ) {
+            throw new Error('Your church already has an active subscription. Manage it from Billing.')
+        }
 
         const normalPlan = process.env.PAYSTACK_PRO_PLAN_CODE
         if (!normalPlan) throw new Error('PAYSTACK_PRO_PLAN_CODE is not configured on this deployment.')
@@ -275,6 +290,44 @@ export const getMyChurchBilling = query({
             // Church already over its plan cap (e.g. was Pro with 5, downgraded to free=1).
             overCap: memberCount > maxTeamMembers,
             isAdmin: user?.role === 'admin' || user?.role === 'superadmin',
+        }
+    },
+})
+
+/**
+ * What became of a checkout, for the page Paystack sends the browser back to.
+ *
+ * That page used to say "Payment received" whatever had happened — after a
+ * declined card, or on a direct visit. It asks here instead. Public and
+ * unauthenticated on purpose: on desktop the page opens in a system browser
+ * that isn't signed in. It reveals only the outcome, for a reference only the
+ * payer has.
+ */
+export const verifyCheckout = action({
+    args: { reference: v.string() },
+    handler: async (_ctx, args): Promise<{ outcome: 'paid' | 'failed' | 'pending' | 'unknown' }> => {
+        if (!/^[A-Za-z0-9_.=-]{6,100}$/.test(args.reference)) return { outcome: 'unknown' }
+        try {
+            const data = await paystack<{ status?: string }>(
+                `/transaction/verify/${encodeURIComponent(args.reference)}`,
+            )
+            switch (data.status) {
+                case 'success':
+                    return { outcome: 'paid' }
+                case 'failed':
+                case 'abandoned':
+                case 'reversed':
+                    return { outcome: 'failed' }
+                case 'pending':
+                case 'ongoing':
+                case 'processing':
+                case 'queued':
+                    return { outcome: 'pending' }
+                default:
+                    return { outcome: 'unknown' }
+            }
+        } catch {
+            return { outcome: 'unknown' }
         }
     },
 })
