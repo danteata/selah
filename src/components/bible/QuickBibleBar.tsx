@@ -7,6 +7,7 @@ import type { Scripture, BibleVerse } from '../../types'
 import { parseBibleQuery, normalizeBibleReference, getRankedBookSuggestions, formatReferenceQuery, type ParsedBibleQuery } from '../../utils/bibleReference'
 import { BookAutocomplete } from './BookAutocomplete'
 import { ReferenceEditor } from './ReferenceEditor'
+import { useDialog } from '../../hooks/useDialog'
 
 export function QuickBibleBar() {
     const quickBibleBarOpen = useAppStore((s) => s.quickBibleBarOpen)
@@ -66,12 +67,13 @@ export function QuickBibleBar() {
         }
     }
 
+    // Focus lands on the search box (the panel's first control), Tab stays in
+    // the bar, and Escape closes it unless handleKeyDown claimed it first.
+    const closeBar = useCallback(() => setQuickBibleBarOpen(false), [setQuickBibleBarOpen])
+    const panelRef = useDialog({ isOpen: quickBibleBarOpen, onClose: closeBar })
+
     useEffect(() => {
-        if (quickBibleBarOpen) {
-            setTimeout(() => inputRef.current?.focus(), 100)
-        } else {
-            clearSemanticResults()
-        }
+        if (!quickBibleBarOpen) clearSemanticResults()
     }, [quickBibleBarOpen, clearSemanticResults])
 
     useEffect(() => {
@@ -299,16 +301,15 @@ export function QuickBibleBar() {
                 e.preventDefault()
                 setFocusedIndex(prev => Math.max(prev - 1, 0))
             }
-        } else if (e.key === 'Escape') {
-            if (currentScripture) {
-                setCurrentScripture(null)
-                setCurrentPosition(null)
-                setNeighboringVerses({ prev: [], next: [] })
-            } else {
-                setQuickBibleBarOpen(false)
-            }
+        } else if (e.key === 'Escape' && currentScripture) {
+            // First Escape backs out of the shown verse; preventDefault tells
+            // useDialog to leave the bar open. The next one closes it.
+            e.preventDefault()
+            setCurrentScripture(null)
+            setCurrentPosition(null)
+            setNeighboringVerses({ prev: [], next: [] })
         }
-    }, [currentScripture, focusedIndex, semanticResults, handleGoLive, handleAddToQueue, fetchAndAct, fetchScripture, defaultBibleVersion, setQuickBibleBarOpen, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion])
+    }, [currentScripture, focusedIndex, semanticResults, handleGoLive, handleAddToQueue, fetchAndAct, fetchScripture, defaultBibleVersion, suggestionsOpen, bookSuggestions, suggestionIndex, acceptBookSuggestion])
 
     const handleSelectSemantic = useCallback(async (bookNumber: number, chapter: number, verse: number) => {
         const label = `${bookNumber}:${chapter}:${verse}`
@@ -332,7 +333,12 @@ export function QuickBibleBar() {
             >
                 <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setQuickBibleBarOpen(false)} />
                 <motion.div
-                    className="relative w-full max-w-lg"
+                    ref={panelRef}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Quick Bible search"
+                    tabIndex={-1}
+                    className="relative w-full max-w-lg outline-none"
                     initial={{ y: -20, opacity: 0, scale: 0.98 }}
                     animate={{ y: 0, opacity: 1, scale: 1 }}
                     exit={{ y: -10, opacity: 0, scale: 0.98 }}

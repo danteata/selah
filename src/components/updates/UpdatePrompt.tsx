@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowUpCircle, X, Loader2, AlertTriangle } from 'lucide-react'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
+import { useDialog } from '../../hooks/useDialog'
 
 /**
  * UpdatePrompt — the pill in the top bar that says an update is waiting.
@@ -20,6 +21,9 @@ export function UpdatePrompt() {
 
     const installing = state === 'installing'
     const failed = state === 'error' && expanded
+    // Called before the early return so the hook order never changes. Mid-install
+    // the dialog can't be dismissed (the backdrop and close button are off too).
+    const panelRef = useDialog({ isOpen: expanded && !!available, onClose: () => setExpanded(false), closeOnEscape: !installing })
 
     // Nothing to offer, or the operator already waved this version away. An
     // install in flight keeps the pill on screen so the spinner has a home.
@@ -59,9 +63,12 @@ export function UpdatePrompt() {
                             initial={{ opacity: 0, scale: 0.96, y: 8 }}
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.96, y: 8 }}
+                            ref={panelRef}
                             role="dialog"
+                            aria-modal="true"
                             aria-label="Update Selah"
-                            className="relative w-full max-w-md rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-default)] shadow-2xl overflow-hidden"
+                            tabIndex={-1}
+                            className="relative w-full max-w-md rounded-2xl outline-none bg-[var(--bg-secondary)] border border-[var(--border-default)] shadow-2xl overflow-hidden"
                         >
                             <div className="flex items-start gap-3 p-4 border-b border-[var(--border-subtle)]">
                                 <div className="p-2 rounded-lg bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] flex-shrink-0">

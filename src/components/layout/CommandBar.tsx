@@ -6,6 +6,7 @@ import {
     Layout, Clock, AlertCircle
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import { useDialog } from '../../hooks/useDialog'
 
 interface CommandItem {
     id: string
@@ -40,13 +41,13 @@ export function CommandBar() {
         }
     }
 
-    useEffect(() => {
-        if (commandBarOpen) inputRef.current?.focus()
-    }, [commandBarOpen])
-
     const handleClose = useCallback(() => {
         setCommandBarOpen(false)
     }, [setCommandBarOpen])
+
+    // Focus lands on the search box (the panel's first control), Tab stays in
+    // the palette, and Escape closes it without reaching a dialog underneath.
+    const panelRef = useDialog({ isOpen: commandBarOpen, onClose: handleClose })
 
     const staticCommands: CommandItem[] = [
         {
@@ -204,15 +205,13 @@ export function CommandBar() {
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [commandBarOpen])
 
-    // Open/close keys stay separate: ⌘K has to work when the palette is closed,
-    // which the effect above deliberately doesn't run for.
+    // ⌘K stays separate: it has to work when the palette is closed, which the
+    // effect above deliberately doesn't run for. Escape is useDialog's.
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
                 e.preventDefault()
                 setCommandBarOpen(!commandBarOpen)
-            } else if (e.key === 'Escape' && commandBarOpen) {
-                setCommandBarOpen(false)
             }
         }
         window.addEventListener('keydown', handleKeyDown)
@@ -242,10 +241,15 @@ export function CommandBar() {
                         initial={{ opacity: 0, scale: 0.95, y: -20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: -20 }}
-                        className="relative w-full max-w-2xl bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+                        ref={panelRef}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="Command palette"
+                        tabIndex={-1}
+                        className="relative w-full max-w-2xl bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-2xl outline-none shadow-2xl overflow-hidden flex flex-col"
                     >
-                        <div className="flex items-center px-4 py-4 border-b border-white/5">
-                            <Search className="w-5 h-5 text-gray-500 mr-3" />
+                        <div className="flex items-center px-4 py-4 border-b border-[var(--border-subtle)]">
+                            <Search className="w-5 h-5 text-[var(--text-muted)] mr-3" />
                             <input
                                 ref={inputRef}
                                 type="text"
@@ -253,11 +257,11 @@ export function CommandBar() {
                                 onChange={(e) => setQuery(e.target.value)}
                                 placeholder="Type a command or search..."
                                 aria-label="Search commands"
-                                className="flex-1 bg-transparent border-none text-white text-lg focus:outline-none focus:ring-0 placeholder-gray-600"
+                                className="flex-1 bg-transparent border-none text-[var(--text-primary)] text-lg focus:outline-none focus:ring-0 placeholder:text-[var(--text-muted)]"
                             />
-                            <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-md border border-white/10">
-                                <Command className="w-3 h-3 text-gray-400" />
-                                <span className="text-[10px] font-bold text-gray-400">K</span>
+                            <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--bg-tertiary)] rounded-md border border-[var(--border-subtle)]">
+                                <Command className="w-3 h-3 text-[var(--text-muted)]" />
+                                <span className="text-[10px] font-bold text-[var(--text-muted)]">K</span>
                             </div>
                         </div>
 
@@ -273,22 +277,22 @@ export function CommandBar() {
                                             className={`w-full flex items-center gap-4 px-3 py-3 rounded-xl transition-all group ${
                                                 activeIndex === index 
                                                     ? 'bg-[var(--accent-teal)] text-white shadow-lg shadow-[var(--accent-teal)]/20' 
-                                                    : 'text-gray-400 hover:bg-white/5'
+                                                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                                             }`}
                                         >
-                                            <div className={`p-2 rounded-lg ${activeIndex === index ? 'bg-white/20' : 'bg-white/5 group-hover:bg-white/10'}`}>
+                                            <div className={`p-2 rounded-lg ${activeIndex === index ? 'bg-white/20' : 'bg-[var(--bg-tertiary)]'}`}>
                                                 <command.icon className="w-5 h-5" />
                                             </div>
                                             <div className="flex-1 text-left">
-                                                <div className={`font-bold text-sm ${activeIndex === index ? 'text-white' : 'text-gray-200'}`}>
+                                                <div className={`font-bold text-sm ${activeIndex === index ? 'text-white' : 'text-[var(--text-primary)]'}`}>
                                                     {command.title}
                                                 </div>
-                                                <div className={`text-xs ${activeIndex === index ? 'text-white/80' : 'text-gray-500'}`}>
+                                                <div className={`text-xs ${activeIndex === index ? 'text-white/80' : 'text-[var(--text-muted)]'}`}>
                                                     {command.description}
                                                 </div>
                                             </div>
                                             {command.shortcut && (
-                                                <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${activeIndex === index ? 'bg-white/20' : 'bg-white/5'}`}>
+                                                <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${activeIndex === index ? 'bg-white/20' : 'bg-[var(--bg-tertiary)]'}`}>
                                                     {command.shortcut}
                                                 </div>
                                             )}
@@ -299,20 +303,20 @@ export function CommandBar() {
                                     ))}
                                 </div>
                             ) : (
-                                <div className="py-12 text-center text-gray-500">
+                                <div className="py-12 text-center text-[var(--text-muted)]">
                                     <HelpCircle className="w-10 h-10 mx-auto mb-3 opacity-20" />
                                     <p className="text-sm">No commands found for "{query}"</p>
                                 </div>
                             )}
                         </div>
 
-                        <div className="px-4 py-3 bg-black/40 border-t border-white/5 flex items-center justify-between text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                        <div className="px-4 py-3 bg-[var(--bg-tertiary)]/30 border-t border-[var(--border-subtle)] flex items-center justify-between text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                             <div className="flex gap-4">
-                                <span className="flex items-center gap-1"><kbd className="bg-white/5 px-1 rounded">↵</kbd> Select</span>
-                                <span className="flex items-center gap-1"><kbd className="bg-white/5 px-1 rounded">↑↓</kbd> Navigate</span>
+                                <span className="flex items-center gap-1"><kbd className="bg-[var(--bg-tertiary)] px-1 rounded">↵</kbd> Select</span>
+                                <span className="flex items-center gap-1"><kbd className="bg-[var(--bg-tertiary)] px-1 rounded">↑↓</kbd> Navigate</span>
                             </div>
                             <div>
-                                Press <kbd className="bg-white/5 px-1 rounded">Esc</kbd> to close
+                                Press <kbd className="bg-[var(--bg-tertiary)] px-1 rounded">Esc</kbd> to close
                             </div>
                         </div>
                     </motion.div>
