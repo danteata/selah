@@ -42,11 +42,11 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 
 ## 4. Live output polish
 
-- ✅ Slide rendering is copied in four places that have drifted; the operator's
-  monitor doesn't match the projector. *The visible differences are fixed (the
-  operator's monitor now dims/blurs backgrounds like the projector, and
-  countdowns share one clock). Merging the renderers into one component is
-  still worth doing, but needs visual checking in a signed-in session.*
+- ✅ Slide rendering was copied in four places that had drifted; the
+  operator's monitor didn't match the projector. They now share one
+  renderer, `src/components/live/SlideView.tsx`, sized against a 1920px
+  frame so every preview is the projector's picture scaled down. The
+  alternate output's canvas renderer (NDI) is separate and unchanged.
 - ✅ Pausing or muting a YouTube/Vimeo video restarts it; Restart works once.
 - ✅ Motion backgrounds restart and flash black on every lyric slide.
 - ✅ Countdown timers drift between the operator and the projector.
