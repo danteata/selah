@@ -18,7 +18,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run && vitest run --config vitest.convex.config.ts",
     "test:watch": "vitest",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -36,7 +36,8 @@
     "desktop:build:windows": "tauri build --target x86_64-pc-windows-msvc",
     "desktop:build:mac": "tauri build --target universal-apple-darwin",
     "desktop:build:linux": "tauri build --target x86_64-unknown-linux-gnu",
-    "updater:serve": "node scripts/serve-updates.mjs"
+    "updater:serve": "node scripts/serve-updates.mjs",
+    "test:convex": "vitest run --config vitest.convex.config.ts"
   },
   "dependencies": {
     "@amplitude/unified": "^1.1.16",
@@ -77,6 +78,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@eslint/js": "^9.39.1",
     "@tailwindcss/postcss": "^4.1.18",
     "@tauri-apps/cli": "^2.0.0",
@@ -92,6 +94,7 @@
     "@vitest/coverage-v8": "^3.2.4",
     "@xenova/transformers": "^2.17.2",
     "autoprefixer": "^10.4.23",
+    "convex-test": "0.0.54",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",

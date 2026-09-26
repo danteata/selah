@@ -21,6 +21,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: npx tsc -b
       - run: npx vitest run
+      - run: npx vitest run --config vitest.convex.config.ts
 
   deploy:
     name: Deploy app
