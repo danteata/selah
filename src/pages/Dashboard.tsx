@@ -34,6 +34,7 @@ import { SubscriptionBanner } from '../components/licensing/SubscriptionBanner'
 import type { Slide, ExtendedFileT } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
 import { clearSignedOutUser } from '../services/auth/signOutCleanup'
+import { prewarmSemanticSearch } from '../services/sermon-listener/localEmbeddings'
 
 // Custom event to focus quick actions search
 const FOCUS_QUICK_ACTIONS_EVENT = 'selah:focus-quick-actions'
@@ -164,6 +165,21 @@ export default function Dashboard() {
     // Initialize global emitter
     useEffect(() => {
         initGlobalEmitter()
+    }, [])
+
+    // Warm semantic verse search once the studio is idle, so the first
+    // meaning search doesn't wait on the model. Only operators reach this
+    // screen; the embedding model and verse pack are ~40MB between them.
+    // The abstractive summarization model is deliberately NOT prewarmed: it is
+    // ~330MB, and `summarizeText` loads it on first use.
+    useEffect(() => {
+        const warm = () => { void prewarmSemanticSearch() }
+        if (typeof requestIdleCallback === 'function') {
+            const id = requestIdleCallback(warm, { timeout: 5000 })
+            return () => cancelIdleCallback(id)
+        }
+        const timer = setTimeout(warm, 3000)
+        return () => clearTimeout(timer)
     }, [])
 
     // Quick action handlers - sets up event listeners

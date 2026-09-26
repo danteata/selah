@@ -43,6 +43,7 @@ COPY --from=build-stage /app/dist /usr/share/nginx/html/
 # Strip the default nginx site config so only ours is active.
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx-security-headers.conf /etc/nginx/snippets/security-headers.conf
 # nginx ships with a master config that includes conf.d/*.conf.
 # Daemon-off + port 8080 match the fly.toml internal_port.
 CMD ["nginx", "-g", "daemon off;"]

@@ -5,8 +5,6 @@ import type {
     AnalyticsProviderType,
     AnalyticsUserProperties,
 } from './types'
-import { PostHogAnalyticsProvider } from './providers/posthog'
-import { AmplitudeAnalyticsProvider } from './providers/amplitude'
 import { ConsoleAnalyticsProvider } from './providers/console'
 import { NoOpAnalyticsProvider } from './providers/noop'
 
@@ -14,12 +12,21 @@ import { NoOpAnalyticsProvider } from './providers/noop'
 // Factory
 // ---------------------------------------------------------------------------
 
-function createProvider(type: AnalyticsProviderType): AnalyticsProvider {
+/**
+ * The vendor SDKs load only when their provider is chosen. Imported statically,
+ * posthog-js sat in the entry bundle of every build — including the web build,
+ * which runs with analytics off.
+ */
+async function createProvider(type: AnalyticsProviderType): Promise<AnalyticsProvider> {
     switch (type) {
-        case 'posthog':
+        case 'posthog': {
+            const { PostHogAnalyticsProvider } = await import('./providers/posthog')
             return new PostHogAnalyticsProvider()
-        case 'amplitude':
+        }
+        case 'amplitude': {
+            const { AmplitudeAnalyticsProvider } = await import('./providers/amplitude')
             return new AmplitudeAnalyticsProvider()
+        }
         case 'console':
             return new ConsoleAnalyticsProvider()
         case 'none':
@@ -53,7 +60,7 @@ export class AnalyticsService {
      */
     async initialize(type: AnalyticsProviderType, config: AnalyticsProviderConfig): Promise<void> {
         try {
-            this.provider = createProvider(type)
+            this.provider = await createProvider(type)
             this.providerType = type
             this.enabled = config.enabled !== false
             await this.provider.init(config)

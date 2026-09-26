@@ -1,1 +1,0 @@
-export { TeamManagementPanel } from './TeamManagementPanel'

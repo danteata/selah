@@ -2,7 +2,6 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { prewarmSemanticSearch } from './services/sermon-listener/localEmbeddings'
 import { applyThemeClass, readStoredTheme } from './utils/theme'
 
 /**
@@ -58,25 +57,9 @@ window.addEventListener('error', (event: ErrorEvent) => {
     }
 }, true)
 
-// Pre-warm semantic search lazily after the UI is idle, not before React mounts.
-// This prevents the 22MB ONNX model download and large IndexedDB reads from
-// blocking the initial render and making the app unresponsive.
-// NOTE: the abstractive summarization model is deliberately NOT prewarmed
-// here. It's a ~330 MB seq2seq, and loading its ONNX graph cost seconds of
-// worker time on every launch even though most sessions never generate sermon
-// notes. `summarizeText` now loads it on first use instead.
-const schedulePrewarm = () => {
-    if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(() => {
-            prewarmSemanticSearch()
-        }, { timeout: 5000 })
-    } else {
-        setTimeout(() => {
-            prewarmSemanticSearch()
-        }, 3000)
-    }
-}
-schedulePrewarm()
+// Semantic search is pre-warmed from the Dashboard (see Dashboard.tsx), not
+// here: from here it ran for every visitor, so a first look at the landing page
+// on a phone downloaded the 22MB embedding model and an 18MB verse pack.
 
 window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {
     if (isConvexError(event.reason)) {

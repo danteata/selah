@@ -43,11 +43,6 @@ export default defineConfig({
     },
   },
   envPrefix: ['VITE_'],
-  optimizeDeps: {
-    // Exclude onnxruntime-web from optimization to avoid dynamic import issues
-    // Note: @xenova/transformers is loaded from CDN, not bundled
-    exclude: ['onnxruntime-web'],
-  },
   esbuild: {
     // Strip console.log + debugger statements from production builds. Keep
     // console.warn and console.error so genuine problems still surface in the
@@ -67,14 +62,25 @@ export default defineConfig({
     // independently by the browser/Tauri webview.
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react': ['react', 'react-dom', 'react-router-dom'],
-          'convex': ['convex/react', 'convex/browser'],
-          'clerk': ['@clerk/clerk-react'],
-          'tiptap': ['@tiptap/react', '@tiptap/starter-kit'],
-          'icons': ['lucide-react'],
-          'three': ['three'],
-          'query': ['@tanstack/react-query'],
+        // A function, not the object form: that can't place the CommonJS
+        // wrappers Rollup generates, so `react/jsx-runtime`'s ended up in the
+        // tiptap chunk — the first to reach it — and every page, landing and
+        // login included, had to preload the whole editor just to render JSX.
+        manualChunks(id) {
+          // Rollup's shared CommonJS helpers live outside node_modules; left
+          // alone they land in whichever chunk uses them first (clerk) and
+          // make react import from it — a circular chunk. Everything loads
+          // react first, so they go there.
+          if (id.includes('commonjsHelpers')) return 'react'
+          if (!id.includes('node_modules')) return undefined
+          const pkg = (name: string) => new RegExp(`[\\\\/]node_modules[\\\\/]${name}[\\\\/]`).test(id)
+          if (pkg('react') || pkg('react-dom') || pkg('scheduler') || pkg('react-router') || pkg('react-router-dom')) return 'react'
+          if (pkg('convex')) return 'convex'
+          if (pkg('@clerk')) return 'clerk'
+          if (pkg('@tiptap') || /[\\/]node_modules[\\/]prosemirror-/.test(id)) return 'tiptap'
+          if (pkg('lucide-react')) return 'icons'
+          if (pkg('three')) return 'three'
+          return undefined
         },
       },
     },
