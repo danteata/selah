@@ -251,7 +251,7 @@ export class SemanticVerseDetector {
                     hasEmbeddings = await this.convexClient.query(api.verseEmbeddings.hasEmbeddings, {
                         version: this.config.version,
                     })
-                } catch (error) {
+                } catch {
                     console.warn('[SemanticDetector] Could not check embedding stats, using local fallback')
                     convexError = true
                     hasEmbeddings = false

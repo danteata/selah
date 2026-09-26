@@ -9,7 +9,6 @@ import {
     updateContextFromVerse,
     resolveBareReferences,
     resolveStandaloneNumberContinuation,
-    type ActiveReferenceContext,
 } from '../referenceContext'
 
 describe('referenceContext — BUG HUNTING', () => {

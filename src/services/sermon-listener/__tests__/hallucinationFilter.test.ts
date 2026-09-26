@@ -53,7 +53,6 @@ describe('hallucinationFilter', () => {
         })
 
         it('detects and removes profanity', () => {
-            const text = 'And he went to a far country'
             // Note: the word "far" is NOT profanity, but "fuck" would be.
             // Let's test with actual profanity that Whisper might hallucinate.
             const textWithProfanity = 'He said what the hell are you doing'

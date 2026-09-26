@@ -394,7 +394,6 @@ function detectBareVerseCommands(text: string, hasFreshChapterContext: boolean):
 
 function detectGoToVerseCommands(text: string): VoiceCommand[] {
     const commands: VoiceCommand[] = []
-    const lower = text.toLowerCase()
 
     // "verse 15", "verse three", "verse twenty five", "go to verse 15",
     // "jump to verse 15", "show verse 15", "read verse 15", "take me to

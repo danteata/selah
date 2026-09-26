@@ -6,7 +6,7 @@
  * when running in a browser.
  */
 
-import type { Event, UnlistenFn } from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 
 export const MONITOR_COLORS = [
     '#3B82F6',
@@ -135,7 +135,7 @@ class NativeMultiMonitorService {
 
         if ('getScreenDetails' in window) {
             try {
-                const screenDetails = await (window as any).getScreenDetails()
+                const screenDetails = await window.getScreenDetails!()
                 for (const [idx, screen] of screenDetails.screens.entries()) {
                     const name = screen.label || `Screen ${idx + 1}`
                     monitors.push({
@@ -150,7 +150,7 @@ class NativeMultiMonitorService {
                         color: getMonitorColor(idx),
                     })
                 }
-            } catch (e) {
+            } catch {
                 console.log('Screen Details API not available')
             }
         }
@@ -326,7 +326,7 @@ class NativeMultiMonitorService {
 
         try {
             return await this.tauriApis!.invoke<LiveWindowState>('get_live_window_state')
-        } catch (e) {
+        } catch {
             return 'Closed'
         }
     }
@@ -339,7 +339,7 @@ class NativeMultiMonitorService {
 
         try {
             return await this.tauriApis!.invoke<boolean>('is_live_window_open')
-        } catch (e) {
+        } catch {
             return false
         }
     }
@@ -352,7 +352,7 @@ class NativeMultiMonitorService {
 
         try {
             return await this.tauriApis!.invoke<string | null>('get_current_live_monitor')
-        } catch (e) {
+        } catch {
             return null
         }
     }
@@ -412,7 +412,7 @@ class NativeMultiMonitorService {
 
         try {
             return await this.tauriApis!.invoke<WindowState>('get_window_state')
-        } catch (e) {
+        } catch {
             return {
                 live_fullscreen: true,
                 main_maximized: false,

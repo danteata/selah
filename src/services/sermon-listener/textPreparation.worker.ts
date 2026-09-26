@@ -58,8 +58,6 @@ interface PrepareErrorResponse {
     error: string
 }
 
-type PrepareResponse = PrepareSuccessResponse | PrepareErrorResponse
-
 // ---------------------------------------------------------------------------
 // Text utilities (mirror of semanticVerseDetection.ts)
 // ---------------------------------------------------------------------------

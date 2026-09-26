@@ -179,7 +179,6 @@ describe('native-multi-monitor — identify.html integration', () => {
     it('identify.html color CSS variables are set correctly by applyIdentity', () => {
         const root = document.documentElement.style
         const color = '#EF4444'
-        const name = 'External Display 1'
 
         root.setProperty('--color', color)
         root.setProperty('--color-dim', color + '18')
@@ -200,7 +199,6 @@ describe('native-multi-monitor — identify.html integration', () => {
         const nameEl = document.getElementById('name')!
         const descEl = document.getElementById('desc')!
 
-        const color = '#3B82F6'
         const name = 'Built-in Display'
 
         nameEl.textContent = name

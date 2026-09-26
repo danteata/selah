@@ -9,10 +9,6 @@
  * /summarize-abstractive endpoint.
  */
 
-type SummarizeCallback = (summary: string) => void
-type ErrorCallback = (error: string) => void
-type ProgressCallback = (progress: number) => void
-
 let workerInstance: Worker | null = null
 let nextId = 0
 let loading = false

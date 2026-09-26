@@ -87,7 +87,7 @@ export function applyPreprocessing(samples: Float32Array, sampleRate: number = 1
  */
 export function createPreprocessingNodes(
     audioContext: AudioContext,
-    sampleRate?: number
+    _sampleRate?: number
 ): { highpass: BiquadFilterNode; gain: GainNode } {
     const highpass = audioContext.createBiquadFilter()
     highpass.type = 'highpass'

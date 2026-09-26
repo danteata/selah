@@ -101,7 +101,7 @@ class MultiMonitorService {
 
         if ('getScreenDetails' in window) {
             try {
-                const screenDetails = await (window as any).getScreenDetails()
+                const screenDetails = await window.getScreenDetails!()
 
                 for (const [idx, screen] of screenDetails.screens.entries()) {
                     const name = screen.label || `Screen ${screens.length + 1}`
@@ -117,7 +117,7 @@ class MultiMonitorService {
                         color: getMonitorColor(idx),
                     })
                 }
-            } catch (e) {
+            } catch {
                 console.log('Screen Details API not available or permission denied')
             }
         }
@@ -260,7 +260,7 @@ class MultiMonitorService {
 
         try {
             const presentationRequest = new PresentationRequest([liveViewUrl])
-                ; (navigator as any).presentation.defaultRequest = presentationRequest
+                ; navigator.presentation!.defaultRequest = presentationRequest
 
             const connection = await presentationRequest.start()
 
@@ -276,8 +276,8 @@ class MultiMonitorService {
             }
 
             return true
-        } catch (e: any) {
-            console.log('Presentation start failed:', e.message)
+        } catch (e: unknown) {
+            console.log('Presentation start failed:', e instanceof Error ? e.message : String(e))
             return false
         }
     }

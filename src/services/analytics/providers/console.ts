@@ -5,7 +5,6 @@ import type { AnalyticsEvent, AnalyticsProvider, AnalyticsProviderConfig, Analyt
  * Useful during development and as a fallback when no real provider is configured.
  */
 export class ConsoleAnalyticsProvider implements AnalyticsProvider {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     init(_config: AnalyticsProviderConfig): void {
         console.log('%c[Analytics] Console provider initialized', 'color: #888; font-style: italic')
     }

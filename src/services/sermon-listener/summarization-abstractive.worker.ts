@@ -11,18 +11,39 @@
 const SUMMARIZATION_MODEL = 'Xenova/distilbart-cnn-6-6'
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1'
 
-let transformersModule: any = null
-let summarizer: any = null
-let loadingPromise: Promise<any> | null = null
-
-async function loadTransformers(): Promise<any> {
-    if (transformersModule) return transformersModule
-    const moduleUrl = `${TRANSFORMERS_CDN}/dist/transformers.min.js`
-    transformersModule = await import(/* @vite-ignore */ moduleUrl)
-    return transformersModule
+/** The slice of the CDN-loaded `@xenova/transformers` module this worker uses. */
+interface TransformersModule {
+    env: {
+        allowLocalModels: boolean
+        localModelPath: string
+        allowRemoteModels: boolean
+        useBrowserCache: boolean
+    }
+    pipeline: (task: 'summarization', model: string, options: { dtype: string }) => Promise<SummarizationPipeline>
 }
 
-async function loadSummarizer(): Promise<any> {
+interface SummarizationOutput {
+    summary_text?: string
+}
+
+type SummarizationPipeline = (
+    text: string,
+    options: { max_length: number; min_length: number; do_sample: boolean },
+) => Promise<SummarizationOutput | SummarizationOutput[]>
+
+let transformersModule: TransformersModule | null = null
+let summarizer: SummarizationPipeline | null = null
+let loadingPromise: Promise<SummarizationPipeline> | null = null
+
+async function loadTransformers(): Promise<TransformersModule> {
+    if (transformersModule) return transformersModule
+    const moduleUrl = `${TRANSFORMERS_CDN}/dist/transformers.min.js`
+    const loaded: TransformersModule = await import(/* @vite-ignore */ moduleUrl)
+    transformersModule = loaded
+    return loaded
+}
+
+async function loadSummarizer(): Promise<SummarizationPipeline> {
     if (summarizer) return summarizer
     if (loadingPromise) return loadingPromise
 
@@ -31,7 +52,7 @@ async function loadSummarizer(): Promise<any> {
 
         // Check for local model in Tauri assets
         // Use self instead of window — window is undefined in Web Worker context
-        const isDesktop = typeof globalThis !== 'undefined' && !!(globalThis as any).__TAURI__
+        const isDesktop = typeof globalThis !== 'undefined' && !!(globalThis as { __TAURI__?: unknown }).__TAURI__
         const localModelPath = isDesktop
             ? ['/assets/embedding-models/Xenova/distilbart-cnn-6-6']
             : null
@@ -42,10 +63,11 @@ async function loadSummarizer(): Promise<any> {
                 transformers.env.localModelPath = localModelPath[0]
                 transformers.env.allowRemoteModels = false
                 transformers.env.useBrowserCache = false
-                summarizer = await transformers.pipeline('summarization', SUMMARIZATION_MODEL, {
+                const localSummarizer = await transformers.pipeline('summarization', SUMMARIZATION_MODEL, {
                     dtype: 'q8',
                 })
-                return summarizer
+                summarizer = localSummarizer
+                return localSummarizer
             } catch {
                 // Local model not available, fall through to remote
             }
@@ -56,10 +78,11 @@ async function loadSummarizer(): Promise<any> {
         transformers.env.allowRemoteModels = true
         transformers.env.useBrowserCache = true
 
-        summarizer = await transformers.pipeline('summarization', SUMMARIZATION_MODEL, {
+        const remoteSummarizer = await transformers.pipeline('summarization', SUMMARIZATION_MODEL, {
             dtype: 'q8',
         })
-        return summarizer
+        summarizer = remoteSummarizer
+        return remoteSummarizer
     })()
 
     try {
@@ -114,10 +137,10 @@ self.onmessage = async (event: MessageEvent<SummarizeWorkerMessage>) => {
             summary: summary?.trim() ?? '',
             id,
         })
-    } catch (err: any) {
+    } catch (err: unknown) {
         self.postMessage({
             type: 'error' as const,
-            error: err?.message ?? String(err),
+            error: (err as { message?: string } | null | undefined)?.message ?? String(err),
             id,
         })
     }

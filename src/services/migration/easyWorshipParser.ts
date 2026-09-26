@@ -13,7 +13,7 @@
  * - SongHistory.db: Usage history
  */
 
-import type { EWSongSQLite, EWSongWords, ParsedSong, EasyWorshipFileType } from './types';
+import type { EWSongSQLite, ParsedSong, EasyWorshipFileType } from './types';
 import { parseVersesRaw, cleanLyrics, isEasyWorshipFormat } from './verseParser';
 import { parseRTF, extractVerseStructureFromRTF } from './rtfParser';
 
@@ -30,9 +30,15 @@ function parseRTFForLyrics(rtf: string): string {
 
 // Import sql.js for SQLite parsing (browser-based)
 // This is a WebAssembly version of SQLite that works in the browser
-let SQL: any = null;
+type SqlJsStatic = Awaited<ReturnType<typeof import('sql.js').default>>;
+type SqlDatabase = InstanceType<SqlJsStatic['Database']>;
+/** A sql.js result set. Some sql.js builds name the column list `lc`. */
+type SqlQueryResult = ReturnType<SqlDatabase['exec']>[number] & { lc?: string[] };
+type SqlRow = unknown[];
 
-async function initSqlJs() {
+let SQL: SqlJsStatic | null = null;
+
+async function initSqlJs(): Promise<SqlJsStatic> {
     if (SQL) return SQL;
 
     // Import sql.js
@@ -43,6 +49,38 @@ async function initSqlJs() {
         locateFile: (file: string) => `/${file}`
     });
     return SQL;
+}
+
+/**
+ * Read one cell by lower-cased column name. sql.js cells are untyped, so the
+ * caller states what the EasyWorship schema stores in that column.
+ */
+function cell<T>(row: SqlRow, colIndex: Record<string, number>, name: string): T | undefined {
+    return row[colIndex[name]] as T | undefined;
+}
+
+/**
+ * Map a Songs.db `song` row onto its metadata shape.
+ */
+function songMetadataFromRow(row: SqlRow, colIndex: Record<string, number>, rowid: number | undefined): EWSongSQLite {
+    return {
+        rowid,
+        song_item_uid: cell<string>(row, colIndex, 'song_item_uid'),
+        song_rev_uid: cell<string>(row, colIndex, 'song_rev_uid'),
+        song_uid: cell<string>(row, colIndex, 'song_uid'),
+        title: cell<string>(row, colIndex, 'title') ?? '',
+        author: cell<string>(row, colIndex, 'author') ?? '',
+        copyright: cell<string>(row, colIndex, 'copyright'),
+        administrator: cell<string>(row, colIndex, 'administrator'),
+        description: cell<string>(row, colIndex, 'description'),
+        tags: cell<string>(row, colIndex, 'tags'),
+        reference_number: cell<string>(row, colIndex, 'reference_number'),
+        provider_id: cell<number>(row, colIndex, 'provider_id'),
+        vendor_id: cell<number>(row, colIndex, 'vendor_id'),
+        presentation_id: cell<number>(row, colIndex, 'presentation_id'),
+        layout_revision: cell<number>(row, colIndex, 'layout_revision'),
+        revision: cell<number>(row, colIndex, 'revision'),
+    };
 }
 
 /**
@@ -82,7 +120,7 @@ export async function parseSQLite(file: File): Promise<ParsedSong[]> {
 
         // Get all table names
         const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
-        const tableNames = tables[0]?.values.map((v: any) => v[0]) || [];
+        const tableNames = (tables[0]?.values.map((v) => v[0]) || []) as string[];
 
         console.log('SQLite tables found:', tableNames);
 
@@ -110,7 +148,7 @@ export async function parseSQLite(file: File): Promise<ParsedSong[]> {
 /**
  * Parse Songs.db - contains song metadata
  */
-async function parseSongsDB(db: any, tableNames: string[]): Promise<ParsedSong[]> {
+async function parseSongsDB(db: SqlDatabase, tableNames: string[]): Promise<ParsedSong[]> {
     // Find the song table
     const songTableName = tableNames.find((t: string) => t.toLowerCase() === 'song') || 'song';
 
@@ -122,9 +160,9 @@ async function parseSongsDB(db: any, tableNames: string[]): Promise<ParsedSong[]
         return [];
     }
 
-    const queryResult = result[0];
-    const columns: string[] = (queryResult as any).lc || queryResult.columns || [];
-    const rows: any[][] = queryResult.values || [];
+    const queryResult: SqlQueryResult = result[0];
+    const columns: string[] = queryResult.lc || queryResult.columns || [];
+    const rows: SqlRow[] = queryResult.values || [];
 
     if (!rows.length) {
         console.log('No rows in Songs.db');
@@ -141,24 +179,11 @@ async function parseSongsDB(db: any, tableNames: string[]): Promise<ParsedSong[]
 
     // Parse each row into ParsedSong
     const songs: ParsedSong[] = rows.map(row => {
-        const rawSong: EWSongSQLite = {
-            rowid: row[colIndex['rowid']] ?? row[colIndex['id']],
-            song_item_uid: row[colIndex['song_item_uid']],
-            song_rev_uid: row[colIndex['song_rev_uid']],
-            song_uid: row[colIndex['song_uid']],
-            title: row[colIndex['title']] ?? '',
-            author: row[colIndex['author']] ?? '',
-            copyright: row[colIndex['copyright']],
-            administrator: row[colIndex['administrator']],
-            description: row[colIndex['description']],
-            tags: row[colIndex['tags']],
-            reference_number: row[colIndex['reference_number']],
-            provider_id: row[colIndex['provider_id']],
-            vendor_id: row[colIndex['vendor_id']],
-            presentation_id: row[colIndex['presentation_id']],
-            layout_revision: row[colIndex['layout_revision']],
-            revision: row[colIndex['revision']],
-        };
+        const rawSong = songMetadataFromRow(
+            row,
+            colIndex,
+            cell<number>(row, colIndex, 'rowid') ?? cell<number>(row, colIndex, 'id'),
+        );
 
         return parseRawSongFromMetadata(rawSong);
     });
@@ -170,7 +195,7 @@ async function parseSongsDB(db: any, tableNames: string[]): Promise<ParsedSong[]
 /**
  * Parse SongWords.db - contains lyrics in RTF format
  */
-async function parseSongWordsDB(db: any, tableNames: string[]): Promise<ParsedSong[]> {
+async function parseSongWordsDB(db: SqlDatabase, tableNames: string[]): Promise<ParsedSong[]> {
     // Find the word table
     const wordTableName = tableNames.find((t: string) => t.toLowerCase() === 'word') || 'word';
 
@@ -182,9 +207,9 @@ async function parseSongWordsDB(db: any, tableNames: string[]): Promise<ParsedSo
         return [];
     }
 
-    const queryResult = result[0];
-    const columns: string[] = (queryResult as any).lc || queryResult.columns || [];
-    const rows: any[][] = queryResult.values || [];
+    const queryResult: SqlQueryResult = result[0];
+    const columns: string[] = queryResult.lc || queryResult.columns || [];
+    const rows: SqlRow[] = queryResult.values || [];
 
     if (!rows.length) {
         console.log('No rows in SongWords.db');
@@ -201,8 +226,8 @@ async function parseSongWordsDB(db: any, tableNames: string[]): Promise<ParsedSo
 
     // Parse each row into ParsedSong (lyrics only, no metadata)
     const songs: ParsedSong[] = rows.map(row => {
-        const songId = row[colIndex['song_id']];
-        const rtfLyrics = row[colIndex['words']] ?? '';
+        const songId = cell<number>(row, colIndex, 'song_id');
+        const rtfLyrics = cell<string>(row, colIndex, 'words') ?? '';
 
         // Parse RTF to plain text
         const plainLyrics = parseRTFForLyrics(rtfLyrics);
@@ -218,7 +243,7 @@ async function parseSongWordsDB(db: any, tableNames: string[]): Promise<ParsedSo
             author: 'Unknown',
             lyrics: plainLyrics,
             verses: verses.length > 0 ? verses : (plainLyrics ? [plainLyrics] : []),
-            raw: { rowid: songId, words: rtfLyrics } as any,
+            raw: { rowid: songId, words: rtfLyrics } as EWSongSQLite,
             isValid: plainLyrics.trim().length > 0,
             validationErrors: plainLyrics.trim() ? [] : ['Missing lyrics'],
             _songId: songId, // For matching with metadata
@@ -242,15 +267,16 @@ export async function parseEasyWorshipDatabases(files: {
     const sql = await initSqlJs();
 
     // Parse metadata from Songs.db
-    const songsMetadata: Map<number, EWSongSQLite> = new Map();
+    const songsMetadata: Map<number | undefined, EWSongSQLite> = new Map();
     if (files.songsDb) {
         const arrayBuffer = await files.songsDb.arrayBuffer();
         const db = new sql.Database(new Uint8Array(arrayBuffer));
 
         const result = db.exec('SELECT * FROM song');
         if (result.length && result[0]) {
-            const columns: string[] = (result[0] as any).lc || result[0].columns || [];
-            const rows: any[][] = result[0].values || [];
+            const queryResult: SqlQueryResult = result[0];
+            const columns: string[] = queryResult.lc || queryResult.columns || [];
+            const rows: SqlRow[] = queryResult.values || [];
 
             const colIndex: Record<string, number> = {};
             columns.forEach((col, i) => {
@@ -258,25 +284,8 @@ export async function parseEasyWorshipDatabases(files: {
             });
 
             for (const row of rows) {
-                const songId = row[colIndex['rowid']];
-                const metadata: EWSongSQLite = {
-                    rowid: songId,
-                    song_item_uid: row[colIndex['song_item_uid']],
-                    song_rev_uid: row[colIndex['song_rev_uid']],
-                    song_uid: row[colIndex['song_uid']],
-                    title: row[colIndex['title']] ?? '',
-                    author: row[colIndex['author']] ?? '',
-                    copyright: row[colIndex['copyright']],
-                    administrator: row[colIndex['administrator']],
-                    description: row[colIndex['description']],
-                    tags: row[colIndex['tags']],
-                    reference_number: row[colIndex['reference_number']],
-                    provider_id: row[colIndex['provider_id']],
-                    vendor_id: row[colIndex['vendor_id']],
-                    presentation_id: row[colIndex['presentation_id']],
-                    layout_revision: row[colIndex['layout_revision']],
-                    revision: row[colIndex['revision']],
-                };
+                const songId = cell<number>(row, colIndex, 'rowid');
+                const metadata = songMetadataFromRow(row, colIndex, songId);
                 songsMetadata.set(songId, metadata);
             }
         }
@@ -291,8 +300,9 @@ export async function parseEasyWorshipDatabases(files: {
 
         const result = db.exec('SELECT * FROM word');
         if (result.length && result[0]) {
-            const columns: string[] = (result[0] as any).lc || result[0].columns || [];
-            const rows: any[][] = result[0].values || [];
+            const queryResult: SqlQueryResult = result[0];
+            const columns: string[] = queryResult.lc || queryResult.columns || [];
+            const rows: SqlRow[] = queryResult.values || [];
 
             const colIndex: Record<string, number> = {};
             columns.forEach((col, i) => {
@@ -300,8 +310,8 @@ export async function parseEasyWorshipDatabases(files: {
             });
 
             for (const row of rows) {
-                const songId = row[colIndex['song_id']];
-                const rtfLyrics = row[colIndex['words']] ?? '';
+                const songId = cell<number>(row, colIndex, 'song_id');
+                const rtfLyrics = cell<string>(row, colIndex, 'words') ?? '';
 
                 // Get metadata if available
                 const metadata = songsMetadata.get(songId);
