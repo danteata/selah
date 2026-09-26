@@ -70,18 +70,37 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 
 ## 7. Engineering hygiene
 
-- ⬜ Clear the lint backlog, then gate CI on lint.
-- ⬜ `convex-test` coverage for the backend authorization rules.
-- ⬜ Delete ~3,500 lines of unreachable transcription providers and dead
-  offline hooks/IndexedDB helpers.
-- ⬜ Split the 1.1 MB Dashboard chunk.
-- ⬜ Self-host runtime libraries loaded from CDNs (and fix their version
-  mismatches), so the desktop app works fully offline.
-- ⬜ Content Security Policy, report-only first.
+- ✅ Clear the lint backlog. ⏭️ Gating CI on lint: one error is left, in
+  `src/components/countdown/AddCountdownModal.tsx` (the effect that fills
+  the form from the slide being edited, `react-hooks/set-state-in-effect`).
+  The automated pass couldn't open that file, so it was left alone. Once
+  that's fixed, add `bun run lint` to the verify job in
+  `.github/workflows/fly-deploy.yml`.
+- ✅ `convex-test` coverage for the backend authorization rules and the
+  Paystack webhook (`convex/security.test.ts`, `convex/billing.test.ts`,
+  run by `bun run test:convex` and in CI).
+- ✅ Deleted the unreachable transcription providers, dead offline hooks and
+  the unused VAD/ORT assets in `public/` (16 MB).
+- ✅ Split the Dashboard chunk: 1.1 MB → 710 KB. Modals, editors and admin
+  panels load on first open; framer-motion and react-grid-layout are
+  separate vendor chunks.
+- ⏭️ Self-host transformers.js. Skipped: bundling it was tried once and
+  failed only at runtime, inside the worker (see the header of
+  `embedding.worker.ts`). ORT's wasm and the models also come from other
+  hosts, so doing it properly means testing it in a running app.
+- ✅ Content Security Policy, report-only (`nginx-security-headers.conf`).
+  Watch the reports, then switch it to enforcing.
 
 ## 8. UI consistency
 
-- ⬜ One shared modal (focus trap, Escape, ARIA) replacing ~20 hand-rolled ones.
-- ⬜ Virtualize long song lists.
-- ⬜ Settings modal responsive; "More Versions" opens the Bible tab.
-- ⬜ Modals use the app's colour tokens; replace native `confirm()`.
+- ✅ A shared `Modal` (`src/components/modals/Modal.tsx`) with a focus trap,
+  Escape for the topmost dialog only, focus return, a scroll lock and ARIA.
+  ConfirmDialog, the shortcuts sheet, the settings modal and the admin panel
+  use it. ⬜ The other hand-rolled modals can move over one at a time.
+- ✅ Long song and hymn lists: rows use `content-visibility: auto`. That is
+  not a windowed list; it keeps keyboard navigation, which finds rows in
+  the DOM, working.
+- ✅ The settings modal fits short and narrow windows; "More Versions" opens
+  it on the Bible page (`openSettings('bible')`).
+- ✅ Native `confirm()` replaced by ConfirmDialog everywhere. The migrated
+  modals use the colour tokens; ⬜ the rest still use fixed grays.
