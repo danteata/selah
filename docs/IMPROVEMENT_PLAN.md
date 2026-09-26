@@ -16,9 +16,14 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
   public-domain versions statically.
 - ⬜ Clicking a song title in search results sends it straight to live. Should
   it preview instead?
-- ⬜ Deploy: `npx convex deploy` together with the web app; set `SITE_URL` and
-  `RESEND_API_KEY` on the Convex deployment; run `nginx -t` or deploy to
-  staging first.
+- ⬜ Production web (`fly.toml`) and, by all signs, the desktop app use the
+  Convex **dev** deployment `impressive-viper-428`; the production deployment
+  `adept-cricket-545` has no functions. Backend changes reach users through
+  `npx convex dev`, not `npx convex deploy`. Decide whether to move to the
+  production deployment (it needs its data, env vars, the Clerk issuer and
+  the Paystack webhook URL pointed at it). `SITE_URL` and `RESEND_API_KEY` are
+  not set there: invite links fall back to selah.fly.dev and invite emails
+  are not sent.
 
 ## 2. Live session sync
 
@@ -92,11 +97,13 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 - ✅ A shared `Modal` (`src/components/modals/Modal.tsx`) with a focus trap,
   Escape for the topmost dialog only, focus return, a scroll lock and ARIA.
   ConfirmDialog, the shortcuts sheet, the settings modal and the admin panel
-  use it. ⬜ The other hand-rolled modals can move over one at a time.
+  use it, and so does every other dialog. The command bar, quick Bible bar
+  and update prompt animate out, so they use the `useDialog` hook directly.
 - ✅ Long song and hymn lists: rows use `content-visibility: auto`. That is
   not a windowed list; it keeps keyboard navigation, which finds rows in
   the DOM, working.
 - ✅ The settings modal fits short and narrow windows; "More Versions" opens
   it on the Bible page (`openSettings('bible')`).
 - ✅ Native `confirm()` replaced by ConfirmDialog everywhere. The migrated
-  modals use the colour tokens; ⬜ the rest still use fixed grays.
+  dialogs' chrome uses the colour tokens. Slide previews keep their own
+  colours, since those are content.
