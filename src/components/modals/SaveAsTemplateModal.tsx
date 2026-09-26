@@ -4,6 +4,7 @@ import type { Slide } from '../../types'
 import { generateThumbnail } from '../../utils/templateThumbnail'
 import { TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type SlideType } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 interface SaveAsTemplateModalProps {
     isOpen: boolean
@@ -25,6 +26,7 @@ interface SaveAsTemplateModalProps {
 const SLIDE_TYPES = TEMPLATE_SLIDE_TYPE_OPTIONS
 
 export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTemplateModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [name, setName] = useState(slide?.name || '')
     const [category, setCategory] = useState<string>('general')
     const [description, setDescription] = useState('')
@@ -74,7 +76,7 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
+            {...backdropDismiss}
         >
             <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
                 {/* Header */}

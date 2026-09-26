@@ -4,6 +4,7 @@ import {
     Palette, Save, X, PanelBottom
 } from 'lucide-react'
 import type { Slide, SlideStyle } from '../../types'
+import { useGuardedClose } from '../../hooks/useGuardedClose'
 
 interface LowerThirdEditorProps {
     slide: Slide | null
@@ -57,16 +58,24 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
         }
     }, [slide])
 
-    // Keyboard shortcut to close
+    // Keyboard shortcut to close — guarded, so Esc can't silently discard edits.
+    const isDirty = !!slide && (
+        title !== ((slide.contents?.[0] || '').replace(/<[^>]*>/g, '').trim() || slide.name || '') ||
+        subtitle !== (slide.slideStyle?.lowerThirdSubtitle || '') ||
+        ltStyle !== (slide.slideStyle?.lowerThirdStyle || 'standard') ||
+        position !== (slide.slideStyle?.lowerThirdPosition || 'left') ||
+        accentColor !== (slide.slideStyle?.lowerThirdAccentColor || '#0d9488')
+    )
+    const requestClose = useGuardedClose(isDirty, onClose)
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose()
+            if (e.key === 'Escape' && !e.defaultPrevented) requestClose()
         }
         if (isOpen) {
             window.addEventListener('keydown', handleEscape)
             return () => window.removeEventListener('keydown', handleEscape)
         }
-    }, [isOpen, onClose])
+    }, [isOpen, requestClose])
 
     if (!isOpen || !slide) return null
 

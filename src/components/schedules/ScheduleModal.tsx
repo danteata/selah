@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Calendar, Plus, CalendarDays } from 'lucide-react'
 import { useSchedules } from '../../hooks/useSchedules'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 interface ScheduleModalProps {
     isOpen: boolean
@@ -8,6 +9,7 @@ interface ScheduleModalProps {
 }
 
 export function ScheduleModal({ isOpen, onClose }: ScheduleModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [scheduleName, setScheduleName] = useState('')
     const { createSchedule } = useSchedules()
 
@@ -40,7 +42,7 @@ export function ScheduleModal({ isOpen, onClose }: ScheduleModalProps) {
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
+            {...backdropDismiss}
         >
             <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
                 {/* Header */}

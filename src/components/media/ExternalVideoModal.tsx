@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, Plus } from 'lucide-react'
 import { detectExternalVideoPlatform } from '../../utils/externalVideo'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 interface ExternalVideoModalProps {
     isOpen?: boolean
@@ -15,6 +16,7 @@ const PLATFORM_LABEL: Record<ExternalVideoModalProps['platform'], string> = {
 }
 
 export function ExternalVideoModal({ isOpen = true, onClose, onAdd, platform }: ExternalVideoModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [url, setUrl] = useState('')
     const [name, setName] = useState('')
 
@@ -32,7 +34,7 @@ export function ExternalVideoModal({ isOpen = true, onClose, onAdd, platform }: 
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose?.()}
+            {...backdropDismiss}
         >
             <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
                 <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">

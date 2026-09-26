@@ -13,6 +13,7 @@ import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     bible: 'Bible',
@@ -238,6 +239,7 @@ interface TemplateBrowserProps {
 }
 
 export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCustom, isInline = false, slideType }: TemplateBrowserProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
     // Second, independent filter axis. Category answers "how is this filed?";
@@ -670,7 +672,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
         <>
             <div
                 className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-                onClick={(e) => e.target === e.currentTarget && onClose?.()}
+                {...backdropDismiss}
             >
                 {content}
             </div>

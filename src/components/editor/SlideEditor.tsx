@@ -10,6 +10,8 @@ import type { Slide, SlideStyle } from '../../types'
 import { TipTapEditor } from './TipTapEditor'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { useGuardedClose } from '../../hooks/useGuardedClose'
 
 const REF_STYLE_COLOR_PRESETS = ['#ffffff', '#f59e0b', '#0d9488', '#3b82f6', '#ef4444']
 
@@ -22,6 +24,9 @@ interface SlideEditorProps {
 
 export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps) {
     const [editedSlide, setEditedSlide] = useState<Slide | null>(null)
+    const isDirty = !!slide && !!editedSlide && JSON.stringify(editedSlide) !== JSON.stringify(slide)
+    const requestClose = useGuardedClose(isDirty, onClose)
+    const backdropDismiss = useBackdropDismiss(requestClose)
     const [activeContentIndex, setActiveContentIndex] = useState(0)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -37,7 +42,9 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
 
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose()
+            // A popover inside (colour picker, menu) that handled Escape
+            // marks it prevented; that press was not meant for the editor.
+            if (e.key === 'Escape' && !e.defaultPrevented) requestClose()
         }
         if (isOpen) {
             document.addEventListener('keydown', handleEscape)
@@ -47,7 +54,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
             document.removeEventListener('keydown', handleEscape)
             document.body.style.overflow = ''
         }
-    }, [isOpen, onClose])
+    }, [isOpen, requestClose])
 
     if (!isOpen || !editedSlide) return null
 
@@ -110,7 +117,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
     return (
         <div
             className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
+            {...backdropDismiss}
         >
             <div className="flex-1 flex flex-col m-4 bg-white dark:bg-gray-900 rounded-xl overflow-hidden shadow-2xl">
                 {/* Header */}

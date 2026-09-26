@@ -3,6 +3,7 @@ import { X, Bell, Plus, AlertCircle } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Alert, Slide } from '../../types'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 interface AddAlertModalProps {
     isOpen?: boolean
@@ -33,6 +34,7 @@ const ALERT_STYLES = [
 ]
 
 export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline = false }: AddAlertModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [content, setContent] = useState('')
     const [title, setTitle] = useState('')
     const [duration, setDuration] = useState(5)
@@ -321,7 +323,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose?.()}
+            {...backdropDismiss}
         >
             {contentArea}
         </div>

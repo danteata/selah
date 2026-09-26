@@ -32,6 +32,7 @@ import { useAudioDevices, saveSelectedDeviceLabel } from '../../hooks/useAudioDe
 import { getVersion } from '@tauri-apps/api/app'
 import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'billing' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
 
@@ -42,6 +43,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: SettingsModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab)
     const { isAdmin, isSuperadmin, currentUser } = useUserRole()
     const { trackEvent } = useAnalytics()
@@ -128,7 +130,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
+            {...backdropDismiss}
         >
             <div className="w-full max-w-4xl h-[600px] bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden flex">
                 {/* Sidebar */}
@@ -1841,6 +1843,7 @@ function DictationSettings() {
 
 function ShortcutsSettings() {
     const shortcuts = [
+        { keys: ['⌘', 'K'], description: 'Command palette' },
         { keys: ['⌘', '/'], description: 'Focus quick actions search' },
         { keys: ['⌘', 'Z'], description: 'Undo last action' },
         { keys: ['⌘', 'Y'], description: 'Redo last action' },

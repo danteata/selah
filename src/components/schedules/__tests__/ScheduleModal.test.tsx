@@ -62,6 +62,7 @@ describe('ScheduleModal', () => {
         const onClose = vi.fn()
         render(<ScheduleModal isOpen={true} onClose={onClose} />)
         const backdrop = screen.getByText('Create New Schedule').closest('div')!.parentElement!.parentElement!
+        fireEvent.mouseDown(backdrop)
         fireEvent.click(backdrop)
         expect(onClose).toHaveBeenCalledTimes(1)
     })

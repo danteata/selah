@@ -44,6 +44,7 @@ describe('ShortcutsModal', () => {
     it('calls onClose when backdrop is clicked', () => {
         render(<ShortcutsModal isOpen={true} onClose={onClose} />)
         const backdrop = screen.getByText('Keyboard Shortcuts').closest('div')!.parentElement!.parentElement!
+        fireEvent.mouseDown(backdrop)
         fireEvent.click(backdrop)
         expect(onClose).toHaveBeenCalledTimes(1)
     })

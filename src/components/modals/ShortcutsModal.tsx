@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { X, Keyboard } from 'lucide-react'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 interface ShortcutsModalProps {
     isOpen: boolean
@@ -7,6 +8,7 @@ interface ShortcutsModalProps {
 }
 
 export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     useEffect(() => {
         const handleEscape = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
@@ -31,6 +33,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
         {
             title: 'General',
             shortcuts: [
+                { keys: ['⌘', 'K'], description: 'Command palette' },
                 { keys: ['⌘', '/'], description: 'Focus quick actions search' },
                 { keys: ['⌘', ','], description: 'Open settings' },
                 { keys: ['?'], description: 'Show this help' },
@@ -85,7 +88,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
+            {...backdropDismiss}
         >
             <div className="w-full max-w-2xl bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
                 {/* Header */}

@@ -9,6 +9,7 @@ import { resolveLocalUrl } from '../../hooks/useLocalBackground'
 import { VideoThumbnail } from './VideoThumbnail'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { ProUpsell } from '../licensing/ProGate'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 export interface MediaItem {
     id: string
@@ -45,6 +46,7 @@ export function MediaPicker({
     mediaType = 'all',
     isInline = false
 }: MediaPickerProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [activeTab, setActiveTab] = useState<'library' | 'upload' | 'link'>('library')
     const [searchQuery, setSearchQuery] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -393,7 +395,7 @@ export function MediaPicker({
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose?.()}
+            {...backdropDismiss}
         >
             {content}
         </div>

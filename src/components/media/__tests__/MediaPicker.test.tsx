@@ -128,6 +128,7 @@ describe('MediaPicker', () => {
         const { container } = render(<MediaPicker {...baseProps} />)
         const backdrop = container.querySelector('.bg-black\\/60')
         expect(backdrop).toBeTruthy()
+        fireEvent.mouseDown(backdrop!)
         fireEvent.click(backdrop!)
         expect(baseProps.onClose).toHaveBeenCalled()
     })

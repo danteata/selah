@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery } from 'convex/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, X, Command, LayoutGrid, Rows3, Users, Plus, Check, Loader2, Shield } from 'lucide-react'
+import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, Command, LayoutGrid, Rows3, Users, Plus, Check, Loader2, Shield } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
@@ -24,27 +24,22 @@ interface TopBarProps {
     onToggleAdminPanel?: () => void
 }
 
-export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminPanel, onToggleAdminPanel }: TopBarProps) {
+export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAdminPanel }: TopBarProps) {
     const { currentUser, canAccessAdmin } = useUserRole()
     const { isOffline } = useConvexConnection()
     const churchId = currentUser?.churchId || ''
     const [showUserMenu, setShowUserMenu] = useState(false)
     const [showScheduleMenu, setShowScheduleMenu] = useState(false)
-    const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const openModal = useAppStore((s) => s.openModal)
     const workspaceMode = useAppStore((s) => s.workspaceMode)
     const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode)
-    const searchInputRef = useRef<HTMLInputElement>(null)
     const scheduleMenuRef = useRef<HTMLDivElement>(null)
 
     const {
         schedules,
         activeSchedule: currentSchedule,
         setActiveSchedule,
-        createSchedule,
-        deleteSchedule,
-        updateSchedule,
         isLoading: schedulesLoading,
     } = useSchedules()
 
@@ -78,28 +73,10 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
         return () => document.removeEventListener('click', handleClickOutside)
     }, [showUserMenu, showScheduleMenu])
 
-    // Focus search input when command bar opens
-    useEffect(() => {
-        if (commandBarOpen) {
-            // Small delay to let animation start
-            setTimeout(() => searchInputRef.current?.focus(), 100)
-        }
-    }, [commandBarOpen])
-
-    // Listen for ⌘/ keyboard shortcut
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === '/') {
-                e.preventDefault()
-                setCommandBarOpen(!commandBarOpen)
-            }
-            if (e.key === 'Escape' && commandBarOpen) {
-                setCommandBarOpen(false)
-            }
-        }
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [commandBarOpen, setCommandBarOpen])
+    // The command palette itself is CommandBar, which owns ⌘K and Escape.
+    // A leftover placeholder overlay used to open here as well and take focus
+    // 100ms later, so everything typed after that went into a hidden field; its
+    // ⌘/ toggle also fired on top of Dashboard's ⌘/ (focus quick actions).
 
     return (
         <header className="studio-top-bar glass-panel border-b border-[var(--border-subtle)] flex items-center px-2 sm:px-4 gap-1.5 sm:gap-3">
@@ -220,7 +197,7 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                         Search bible, hymns, songs, actions...
                     </span>
                     <kbd className="hidden sm:flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-muted)] font-mono">
-                        <Command className="w-2.5 h-2.5" />/
+                        <Command className="w-2.5 h-2.5" />K
                     </kbd>
                 </button>
             </div>
@@ -355,54 +332,6 @@ export function TopBar({ isDark, onToggleTheme, activeSchedule, user, showAdminP
                 </div>
             </div>
 
-            {/* Command Bar Overlay (full-width dropdown) */}
-            <AnimatePresence>
-                {commandBarOpen && (
-                    <>
-                        {/* Backdrop */}
-                        <motion.div
-                            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[100]"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            onClick={() => setCommandBarOpen(false)}
-                        />
-                        {/* Command Bar */}
-                        <motion.div
-                            className="fixed top-12 left-1/2 -translate-x-1/2 w-full max-w-lg z-[101]"
-                            initial={{ opacity: 0, y: -10, scale: 0.98 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: -10, scale: 0.98 }}
-                            transition={{ duration: 0.15 }}
-                        >
-                            <div className="bg-[var(--bg-elevated)] rounded-xl shadow-2xl border border-[var(--border-default)] overflow-hidden">
-                                <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border-subtle)]">
-                                    <Search className="w-4 h-4 text-[var(--text-muted)]" />
-                                    <input
-                                        ref={searchInputRef}
-                                        type="text"
-                                        placeholder="Search bible, hymns, songs, or type a command..."
-                                        className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Escape') setCommandBarOpen(false)
-                                        }}
-                                    />
-                                    <button
-                                        onClick={() => setCommandBarOpen(false)}
-                                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded"
-                                    >
-                                        <X className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
-                                {/* Placeholder for search results — will be populated in Phase 2 */}
-                                <div className="p-3 text-xs text-[var(--text-muted)] text-center">
-                                    Start typing to search...
-                                </div>
-                            </div>
-                        </motion.div>
-                    </>
-                )}
-            </AnimatePresence>
         </header>
     )
 }

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { X, Clock, Plus, Play, Pause, RotateCcw } from 'lucide-react'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
 import type { Slide } from '../../types'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 interface AddCountdownModalProps {
     isOpen?: boolean
@@ -30,6 +31,7 @@ const DEFAULT_BG: BackgroundSelection = {
 }
 
 export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide, isInline = false }: AddCountdownModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const [hours, setHours] = useState(0)
     const [minutes, setMinutes] = useState(5)
     const [seconds, setSeconds] = useState(0)
@@ -265,7 +267,7 @@ export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide,
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose?.()}
+            {...backdropDismiss}
         >
             {content}
         </div>

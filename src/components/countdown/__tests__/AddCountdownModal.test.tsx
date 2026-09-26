@@ -147,6 +147,7 @@ describe('AddCountdownModal', () => {
         const { container } = render(<AddCountdownModal {...baseProps} />)
         const backdrop = container.querySelector('.bg-black\\/50')
         expect(backdrop).toBeTruthy()
+        fireEvent.mouseDown(backdrop!)
         fireEvent.click(backdrop!)
         expect(baseProps.onClose).toHaveBeenCalled()
     })
