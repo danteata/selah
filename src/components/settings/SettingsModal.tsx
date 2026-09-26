@@ -258,10 +258,7 @@ function DisplaySettings({
     settings,
     onUpdate,
 }: {
-    // `slideStyle` is not a real AppSettings key (the store writes
-    // linesPerSlide under `slideStyles`), so the slider below always reads 4.
-    // Typed as-is to keep behaviour unchanged; left for a separate fix.
-    settings: AppSettings & { slideStyle?: Pick<SlideStyle, 'linesPerSlide'> }
+    settings: AppSettings
     onUpdate: {
         setSlideStyles: (styles: SlideStyle) => void
         setDefaultFont: (font: string) => void
@@ -798,13 +795,13 @@ function DisplaySettings({
                     type="range"
                     min="2"
                     max="8"
-                    value={settings.slideStyle?.linesPerSlide || 4}
+                    value={settings.slideStyles?.linesPerSlide || 4}
                     onChange={(e) => onUpdate.setLinesPerSlide(parseInt(e.target.value))}
                     className="w-full accent-[var(--accent-teal)]"
                 />
                 <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
                     <span>2</span>
-                    <span>{settings.slideStyle?.linesPerSlide || 4} lines</span>
+                    <span>{settings.slideStyles?.linesPerSlide || 4} lines</span>
                     <span>8</span>
                 </div>
             </div>
