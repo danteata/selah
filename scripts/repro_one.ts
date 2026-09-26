@@ -1,4 +1,4 @@
-import { parseRTF, extractVerseStructureFromRTF } from '../src/services/migration/rtfParser'
+import { extractVerseStructureFromRTF } from '../src/services/migration/rtfParser'
 import { execSync } from 'child_process'
 import * as fs from 'fs'
 

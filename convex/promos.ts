@@ -17,7 +17,7 @@
  * code's `maxRedemptions` caps total uses.
  */
 
-import { query, mutation, action, internalQuery, internalMutation } from './_generated/server'
+import { query, mutation, action, internalQuery, internalMutation, type DatabaseWriter } from './_generated/server'
 import { internal } from './_generated/api'
 import { v } from 'convex/values'
 import { requireSuperadmin } from './lib/auth'
@@ -221,12 +221,12 @@ type CreatePromoArgs = {
     revertPlanCode?: string
 }
 
-async function createPromoImpl(db: any, args: CreatePromoArgs) {
+async function createPromoImpl(db: DatabaseWriter, args: CreatePromoArgs) {
     const code = normalizeCode(args.code)
 
     const existing = await db
         .query('promoCodes')
-        .withIndex('by_code', (q: any) => q.eq('code', code))
+        .withIndex('by_code', (q) => q.eq('code', code))
         .unique()
     if (existing) throw new Error('A code with that name already exists')
 
@@ -255,10 +255,10 @@ async function createPromoImpl(db: any, args: CreatePromoArgs) {
     })
 }
 
-async function setPromoActiveImpl(db: any, code: string, active: boolean) {
+async function setPromoActiveImpl(db: DatabaseWriter, code: string, active: boolean) {
     const promo = await db
         .query('promoCodes')
-        .withIndex('by_code', (q: any) => q.eq('code', normalizeCode(code)))
+        .withIndex('by_code', (q) => q.eq('code', normalizeCode(code)))
         .unique()
     if (!promo) throw new Error('Code not found')
     await db.patch(promo._id, { active, updatedAt: new Date().toISOString() })

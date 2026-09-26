@@ -125,7 +125,7 @@ export const updateSlide = mutation({
         }),
     },
     handler: async (ctx, args) => {
-        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
+        const { slide } = await requireOwnSlide(ctx, args.slideId);
 
         await ctx.db.patch(slide._id, {
             ...args.updates,
@@ -142,7 +142,7 @@ export const deleteSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
+        const { slide } = await requireOwnSlide(ctx, args.slideId);
 
         await ctx.db.delete(slide._id);
         return true;
@@ -332,7 +332,7 @@ export const saveSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
+        const { slide } = await requireOwnSlide(ctx, args.slideId);
 
         await ctx.db.patch(slide._id, {
             saved: true,
@@ -349,7 +349,7 @@ export const unsaveSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
+        const { slide } = await requireOwnSlide(ctx, args.slideId);
 
         await ctx.db.patch(slide._id, {
             saved: false,

@@ -163,6 +163,11 @@ function timingSafeEqual(a: string, b: string): boolean {
     return diff === 0
 }
 
+// Paystack's webhook `data` is untyped JSON whose shape varies by event; it
+// is read defensively field by field below.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- third-party payload, see above
+type PaystackData = Record<string, any>
+
 type NormalizedEvent = {
     email: string
     status: 'active' | 'non-renewing' | 'attention' | 'past_due' | 'cancelled'
@@ -186,7 +191,7 @@ type NormalizedEvent = {
  */
 function normalizePaystackEvent(event: {
     event?: string
-    data?: Record<string, any>
+    data?: PaystackData
 }): NormalizedEvent | null {
     const type = event.event
     const data = event.data ?? {}
@@ -238,7 +243,7 @@ function normalizePaystackEvent(event: {
 }
 
 /** When Paystack says the event happened (ISO), if it says. */
-function paystackEventTime(data: Record<string, any> | undefined): string | null {
+function paystackEventTime(data: PaystackData | undefined): string | null {
     const raw = data?.paid_at ?? data?.paidAt ?? data?.updated_at ?? data?.updatedAt ?? data?.created_at ?? data?.createdAt
     if (typeof raw !== 'string') return null
     const time = new Date(raw)
@@ -258,7 +263,7 @@ const paystackWebhook = httpAction(async (ctx, request) => {
         return new Response('Invalid signature', { status: 401 })
     }
 
-    let event: { event?: string; data?: Record<string, any> }
+    let event: { event?: string; data?: PaystackData }
     try {
         event = JSON.parse(raw)
     } catch {
@@ -285,7 +290,7 @@ const paystackWebhook = httpAction(async (ctx, request) => {
     return new Response('ok', { status: 200 })
 })
 
-const issueLicense = httpAction(async (ctx, request) => {
+const issueLicense = httpAction(async (ctx, _request) => {
     const identity = await ctx.auth.getUserIdentity()
     if (!identity?.email) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {

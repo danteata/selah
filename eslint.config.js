@@ -29,5 +29,24 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // A leading underscore marks a binding as deliberately unused (a
+      // callback parameter the signature requires, a destructured-away field).
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        destructuredArrayIgnorePattern: '^_',
+        ignoreRestSiblings: true,
+      }],
+    },
+  },
+  {
+    // Test doubles stand in for real modules; typing every mock precisely buys
+    // nothing and hides what the test is about.
+    files: ['**/__tests__/**', '**/*.test.{ts,tsx}', 'src/test-setup.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
   },
 ])

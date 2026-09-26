@@ -32,8 +32,6 @@ const DEFAULT_SETTINGS = {
     sermonListener_defaultLanguage: "en-US",
 };
 
-// Singleton document ID - we use a fixed ID for the single global settings document
-const GLOBAL_SETTINGS_ID = "global_settings";
 
 /**
  * Get global app settings (system-wide)

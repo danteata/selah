@@ -349,7 +349,7 @@ export const removeFromQueue = mutation({
         slideIds: v.array(v.string()),
     },
     handler: async (ctx, args) => {
-        const { user, session } = await requireActiveSession(ctx, args.sessionId);
+        const { session } = await requireActiveSession(ctx, args.sessionId);
 
         const currentQueue = session.queue || [];
         const updatedQueue = removeQueueEntriesByOccurrence(currentQueue, args.slideIds);
@@ -457,7 +457,7 @@ export const setOverlay = mutation({
         alertId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const { user, session } = await requireActiveSession(ctx, args.sessionId);
+        await requireActiveSession(ctx, args.sessionId);
 
         await ctx.db.patch(args.sessionId, {
             activeOverlay: args.overlay,

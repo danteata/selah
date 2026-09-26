@@ -18,7 +18,7 @@ const songs = songsRaw.trim().split('\n').map(line => {
 console.log(`Total songs: ${songs.length}\n`);
 
 let issuesFound = 0;
-const issueDetails: any[] = [];
+const issueDetails: Array<Record<string, unknown>> = [];
 
 for (const song of songs) {
   try {
