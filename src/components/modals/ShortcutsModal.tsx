@@ -33,8 +33,8 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
             shortcuts: [
                 { keys: ['⌘', '/'], description: 'Focus quick actions search' },
                 { keys: ['⌘', ','], description: 'Open settings' },
-                { keys: ['⌘', 'H'], description: 'Show this help' },
-                { keys: ['Esc'], description: 'Close modal / Clear selection' },
+                { keys: ['?'], description: 'Show this help' },
+                { keys: ['Esc'], description: 'Close modal' },
             ],
         },
         {
@@ -42,7 +42,6 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
             shortcuts: [
                 { keys: ['⌘', 'Z'], description: 'Undo' },
                 { keys: ['⌘', 'Y'], description: 'Redo' },
-                { keys: ['⌘', 'S'], description: 'Save to library' },
                 { keys: ['Delete'], description: 'Delete selected slide' },
             ],
         },
@@ -53,6 +52,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
                 { keys: ['↓'], description: 'Next slide' },
                 { keys: ['Home'], description: 'First slide' },
                 { keys: ['End'], description: 'Last slide' },
+                { keys: ['⌘', '1–9'], description: 'Go to slide in the live deck' },
             ],
         },
         {
@@ -77,9 +77,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
             title: 'Live Presentation',
             shortcuts: [
                 { keys: ['⌘', 'P'], description: 'Promote to live' },
-                { keys: ['Space'], description: 'Toggle live slide' },
-                { keys: ['B'], description: 'Black screen' },
-                { keys: ['W'], description: 'White screen' },
+                { keys: ['B'], description: 'Clear the output (and bring it back)' },
             ],
         },
     ]

@@ -8,7 +8,7 @@ import {
     runRetentionOnStartup,
     type RetentionPolicy,
 } from '../services/sermon-listener/sessionRecordings'
-import { useDictation, useKeyboardShortcuts, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
+import { useDictation, useKeyboardShortcuts, isLiveNavigationClaimed, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from '../hooks/useLocalBackground'
 import { SettingsModal } from '../components/settings/SettingsModal'
@@ -55,7 +55,6 @@ export default function Dashboard() {
     const removeActiveSlide = useAppStore((state) => state.removeActiveSlide)
     const selectedSlideIds = useAppStore((state) => state.selectedSlideIds)
     const clearSelectedSlides = useAppStore((state) => state.clearSelectedSlides)
-    const setActiveOverlay = useAppStore((state) => state.setActiveOverlay)
 
     // Get modal state and actions from Zustand store
     const modals = useAppStore((state) => state.modals)
@@ -70,7 +69,7 @@ export default function Dashboard() {
     const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
 
     // Shared live session for collaboration
-    const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession } = useLiveSession()
+    const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession, toggleBlank: toggleSharedBlank } = useLiveSession()
 
     // Collaboration toast notifications
     useCollaborationToasts(currentUser?.churchId || undefined, sessionId || undefined)
@@ -221,16 +220,14 @@ export default function Dashboard() {
         }
     }, [liveSlideId, scheduleSlides, setSharedLiveSlide])
 
-    // Toggle overlay (black/white screen)
-    const toggleBlackScreen = useCallback(() => {
-        const currentOverlay = useAppStore.getState().activeOverlay
-        setActiveOverlay(currentOverlay === 'black' ? 'none' : 'black')
-    }, [setActiveOverlay])
-
-    const toggleWhiteScreen = useCallback(() => {
-        const currentOverlay = useAppStore.getState().activeOverlay
-        setActiveOverlay(currentOverlay === 'white' ? 'none' : 'white')
-    }, [setActiveOverlay])
+    // "B": clear the output. The same toggle as LiveOutput's button — this used
+    // to set an `activeOverlay` of 'black' that nothing ever rendered, so the
+    // key the shortcuts list advertises for emergencies did nothing at all.
+    const toggleBlank = useCallback(() => {
+        const next = !useAppStore.getState().liveOutputBlanked
+        useAppStore.getState().setLiveOutputBlanked(next)
+        void toggleSharedBlank(next)
+    }, [toggleSharedBlank])
 
     // Open settings
     const openSettings = useCallback(() => {
@@ -255,22 +252,25 @@ export default function Dashboard() {
         // Settings
         { key: ',', callback: openSettings, options: { ctrlOrMeta: true } },
         // Shortcuts help
-        { key: 'h', callback: openShortcutsModal, options: { ctrlOrMeta: true } },
+        // '?', not ⌘H: on macOS ⌘H hides the whole app, and preventDefault
+        // can't stop it — one slip mid-service and the operator's window is gone.
+        { key: '?', callback: openShortcutsModal },
         // Focus quick actions
         { key: '/', callback: focusSearch, options: { ctrlOrMeta: true } },
         // Promote to live
         { key: 'p', callback: promoteToLive, options: { ctrlOrMeta: true } },
         // Navigation - Arrow keys (without modifiers)
-        { key: 'ArrowDown', callback: navigateToNextSlide },
-        { key: 'ArrowUp', callback: navigateToPrevSlide },
+        // ↑/↓ are LiveOutput's while it is mounted (it steps the operator's
+        // deck); these schedule-order versions only answer when it isn't.
+        { key: 'ArrowDown', callback: () => (isLiveNavigationClaimed() ? false : navigateToNextSlide()) },
+        { key: 'ArrowUp', callback: () => (isLiveNavigationClaimed() ? false : navigateToPrevSlide()) },
         // Navigation - Home/End
         { key: 'Home', callback: navigateToFirstSlide },
         { key: 'End', callback: navigateToLastSlide },
         // Delete selected slides
         { key: 'Delete', callback: deleteSelectedSlides },
-        // Black/White screen toggles
-        { key: 'b', callback: toggleBlackScreen },
-        { key: 'w', callback: toggleWhiteScreen },
+        // Clear the output (see toggleBlank)
+        { key: 'b', callback: toggleBlank },
     ])
 
     // Handle media selection (from the "Add Media" modal — library, upload, or pasted link)

@@ -7,7 +7,7 @@ import { proGateMessage } from '../../providers/entitlementState'
 import { useAlternateOutput } from '../../hooks/useAlternateOutput'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
-import { useLiveSession, useVerseNavigationShortcuts, useKeyboardShortcut } from '../../hooks'
+import { useLiveSession, useVerseNavigationShortcuts, useClaimLiveNavigation, shouldIgnoreShortcut, VERSE_NAV_PRIORITY } from '../../hooks'
 import { generateSlideContent, calculateScreenFontSize } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
@@ -383,14 +383,17 @@ export function LiveOutput() {
         }
     }, [])
 
-    // Arrow key navigation
+    // Arrow key navigation. While mounted this is the only ↑/↓ handler — the
+    // Dashboard's schedule-order fallback stands down (useClaimLiveNavigation).
+    useClaimLiveNavigation()
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            const el = document.activeElement
-            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.getAttribute('contenteditable') === 'true') return
+            if (e.ctrlKey || e.metaKey || e.altKey || shouldIgnoreShortcut(e)) return
             if (e.key === 'ArrowDown' && nextSlide) {
+                e.preventDefault()
                 handleSetLiveSlide(nextSlide.id)
             } else if (e.key === 'ArrowUp' && prevSlide) {
+                e.preventDefault()
                 handleSetLiveSlide(prevSlide.id)
             }
         }
@@ -406,18 +409,16 @@ export function LiveOutput() {
     useVerseNavigationShortcuts(
         () => verseNavigatorRef.current?.navigateVerse('next'),
         () => verseNavigatorRef.current?.navigateVerse('prev'),
-        { enabled: liveSlide?.type === 'bible' }
+        { enabled: liveSlide?.type === 'bible', priority: VERSE_NAV_PRIORITY.live }
     )
 
-    // "B" — clear/un-clear the live output to black (documented in
-    // ShortcutsModal as "Black screen").
-    useKeyboardShortcut('b', handleToggleBlank)
+    // "B" is bound once, in Dashboard, which is always mounted. Binding it
+    // here as well made the two toggles cancel out whenever both were up.
 
     // Number shortcuts (Ctrl/Cmd + 0-9)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            const el = document.activeElement
-            if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.getAttribute('contenteditable') === 'true') return
+            if (shouldIgnoreShortcut(e)) return
             if (e.ctrlKey || e.metaKey) {
                 const num = parseInt(e.key, 10)
                 if (!isNaN(num) && num >= 0 && num <= 9) {
@@ -460,24 +461,37 @@ export function LiveOutput() {
 
     // Handle open live with screen picker or auto-open
     const handleOpenLive = useCallback(async () => {
-        if (liveOutputMonitorId && isDesktop) {
-            await openLiveWindow({
-                monitor_id: liveOutputMonitorId,
-                fullscreen: true,
-                decorations: false,
-                always_on_top: true,
-                initial_slide_id: liveSlideId || undefined,
-            })
-        } else if (!isDesktop && liveOutputMonitorId) {
-            // Web mode with saved monitor preference
-            await openLiveWindow({
-                monitor_id: liveOutputMonitorId,
-                fullscreen: true,
-                initial_slide_id: liveSlideId || undefined,
-            })
-        } else {
+        const showPicker = async () => {
             await detectMonitors()
             setShowScreenPicker(true)
+        }
+
+        if (!liveOutputMonitorId) {
+            await showPicker()
+            return
+        }
+
+        // The saved display may have been unplugged or renumbered since, and a
+        // web popup can be blocked. Both used to fail silently — PRESENT did
+        // nothing and the picker never appeared. Fall back to the picker.
+        let opened = false
+        try {
+            opened = await openLiveWindow({
+                monitor_id: liveOutputMonitorId,
+                fullscreen: true,
+                ...(isDesktop ? { decorations: false, always_on_top: true } : {}),
+                initial_slide_id: liveSlideId || undefined,
+            })
+        } catch (err) {
+            console.error('[LiveOutput] Failed to open the output on the saved display:', err)
+        }
+        if (!opened) {
+            toast.error(
+                isDesktop
+                    ? "Couldn't open the output on the saved display. Pick a screen."
+                    : "Couldn't open the output window — allow pop-ups for this site, or pick a screen."
+            )
+            await showPicker()
         }
     }, [liveOutputMonitorId, isDesktop, openLiveWindow, detectMonitors, liveSlideId])
 

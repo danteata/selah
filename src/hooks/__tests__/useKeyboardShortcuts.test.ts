@@ -401,3 +401,93 @@ describe('useVerseNavigationShortcuts', () => {
         expect(evt.defaultPrevented).toBe(false)
     })
 })
+
+// ---------------------------------------------------------------------------
+// The shared guard, and who answers a key when several could
+// ---------------------------------------------------------------------------
+import { useAppStore } from '../../store/appStore'
+import { useClaimLiveNavigation, isLiveNavigationClaimed, VERSE_NAV_PRIORITY } from '../useKeyboardShortcuts'
+
+describe('shortcut guard', () => {
+    afterEach(() => {
+        useAppStore.setState({ commandBarOpen: false })
+        useAppStore.getState().closeAllModals?.()
+        document.body.innerHTML = ''
+    })
+
+    it('ignores a key pressed with a <select> focused', () => {
+        const callback = vi.fn()
+        renderHook(() => useKeyboardShortcuts([{ key: 'ArrowDown', callback }]))
+
+        const select = document.createElement('select')
+        document.body.appendChild(select)
+        select.focus()
+        fireKeyDown('ArrowDown')
+
+        // The dropdown's value changed, the projector must not.
+        expect(callback).not.toHaveBeenCalled()
+    })
+
+    it('ignores auto-repeat from a held key', () => {
+        const callback = vi.fn()
+        renderHook(() => useKeyboardShortcuts([{ key: 'ArrowDown', callback }]))
+
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', repeat: true, bubbles: true }))
+        expect(callback).not.toHaveBeenCalled()
+    })
+
+    it('ignores a press another handler already took', () => {
+        const callback = vi.fn()
+        renderHook(() => useKeyboardShortcuts([{ key: 'ArrowDown', callback }]))
+
+        const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+        event.preventDefault()
+        window.dispatchEvent(event)
+        expect(callback).not.toHaveBeenCalled()
+    })
+
+    it('stays quiet while the command palette is open', () => {
+        const callback = vi.fn()
+        renderHook(() => useKeyboardShortcuts([{ key: 'b', callback }]))
+
+        useAppStore.setState({ commandBarOpen: true })
+        fireKeyDown('b')
+        expect(callback).not.toHaveBeenCalled()
+    })
+
+    it('does not prevent a press its callback declined', () => {
+        renderHook(() => useKeyboardShortcuts([{ key: 'ArrowDown', callback: () => false }]))
+
+        const event = fireKeyDown('ArrowDown')
+        // Left for the handler that owns it (LiveOutput's deck navigation).
+        expect(event.defaultPrevented).toBe(false)
+    })
+})
+
+describe('live navigation claim', () => {
+    it('is held only while a claimant is mounted', () => {
+        expect(isLiveNavigationClaimed()).toBe(false)
+        const { unmount } = renderHook(() => useClaimLiveNavigation())
+        expect(isLiveNavigationClaimed()).toBe(true)
+        unmount()
+        expect(isLiveNavigationClaimed()).toBe(false)
+    })
+})
+
+describe('verse navigation ownership', () => {
+    it('sends a press only to the highest-priority enabled owner', () => {
+        const preview = vi.fn()
+        const live = vi.fn()
+        renderHook(() => useVerseNavigationShortcuts(preview, vi.fn(), { priority: VERSE_NAV_PRIORITY.preview }))
+        const liveHook = renderHook(() => useVerseNavigationShortcuts(live, vi.fn(), { priority: VERSE_NAV_PRIORITY.live }))
+
+        fireKeyDown('ArrowRight')
+        expect(live).toHaveBeenCalledTimes(1)
+        // Both used to step: the live verse and the preview's stale copy.
+        expect(preview).not.toHaveBeenCalled()
+
+        liveHook.unmount()
+        fireKeyDown('ArrowRight')
+        expect(preview).toHaveBeenCalledTimes(1)
+    })
+})

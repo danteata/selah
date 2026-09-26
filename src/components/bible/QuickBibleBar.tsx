@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Zap, Plus, X, Loader2, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
+import { useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession, useVerseNavigationShortcuts, VERSE_NAV_PRIORITY } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { bibleBooks, bibleVersionObjects } from '../../types'
 import type { Scripture, BibleVerse } from '../../types'
@@ -241,7 +241,7 @@ export function QuickBibleBar() {
     useVerseNavigationShortcuts(
         () => navigateVerse('next'),
         () => navigateVerse('prev'),
-        { enabled: !!currentScripture }
+        { enabled: !!currentScripture, priority: VERSE_NAV_PRIORITY.quickBible }
     )
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {

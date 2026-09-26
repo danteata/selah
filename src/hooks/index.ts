@@ -28,7 +28,11 @@ export {
     useSlideNavigationShortcuts,
     useVerseNavigationShortcuts,
     useNumberShortcuts,
-    useCtrlOrMetaActive
+    useCtrlOrMetaActive,
+    useClaimLiveNavigation,
+    isLiveNavigationClaimed,
+    shouldIgnoreShortcut,
+    VERSE_NAV_PRIORITY,
 } from './useKeyboardShortcuts'
 export { useMultiMonitor } from './useMultiMonitor'
 export { useNativeMultiMonitor } from './useNativeMultiMonitor'

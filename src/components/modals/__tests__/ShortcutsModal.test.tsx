@@ -35,7 +35,10 @@ describe('ShortcutsModal', () => {
         render(<ShortcutsModal isOpen={true} onClose={onClose} />)
         expect(screen.getAllByText('⌘').length).toBeGreaterThan(0)
         expect(screen.getByText('Esc')).toBeInTheDocument()
-        expect(screen.getByText('Space')).toBeInTheDocument()
+        expect(screen.getByText('?')).toBeInTheDocument()
+        // Listed shortcuts are the bound ones: Space and W never did anything.
+        expect(screen.queryByText('Space')).not.toBeInTheDocument()
+        expect(screen.queryByText('W')).not.toBeInTheDocument()
     })
 
     it('calls onClose when backdrop is clicked', () => {

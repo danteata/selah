@@ -42,6 +42,7 @@ vi.mock('../../../hooks', () => ({
     useSemanticVerseSearch: vi.fn(() => h.semantic),
     useLiveSession: vi.fn(() => h.liveSession),
     useVerseNavigationShortcuts: vi.fn(),
+    VERSE_NAV_PRIORITY: { preview: 1, live: 2, quickBible: 3 },
 }))
 
 vi.mock('framer-motion', () => ({
