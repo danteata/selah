@@ -47,7 +47,7 @@ describe('LibraryPanel', () => {
         const onClose = vi.fn()
         mockUseLibrary.mockReturnValue({ libraryCount: 0 })
         render(<LibraryPanel isOpen={true} onClose={onClose} />)
-        const closeBtn = screen.getByRole('button', { name: '' })
+        const closeBtn = screen.getByRole('button', { name: 'Close' })
         fireEvent.click(closeBtn)
         expect(onClose).toHaveBeenCalledTimes(1)
     })

@@ -186,6 +186,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                             {activeTab.startsWith('admin-') ? 'Admin — ' : ''}{tabs.find((t) => t.id === activeTab)?.label || adminTabs.find((t) => t.id === activeTab)?.label || ''} Settings
                         </h3>
                         <button
+                            aria-label="Close"
                             onClick={onClose}
                             className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                         >
@@ -833,6 +834,9 @@ function DisplaySettings({
                     </p>
                 </div>
                 <button
+                    role="switch"
+                    aria-checked={!!(settings.animations)}
+                    aria-label="Enable Animations"
                     onClick={() => onUpdate.setAnimations(!settings.animations)}
                     className={`relative w-12 h-6 rounded-full transition-colors ${settings.animations ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
@@ -1071,6 +1075,9 @@ function BibleSettings({
                     </p>
                 </div>
                 <button
+                    role="switch"
+                    aria-checked={!!(settings.footnotes)}
+                    aria-label="Show Footnotes"
                     onClick={() => onUpdate.setFootnotes(!settings.footnotes)}
                     className={`relative w-12 h-6 rounded-full transition-colors ${settings.footnotes ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
@@ -1677,6 +1684,9 @@ function DictationSettings() {
                     </p>
                 </div>
                 <button
+                    role="switch"
+                    aria-checked={!!(enabled)}
+                    aria-label="Dictation"
                     onClick={() => update({ enabled: !enabled })}
                     className={`relative w-12 h-6 rounded-full shrink-0 transition-colors ${enabled ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >

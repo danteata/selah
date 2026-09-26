@@ -10,6 +10,8 @@ import { VideoThumbnail } from './VideoThumbnail'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { ProUpsell } from '../licensing/ProGate'
 import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { ConfirmDialog } from '../modals/ConfirmDialog'
+import { toast } from 'sonner'
 
 export interface MediaItem {
     id: string
@@ -56,6 +58,34 @@ export function MediaPicker({
     const [uploadError, setUploadError] = useState<string | null>(null)
 
     const { items, isLoading, uploadFile, syncToCloud, addExternalVideo, deleteItem } = useMediaLibrary()
+
+    // Deleting removes the file from the church's cloud library for everyone,
+    // with no undo, so ask first. It used to go on a single click of a button
+    // that was invisible until hovered.
+    const [pendingDelete, setPendingDelete] = useState<MediaLibraryItem | null>(null)
+    const confirmDelete = async () => {
+        const item = pendingDelete
+        setPendingDelete(null)
+        if (!item) return
+        try {
+            await deleteItem(item)
+            if (selectedMedia?.id === item.id) setSelectedMedia(null)
+            toast.success(`Removed "${item.name}"`)
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Couldn't remove that item")
+        }
+    }
+    const deleteDialog = (
+        <ConfirmDialog
+            isOpen={pendingDelete !== null}
+            type="danger"
+            title="Remove from library?"
+            message={`"${pendingDelete?.name ?? ''}" will be removed from your church's media library. This can't be undone.`}
+            confirmText="Remove"
+            onConfirm={() => void confirmDelete()}
+            onCancel={() => setPendingDelete(null)}
+        />
+    )
 
     useEffect(() => {
         if (isInline) return
@@ -189,6 +219,7 @@ export function MediaPicker({
                     </div>
                     {!isInline && (
                         <button
+                            aria-label="Close"
                             onClick={onClose}
                             className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                         >
@@ -271,7 +302,7 @@ export function MediaPicker({
                                             variant="grid"
                                             selected={selectedMedia?.id === item.id}
                                             onSelect={setSelectedMedia}
-                                            onDelete={deleteItem}
+                                            onDelete={setPendingDelete}
                                             onSyncToCloud={syncToCloud}
                                         />
                                     ))}
@@ -285,7 +316,7 @@ export function MediaPicker({
                                             variant="list"
                                             selected={selectedMedia?.id === item.id}
                                             onSelect={setSelectedMedia}
-                                            onDelete={deleteItem}
+                                            onDelete={setPendingDelete}
                                             onSyncToCloud={syncToCloud}
                                         />
                                     ))}
@@ -390,7 +421,7 @@ export function MediaPicker({
         </div>
     )
 
-    if (isInline) return content
+    if (isInline) return <>{content}{deleteDialog}</>
 
     return (
         <div
@@ -398,6 +429,7 @@ export function MediaPicker({
             {...backdropDismiss}
         >
             {content}
+            {deleteDialog}
         </div>
     )
 }
@@ -457,6 +489,9 @@ function MediaTile({ item, variant, selected, onSelect, onDelete, onSyncToCloud 
     }
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        // Only for the card itself: Enter on a button inside it (delete, sync)
+        // belongs to that button, and this used to swallow it.
+        if (e.target !== e.currentTarget) return
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
             handleSelect()
@@ -556,6 +591,7 @@ function MediaTile({ item, variant, selected, onSelect, onDelete, onSyncToCloud 
                     onClick={handleDelete}
                     className="absolute top-2 left-2 p-1.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-opacity"
                     title="Remove from library"
+                    aria-label={`Remove ${item.name} from library`}
                 >
                     <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -605,6 +641,7 @@ function MediaTile({ item, variant, selected, onSelect, onDelete, onSyncToCloud 
                 onClick={handleDelete}
                 className="p-1.5 rounded-full text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-opacity flex-shrink-0"
                 title="Remove from library"
+                aria-label={`Remove ${item.name} from library`}
             >
                 <Trash2 className="w-4 h-4" />
             </button>

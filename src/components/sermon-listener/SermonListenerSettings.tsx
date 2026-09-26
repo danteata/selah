@@ -200,6 +200,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         </div>
                     </div>
                     <button
+                        role="switch"
+                        aria-checked={!!((sermon?.autoLookup ?? true))}
+                        aria-label="Auto-lookup verses"
                         onClick={() => update({ autoLookup: !(sermon?.autoLookup ?? true) })}
                         className={`relative w-12 h-6 rounded-full transition-colors ${(sermon?.autoLookup ?? true) ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
@@ -218,6 +221,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         </div>
                     </div>
                     <button
+                        role="switch"
+                        aria-checked={!!((sermon?.autoDisplay ?? false))}
+                        aria-label="Auto-display on live view"
                         onClick={() => update({ autoDisplay: !(sermon?.autoDisplay ?? false) })}
                         className={`relative w-12 h-6 rounded-full transition-colors ${(sermon?.autoDisplay ?? false) ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
@@ -236,6 +242,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         </div>
                     </div>
                     <button
+                        role="switch"
+                        aria-checked={!!(audioFeedback)}
+                        aria-label="Audio feedback"
                         onClick={toggleAudioFeedback}
                         className={`relative w-12 h-6 rounded-full transition-colors ${audioFeedback ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >
@@ -262,6 +271,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                             </div>
                         </div>
                         <button
+                            role="switch"
+                            aria-checked={!!(recordSessions)}
+                            aria-label="Keep a recording of each service"
                             onClick={() => update({ recordSessions: !recordSessions })}
                             className={`relative w-12 h-6 shrink-0 rounded-full transition-colors ${recordSessions ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                         >
@@ -359,6 +371,9 @@ export function SermonListenerSettings({ onClose }: SermonListenerSettingsProps 
                         </div>
                     </div>
                     <button
+                        role="switch"
+                        aria-checked={!!((sermon?.enableVoiceCommands ?? true))}
+                        aria-label="Voice commands"
                         onClick={() => update({ enableVoiceCommands: !(sermon?.enableVoiceCommands ?? true) })}
                         className={`relative w-12 h-6 rounded-full transition-colors ${(sermon?.enableVoiceCommands ?? true) ? 'bg-[var(--accent-teal)]' : 'bg-gray-300 dark:bg-gray-600'}`}
                     >

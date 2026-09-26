@@ -51,7 +51,7 @@ describe('ShortcutsModal', () => {
 
     it('calls onClose when X button is clicked', () => {
         render(<ShortcutsModal isOpen={true} onClose={onClose} />)
-        const closeBtn = screen.getByRole('button', { name: '' })
+        const closeBtn = screen.getByRole('button', { name: 'Close' })
         fireEvent.click(closeBtn)
         expect(onClose).toHaveBeenCalledTimes(1)
     })

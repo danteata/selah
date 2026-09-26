@@ -35,6 +35,7 @@ export function SongVerseBrowser({ songTitle, artist, verses, liveSlideId, onSel
                         </div>
                     </div>
                     <button
+                        aria-label="Close"
                         onClick={onClose}
                         className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors flex-shrink-0"
                         title="Close"

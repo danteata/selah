@@ -174,6 +174,7 @@ export function ScreenPicker({ onSelect, onClose, showCloseButton = true }: Scre
                     </button>
                     {showCloseButton && onClose && (
                         <button
+                            aria-label="Close"
                             onClick={onClose}
                             className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                         >

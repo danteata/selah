@@ -93,6 +93,7 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
                         </p>
                     </div>
                     <button
+                        aria-label="Close"
                         onClick={onClose}
                         className="ml-auto p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                     >

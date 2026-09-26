@@ -143,7 +143,7 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
                         <PanelBottom className="w-5 h-5 text-teal-500" />
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Edit Lower Third</h2>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                    <button aria-label="Close" onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
                         <X className="w-5 h-5 text-gray-500" />
                     </button>
                 </div>

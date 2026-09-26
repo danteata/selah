@@ -92,14 +92,21 @@ export function ConfirmDialog({
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
             onClick={handleBackdropClick}
         >
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="confirm-dialog-title"
+                aria-describedby="confirm-dialog-message"
+                className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
+            >
                 {/* Header */}
                 <div className={`flex items-center gap-3 p-4 ${config.bgColor}`}>
                     <Icon className={`w-6 h-6 ${config.iconColor}`} />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    <h3 id="confirm-dialog-title" className="text-lg font-semibold text-gray-900 dark:text-white">
                         {title}
                     </h3>
                     <button
+                        aria-label="Close"
                         onClick={onClose || onCancel}
                         className="ml-auto p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-black/5"
                     >
@@ -109,20 +116,25 @@ export function ConfirmDialog({
 
                 {/* Content */}
                 <div className="p-4">
-                    <p className="text-gray-600 dark:text-gray-300">
+                    <p id="confirm-dialog-message" className="text-gray-600 dark:text-gray-300">
                         {message}
                     </p>
                 </div>
 
                 {/* Actions */}
                 <div className="flex justify-end gap-3 p-4 border-t border-gray-200 dark:border-gray-800">
+                    {/* Focus moves into the dialog so Enter answers it — before, it
+                        re-pressed whatever button behind it had opened it. A
+                        destructive confirm starts on Cancel. */}
                     <button
+                        autoFocus={type === 'danger'}
                         onClick={onCancel}
                         className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
                     >
                         {cancelText}
                     </button>
                     <button
+                        autoFocus={type !== 'danger'}
                         onClick={onConfirm}
                         className={`px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${config.confirmButton}`}
                     >

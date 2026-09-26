@@ -56,8 +56,11 @@
 
     --text-primary: #1c1917;
     --text-secondary: #57534e;
-    --text-tertiary: #78716c;
-    --text-muted: #a8a29e;
+    /* Tertiary and muted both clear WCAG AA (4.5:1) on every light surface.
+       Muted was #a8a29e — 2.3–2.5:1 — on hints, empty states and key labels,
+       often at 9–11px, which is unreadable in a dim sanctuary. */
+    --text-tertiary: #68615c;
+    --text-muted: #746d68;
 
     --border-subtle: rgba(0, 0, 0, 0.06);
     --border-default: rgba(0, 0, 0, 0.1);
@@ -89,7 +92,8 @@
     --text-primary: #fafaf9;
     --text-secondary: #d6d3d1;
     --text-tertiary: #a8a29e;
-    --text-muted: #78716c;
+    /* Was #78716c: 3.2–3.7:1 on the dark panels. */
+    --text-muted: #9c958f;
 
     --border-subtle: rgba(255, 255, 255, 0.06);
     --border-default: rgba(255, 255, 255, 0.1);
@@ -1215,5 +1219,28 @@ h6 {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
+    }
+}
+
+/* ------------------------------------------------------------------------
+   Hover-revealed controls (edit, delete, "Present" buttons on list rows)
+   must stay reachable without a mouse. Tailwind's group-hover only applies
+   where the device can hover, so on a touchscreen these never appeared at
+   all, and `hidden group-hover:flex` also took them out of the tab order.
+   Show them whenever anything in their row has focus, and always on touch.
+   Tooltips (pointer-events-none) stay hover-only.
+   ------------------------------------------------------------------------ */
+.group:focus-within .group-hover\:opacity-100:not(.pointer-events-none) {
+    opacity: 1;
+}
+.group:focus-within .group-hover\:flex {
+    display: flex;
+}
+@media (hover: none) {
+    .group .group-hover\:opacity-100:not(.pointer-events-none) {
+        opacity: 1;
+    }
+    .group .group-hover\:flex {
+        display: flex;
     }
 }

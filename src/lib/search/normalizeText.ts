@@ -22,18 +22,33 @@ function foldQuotes(s: string): string {
 }
 
 /**
+ * Drop accents from Latin letters, so "senor" finds "Señor" and "Jesus" finds
+ * "Jésus" — what anyone typing a song title on a laptop keyboard expects.
+ * Only marks on Latin letters: in scripts such as Devanagari the combining
+ * marks are the vowels themselves, and removing them would wreck the word.
+ */
+function foldLatinDiacritics(s: string): string {
+    return s
+        .normalize('NFD')
+        .replace(/(\p{Script=Latin})\p{Mn}+/gu, '$1')
+        .normalize('NFC')
+}
+
+/**
  * Lowercase, Unicode-fold, strip punctuation to spaces, collapse whitespace.
  * Word order and every meaningful word are preserved.
  */
 export function normalizeText(input: string): string {
     if (!input) return ''
     let s = input.normalize('NFKC')
+    s = foldLatinDiacritics(s)
     s = foldQuotes(s)
     s = s.toLowerCase()
-    // Anything that isn't a letter or digit becomes a space. `\p{L}\p{N}`
-    // keeps accented/non-Latin letters (folded above) rather than deleting
-    // them. The `u` flag makes the Unicode property escapes valid.
-    s = s.replace(/[^\p{L}\p{N}]+/gu, ' ')
+    // Anything that isn't a letter, mark or digit becomes a space. Marks
+    // (`\p{M}`) must survive: in many scripts they are the vowels, and treating
+    // them as punctuation split "नमस्ते" into "नमस त". Latin accents are
+    // already folded away above. The `u` flag makes the property escapes valid.
+    s = s.replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
     return s.replace(/\s+/g, ' ').trim()
 }
 

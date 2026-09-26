@@ -53,7 +53,7 @@ describe('ScheduleModal', () => {
     it('calls onClose when X button is clicked', () => {
         const onClose = vi.fn()
         render(<ScheduleModal isOpen={true} onClose={onClose} />)
-        const closeBtn = screen.getByRole('button', { name: '' })
+        const closeBtn = screen.getByRole('button', { name: 'Close' })
         fireEvent.click(closeBtn)
         expect(onClose).toHaveBeenCalledTimes(1)
     })

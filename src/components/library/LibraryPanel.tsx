@@ -39,6 +39,7 @@ export function LibraryPanel({ isOpen, onClose }: LibraryPanelProps) {
                         {libraryCount} slides
                     </span>
                     <button
+                        aria-label="Close"
                         onClick={onClose}
                         className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
                     >

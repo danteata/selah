@@ -173,6 +173,7 @@ export function ContextPanel() {
                     </button>
                 )}
                 <button
+                    aria-label="Close"
                     onClick={handleClose}
                     className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
                 >

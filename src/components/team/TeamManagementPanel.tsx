@@ -559,6 +559,7 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
                         Invite Team Member
                     </h3>
                     <button
+                        aria-label="Close"
                         onClick={onClose}
                         className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
                     >
