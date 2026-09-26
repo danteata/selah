@@ -80,6 +80,10 @@ export default defineConfig({
           if (pkg('@tiptap') || /[\\/]node_modules[\\/]prosemirror-/.test(id)) return 'tiptap'
           if (pkg('lucide-react')) return 'icons'
           if (pkg('three')) return 'three'
+          // The studio's own vendors, split out of the Dashboard chunk so an
+          // app update doesn't make every operator re-download them.
+          if (pkg('framer-motion') || pkg('motion-dom') || pkg('motion-utils')) return 'motion'
+          if (pkg('react-grid-layout') || pkg('react-draggable') || pkg('react-resizable')) return 'grid-layout'
           return undefined
         },
       },

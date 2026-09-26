@@ -1,5 +1,5 @@
 import { useClerk } from '@clerk/clerk-react'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react'
 import { Shield, Database, Book, X, Mic, Ticket } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { getStarredRecordingIds } from '../hooks/useIndexedDB'
@@ -11,22 +11,12 @@ import {
 import { useDictation, useKeyboardShortcuts, isLiveNavigationClaimed, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { resolveLocalUrl } from '../hooks/useLocalBackground'
-import { SettingsModal } from '../components/settings/SettingsModal'
-import { ShortcutsModal } from '../components/modals/ShortcutsModal'
-import { SlideEditor } from '../components/editor/SlideEditor'
-import { LowerThirdEditor } from '../components/editor/LowerThirdEditor'
-import { MediaPicker, type MediaItem } from '../components/media/MediaPicker'
-import { ExternalVideoModal } from '../components/media/ExternalVideoModal'
-import { TemplateBrowser } from '../components/templates/TemplateBrowser'
-import { AddAlertModal } from '../components/alerts/AddAlertModal'
-import { AddCountdownModal, type CountdownData } from '../components/countdown/AddCountdownModal'
-import { LibraryPanel } from '../components/library/LibraryPanel'
-import { ScheduleModal } from '../components/schedules/ScheduleModal'
+import type { MediaItem } from '../components/media/MediaPicker'
+import type { CountdownData } from '../components/countdown/AddCountdownModal'
 import { AppShell } from '../components/layout/AppShell'
 import { StudioWorkspace } from '../components/layout/StudioWorkspace'
 import { DashboardLayout } from '../components/dashboard'
 import { CommandBar } from '../components/layout/CommandBar'
-import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel, PromoCodeManager } from '../components/admin'
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import { EmbeddingSyncIndicator } from '../components/settings/EmbeddingSyncIndicator'
@@ -36,6 +26,25 @@ import type { TemplateItem, SlideType } from '../hooks/useTemplates'
 import { clearSignedOutUser } from '../services/auth/signOutCleanup'
 import { prewarmSemanticSearch } from '../services/sermon-listener/localEmbeddings'
 import { useScheduleOutboxSync } from '../hooks/useScheduleOutboxSync'
+
+// Modals and the admin panel load on first open, keeping them out of the
+// Dashboard chunk every operator downloads before the studio appears.
+const SettingsModal = lazy(() => import('../components/settings/SettingsModal').then((m) => ({ default: m.SettingsModal })))
+const ShortcutsModal = lazy(() => import('../components/modals/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal })))
+const SlideEditor = lazy(() => import('../components/editor/SlideEditor').then((m) => ({ default: m.SlideEditor })))
+const LowerThirdEditor = lazy(() => import('../components/editor/LowerThirdEditor').then((m) => ({ default: m.LowerThirdEditor })))
+const MediaPicker = lazy(() => import('../components/media/MediaPicker').then((m) => ({ default: m.MediaPicker })))
+const ExternalVideoModal = lazy(() => import('../components/media/ExternalVideoModal').then((m) => ({ default: m.ExternalVideoModal })))
+const TemplateBrowser = lazy(() => import('../components/templates/TemplateBrowser').then((m) => ({ default: m.TemplateBrowser })))
+const AddAlertModal = lazy(() => import('../components/alerts/AddAlertModal').then((m) => ({ default: m.AddAlertModal })))
+const AddCountdownModal = lazy(() => import('../components/countdown/AddCountdownModal').then((m) => ({ default: m.AddCountdownModal })))
+const LibraryPanel = lazy(() => import('../components/library/LibraryPanel').then((m) => ({ default: m.LibraryPanel })))
+const ScheduleModal = lazy(() => import('../components/schedules/ScheduleModal').then((m) => ({ default: m.ScheduleModal })))
+const BibleVersionUploader = lazy(() => import('../components/admin').then((m) => ({ default: m.BibleVersionUploader })))
+const VerseEmbeddingUploader = lazy(() => import('../components/admin').then((m) => ({ default: m.VerseEmbeddingUploader })))
+const GlobalSermonListenerSettingsPanel = lazy(() => import('../components/admin').then((m) => ({ default: m.GlobalSermonListenerSettingsPanel })))
+const PromoCodeManager = lazy(() => import('../components/admin').then((m) => ({ default: m.PromoCodeManager })))
+
 
 // Custom event to focus quick actions search
 const FOCUS_QUICK_ACTIONS_EVENT = 'selah:focus-quick-actions'
@@ -488,52 +497,64 @@ export default function Dashboard() {
 
             {/* Modals */}
             {modals.settings && (
-                <SettingsModal
-                    isOpen={modals.settings}
-                    onClose={() => closeModal('settings')}
-                />
+                <Suspense fallback={null}>
+                    <SettingsModal
+                        isOpen={modals.settings}
+                        onClose={() => closeModal('settings')}
+                    />
+                </Suspense>
             )}
 
             {modals.shortcuts && (
-                <ShortcutsModal
-                    isOpen={modals.shortcuts}
-                    onClose={() => closeModal('shortcuts')}
-                />
+                <Suspense fallback={null}>
+                    <ShortcutsModal
+                        isOpen={modals.shortcuts}
+                        onClose={() => closeModal('shortcuts')}
+                    />
+                </Suspense>
             )}
 
             {modals.editor && editingSlide && (
-                <SlideEditor
-                    slide={editingSlide}
-                    isOpen={modals.editor}
-                    onClose={() => closeModal('editor')}
-                    onSave={handleSlideEditorSave}
-                />
+                <Suspense fallback={null}>
+                    <SlideEditor
+                        slide={editingSlide}
+                        isOpen={modals.editor}
+                        onClose={() => closeModal('editor')}
+                        onSave={handleSlideEditorSave}
+                    />
+                </Suspense>
             )}
 
             {modals.mediaPicker && (
-                <MediaPicker
-                    isOpen={modals.mediaPicker}
-                    onClose={() => closeModal('mediaPicker')}
-                    onSelect={handleMediaSelect}
-                />
+                <Suspense fallback={null}>
+                    <MediaPicker
+                        isOpen={modals.mediaPicker}
+                        onClose={() => closeModal('mediaPicker')}
+                        onSelect={handleMediaSelect}
+                    />
+                </Suspense>
             )}
 
             {modals.externalVideo && (
-                <ExternalVideoModal
-                    isOpen={modals.externalVideo}
-                    platform={quickActionsPage === 'vimeo' ? 'vimeo' : 'youtube'}
-                    onClose={() => closeModal('externalVideo')}
-                    onAdd={handleExternalVideoAdd}
-                />
+                <Suspense fallback={null}>
+                    <ExternalVideoModal
+                        isOpen={modals.externalVideo}
+                        platform={quickActionsPage === 'vimeo' ? 'vimeo' : 'youtube'}
+                        onClose={() => closeModal('externalVideo')}
+                        onAdd={handleExternalVideoAdd}
+                    />
+                </Suspense>
             )}
 
             {modals.templateBrowser && (
-                <TemplateBrowser
-                    isOpen={modals.templateBrowser}
-                    onClose={() => closeModal('templateBrowser')}
-                    onSelect={handleTemplateSelect}
-                    onCreateCustom={handleCreateCustomTemplate}
-                />
+                <Suspense fallback={null}>
+                    <TemplateBrowser
+                        isOpen={modals.templateBrowser}
+                        onClose={() => closeModal('templateBrowser')}
+                        onSelect={handleTemplateSelect}
+                        onCreateCustom={handleCreateCustomTemplate}
+                    />
+                </Suspense>
             )}
 
             {/* Save As Template Modal */}
@@ -549,45 +570,55 @@ export default function Dashboard() {
 
             {/* AddAlertModal handles its own alerts via store internally */}
             {modals.alertModal && (
-                <AddAlertModal
-                    isOpen={modals.alertModal}
-                    onClose={() => closeModal('alertModal')}
-                    editingSlide={editingSlide}
-                />
+                <Suspense fallback={null}>
+                    <AddAlertModal
+                        isOpen={modals.alertModal}
+                        onClose={() => closeModal('alertModal')}
+                        editingSlide={editingSlide}
+                    />
+                </Suspense>
             )}
 
             {modals.countdownModal && (
-                <AddCountdownModal
-                    isOpen={modals.countdownModal}
-                    onClose={() => closeModal('countdownModal')}
-                    onAdd={handleCountdownCreate}
-                    editingSlide={editingSlide}
-                />
+                <Suspense fallback={null}>
+                    <AddCountdownModal
+                        isOpen={modals.countdownModal}
+                        onClose={() => closeModal('countdownModal')}
+                        onAdd={handleCountdownCreate}
+                        editingSlide={editingSlide}
+                    />
+                </Suspense>
             )}
 
             {/* LibraryPanel handles its own slide usage via addSlideToService internally */}
             {modals.libraryPanel && (
-                <LibraryPanel
-                    isOpen={modals.libraryPanel}
-                    onClose={() => closeModal('libraryPanel')}
-                />
+                <Suspense fallback={null}>
+                    <LibraryPanel
+                        isOpen={modals.libraryPanel}
+                        onClose={() => closeModal('libraryPanel')}
+                    />
+                </Suspense>
             )}
 
             {/* Schedule Modal for creating new schedules */}
             {modals.scheduleModal && (
-                <ScheduleModal
-                    isOpen={modals.scheduleModal}
-                    onClose={() => closeModal('scheduleModal')}
-                />
+                <Suspense fallback={null}>
+                    <ScheduleModal
+                        isOpen={modals.scheduleModal}
+                        onClose={() => closeModal('scheduleModal')}
+                    />
+                </Suspense>
             )}
 
             {modals.lowerThirdEditor && editingSlide && (
-                <LowerThirdEditor
-                    slide={editingSlide}
-                    isOpen={modals.lowerThirdEditor}
-                    onClose={() => closeModal('lowerThirdEditor')}
-                    onSave={handleSlideEditorSave}
-                />
+                <Suspense fallback={null}>
+                    <LowerThirdEditor
+                        slide={editingSlide}
+                        isOpen={modals.lowerThirdEditor}
+                        onClose={() => closeModal('lowerThirdEditor')}
+                        onSave={handleSlideEditorSave}
+                    />
+                </Suspense>
             )}
 
             <EmbeddingSyncIndicator />
@@ -666,18 +697,26 @@ export default function Dashboard() {
                             {/* Content */}
                             <div className="p-6 overflow-y-auto max-h-[calc(80vh-140px)]">
                                 {adminTab === 'bible' && (
-                                    <BibleVersionUploader onClose={() => setShowAdminPanel(false)} />
+                                    <Suspense fallback={null}>
+                                        <BibleVersionUploader onClose={() => setShowAdminPanel(false)} />
+                                    </Suspense>
                                 )}
                                 {adminTab === 'embeddings' && (
-                                    <VerseEmbeddingUploader onClose={() => setShowAdminPanel(false)} />
+                                    <Suspense fallback={null}>
+                                        <VerseEmbeddingUploader onClose={() => setShowAdminPanel(false)} />
+                                    </Suspense>
                                 )}
                                 {adminTab === 'sermon-settings' && (
-                                    <GlobalSermonListenerSettingsPanel
-                                        onClose={() => setShowAdminPanel(false)}
-                                    />
+                                    <Suspense fallback={null}>
+                                        <GlobalSermonListenerSettingsPanel
+                                            onClose={() => setShowAdminPanel(false)}
+                                        />
+                                    </Suspense>
                                 )}
                                 {adminTab === 'promos' && isSuperadmin && (
-                                    <PromoCodeManager onClose={() => setShowAdminPanel(false)} />
+                                    <Suspense fallback={null}>
+                                        <PromoCodeManager onClose={() => setShowAdminPanel(false)} />
+                                    </Suspense>
                                 )}
                             </div>
                         </div>
