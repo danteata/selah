@@ -316,7 +316,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                                         key={song._id || song.id}
                                         data-result-index={index}
                                         onMouseEnter={() => setFocusedIndex(index)}
-                                        className={`flex items-center justify-between px-4 py-3 group ${
+                                        className={`list-row-lazy flex items-center justify-between px-4 py-3 group ${
                                             focusedIndex === index
                                                 ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
                                                 : 'hover:bg-gray-50 dark:hover:bg-gray-800'

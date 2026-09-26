@@ -1244,3 +1244,15 @@ h6 {
         display: flex;
     }
 }
+
+/*
+ * A row in a long list (songs, hymns). Rows scrolled out of view skip layout
+ * and paint until they come near the viewport, so a library of thousands of
+ * songs scrolls and filters without laying out every row. They stay in the
+ * DOM, so find-in-page, keyboard navigation and scrollIntoView keep working,
+ * which a windowed list would break. 64px is a row's usual height.
+ */
+@utility list-row-lazy {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 64px;
+}

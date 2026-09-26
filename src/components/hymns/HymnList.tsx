@@ -206,7 +206,7 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
                                     key={hymn.number}
                                     data-result-index={index}
                                     onMouseEnter={() => setFocusedIndex(index)}
-                                    className={`flex items-center justify-between gap-2 px-4 py-3 transition-colors group ${
+                                    className={`list-row-lazy flex items-center justify-between gap-2 px-4 py-3 transition-colors group ${
                                         focusedIndex === index
                                             ? 'bg-[var(--accent-teal)]/8 ring-1 ring-inset ring-[var(--accent-teal)]/20'
                                             : 'hover:bg-gray-50 dark:hover:bg-gray-800'
