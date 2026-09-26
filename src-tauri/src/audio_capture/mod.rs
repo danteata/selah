@@ -16,7 +16,8 @@
 #[cfg(all(test, feature = "native-transcription"))]
 mod offline_probe;
 mod microphone;
-#[cfg(debug_assertions)]
+// Every build: it backs the operator-facing sermon recordings, not only the
+// dev auto-recording (which stays debug-only, below).
 mod session_recorder;
 mod types;
 mod vad;
@@ -25,7 +26,6 @@ pub use types::*;
 pub use vad::VadSegmenter;
 #[allow(unused_imports)]
 pub use vad::{SileroVad, VadConfig};
-#[cfg(debug_assertions)]
 pub use session_recorder::SessionRecorder;
 
 #[cfg(target_os = "macos")]
@@ -65,7 +65,6 @@ pub struct AudioCaptureState {
     pub input_channel: Arc<Mutex<Option<u16>>>,
     /// Dev-only: active session-audio recorder, if a dev has started one via
     /// `start_session_recording`. Always `None` in release builds.
-    #[cfg(debug_assertions)]
     pub session_recorder: Arc<Mutex<Option<Arc<SessionRecorder>>>>,
 }
 
@@ -83,7 +82,6 @@ impl AudioCaptureState {
             vad_enabled: Arc::new(AtomicBool::new(false)),
             device_name: Arc::new(Mutex::new(None)),
             input_channel: Arc::new(Mutex::new(None)),
-            #[cfg(debug_assertions)]
             session_recorder: Arc::new(Mutex::new(None)),
         }
     }
@@ -1001,7 +999,6 @@ pub fn start_capture_with_vad(
     let buffer_size = state.buffer_size.clone();
     let vad_segmenter = state.vad_segmenter.clone();
     let vad_enabled = state.vad_enabled.clone();
-    #[cfg(debug_assertions)]
     let session_recorder = state.session_recorder.clone();
 
     // Start the underlying capture with smaller chunks for VAD
