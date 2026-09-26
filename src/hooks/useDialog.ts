@@ -17,6 +17,23 @@ const FOCUSABLE =
 const stack: symbol[] = []
 let scrollLocks = 0
 
+// The last element focused outside any open dialog. An `autoFocus` child takes
+// focus as the dialog mounts, before the effect below runs, so by then
+// document.activeElement is already inside the dialog and can't say who
+// opened it. This remembers.
+let lastFocusOutside: HTMLElement | null = null
+let tracking = false
+function trackFocus() {
+    if (tracking || typeof document === 'undefined') return
+    tracking = true
+    document.addEventListener('focusin', (e) => {
+        const target = e.target as HTMLElement | null
+        if (target && !target.closest?.('[aria-modal="true"]')) lastFocusOutside = target
+    }, true)
+    const active = document.activeElement as HTMLElement | null
+    if (active && active !== document.body) lastFocusOutside = active
+}
+
 interface DialogOptions {
     isOpen: boolean
     onClose: () => void
@@ -25,6 +42,7 @@ interface DialogOptions {
 
 export function useDialog<T extends HTMLElement = HTMLDivElement>({ isOpen, onClose, closeOnEscape = true }: DialogOptions) {
     const panelRef = useRef<T>(null)
+    trackFocus()
     const onCloseRef = useRef(onClose)
     const closeOnEscapeRef = useRef(closeOnEscape)
     useEffect(() => {
@@ -36,13 +54,14 @@ export function useDialog<T extends HTMLElement = HTMLDivElement>({ isOpen, onCl
         if (!isOpen) return
         const id = Symbol('dialog')
         stack.push(id)
-        const opener = document.activeElement as HTMLElement | null
+        const panel = panelRef.current
+        const active = document.activeElement as HTMLElement | null
+        const opener = panel && active && panel.contains(active) ? lastFocusOutside : active
 
         if (scrollLocks++ === 0) document.body.style.overflow = 'hidden'
 
         // Respect an autoFocus inside the panel; otherwise take the first
         // control, or the panel itself.
-        const panel = panelRef.current
         if (panel && !panel.contains(document.activeElement)) {
             const first = panel.querySelector<HTMLElement>(FOCUSABLE)
             ;(first ?? panel).focus()

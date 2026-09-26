@@ -66,4 +66,26 @@ describe('Modal', () => {
         expect(document.activeElement).toBe(opener)
         expect(document.body.style.overflow).toBe('')
     })
+
+    it('returns focus to the opener when a child autofocuses', () => {
+        function Harness() {
+            const [open, setOpen] = useState(false)
+            return (
+                <>
+                    <button onClick={() => setOpen(true)}>open</button>
+                    <Modal isOpen={open} onClose={() => setOpen(false)} ariaLabel="Test">
+                        <button>first</button>
+                        <button autoFocus>chosen</button>
+                    </Modal>
+                </>
+            )
+        }
+        render(<Harness />)
+        const opener = screen.getByText('open')
+        opener.focus()
+        fireEvent.click(opener)
+        expect(document.activeElement).toBe(screen.getByText('chosen'))
+        fireEvent.keyDown(document, { key: 'Escape' })
+        expect(document.activeElement).toBe(opener)
+    })
 })
