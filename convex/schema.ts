@@ -166,6 +166,20 @@ export default defineSchema({
         .index("by_user", ["userId"])
         .index("by_church", ["churchId"]),
 
+    // Paystack webhook deliveries already applied, so a redelivered event is a
+    // no-op. Paystack retries anything it isn't sure landed, and can send the
+    // same event twice; applied again, a charge.success spent a second
+    // discounted intro cycle and could start the full-price rollover early.
+    // Rows older than Paystack's retry window are pruned by crons.ts.
+    paystackEvents: defineTable({
+        // `${event}:${id}` — see paystackEventKey in http.ts.
+        key: v.string(),
+        event: v.string(),
+        receivedAt: v.number(),
+    })
+        .index("by_key", ["key"])
+        .index("by_received_at", ["receivedAt"]),
+
     // Promo codes — there is no native Paystack coupon system, so codes are
     // modeled here. Two kinds:
     //   "comp"     → grants Pro free for `compDays` with no payment at all.

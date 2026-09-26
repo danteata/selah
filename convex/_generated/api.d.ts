@@ -10,6 +10,7 @@
 
 import type * as bibleVersions from "../bibleVersions.js";
 import type * as churches from "../churches.js";
+import type * as crons from "../crons.js";
 import type * as emails from "../emails.js";
 import type * as entitlements from "../entitlements.js";
 import type * as globalAppSettings from "../globalAppSettings.js";
@@ -17,6 +18,7 @@ import type * as http from "../http.js";
 import type * as invitations from "../invitations.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_invites from "../lib/invites.js";
+import type * as lib_paystackEvents from "../lib/paystackEvents.js";
 import type * as licensing from "../licensing.js";
 import type * as liveSessions from "../liveSessions.js";
 import type * as media from "../media.js";
@@ -42,6 +44,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   bibleVersions: typeof bibleVersions;
   churches: typeof churches;
+  crons: typeof crons;
   emails: typeof emails;
   entitlements: typeof entitlements;
   globalAppSettings: typeof globalAppSettings;
@@ -49,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   invitations: typeof invitations;
   "lib/auth": typeof lib_auth;
   "lib/invites": typeof lib_invites;
+  "lib/paystackEvents": typeof lib_paystackEvents;
   licensing: typeof licensing;
   liveSessions: typeof liveSessions;
   media: typeof media;

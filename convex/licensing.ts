@@ -24,6 +24,7 @@
 
 import { internalQuery, internalMutation, mutation, type MutationCtx } from './_generated/server'
 import { v } from 'convex/values'
+import { internal } from './_generated/api'
 import { getEffectiveSubscription, getChurchSubscription } from './entitlements'
 import * as ed from '@noble/ed25519'
 import { sha512 } from '@noble/hashes/sha2.js'
@@ -238,9 +239,32 @@ export const applyPaystackEvent = internalMutation({
         // per charge (invoice.* events for the same charge don't double-count).
         isCharge: v.optional(v.boolean()),
         eventAt: v.string(),
+        // Identifies the delivery; a key seen before makes this a no-op.
+        // Optional only so a caller without one still works (unguarded).
+        eventKey: v.optional(v.string()),
+        eventType: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
         const email = args.email.toLowerCase()
+
+        // Check and record in the same transaction as the update itself, so
+        // two concurrent deliveries of one event can't both get through: the
+        // second conflicts on the key read and retries into the duplicate path.
+        if (args.eventKey) {
+            const seen = await ctx.db
+                .query('paystackEvents')
+                .withIndex('by_key', (q) => q.eq('key', args.eventKey!))
+                .first()
+            if (seen) {
+                console.log(`[licensing] ignoring redelivered Paystack event ${args.eventKey}`)
+                return { id: null, rollover: null, duplicate: true }
+            }
+            await ctx.db.insert('paystackEvents', {
+                key: args.eventKey,
+                event: args.eventType ?? 'unknown',
+                receivedAt: Date.now(),
+            })
+        }
 
         // Prefer matching on the subscription code; fall back to email.
         let existing = null
@@ -253,10 +277,12 @@ export const applyPaystackEvent = internalMutation({
                 .unique()
         }
         if (!existing) {
+            // `.first()`: a duplicated row made `.unique()` throw, and a throw
+            // here fails the webhook — which Paystack then retries forever.
             existing = await ctx.db
                 .query('subscriptions')
                 .withIndex('by_email', (q) => q.eq('email', email))
-                .unique()
+                .first()
         }
 
         // Period only ever moves forward.
@@ -300,7 +326,7 @@ export const applyPaystackEvent = internalMutation({
         const userByEmail = await ctx.db
             .query('users')
             .withIndex('by_email', (q) => q.eq('email', email))
-            .unique()
+            .first()
         const churchId = existing?.churchId ?? userByEmail?.churchId ?? undefined
 
         const now = args.eventAt
@@ -325,7 +351,7 @@ export const applyPaystackEvent = internalMutation({
 
         if (existing) {
             await ctx.db.patch(existing._id, patch)
-            return { id: existing._id, rollover }
+            return { id: existing._id, rollover, duplicate: false }
         }
 
         const id = await ctx.db.insert('subscriptions', {
@@ -334,7 +360,7 @@ export const applyPaystackEvent = internalMutation({
             userId: userByEmail?._id,
             createdAt: now,
         })
-        return { id, rollover }
+        return { id, rollover, duplicate: false }
     },
 })
 
@@ -590,5 +616,29 @@ export const ensureTrial = mutation({
         const identity = await ctx.auth.getUserIdentity()
         if (!identity?.email) return
         await maybeStartTrial(ctx, { email: identity.email })
+    },
+})
+
+// Paystack retries a delivery for up to 72 hours; keep a comfortable margin
+// beyond that, then forget the key.
+const PAYSTACK_EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
+/** Delete processed-event keys past retention, a batch at a time. */
+export const prunePaystackEvents = internalMutation({
+    args: {},
+    handler: async (ctx) => {
+        const BATCH = 500
+        const cutoff = Date.now() - PAYSTACK_EVENT_RETENTION_MS
+        const old = await ctx.db
+            .query('paystackEvents')
+            .withIndex('by_received_at', (q) => q.lt('receivedAt', cutoff))
+            .take(BATCH)
+        for (const row of old) {
+            await ctx.db.delete(row._id)
+        }
+        if (old.length === BATCH) {
+            await ctx.scheduler.runAfter(0, internal.licensing.prunePaystackEvents, {})
+        }
+        return { deleted: old.length }
     },
 })

@@ -23,6 +23,7 @@ import { internal } from './_generated/api'
 import { hmac } from '@noble/hashes/hmac.js'
 import { sha512 } from '@noble/hashes/sha2.js'
 import { buildLicense, signPayload } from './licensing'
+import { paystackEventKey } from './lib/paystackEvents'
 
 const GITHUB_OWNER = 'danteata'
 const GITHUB_REPO = 'selah'
@@ -261,7 +262,12 @@ const paystackWebhook = httpAction(async (ctx, request) => {
         const result = await ctx.runMutation(internal.licensing.applyPaystackEvent, {
             ...normalized,
             eventAt: new Date().toISOString(),
+            eventKey: paystackEventKey(event, raw),
+            eventType: event.event,
         })
+        // A redelivery: already applied, and its rollover (if any) already
+        // started. Acknowledge it so Paystack stops retrying.
+        if (result?.duplicate) return new Response('ok', { status: 200 })
 
         // Intro discount used up → start the normal-priced subscription off the
         // saved card so billing continues seamlessly at full price.
