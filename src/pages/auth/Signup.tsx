@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useSignUp, useUser } from '@clerk/clerk-react'
+import { useSignUp } from '@clerk/clerk-react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Eye, EyeOff, Mail, Lock, User, Church, ArrowRight, Cloud, Check, Users } from 'lucide-react'
 import { useMutation, useQuery } from 'convex/react'
@@ -87,7 +87,7 @@ export default function SignupPage() {
             trackEvent(AnalyticsEventType.EMAIL_VERIFICATION_SENT)
             trackEvent(AnalyticsEventType.SIGNUP_STEP_COMPLETED, { step: 'account' })
             setStep('verify')
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Sign up error:', err)
             const errorMessage = friendlyAuthError(err, 'Failed to create account.')
             setError(errorMessage)
@@ -134,7 +134,7 @@ export default function SignupPage() {
                     setStep('church')
                 }
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Verification error:', err)
             const errorMessage = friendlyAuthError(err, 'Invalid verification code.')
             setError(errorMessage)
@@ -168,10 +168,11 @@ export default function SignupPage() {
                 // Redirect to the original destination (invite link) or home
                 navigate(from || '/')
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Church setup error:', err)
-            setError(err.message || 'Failed to set up church.')
-            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'church_setup', error_category: sanitizeAuthError(err.message || '') })
+            const message = err instanceof Error ? err.message : ''
+            setError(message || 'Failed to set up church.')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'church_setup', error_category: sanitizeAuthError(message) })
         } finally {
             setIsLoading(false)
         }
@@ -225,7 +226,7 @@ export default function SignupPage() {
                     redirectUrlComplete: callbackComplete,
                 })
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('[auth] Google sign up error:', err)
             setError('Failed to sign up with Google.')
             trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'google', page: 'signup', error_category: 'oauth_redirect_failed' })

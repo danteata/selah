@@ -1049,7 +1049,7 @@ export default function Downloads() {
     const { status, release, error } = useLatestRelease()
     const userPlatform = useMemo(() => detectPlatform(), [])
     const [retryNonce, setRetryNonce] = useState(0)
-    const { trackPage, trackEvent } = useAnalytics()
+    const { trackPage } = useAnalytics()
 
     // Track page view on mount
     useEffect(() => {

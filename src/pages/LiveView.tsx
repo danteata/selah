@@ -18,7 +18,6 @@ import { KineticText } from '../components/live/KineticText'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
 import { audioFeatures } from '../services/visualizer/audioFeatures'
 import { useAnalytics } from '../hooks'
-import { AnalyticsEventType } from '../services/analytics/types'
 import { getVerseRefStyle, VERSE_REF_BOUNDS } from '../utils/verseRefStyle'
 import { isCaptionedSlideType, slideCaptionHtml } from '../utils/slideCaption'
 import { formatCountdownTime, useCountdownSeconds } from '../utils/countdown'
@@ -61,7 +60,7 @@ export default function LiveView() {
     const [liveState, setLiveState] = useState<LiveState | null>(null)
     const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
     const [isDesktop, setIsDesktop] = useState(false)
-    const { trackPage, trackEvent } = useAnalytics()
+    const { trackPage } = useAnalytics()
 
     const [flashColor, setFlashColor] = useState<string | null>(null)
     // 'alternate' when this window is the alternate output. Both outputs run this

@@ -1,4 +1,4 @@
-import { useUser, useClerk } from '@clerk/clerk-react'
+import { useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Shield, Database, Book, X, Mic, Ticket } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
@@ -32,7 +32,7 @@ import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
 import { EmbeddingSyncIndicator } from '../components/settings/EmbeddingSyncIndicator'
 import { SubscriptionBanner } from '../components/licensing/SubscriptionBanner'
 import type { Slide, ExtendedFileT } from '../types'
-import type { TemplateItem } from '../hooks/useTemplates'
+import type { TemplateItem, SlideType } from '../hooks/useTemplates'
 import { clearSignedOutUser } from '../services/auth/signOutCleanup'
 import { prewarmSemanticSearch } from '../services/sermon-listener/localEmbeddings'
 import { useScheduleOutboxSync } from '../hooks/useScheduleOutboxSync'
@@ -40,6 +40,7 @@ import { useScheduleOutboxSync } from '../hooks/useScheduleOutboxSync'
 // Custom event to focus quick actions search
 const FOCUS_QUICK_ACTIONS_EVENT = 'selah:focus-quick-actions'
 
+// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; event helper colocated with the dashboard that listens for it
 export function focusQuickActionsSearch() {
     window.dispatchEvent(new CustomEvent(FOCUS_QUICK_ACTIONS_EVENT))
 }
@@ -69,7 +70,7 @@ export default function Dashboard() {
     const { createMediaSlide } = useSlideCreation()
 
     // Get user role for admin access
-    const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
+    const { isSuperadmin, currentUser } = useUserRole()
 
     // Shared live session for collaboration
     const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession, toggleBlank: toggleSharedBlank } = useLiveSession(undefined, { sync: true })
@@ -409,7 +410,7 @@ export default function Dashboard() {
             description: data.description,
             slideId: slideToSaveAsTemplate,
             thumbnail: data.thumbnail || slideToSaveAsTemplate.background,
-            appliesTo: data.appliesTo as any,
+            appliesTo: data.appliesTo as SlideType[] | undefined,
         })
 
         setShowSaveAsTemplate(false)

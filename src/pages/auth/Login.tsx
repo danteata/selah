@@ -68,7 +68,7 @@ export default function LoginPage() {
             } else {
                 console.log('Sign in needs additional steps:', result)
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Sign in error:', err)
             const errorMessage = friendlyAuthError(err, 'Failed to sign in. Please check your credentials.')
             setError(errorMessage)
@@ -120,7 +120,7 @@ export default function LoginPage() {
                 redirectUrl: callbackUrl,
                 redirectUrlComplete: callbackComplete,
             })
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('[auth] Google sign in error:', err)
             setError('Failed to sign in with Google.')
             trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'google', error_category: 'oauth_redirect_failed' })

@@ -34,13 +34,14 @@ export default function JoinChurch() {
         setError('')
 
         try {
-            const result = await acceptInvitation({ code })
+            await acceptInvitation({ code })
             trackEvent(AnalyticsEventType.INVITATION_ACCEPTED)
             // Redirect to dashboard on success
             navigate('/')
-        } catch (err: any) {
-            setError(err.message || 'Failed to accept invitation')
-            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'invitation', error_category: sanitizeAuthError(err.message || '') })
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : ''
+            setError(message || 'Failed to accept invitation')
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'invitation', error_category: sanitizeAuthError(message) })
         } finally {
             setIsLoading(false)
         }
