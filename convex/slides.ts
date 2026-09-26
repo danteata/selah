@@ -260,30 +260,32 @@ export const syncScheduleSlides = mutation({
     },
 });
 
+const scheduleSlideValidator = v.object({
+    id: v.string(),
+    index: v.number(),
+    name: v.string(),
+    type: v.string(),
+    layout: v.string(),
+    contents: v.array(v.string()),
+    backgroundType: v.optional(v.string()),
+    background: v.optional(v.string()),
+    backgroundVideoKey: v.optional(v.union(v.string(), v.null())),
+    backgroundStorageId: v.optional(v.union(v.string(), v.null())),
+    title: v.optional(v.string()),
+    songId: v.optional(v.string()),
+    hasChorus: v.optional(v.boolean()),
+    data: v.optional(v.any()),
+    slideStyle: v.optional(v.any()),
+    saved: v.optional(v.boolean()),
+    verseIndex: v.optional(v.number()),
+    totalVerses: v.optional(v.number()),
+    verseLabel: v.optional(v.string()),
+})
+
 export const upsertScheduleSlide = mutation({
     args: {
         scheduleId: v.string(),
-        slide: v.object({
-            id: v.string(),
-            index: v.number(),
-            name: v.string(),
-            type: v.string(),
-            layout: v.string(),
-            contents: v.array(v.string()),
-            backgroundType: v.optional(v.string()),
-            background: v.optional(v.string()),
-            backgroundVideoKey: v.optional(v.union(v.string(), v.null())),
-            backgroundStorageId: v.optional(v.union(v.string(), v.null())),
-            title: v.optional(v.string()),
-            songId: v.optional(v.string()),
-            hasChorus: v.optional(v.boolean()),
-            data: v.optional(v.any()),
-            slideStyle: v.optional(v.any()),
-            saved: v.optional(v.boolean()),
-            verseIndex: v.optional(v.number()),
-            totalVerses: v.optional(v.number()),
-            verseLabel: v.optional(v.string()),
-        }),
+        slide: scheduleSlideValidator,
     },
     handler: async (ctx, args) => {
         const user = await requireUser(ctx);
@@ -402,5 +404,64 @@ export const unlockSlide = mutation({
         });
 
         return args.slideId;
+    },
+});
+
+/**
+ * Apply one batch of an operator's slide edits to a schedule.
+ *
+ * The replacement for `syncScheduleSlides`, which the client called with its
+ * whole deck and which deleted every server slide missing from it — so a
+ * collaborator's slide that hadn't reached the operator's device yet was
+ * deleted by omission, for everyone. Here the caller names exactly what
+ * changed: slides to write, and slide ids it had and removed.
+ * (`syncScheduleSlides` stays for desktop builds already installed.)
+ */
+export const applyScheduleSlideChanges = mutation({
+    args: {
+        scheduleId: v.string(),
+        upserts: v.array(scheduleSlideValidator),
+        deletes: v.array(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const user = await requireUser(ctx);
+        if (!user.churchId) throw new Error("Join a church first");
+        await assertScheduleWritable(ctx, user, args.scheduleId);
+
+        const existing = await ctx.db
+            .query("slides")
+            .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+            .collect();
+        const ours = existing.filter((slide) => slide.churchId === user.churchId);
+        const byStableId = new Map(ours.map((slide) => [slide.id, slide]));
+        const now = new Date().toISOString();
+
+        for (const id of new Set(args.deletes)) {
+            const slide = byStableId.get(id);
+            if (slide) {
+                await ctx.db.delete(slide._id);
+                byStableId.delete(id);
+            }
+        }
+
+        // Last write per slide id wins, so a batch never inserts one twice.
+        const upserts = new Map(args.upserts.map((slide) => [slide.id, slide]));
+        for (const slide of upserts.values()) {
+            const payload = {
+                ...slide,
+                userId: user._id,
+                churchId: user.churchId,
+                scheduleId: args.scheduleId,
+                updatedAt: now,
+            };
+            const current = byStableId.get(slide.id);
+            if (current) {
+                await ctx.db.patch(current._id, payload);
+            } else {
+                await ctx.db.insert("slides", { ...payload, createdAt: now });
+            }
+        }
+
+        return { upserted: upserts.size, deleted: args.deletes.length };
     },
 });

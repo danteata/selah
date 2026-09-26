@@ -319,7 +319,11 @@ interface AppStore extends AppState {
     removeActiveSlide: (slide: Slide) => void
     reorderActiveSlides: (fromIndex: number, toIndex: number) => void
     replaceScheduleActiveSlides: (slides: Slide[]) => void
-    replaceSlidesForSchedule: (scheduleId: string, slides: Slide[], preserveLiveOutputOrder?: boolean) => void
+    /**
+     * Merge the server's slides for a schedule. `removedIds` are slides the
+     * server had and no longer does (deleted elsewhere): dropped here too.
+     */
+    replaceSlidesForSchedule: (scheduleId: string, slides: Slide[], preserveLiveOutputOrder?: boolean, removedIds?: string[]) => void
     setActiveSlides: (slides: Slide[]) => void
     setLiveOutputSlidesId: (slides: string[]) => void
     setSharedQueueSlideIds: (slideIds: string[]) => void
@@ -594,9 +598,14 @@ export const useAppStore = create<AppStore>()(
                 })
             },
 
-            replaceSlidesForSchedule: (scheduleId, slides, preserveLiveOutputOrder = true) => {
+            replaceSlidesForSchedule: (scheduleId, slides, preserveLiveOutputOrder = true, removedIds = []) => {
                 set((state) => {
                     if (!scheduleId) return state
+                    // Slides someone else deleted on the server. The merge below
+                    // keeps local slides the server doesn't list (they may be
+                    // optimistic adds still on their way), so without this a
+                    // deletion never reached the other devices at all.
+                    const removed = new Set(removedIds)
 
                     // Merge: keep any existing local slides for this schedule
                     // (they may include optimistic adds that haven't yet
@@ -606,7 +615,7 @@ export const useAppStore = create<AppStore>()(
                     // queue doesn't appear to "reset" after a contributor
                     // adds a slide.
                     const existingForSchedule = state.activeSlides.filter(
-                        (slide) => slide.scheduleId === scheduleId
+                        (slide) => slide.scheduleId === scheduleId && !removed.has(slide.id)
                     )
                     const serverById = new Map(slides.map((s) => [s.id, s]))
                     const mergedSlides = [
@@ -646,12 +655,14 @@ export const useAppStore = create<AppStore>()(
                     const localIds = new Set(existingForSchedule.map((slide) => slide.id))
                     const remoteAdded = slides.some((slide) => !localIds.has(slide.id))
 
+                    const deck = preserveLiveOutputOrder
+                        ? state.liveOutputSlidesId
+                        : Array.from(new Set(uniqueSlides.map((slide) => slide.id)))
+
                     return {
-                        ...(remoteAdded ? { pastStates: [] } : {}),
+                        ...(remoteAdded || removed.size > 0 ? { pastStates: [] } : {}),
                         activeSlides: uniqueSlides,
-                        liveOutputSlidesId: preserveLiveOutputOrder
-                            ? state.liveOutputSlidesId
-                            : Array.from(new Set(uniqueSlides.map((slide) => slide.id))),
+                        liveOutputSlidesId: removed.size > 0 && deck ? deck.filter((id) => !removed.has(id)) : deck,
                         futureStates: [],
                     }
                 })

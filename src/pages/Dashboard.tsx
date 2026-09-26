@@ -72,7 +72,7 @@ export default function Dashboard() {
     const { isSuperadmin, canAccessAdmin, currentUser } = useUserRole()
 
     // Shared live session for collaboration
-    const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession, toggleBlank: toggleSharedBlank } = useLiveSession()
+    const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession, toggleBlank: toggleSharedBlank } = useLiveSession(undefined, { sync: true })
 
     // Collaboration toast notifications
     useCollaborationToasts(currentUser?.churchId || undefined, sessionId || undefined)

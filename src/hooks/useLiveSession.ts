@@ -8,6 +8,7 @@ import { useUserRole } from './useUserRole'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { canClientPushLiveSlide, selectDiscoveredSession } from './liveSessionUtils'
+import { diffScheduleSlides, removedOnServer, slideKey, type SlideKey } from './liveSlideSync'
 import type { Slide } from '../types'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
@@ -141,6 +142,16 @@ function syncQueueFromServer(params: {
     return false
 }
 
+/**
+ * Suggestions this device sent that the server hasn't confirmed yet. Shared by
+ * every mounted copy of the hook: one copy adds a suggestion, the sync owner
+ * reconciles it against the server, and each copy used to hold its own list,
+ * so the owner's empty one erased the optimistic entry.
+ */
+const pendingQueue = { ids: [] as string[] }
+
+const EMPTY_SLIDES: Slide[] = []
+
 interface UseLiveSessionReturn {
     sessionId: Id<"liveSessions"> | null
     sessionScheduleId: string | null
@@ -171,7 +182,19 @@ interface UseLiveSessionReturn {
     updateCollaborationMode: (mode: CollaborationMode) => Promise<void>
 }
 
-export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
+export interface UseLiveSessionOptions {
+    /**
+     * Run the session's background sync from this copy: mirror server state
+     * into the store and push the operator's edits to the server. Exactly one
+     * mounted copy should (Dashboard). The hook is used by ~10 components,
+     * and when every copy did this, one slide edit sent ~10 whole-deck syncs
+     * and every copy re-rendered on every slide change.
+     */
+    sync?: boolean
+}
+
+export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptions = {}): UseLiveSessionReturn {
+    const sync = options.sync === true
     const { isConvexConnected, isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
     const { trackEvent } = useAnalytics()
@@ -191,8 +214,10 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const setActiveOverlay = useAppStore((s) => s.setActiveOverlay)
     const replaceSlidesForSchedule = useAppStore((s) => s.replaceSlidesForSchedule)
 
-    const liveOutputSlidesId = useAppStore((s) => s.liveOutputSlidesId)
-    const activeSlides = useAppStore((s) => s.activeSlides)
+    // Only the sync owner needs these; elsewhere they'd just re-render the
+    // component on every slide change.
+    const liveOutputSlidesId = useAppStore((s) => (sync ? s.liveOutputSlidesId : null))
+    const activeSlides = useAppStore((s) => (sync ? s.activeSlides : EMPTY_SLIDES))
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
@@ -233,21 +258,31 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     const setOverlayMutation = useMutation(api.liveSessions.setOverlay)
     const transferOperatorMutation = useMutation(api.liveSessions.transferOperator)
     const updateCollaborationModeMutation = useMutation(api.liveSessions.updateCollaborationMode)
-    const syncScheduleSlidesMutation = useMutation(api.slides.syncScheduleSlides)
+    const applyScheduleSlideChangesMutation = useMutation(api.slides.applyScheduleSlideChanges)
     const upsertScheduleSlideMutation = useMutation(api.slides.upsertScheduleSlide)
 
     const previousServerBlankRef = useRef<boolean | null>(null)
     const previousLiveSlideRef = useRef<string | null>(null)
     const lastSyncedSlidesRef = useRef<string | null>(null)
-    const lastSyncedScheduleSlidesRef = useRef<string | null>(null)
-    const pendingQueueSlideIdsRef = useRef<string[]>([])
+    // Content last synced or received per slide id: what the operator's
+    // edits are diffed against (see liveSlideSync).
+    const slideBaselineRef = useRef<Map<string, SlideKey>>(new Map())
+    const knownServerSlideIdsRef = useRef<Set<string>>(new Set())
+    const baselineScheduleRef = useRef<string | null>(null)
+    // Both maps describe one schedule; switching schedules starts them over.
+    const resetBaselineFor = (scheduleIdForBaseline: string) => {
+        if (baselineScheduleRef.current === scheduleIdForBaseline) return
+        baselineScheduleRef.current = scheduleIdForBaseline
+        slideBaselineRef.current = new Map()
+        knownServerSlideIdsRef.current = new Set()
+    }
 
     const resolvedSessionId = (sessionId || (resolvedActiveSession?._id as Id<"liveSessions"> | undefined) || null) as Id<"liveSessions"> | null
     const sessionScheduleId = (liveSession?.scheduleId || resolvedActiveSession?.scheduleId || effectiveScheduleId || null) as string | null
 
     const scheduleSlides = useQuery(
         api.slides.getSlides,
-        sessionScheduleId && isConvexConnected && !isOffline
+        sync && sessionScheduleId && isConvexConnected && !isOffline
             ? { scheduleId: sessionScheduleId }
             : 'skip'
     )
@@ -265,12 +300,15 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
                 setCollaborationMode(resolvedActiveSession.collaborationMode as CollaborationMode)
             }
 
+            // Store writes below are the sync owner's alone.
+            if (!sync) return
+
             // Also sync queue and operatorSlideIds from activeSession
             // so they're available immediately even before getSession resolves
             syncQueueFromServer({
                 queue: (resolvedActiveSession as any).queue,
                 queuedSlideIds: (resolvedActiveSession as any).queuedSlideIds,
-                pendingRef: pendingQueueSlideIdsRef.current,
+                pendingRef: pendingQueue.ids,
             })
 
             const operatorSlides = (resolvedActiveSession as any).operatorSlideIds as string[] | undefined
@@ -289,7 +327,8 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
     }, [resolvedActiveSession, currentUser?._id])
 
     useEffect(() => {
-        if (!scheduleSlides || !sessionScheduleId) return
+        if (!sync || !scheduleSlides || !sessionScheduleId) return
+        resetBaselineFor(sessionScheduleId)
 
         const mappedSlides: Slide[] = scheduleSlides.map((slide: any, index: number) => ({
             ...slide,
@@ -298,13 +337,38 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             index: typeof slide.index === 'number' ? slide.index : index,
         }))
 
-        if (mappedSlides.length === 0) {
-            return
-        }
+        const serverIds = new Set(mappedSlides.map((slide) => slide.id))
+        const removed = removedOnServer(knownServerSlideIdsRef.current, serverIds)
+        knownServerSlideIdsRef.current = serverIds
 
-        replaceSlidesForSchedule(sessionScheduleId, mappedSlides, true)
+        // Slides the operator removed here that the server still lists: the
+        // delete is on its way, so don't merge them straight back in.
+        const localIds = new Set(
+            useAppStore.getState().activeSlides
+                .filter((slide) => slide.scheduleId === sessionScheduleId)
+                .map((slide) => slide.id)
+        )
+        const pendingDeletes = new Set(
+            [...slideBaselineRef.current.keys()].filter((id) => !localIds.has(id))
+        )
+        const incoming = mappedSlides.filter((slide) => !pendingDeletes.has(slide.id))
 
-        const idsFromSessionSlides = mappedSlides.map((s) => s.id)
+        // An empty list used to return early here, so deleting every slide
+        // never reached the other devices.
+        if (incoming.length === 0 && removed.length === 0) return
+
+        replaceSlidesForSchedule(sessionScheduleId, incoming, true, removed)
+
+        // What just arrived is in sync by definition: record it as the
+        // baseline so the operator's diff doesn't echo it straight back.
+        const merged = useAppStore.getState().activeSlides
+        const baseline = slideBaselineRef.current
+        for (const id of removed) baseline.delete(id)
+        merged.forEach((slide, index) => {
+            if (serverIds.has(slide.id)) baseline.set(slide.id, slideKey(toSyncableSlide(slide, index)))
+        })
+
+        const idsFromSessionSlides = incoming.map((s) => s.id)
         const currentIds = useAppStore.getState().liveOutputSlidesId || []
         const hasOperatorOrdering =
             Array.isArray((liveSession as any)?.operatorSlideIds) &&
@@ -315,15 +379,27 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         if (currentIds.length === 0 && !hasOperatorOrdering && JSON.stringify(currentIds) !== JSON.stringify(idsFromSessionSlides)) {
             setLiveOutputSlidesId(idsFromSessionSlides)
         }
-    }, [scheduleSlides, sessionScheduleId, liveSession, replaceSlidesForSchedule, setLiveOutputSlidesId])
+    }, [sync, scheduleSlides, sessionScheduleId, liveSession, replaceSlidesForSchedule, setLiveOutputSlidesId])
 
     useEffect(() => {
         if (liveSession?.status === 'ended') {
-            useAppStore.getState().setSharedQueueSlideIds([])
+            if (sync) useAppStore.getState().setSharedQueueSlideIds([])
             return
         }
 
         if (!liveSession || liveSession.status !== 'active') return
+
+        // This copy's own view of the session, kept by every copy.
+        const isOp = liveSession.operatorId === currentUser?._id
+        if (isOp !== (sessionRole === 'operator')) {
+            setSessionRole(isOp ? 'operator' : 'contributor')
+        }
+        if (liveSession.collaborationMode) {
+            setCollaborationMode(liveSession.collaborationMode as CollaborationMode)
+        }
+
+        // Mirroring the session into the shared store is the sync owner's job.
+        if (!sync) return
 
         // Only apply server slide state if it has been explicitly set (not undefined)
         if (liveSession.liveSlideId !== undefined) {
@@ -338,7 +414,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         syncQueueFromServer({
             queue: (liveSession as any).queue,
             queuedSlideIds: (liveSession as any).queuedSlideIds,
-            pendingRef: pendingQueueSlideIdsRef.current,
+            pendingRef: pendingQueue.ids,
         })
 
         // Sync operator's slide order — only for non-operators to prevent
@@ -383,14 +459,6 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
             setActiveOverlay(liveSession.activeOverlay || 'none')
         }
 
-        const isOp = liveSession.operatorId === currentUser?._id
-        if (isOp !== (sessionRole === 'operator')) {
-            setSessionRole(isOp ? 'operator' : 'contributor')
-        }
-
-        if (liveSession.collaborationMode) {
-            setCollaborationMode(liveSession.collaborationMode as CollaborationMode)
-        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [liveSession, currentUser?._id])
 
@@ -590,13 +658,13 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         // Moderated/strict mode: slide enters the shared suggestion queue
         // and the operator reviews it before adding to the deck.
         const addLocally = useAppStore.getState().addSharedQueueSlideIds
-        pendingQueueSlideIdsRef.current = [...pendingQueueSlideIdsRef.current, ...slideIds]
+        pendingQueue.ids = [...pendingQueue.ids, ...slideIds]
         addLocally(slideIds)
 
         try {
             await addToQueueMutation({ sessionId: resolvedSessionId, slideIds, position })
         } catch (err) {
-            pendingQueueSlideIdsRef.current = removeByOccurrence(pendingQueueSlideIdsRef.current, slideIds)
+            pendingQueue.ids = removeByOccurrence(pendingQueue.ids, slideIds)
             useAppStore.getState().removeSharedQueueSlideIds(slideIds)
             console.error('[useLiveSession] Failed to add to queue:', err)
         }
@@ -728,7 +796,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
 
     // Auto-sync operator's slide order to Convex when it changes locally
     useEffect(() => {
-        if (!resolvedSessionId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
+        if (!sync || !resolvedSessionId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
         if (!liveOutputSlidesId || liveOutputSlidesId.length === 0) return
 
         const slidesKey = JSON.stringify(liveOutputSlidesId)
@@ -747,24 +815,25 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }, 500)
 
         return () => clearTimeout(timeoutId)
-    }, [liveOutputSlidesId, resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
+    }, [sync, liveOutputSlidesId, resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
 
+    // Push the operator's slide edits: only what changed since the last sync
+    // or server update, and deletes only for slides this device had and lost.
     useEffect(() => {
-        if (!sessionScheduleId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
+        if (!sync || !sessionScheduleId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
+        resetBaselineFor(sessionScheduleId)
 
         const scheduleActiveSlides = activeSlides
             .filter((slide) => slide.scheduleId === sessionScheduleId || !slide.scheduleId || slide.scheduleId === '')
             .map((slide, index) => toSyncableSlide(slide, index))
 
-        if (scheduleActiveSlides.length === 0) return
-
-        const slidesKey = JSON.stringify(scheduleActiveSlides)
-        if (slidesKey === lastSyncedScheduleSlidesRef.current) return
+        const { upserts, deletes, next } = diffScheduleSlides(slideBaselineRef.current, scheduleActiveSlides)
+        if (upserts.length === 0 && deletes.length === 0) return
 
         const timeoutId = setTimeout(() => {
-            syncScheduleSlidesMutation({ scheduleId: sessionScheduleId, slides: scheduleActiveSlides })
+            applyScheduleSlideChangesMutation({ scheduleId: sessionScheduleId, upserts, deletes })
                 .then(() => {
-                    lastSyncedScheduleSlidesRef.current = slidesKey
+                    slideBaselineRef.current = next
                 })
                 .catch((err: unknown) => {
                     console.error('[useLiveSession] Failed to sync schedule slides:', err)
@@ -772,7 +841,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         }, 750)
 
         return () => clearTimeout(timeoutId)
-    }, [activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, syncScheduleSlidesMutation])
+    }, [sync, activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, applyScheduleSlideChangesMutation])
 
     // Reconnection recovery: reconcile session state when Convex reconnects
     const prevConnectedRef = useRef(isConvexConnected)
@@ -780,10 +849,10 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
         const wasDisconnected = !prevConnectedRef.current
         prevConnectedRef.current = isConvexConnected
 
-        if (isConvexConnected && !isOffline && resolvedSessionId && wasDisconnected) {
-            if (pendingQueueSlideIdsRef.current.length > 0) {
-                const pendingIds = [...pendingQueueSlideIdsRef.current]
-                pendingQueueSlideIdsRef.current = []
+        if (sync && isConvexConnected && !isOffline && resolvedSessionId && wasDisconnected) {
+            if (pendingQueue.ids.length > 0) {
+                const pendingIds = [...pendingQueue.ids]
+                pendingQueue.ids = []
                 if (sessionRole !== 'operator') {
                     addToQueueMutation({ sessionId: resolvedSessionId, slideIds: pendingIds })
                         .catch(err => {
@@ -792,7 +861,7 @@ export function useLiveSession(scheduleId?: string): UseLiveSessionReturn {
                 }
             }
         }
-    }, [isConvexConnected, isOffline, resolvedSessionId, sessionRole])
+    }, [sync, isConvexConnected, isOffline, resolvedSessionId, sessionRole, addToQueueMutation])
 
     return {
         sessionId: resolvedSessionId,
