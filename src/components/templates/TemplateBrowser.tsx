@@ -14,7 +14,7 @@ import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
-import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { Modal } from '../modals/Modal'
 
 const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     bible: 'Bible',
@@ -241,7 +241,6 @@ interface TemplateBrowserProps {
 
 export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCustom, isInline = false, slideType }: TemplateBrowserProps) {
     const { confirm: askConfirm, ConfirmDialog } = useConfirmDialog()
-    const backdropDismiss = useBackdropDismiss(onClose)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
     // Second, independent filter axis. Category answers "how is this filed?";
@@ -295,21 +294,6 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
             setSelectedCategory(null)
         }
     }, [isOpen, isInline])
-
-    useEffect(() => {
-        if (isInline) return
-        const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose?.()
-        }
-        if (isOpen) {
-            document.addEventListener('keydown', handleEscape)
-            document.body.style.overflow = 'hidden'
-        }
-        return () => {
-            document.removeEventListener('keydown', handleEscape)
-            document.body.style.overflow = ''
-        }
-    }, [isOpen, onClose, isInline])
 
     const categories = [
         { id: null as string | null, label: 'All', icon: Grid, color: null as string | null, abbr: null as string | null },
@@ -393,16 +377,16 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     if (!isOpen && !isInline) return null
 
     const content = (
-        <div className={`${isInline ? 'h-full' : 'w-full max-w-5xl h-[85vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl'} flex flex-col overflow-hidden`}>
+        <div className="h-full flex flex-col overflow-hidden">
             {!isInline && (
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-gradient-to-r from-[var(--accent-teal)]/5 to-amber-500/5">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)] bg-gradient-to-r from-[var(--accent-teal)]/5 to-amber-500/5">
                     <div className="flex items-center gap-3">
                         <Sparkles className="w-6 h-6 text-[var(--accent-teal)]" />
                         <div>
-                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                            <h2 id="template-browser-title" className="text-lg font-semibold text-[var(--text-primary)]">
                                 Slide Templates
                             </h2>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                            <p className="text-sm text-[var(--text-muted)]">
                                 Choose from pre-designed templates or create your own
                             </p>
                         </div>
@@ -410,7 +394,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                     <button
                         aria-label="Close"
                         onClick={onClose}
-                        className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                        className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -419,9 +403,9 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Sidebar */}
-                <div className={`${isInline ? 'w-14 p-1' : 'w-56 p-4'} border-r border-gray-200 dark:border-gray-800 space-y-1 overflow-y-auto custom-scrollbar`}>
+                <div className={`${isInline ? 'w-14 p-1' : 'w-56 p-4'} border-r border-[var(--border-subtle)] space-y-1 overflow-y-auto custom-scrollbar`}>
                     {!isInline && (
-                        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                        <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
                             Category
                         </p>
                     )}
@@ -433,7 +417,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                                 isInline ? 'p-1.5 justify-center flex-col gap-0.5' : 'px-3 py-2'
                             } ${selectedCategory === cat.id
                                 ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                             }`}
                             title={cat.label}
                         >
@@ -446,7 +430,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                             ) : null}
                             <span className={isInline ? 'text-[9px] leading-tight truncate w-full text-center' : ''}>{cat.label}</span>
                             {!isInline && cat.id && filteredTemplates.filter(t => t.category === cat.id).length > 0 && (
-                                <span className="ml-auto text-[10px] text-gray-400">{filteredTemplates.filter(t => t.category === cat.id).length}</span>
+                                <span className="ml-auto text-[10px] text-[var(--text-muted)]">{filteredTemplates.filter(t => t.category === cat.id).length}</span>
                             )}
                         </button>
                     ))}
@@ -454,9 +438,9 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                     {/* Works with — the second axis. Hidden when the caller already
                         scoped the panel to a slide type. */}
                     {!slideType && (
-                        <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-gray-200 dark:border-gray-700 space-y-1`}>
+                        <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-[var(--border-subtle)] space-y-1`}>
                             {!isInline && (
-                                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                                <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
                                     Works with
                                 </p>
                             )}
@@ -466,7 +450,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                                     isInline ? 'p-1.5 justify-center' : 'px-3 py-2'
                                 } ${selectedSlideType === null
                                     ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                                 }`}
                                 title="Any slide type"
                             >
@@ -482,7 +466,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                                         isInline ? 'p-1.5 justify-center' : 'px-3 py-2'
                                     } ${selectedSlideType === opt.id
                                         ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                                     }`}
                                     title={`Templates that work with ${opt.label}`}
                                 >
@@ -494,9 +478,9 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                         </div>
                     )}
 
-                    <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-gray-200 dark:border-gray-700`}>
+                    <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-[var(--border-subtle)]`}>
                         {!isInline && (
-                            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                            <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
                                 Quick Access
                             </p>
                         )}
@@ -506,7 +490,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                                 isInline ? 'p-2 justify-center' : 'px-3 py-2'
                             } ${showFavorites
                                 ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
                             }`}
                             title="Favorites"
                         >
@@ -515,9 +499,9 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                         </button>
                     </div>
 
-                    <div className="pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
+                    <div className="pt-4 border-t border-[var(--border-subtle)] mt-4">
                         {!isInline && (
-                            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                            <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
                                 Your Templates
                             </p>
                         )}
@@ -542,28 +526,28 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                 {/* Main Content */}
                 <div className="flex-1 flex flex-col min-w-0">
                     {/* Search & View Toggle */}
-                    <div className="flex items-center gap-3 p-3 border-b border-gray-200 dark:border-gray-800">
+                    <div className="flex items-center gap-3 p-3 border-b border-[var(--border-subtle)]">
                         <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
                             <input
                                 type="text"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search templates..."
-                                className="w-full pl-9 pr-4 py-1.5 text-xs border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                className="w-full pl-9 pr-4 py-1.5 text-xs border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                             />
                         </div>
                         {!isInline && (
-                            <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                            <div className="flex bg-[var(--bg-tertiary)] rounded-lg p-0.5">
                                 <button
                                     onClick={() => setViewMode('grid')}
-                                    className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-gray-500'}`}
+                                    className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-[var(--text-muted)]'}`}
                                 >
                                     <Grid className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                     onClick={() => setViewMode('list')}
-                                    className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-gray-500'}`}
+                                    className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-[var(--text-muted)]'}`}
                                 >
                                     <List className="w-3.5 h-3.5" />
                                 </button>
@@ -573,7 +557,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                             <button
                                 onClick={handleResetDefaults}
                                 disabled={isResetting}
-                                className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
                                 title="Reset default templates"
                                 aria-label="Reset default templates"
                             >
@@ -583,7 +567,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                     </div>
 
                     {/* Results count */}
-                    <div className="px-3 py-1.5 text-[10px] text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800">
+                    <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-b border-gray-100 dark:border-gray-800">
                         {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''}
                         {activeSlideType && ` for ${SLIDE_TYPE_LABELS[activeSlideType] || activeSlideType}`}
                         {selectedCategory && ` in ${templateCategory(selectedCategory)?.label || selectedCategory}`}
@@ -592,15 +576,15 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                     {/* Templates Grid */}
                     <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
                         {isLoading ? (
-                            <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
+                            <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-muted)]">
                                 <Loader2 className="w-6 h-6 animate-spin mb-2" />
                                 <p className="text-xs">Loading templates...</p>
                             </div>
                         ) : filteredTemplates.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 p-4">
+                            <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-muted)] p-4">
                                 <LayoutTemplate className="w-8 h-8 mb-2 opacity-30" />
                                 <p className="text-sm font-medium">No templates found</p>
-                                <p className="text-xs mt-1 text-gray-400">
+                                <p className="text-xs mt-1 text-[var(--text-muted)]">
                                     {searchQuery ? 'Try a different search' : 'Create one to get started'}
                                 </p>
                             </div>
@@ -628,16 +612,16 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+            <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border-subtle)] bg-gray-50/50 dark:bg-gray-900/50">
                 <div className="flex-1 min-w-0 mr-4">
                     {selectedTemplate && (
                         <div className="flex items-center gap-2">
                             <CategoryBadge category={selectedTemplate.category} />
-                            <p className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                            <p className="text-xs font-bold text-[var(--text-primary)] truncate">
                                 {selectedTemplate.name}
                             </p>
                             {selectedTemplate.description && (
-                                <p className="text-[10px] text-gray-400 truncate hidden sm:block">
+                                <p className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block">
                                     — {selectedTemplate.description}
                                 </p>
                             )}
@@ -648,7 +632,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                     {!isInline && (
                         <button
                             onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                            className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
                         >
                             Cancel
                         </button>
@@ -684,12 +668,15 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
 
     return (
         <>
-            <div
-                className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-                {...backdropDismiss}
+            <Modal
+                isOpen={isOpen}
+                onClose={() => onClose?.()}
+                labelledBy="template-browser-title"
+                overlayClassName="bg-black/60 backdrop-blur-sm"
+                className="w-full max-w-5xl h-[85vh] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden"
             >
                 {content}
-            </div>
+            </Modal>
             <ConfirmDialog />
 
             <CreateTemplateModal

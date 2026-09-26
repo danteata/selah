@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Plus } from 'lucide-react'
 import { detectExternalVideoPlatform } from '../../utils/externalVideo'
-import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { Modal } from '../modals/Modal'
 
 interface ExternalVideoModalProps {
     isOpen?: boolean
@@ -16,7 +16,6 @@ const PLATFORM_LABEL: Record<ExternalVideoModalProps['platform'], string> = {
 }
 
 export function ExternalVideoModal({ isOpen = true, onClose, onAdd, platform }: ExternalVideoModalProps) {
-    const backdropDismiss = useBackdropDismiss(onClose)
     const [url, setUrl] = useState('')
     const [name, setName] = useState('')
 
@@ -32,76 +31,76 @@ export function ExternalVideoModal({ isOpen = true, onClose, onAdd, platform }: 
     }
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            {...backdropDismiss}
+        <Modal
+            isOpen={isOpen}
+            onClose={() => onClose?.()}
+            labelledBy="external-video-modal-title"
+            className="w-full max-w-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden"
         >
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden">
-                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
-                    <h3 className="font-semibold text-gray-900 dark:text-white">
-                        Add {PLATFORM_LABEL[platform]} Video
-                    </h3>
-                    <button
-                        aria-label="Close"
-                        onClick={onClose}
-                        className="ml-auto p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
+            <div className="flex items-center gap-3 p-4 border-b border-[var(--border-subtle)]">
+                <h3 id="external-video-modal-title" className="font-semibold text-[var(--text-primary)]">
+                    Add {PLATFORM_LABEL[platform]} Video
+                </h3>
+                <button
+                    aria-label="Close"
+                    onClick={onClose}
+                    className="ml-auto p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
+                >
+                    <X className="w-5 h-5" />
+                </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                        {PLATFORM_LABEL[platform]} link
+                    </label>
+                    <input
+                        type="url"
+                        autoFocus
+                        value={url}
+                        onChange={(e) => setUrl(e.target.value)}
+                        placeholder={platform === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'https://vimeo.com/...'}
+                        className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                    />
+                    {url.trim().length > 0 && !valid && (
+                        <p className="text-xs text-red-500 mt-1">
+                            That doesn't look like a valid {PLATFORM_LABEL[platform]} link.
+                        </p>
+                    )}
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-4 space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            {PLATFORM_LABEL[platform]} link
-                        </label>
-                        <input
-                            type="url"
-                            autoFocus
-                            value={url}
-                            onChange={(e) => setUrl(e.target.value)}
-                            placeholder={platform === 'youtube' ? 'https://www.youtube.com/watch?v=...' : 'https://vimeo.com/...'}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
-                        />
-                        {url.trim().length > 0 && !valid && (
-                            <p className="text-xs text-red-500 mt-1">
-                                That doesn't look like a valid {PLATFORM_LABEL[platform]} link.
-                            </p>
-                        )}
-                    </div>
+                <div>
+                    <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                        Title <span className="text-[var(--text-muted)]">(optional)</span>
+                    </label>
+                    <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="Sunday announcement..."
+                        className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                    />
+                </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Title <span className="text-gray-400">(optional)</span>
-                        </label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="Sunday announcement..."
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
-                        />
-                    </div>
-
-                    <div className="flex justify-end gap-3 pt-2">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={!valid}
-                            className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[var(--accent-teal)] hover:brightness-110 disabled:opacity-50 rounded-lg transition-all shadow-sm"
-                        >
-                            <Plus className="w-4 h-4" />
-                            ADD VIDEO
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+                <div className="flex justify-end gap-3 pt-2">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        disabled={!valid}
+                        className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[var(--accent-teal)] hover:brightness-110 disabled:opacity-50 rounded-lg transition-all shadow-sm"
+                    >
+                        <Plus className="w-4 h-4" />
+                        ADD VIDEO
+                    </button>
+                </div>
+            </form>
+        </Modal>
     )
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { X, Search, Image, Film, Grid, List, Check, Loader2, Link2, Trash2, CloudUpload, CloudCheck } from 'lucide-react'
 import { MediaUpload, type UploadedFile } from './MediaUpload'
 import { detectExternalVideoPlatform, getExternalVideoThumbnail } from '../../utils/externalVideo'
@@ -9,8 +9,8 @@ import { resolveLocalUrl } from '../../hooks/useLocalBackground'
 import { VideoThumbnail } from './VideoThumbnail'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { ProUpsell } from '../licensing/ProGate'
-import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 import { ConfirmDialog } from '../modals/ConfirmDialog'
+import { Modal } from '../modals/Modal'
 import { toast } from 'sonner'
 
 export interface MediaItem {
@@ -48,7 +48,6 @@ export function MediaPicker({
     mediaType = 'all',
     isInline = false
 }: MediaPickerProps) {
-    const backdropDismiss = useBackdropDismiss(onClose)
     const [activeTab, setActiveTab] = useState<'library' | 'upload' | 'link'>('library')
     const [searchQuery, setSearchQuery] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -86,22 +85,6 @@ export function MediaPicker({
             onCancel={() => setPendingDelete(null)}
         />
     )
-
-    useEffect(() => {
-        if (isInline) return
-
-        const handleEscape = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose?.()
-        }
-        if (isOpen) {
-            document.addEventListener('keydown', handleEscape)
-            document.body.style.overflow = 'hidden'
-        }
-        return () => {
-            document.removeEventListener('keydown', handleEscape)
-            document.body.style.overflow = ''
-        }
-    }, [isOpen, onClose, isInline])
 
     const handleUpload = async (files: UploadedFile[]) => {
         setUploadError(null)
@@ -170,24 +153,24 @@ export function MediaPicker({
     if (!isOpen && !isInline) return null
 
     const content = (
-        <div className={`${isInline ? 'h-full' : 'w-full max-w-4xl h-[80vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl'} flex flex-col overflow-hidden`}>
+        <div className="h-full flex flex-col overflow-hidden">
             {/* Header. Non-inline shows a title + close button; inline (ContextPanel
                 has its own header/close) shows just the tab switcher, compact. */}
             {(allowUpload || allowLink || !isInline) && (
-                <div className={`flex items-center ${isInline ? 'justify-start px-3 py-2' : 'justify-between px-4 py-3'} border-b border-gray-200 dark:border-gray-800`}>
+                <div className={`flex items-center ${isInline ? 'justify-start px-3 py-2' : 'justify-between px-4 py-3'} border-b border-[var(--border-subtle)]`}>
                     <div className="flex items-center gap-4">
                         {!isInline && (
-                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                            <h2 id="media-picker-title" className="text-lg font-semibold text-[var(--text-primary)]">
                                 Select Media
                             </h2>
                         )}
                         {(allowUpload || allowLink) && (
-                            <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                            <div className="flex bg-[var(--bg-tertiary)] rounded-lg p-0.5">
                                 <button
                                     onClick={() => setActiveTab('library')}
                                     className={`px-3 py-1.5 text-sm font-medium rounded ${activeTab === 'library'
                                         ? 'bg-white dark:bg-gray-700 shadow-sm'
-                                        : 'text-gray-600 dark:text-gray-400'
+                                        : 'text-[var(--text-secondary)]'
                                         }`}
                                 >
                                     Library
@@ -197,7 +180,7 @@ export function MediaPicker({
                                         onClick={() => setActiveTab('upload')}
                                         className={`px-3 py-1.5 text-sm font-medium rounded ${activeTab === 'upload'
                                             ? 'bg-white dark:bg-gray-700 shadow-sm'
-                                            : 'text-gray-600 dark:text-gray-400'
+                                            : 'text-[var(--text-secondary)]'
                                             }`}
                                     >
                                         Upload
@@ -208,7 +191,7 @@ export function MediaPicker({
                                         onClick={() => setActiveTab('link')}
                                         className={`px-3 py-1.5 text-sm font-medium rounded ${activeTab === 'link'
                                             ? 'bg-white dark:bg-gray-700 shadow-sm'
-                                            : 'text-gray-600 dark:text-gray-400'
+                                            : 'text-[var(--text-secondary)]'
                                             }`}
                                     >
                                         Link
@@ -221,7 +204,7 @@ export function MediaPicker({
                         <button
                             aria-label="Close"
                             onClick={onClose}
-                            className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                            className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -243,24 +226,24 @@ export function MediaPicker({
                 {activeTab === 'library' ? (
                     <div className="h-full flex flex-col">
                         {/* Search & View Toggle */}
-                        <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800">
+                        <div className="flex items-center gap-3 p-4 border-b border-[var(--border-subtle)]">
                             <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
                                 <input
                                     type="text"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     placeholder="Search media..."
-                                    className="w-full pl-10 pr-4 py-2 text-sm border border-[var(--border-default)] rounded-lg bg-[var(--bg-tertiary)] text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                    className="w-full pl-10 pr-4 py-2 text-sm border border-[var(--border-default)] rounded-lg bg-[var(--bg-tertiary)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                                 />
                             </div>
                             {!isInline && (
-                                <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                                <div className="flex bg-[var(--bg-tertiary)] rounded-lg p-0.5">
                                     <button
                                         onClick={() => setViewMode('grid')}
                                         className={`p-2 rounded ${viewMode === 'grid'
                                             ? 'bg-white dark:bg-gray-700 shadow-sm'
-                                            : 'text-gray-500'
+                                            : 'text-[var(--text-muted)]'
                                             }`}
                                     >
                                         <Grid className="w-4 h-4" />
@@ -269,7 +252,7 @@ export function MediaPicker({
                                         onClick={() => setViewMode('list')}
                                         className={`p-2 rounded ${viewMode === 'list'
                                             ? 'bg-white dark:bg-gray-700 shadow-sm'
-                                            : 'text-gray-500'
+                                            : 'text-[var(--text-muted)]'
                                             }`}
                                     >
                                         <List className="w-4 h-4" />
@@ -289,7 +272,7 @@ export function MediaPicker({
                                     ))}
                                 </div>
                             ) : filteredMedia.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 dark:text-gray-400">
+                                <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-muted)]">
                                     <Image className="w-12 h-12 mb-4 opacity-50" />
                                     <p className="text-sm font-medium">No media found</p>
                                 </div>
@@ -339,17 +322,17 @@ export function MediaPicker({
                 ) : (
                     <div className="p-4 space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                                 YouTube or Vimeo link
                             </label>
                             <div className="relative">
-                                <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
                                 <input
                                     type="url"
                                     value={linkUrl}
                                     onChange={(e) => setLinkUrl(e.target.value)}
                                     placeholder="https://www.youtube.com/watch?v=... or https://vimeo.com/..."
-                                    className="w-full pl-10 pr-4 py-2 text-sm border border-[var(--border-default)] rounded-lg bg-[var(--bg-tertiary)] text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                    className="w-full pl-10 pr-4 py-2 text-sm border border-[var(--border-default)] rounded-lg bg-[var(--bg-tertiary)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                                 />
                             </div>
                             {linkUrl.trim().length > 0 && !detectExternalVideoPlatform(linkUrl.trim()) && (
@@ -357,15 +340,15 @@ export function MediaPicker({
                             )}
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                Title <span className="text-gray-400">(optional)</span>
+                            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                                Title <span className="text-[var(--text-muted)]">(optional)</span>
                             </label>
                             <input
                                 type="text"
                                 value={linkName}
                                 onChange={(e) => setLinkName(e.target.value)}
                                 placeholder="Sunday announcement..."
-                                className="w-full px-3 py-2 text-sm border border-[var(--border-default)] rounded-lg bg-[var(--bg-tertiary)] text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                                className="w-full px-3 py-2 text-sm border border-[var(--border-default)] rounded-lg bg-[var(--bg-tertiary)] text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                             />
                         </div>
                         <button
@@ -381,10 +364,10 @@ export function MediaPicker({
 
             {/* Footer */}
             {activeTab === 'library' && (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50">
+                <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border-subtle)] bg-gray-50/50 dark:bg-gray-900/50">
                     <div className="flex-1 min-w-0 mr-4">
                         {selectedMedia && (
-                            <p className="text-xs font-medium text-primary-500 truncate">
+                            <p className="text-xs font-medium text-[var(--accent-teal)] truncate">
                                 Selected: {selectedMedia.name}
                             </p>
                         )}
@@ -402,7 +385,7 @@ export function MediaPicker({
                             <>
                                 <button
                                     onClick={onClose}
-                                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                                    className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
                                 >
                                     Cancel
                                 </button>
@@ -424,13 +407,18 @@ export function MediaPicker({
     if (isInline) return <>{content}{deleteDialog}</>
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-            {...backdropDismiss}
-        >
-            {content}
+        <>
+            <Modal
+                isOpen={isOpen}
+                onClose={() => onClose?.()}
+                labelledBy="media-picker-title"
+                overlayClassName="bg-black/60 backdrop-blur-sm"
+                className="w-full max-w-4xl h-[80vh] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl overflow-hidden"
+            >
+                {content}
+            </Modal>
             {deleteDialog}
-        </div>
+        </>
     )
 }
 

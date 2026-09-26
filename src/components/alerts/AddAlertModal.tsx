@@ -3,7 +3,7 @@ import { X, Plus, AlertCircle } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Alert, Slide } from '../../types'
 import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundPicker'
-import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
+import { Modal } from '../modals/Modal'
 
 interface AddAlertModalProps {
     isOpen?: boolean
@@ -34,7 +34,6 @@ const ALERT_STYLES = [
 ]
 
 export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline = false }: AddAlertModalProps) {
-    const backdropDismiss = useBackdropDismiss(onClose)
     const [content, setContent] = useState('')
     const [title, setTitle] = useState('')
     const [duration, setDuration] = useState(5)
@@ -160,20 +159,20 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
     if (!isOpen && !isInline) return null
 
     const contentArea = (
-        <div className={`${isInline ? 'h-full bg-transparent' : 'w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-h-[90vh]'} flex flex-col overflow-hidden`}>
+        <div className={`${isInline ? 'h-full bg-transparent' : 'w-full max-w-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl shadow-2xl max-h-[90vh]'} flex flex-col overflow-hidden`}>
             {/* Header */}
             {!isInline && (
-                <div className="flex items-center gap-3 p-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
+                <div className="flex items-center gap-3 p-4 border-b border-[var(--border-subtle)] flex-shrink-0">
                     <div className="p-2 bg-[var(--accent-teal)]/10 rounded-lg">
                         <AlertCircle className="w-5 h-5 text-[var(--accent-teal)]" />
                     </div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                    <h3 id="add-alert-modal-title" className="font-semibold text-[var(--text-primary)]">
                         {editingSlide ? 'Edit Alert' : 'Create Alert'}
                     </h3>
                     <button
                         aria-label="Close"
                         onClick={onClose}
-                        className="ml-auto p-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                        className="ml-auto p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)]"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -185,7 +184,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
 
                     {/* Alert Style */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                             Display Style
                         </label>
                         <div className="grid grid-cols-2 gap-2">
@@ -196,7 +195,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
                                     onClick={() => setAlertStyle(s.id as 'banner' | 'fullscreen')}
                                     className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-all ${alertStyle === s.id
                                         ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
-                                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300'
+                                        : 'border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-gray-300'
                                         }`}
                                 >
                                     <span className="text-2xl">{s.icon}</span>
@@ -209,21 +208,21 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
 
                     {/* Title (optional) */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Title <span className="text-gray-400">(optional)</span>
+                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                            Title <span className="text-[var(--text-muted)]">(optional)</span>
                         </label>
                         <input
                             type="text"
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
                             placeholder="Announcement"
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                            className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                         />
                     </div>
 
                     {/* Content */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                             Message <span className="text-red-500">*</span>
                         </label>
                         <textarea
@@ -232,7 +231,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
                             placeholder="Enter your announcement..."
                             rows={3}
                             required
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                            className="w-full px-3 py-2 border border-[var(--border-default)] rounded-lg bg-[var(--bg-secondary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                         />
                     </div>
 
@@ -257,8 +256,8 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
 
                     {/* Duration */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Banner Duration <span className="text-gray-400 font-normal">(when shown as overlay)</span>
+                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+                            Banner Duration <span className="text-[var(--text-muted)] font-normal">(when shown as overlay)</span>
                         </label>
                         <div className="flex gap-2">
                             {[3, 5, 10, 15, 30].map((d) => (
@@ -268,7 +267,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
                                     onClick={() => setDuration(d)}
                                     className={`flex-1 py-2 text-sm rounded-lg transition-colors ${duration === d
                                         ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500'
-                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                        : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700'
                                         }`}
                                 >
                                     {d}s
@@ -279,7 +278,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
 
                     {/* Priority */}
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
                             Priority
                         </label>
                         <div className="flex gap-2">
@@ -294,7 +293,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
                                     onClick={() => setPriority(p.id as 'low' | 'medium' | 'high')}
                                     className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm rounded-lg transition-colors ${priority === p.id
                                         ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500'
-                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                        : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700'
                                         }`}
                                 >
                                     <span className={`w-2 h-2 rounded-full ${p.color}`} />
@@ -310,7 +309,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
                             <button
                                 type="button"
                                 onClick={onClose}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
                             >
                                 Cancel
                             </button>
@@ -330,11 +329,15 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
     if (isInline) return contentArea
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            {...backdropDismiss}
+        // Escape never closed this, and the typed message would go with it.
+        <Modal
+            isOpen={isOpen}
+            onClose={() => onClose?.()}
+            labelledBy="add-alert-modal-title"
+            closeOnEscape={false}
+            className="w-full max-w-md"
         >
             {contentArea}
-        </div>
+        </Modal>
     )
 }
