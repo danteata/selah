@@ -10,9 +10,6 @@ import type {
     SlideStyle,
     Advert,
     BibleVersion,
-    Scripture,
-    Hymn,
-    Song
 } from '../types'
 import { DEFAULT_ALTERNATE_OUTPUT, type AlternateOutputConfig } from '../types/alternateOutput'
 import { bibleVersionObjects } from '../types'
@@ -448,7 +445,7 @@ interface AppStore extends AppState {
 
 export const useAppStore = create<AppStore>()(
     persist(
-        (set, get) => ({
+        (set) => ({
             ...initialState,
 
             setSchedules: (schedules) => {
@@ -684,7 +681,7 @@ export const useAppStore = create<AppStore>()(
             },
 
             setActiveSlides: (slides) => {
-                set((state) => ({
+                set(() => ({
                     activeSlides: ensureUniqueIds(slides),
                     liveOutputSlidesId: Array.from(new Set(slides.map((slide) => slide.id))),
                     futureStates: []

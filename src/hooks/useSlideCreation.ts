@@ -13,7 +13,6 @@ import type {
     DictionaryPack,
     ExtendedFileT,
     ExternalVideo,
-    SlideStyle
 } from '../types'
 import { formatHeadword } from '../lib/search/dictionarySearch'
 import {
@@ -288,7 +287,6 @@ export function useSlideCreation() {
     const activeSlides = useAppStore((state) => state.activeSlides)
     const settings = useAppStore((state) => state.settings)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
-    const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const { templates } = useTemplates()
     const { trackEvent } = useAnalytics()
 
@@ -706,7 +704,7 @@ export function useSlideCreation() {
 
     const createMediaSlide = useCallback(async (
         file: ExtendedFileT & { isExternal?: boolean },
-        options?: { oneOfManySlides?: boolean }
+        _options?: { oneOfManySlides?: boolean }
     ): Promise<Slide> => {
         const tempSlide = preSlideCreation()
         tempSlide.layout = slideLayoutTypes.empty

@@ -44,7 +44,7 @@ export function useSchedules() {
     useEffect(() => {
         if (!convexSchedules || isOffline) return
 
-        const mapped: Schedule[] = convexSchedules.map((s: any) => ({
+        const mapped: Schedule[] = convexSchedules.map((s) => ({
             _id: s._id,
             name: s.name,
             authorId: s.authorId,

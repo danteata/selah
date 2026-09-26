@@ -1,16 +1,21 @@
 import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { useQuery } from 'convex/react'
+import type { FunctionReturnType } from 'convex/server'
 import { api } from '../../convex/_generated/api'
-import type { Id } from '../../convex/_generated/dataModel'
+import type { Doc, Id } from '../../convex/_generated/dataModel'
 import { useUserRole } from './useUserRole'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
+
+// Older sessions may still carry the pre-`queue` flat list of slide ids.
+type SharedSession = Doc<'liveSessions'> & { queuedSlideIds?: string[] }
+type SessionUser = FunctionReturnType<typeof api.presence.getPresenceBySession>[number]
 
 export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"liveSessions">) {
     const { currentUser } = useUserRole()
     const { isOffline } = useConvexConnection()
-    const previousSessionRef = useRef<any | null>(null)
-    const previousUsersRef = useRef<any[] | null>(null)
+    const previousSessionRef = useRef<SharedSession | null>(null)
+    const previousUsersRef = useRef<SessionUser[] | null>(null)
     const previousSessionIdRef = useRef<string | null>(null)
 
     const sharedSession = useQuery(
@@ -55,8 +60,8 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
         }
 
         // Queue changed (handles both new `queue` and legacy `queuedSlideIds`)
-        const currentQueue = sharedSession.queue || (sharedSession as any).queuedSlideIds || []
-        const prevQueue = prev.queue || (prev as any).queuedSlideIds || []
+        const currentQueue = sharedSession.queue || (sharedSession as SharedSession).queuedSlideIds || []
+        const prevQueue = prev.queue || prev.queuedSlideIds || []
         const currentQueueIds: string[] = Array.isArray(currentQueue) && currentQueue.length > 0 && typeof currentQueue[0] === 'object'
             ? (currentQueue as { slideId: string }[]).map((e) => e.slideId)
             : currentQueue as string[]
@@ -122,13 +127,13 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
         const selfId = currentUser?._id
 
         const joined = sessionUsers.filter(
-            (u: any) => !prev.find((p: any) => p.userId === u.userId)
+            (u) => !prev.find((p) => p.userId === u.userId)
         )
         const left = prev.filter(
-            (p: any) => !sessionUsers.find((u: any) => u.userId === p.userId)
+            (p) => !sessionUsers.find((u) => u.userId === p.userId)
         )
 
-        joined.forEach((entry: any) => {
+        joined.forEach((entry) => {
             if (entry.userId !== selfId) {
                 toast.success(
                     `${entry.user?.fullname || 'Someone'} joined the session`,
@@ -137,7 +142,7 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
             }
         })
 
-        left.forEach((entry: any) => {
+        left.forEach((entry) => {
             if (entry.userId !== selfId) {
                 toast.info(
                     `${entry.user?.fullname || 'Someone'} left the session`,

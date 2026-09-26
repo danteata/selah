@@ -24,11 +24,10 @@ import { onCaptureStreamError } from '../services/sermon-listener/nativeAudioCap
 import { saveSelectedDeviceLabel } from './useAudioDevices'
 import { audioFeatures, bandsForSampleRate } from '../services/visualizer/audioFeatures'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
-import type { TranscriptionProvider, TranscriptionStatus, WhisperSegmentTiming } from '../services/sermon-listener'
+import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
 import { detectVerses,
     verseToLabel,
     getSemanticDetector,
-    resetSemanticDetector,
     initializeEmbedder,
     isContextValid,
     NUMBER_TO_BOOK,
@@ -86,8 +85,14 @@ const SCREEN_AFFECTING_COMMAND_TYPES = new Set<VoiceCommand['type']>([
 ])
 const COMMAND_CONFIDENCE_ORDER = { high: 3, medium: 2, low: 1 } as const
 
+// Scripture-marker words. If the matched query contains one of these, the
+// match is more likely a real Bible reference and we accept lower scores.
+// If none are present, we require a higher score to compensate for the
+// lack of an explicit reference signal.
+const SCRIPTURE_MARKER_RE = /\b(verse|verses|chapter|chapters|scripture|scriptures|the bible|the word|it is written|the lord said|god said|according to)\b/i
+
 // Pre-filter gate checked before running semantic search at all (not a strict
-// acceptance check — deliberately broader than the in-hook SCRIPTURE_MARKER_RE,
+// acceptance check — deliberately broader than SCRIPTURE_MARKER_RE above,
 // which stays a strict post-hoc filter on weak matches). This only decides "is
 // it worth paying for an embedding pass on this chunk", so it favors recall:
 // any explicit Bible book name always passes (BOOK_PATTERN, the same list used
@@ -299,7 +304,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
 
     // Get global settings (system-wide, no churchId needed)
-    const { settings: globalSettings, isLoading: isGlobalSettingsLoading } = useGlobalSermonListenerSettings()
+    const { settings: globalSettings } = useGlobalSermonListenerSettings()
 
     // User-specific settings from local store
     const autoLookup = autoLookupOverride ?? sermonSettings?.autoLookup ?? true
@@ -422,7 +427,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Cooldown map for re-triggering already-detected verses (reference → last activated timestamp)
     const reactivationCooldownRef = useRef<Map<string, number>>(new Map())
-    const REACTIVATION_COOLDOWN_MS = 30_000 // 30 seconds
 
     // Per-verse "last time the rolling transcript window matched this verse" timestamp.
     // Used to distinguish a genuine re-reference (the verse stopped matching for a
@@ -466,11 +470,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const lastScoreByReferenceRef = useRef<Map<string, number>>(new Map())
     const CHAPTER_DEDUP_DELTA = 0.10 // A new semantic match must beat the existing chapter sibling by this much
 
-    // Scripture-marker words. If the matched query contains one of these, the
-    // match is more likely a real Bible reference and we accept lower scores.
-    // If none are present, we require a higher score to compensate for the
-    // lack of an explicit reference signal.
-    const SCRIPTURE_MARKER_RE = /\b(verse|verses|chapter|chapters|scripture|scriptures|the bible|the word|it is written|the lord said|god said|according to)\b/i
+    // Scripture-marker words: see SCRIPTURE_MARKER_RE at module scope.
     const SCRIPTURE_MARKER_MIN_SCORE = 0.75 // Below this AND no marker → likely incidental match
 
     // Debounce timer for interim transcript processing
@@ -750,6 +750,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         void startAudioAnalyser(generation)
         return () => {
             // Retire this run before the next one (or a Stop) takes over.
+            // eslint-disable-next-line react-hooks/exhaustive-deps -- a generation counter, not a DOM ref: bumping the latest value is the point
             analyserGenerationRef.current++
             stopAudioAnalyser()
         }
@@ -1103,7 +1104,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
         const versionToUse = versionOverride || activeBibleVersionRef.current
         const requestId = ++verseLookupRequestIdRef.current
-        const count = ++activeLookupCountRef.current
+        ++activeLookupCountRef.current
 
         setIsLoading(true)
         try {
@@ -1497,7 +1498,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } else {
             optionsRef.current.onVerseDetected?.(latest, null)
         }
-    }, [dedupeVerses, lookupVerse, autoLookup, autoDisplay, projectScriptureSlide, minConfidence])
+    }, [dedupeVerses, lookupVerse, autoLookup, autoDisplay, projectScriptureSlide, minConfidence, trackEvent])
 
     /**
      * Debounced, optional LLM extraction pass over the latest transcript text.
@@ -2562,7 +2563,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     setIsSemanticSearching(false)
                 })
         }
-    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, projectScriptureSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, recordAnnouncedVerse, applyBibleVersionChange, scheduleLlmExtraction, language])
+    }, [minConfidence, autoLookup, autoDisplay, lookupVerse, projectScriptureSlide, refreshLiveSlide, enableVoiceCommands, onVoiceCommand, dedupeVerses, recordAnnouncedVerse, applyBibleVersionChange, scheduleLlmExtraction, language, getCurrentVerseFromLiveSlide, trackEvent])
 
     // The transcription callbacks are handed to the provider once, at start.
     // Calling processTranscript through this ref means a setting changed
@@ -2940,6 +2941,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         } finally {
             startInFlightRef.current = false
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the global provider setting is kept so `start` is rebuilt when an admin switches provider, as before
     }, [
         isSupported,
         isListening,
@@ -2959,6 +2961,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         globalSettings?.sermonListener_useVAD,
         semanticDetectorReady,
         initSemanticDetector,
+        enableSemanticDetection,
+        trackEvent,
     ])
 
     // Keep ref in sync so processTranscript can call start without TDZ issues

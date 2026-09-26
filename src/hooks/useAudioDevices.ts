@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { isDesktop } from '../platform'
 import { listAudioDevices, type AudioDeviceInfo, isTauriAvailable } from '../services/sermon-listener/nativeAudioCapture'
 

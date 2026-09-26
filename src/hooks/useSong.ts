@@ -1,17 +1,12 @@
 import { useCallback } from 'react'
-import { useAppStore } from '../store/appStore'
 import { getIndexedDB } from './useIndexedDB'
 import type { Song } from '../types'
 
 export function useSong() {
-    const linesPerSlide = useAppStore((state) => state.settings.slideStyles.linesPerSlide)
-
     const getSong = useCallback(async (
         song: Song | string,
-        customLinesPerDisplay?: number
+        _customLinesPerDisplay?: number
     ): Promise<Song | null> => {
-        const linesToUse = customLinesPerDisplay || linesPerSlide || 4
-
         try {
             let songData: Song | null = null
 
@@ -71,7 +66,7 @@ export function useSong() {
             console.error('Error processing song:', error)
             return null
         }
-    }, [linesPerSlide])
+    }, [])
 
     const saveSong = useCallback(async (song: Song): Promise<void> => {
         const db = getIndexedDB()

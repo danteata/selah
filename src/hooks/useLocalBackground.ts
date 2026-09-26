@@ -132,6 +132,7 @@ export function useLocalBackground(background: string | undefined, localFilePath
     useEffect(() => {
         const result = resolveBackground(background || '', localFilePath)
         if (result) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- same effect resolves desktop file paths asynchronously via Tauri's convertFileSrc; sync branches share the one state
             setResolved(result)
             return
         }

@@ -13,6 +13,7 @@ interface AnalyticsContextValue {
 
 const AnalyticsContext = createContext<AnalyticsContextValue>({ analytics })
 
+// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; hook exported beside its provider
 export function useAnalyticsContext(): AnalyticsContextValue {
     return useContext(AnalyticsContext)
 }

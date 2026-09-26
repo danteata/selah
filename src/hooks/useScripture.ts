@@ -54,7 +54,7 @@ function findBibleStartIndex(bibleData: BibleVerse[], book: number, chapter: num
 
     if (startIndex === -1) {
         const targetBookName = BOOK_NAMES[book] || ''
-        startIndex = bibleData.findIndex((s: any) => {
+        startIndex = bibleData.findIndex((s: BibleVerse) => {
             const sb = String(s.book ?? '')
             const sc = Number(s.chapter)
             const sv = Number(s.verse)

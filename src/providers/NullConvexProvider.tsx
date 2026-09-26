@@ -1,10 +1,11 @@
 import { type ReactNode } from 'react'
 import { ConvexReactClient } from 'convex/react'
+import type { ConnectionState } from 'convex/browser'
 import { ConvexProviderWithClerk } from 'convex/react-clerk'
 import { useAuth } from '@clerk/clerk-react'
 
 class NullWatch {
-    private listener: ((value: any) => void) | null = null
+    private listener: ((value: unknown) => void) | null = null
 
     localQueryResult() {
         return []
@@ -14,7 +15,7 @@ class NullWatch {
         return undefined
     }
 
-    onUpdate(callback: (value: any) => void) {
+    onUpdate(callback: (value: unknown) => void) {
         this.listener = callback
         if (this.listener) {
             this.listener([])
@@ -47,7 +48,7 @@ class NullConvexReactClient {
     }
 
     connectionState() {
-        return { isInFlight: false, hasEverConnected: false } as any
+        return { isInFlight: false, hasEverConnected: false } as unknown as ConnectionState
     }
 
     subscribeToConnectionState() {
@@ -67,6 +68,7 @@ class NullConvexReactClient {
  * The stand-in client. Exported so ConvexConnectionProvider can switch its one
  * provider between this and the real client without remounting the app.
  */
+// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; stand-in client exported beside its provider
 export const nullClient = new NullConvexReactClient() as unknown as ConvexReactClient
 
 /**

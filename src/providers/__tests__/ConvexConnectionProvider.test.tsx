@@ -139,7 +139,10 @@ describe('ConvexConnectionProvider', () => {
     it('retrying never blanks the app with the connection check screen', async () => {
         let retry: () => void = () => {}
         function Grab() {
-            retry = useConvexConnection().retryConnection
+            const { retryConnection } = useConvexConnection()
+            useEffect(() => {
+                retry = retryConnection
+            }, [retryConnection])
             return null
         }
         healthResponds(true)

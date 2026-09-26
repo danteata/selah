@@ -1,11 +1,15 @@
 import { useConvexAuth, useQuery } from 'convex/react'
 import { useAuth } from '@clerk/clerk-react'
 import { api } from '../../convex/_generated/api'
+import type { Doc } from '../../convex/_generated/dataModel'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import { getCachedAuthSession, cacheAuthSession, type CachedAuthSession } from './useIndexedDB'
 import { useState, useEffect } from 'react'
 
 export type UserRole = 'superadmin' | 'admin' | 'member'
+
+/** The signed-in user: the live Convex row, or the cached session standing in for it offline. */
+export type CurrentUser = Doc<'users'> | (CachedAuthSession & { _id: string })
 
 export interface UseUserRoleReturn {
     role: UserRole | null
@@ -14,7 +18,7 @@ export interface UseUserRoleReturn {
     isAdmin: boolean
     isMember: boolean
     canAccessAdmin: boolean
-    currentUser: any | null
+    currentUser: CurrentUser | null
     isOfflineMode: boolean
     isCachedSession: boolean
 }
@@ -66,7 +70,7 @@ export function useUserRole(): UseUserRoleReturn {
         // an empty member one.
         if (!clerkId || !currentUser || Array.isArray(currentUser) || !currentUser._id) return
 
-        const user = currentUser as any
+        const user = currentUser
         Promise.resolve(cacheAuthSession({
             id: `session_${clerkId}`,
             clerkId,

@@ -24,7 +24,6 @@ import {
 } from '../services/multi-monitor'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
-import { isDesktop as checkIsDesktop } from '../platform'
 
 export interface UseNativeMultiMonitorReturn {
     // State

@@ -223,7 +223,7 @@ export function useSemanticVerseSearch(
             }
         }
         checkEmbeddings()
-    }, [convex, version])
+    }, [convex, version, cacheKey])
 
     // Initialize the embedder
     const initEmbedder = useCallback(async () => {

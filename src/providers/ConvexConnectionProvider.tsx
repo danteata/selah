@@ -33,6 +33,7 @@ const ConvexConnectionContext = createContext<ConvexConnectionContextType>({
     retryConnection: () => { },
 })
 
+// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; hook exported beside its provider
 export function useConvexConnection() {
     return useContext(ConvexConnectionContext)
 }

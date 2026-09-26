@@ -4,7 +4,6 @@ import {
     validateSemanticMatch,
     normalizeQuery,
     getContentWords,
-    removeStopWords,
     isAmbiguousMatch,
     canClaimLiveSlide,
 } from '../semanticRetrievalPolicy'
@@ -172,8 +171,8 @@ describe('semanticRetrievalPolicy', () => {
         })
 
         it('rejects "body of Christ" matching Ephesians 4:12 via only theological words', () => {
-            const query = 'to edify to build up the body of Christ'
-            const verse = 'For the perfecting of the saints for the work of the ministry for the edifying of the body of Christ'
+            // query: 'to edify to build up the body of Christ'
+            // verse: 'For the perfecting of the saints for the work of the ministry for the edifying of the body of Christ'
             // "edify/build" synonyms are theological; "body" + "Christ" are theological common
             // But "edifying" (built from "edify") is distinctive enough
             // Actually this should pass since "edify" → "edifying" is a synonym match via STEM

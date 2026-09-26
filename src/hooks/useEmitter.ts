@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from 'react';
 import mitt from 'mitt';
-import type { Emitter, EventType, Handler } from 'mitt';
+import type { EventType, Handler } from 'mitt';
 import { useAppStore } from '../store/appStore';
 
 export type AppEvents = Record<EventType, unknown>;

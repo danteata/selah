@@ -2,7 +2,7 @@ import { useEffect, useCallback } from 'react'
 import { useEmitter } from './useEmitter'
 import { useSlideCreation } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
-import { appWideActions, type Slide, type Countdown } from '../types'
+import { appWideActions, type Slide } from '../types'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 
@@ -12,7 +12,7 @@ interface QuickActionHandlersResult {
 
 export function useQuickActionHandlers(): QuickActionHandlersResult {
     const { on } = useEmitter()
-    const { createTextSlide, createCountdownSlide, createLowerThirdSlide } = useSlideCreation()
+    const { createTextSlide, createLowerThirdSlide } = useSlideCreation()
     const { trackEvent } = useAnalytics()
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)

@@ -92,6 +92,7 @@ export function useCountdownSeconds(slide: Slide | null | undefined): number {
     const slideId = slide?.id
     // When this screen first showed the slide; only used without a clock.
     const [localStart, setLocalStart] = useState(() => ({ id: slideId, at: Date.now() }))
+    // eslint-disable-next-line react-hooks/purity -- deliberately stamps the moment this screen first rendered a new slide (adjust-state-during-render reset); the stamp is stored, so re-renders don't change it
     if (localStart.id !== slideId) setLocalStart({ id: slideId, at: Date.now() })
 
     const running = !!slide && slide.type === 'countdown' && !isCountdownPaused(slide)

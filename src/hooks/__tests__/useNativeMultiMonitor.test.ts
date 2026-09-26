@@ -66,7 +66,6 @@ vi.mock('../../services/multi-monitor', () => ({
 
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { getMonitorColor } from '../../services/native-multi-monitor'
-import { multiMonitorService } from '../../services/multi-monitor'
 
 const svc = nativeMock
 

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
-import { useAppStore } from '../store/appStore'
+import type { Doc } from '../../convex/_generated/dataModel'
 import type { Slide } from '../types'
 export interface TemplateItem {
     _id?: string
@@ -101,8 +101,6 @@ const BUILTIN_TEMPLATES: TemplateItem[] = [
 ]
 export function useTemplates(): UseTemplatesReturn {
     const [loading, setLoading] = useState(false)
-    const activeSchedule = useAppStore((state) => state.activeSchedule)
-    const churchId = activeSchedule?.churchId || ''
     // Convex queries and mutations
     const customTemplatesQuery = useQuery(api.templates.getTemplates, {})
     const createTemplateMutation = useMutation(api.templates.createTemplate)
@@ -112,7 +110,7 @@ export function useTemplates(): UseTemplatesReturn {
     const customTemplates: TemplateItem[] = useMemo(() => {
         if (!customTemplatesQuery) return []
 
-        return customTemplatesQuery.map((t: any) => ({
+        return customTemplatesQuery.map((t: Doc<'templates'>) => ({
             _id: t._id,
             id: t._id || t.name.toLowerCase().replace(/\s+/g, '-'),
             name: t.name,
@@ -193,7 +191,7 @@ export function useTemplates(): UseTemplatesReturn {
                 updates: {
                     name: updates.name,
                     description: updates.description,
-                    category: updates.category as any,
+                    category: updates.category,
                     thumbnail: updates.thumbnail,
                     slideId: updates.slideData,
                 },

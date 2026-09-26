@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import { useSyncExternalStore } from 'react'
 import { embeddingSyncManager, type EmbeddingSource, type VersionSyncState } from '../services/sermon-listener/embeddingSyncManager'
 

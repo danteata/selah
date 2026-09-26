@@ -15,10 +15,9 @@ import type { Slide } from '../types'
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
 
-interface QueueEntry {
-    slideId: string
-    suggestedBy: string
-    suggestedAt: number
+/** Pre-`queue` sessions stored the suggestion queue as a flat id list. */
+interface LegacyQueueFields {
+    queuedSlideIds?: unknown
 }
 
 function removeByOccurrence(source: string[], removals: string[]) {
@@ -230,7 +229,6 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
 
     const setLiveSlideStore = useAppStore((s) => s.setLiveSlide)
     const setLiveOutputSlidesId = useAppStore((s) => s.setLiveOutputSlidesId)
-    const setSharedQueueSlideIds = useAppStore((s) => s.setSharedQueueSlideIds)
     const setActiveOverlay = useAppStore((s) => s.setActiveOverlay)
     const replaceSlidesForSchedule = useAppStore((s) => s.replaceSlidesForSchedule)
 
@@ -326,12 +324,12 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             // Also sync queue and operatorSlideIds from activeSession
             // so they're available immediately even before getSession resolves
             syncQueueFromServer({
-                queue: (resolvedActiveSession as any).queue,
-                queuedSlideIds: (resolvedActiveSession as any).queuedSlideIds,
+                queue: resolvedActiveSession.queue,
+                queuedSlideIds: (resolvedActiveSession as LegacyQueueFields).queuedSlideIds,
                 pendingRef: pendingQueue.ids,
             })
 
-            const operatorSlides = (resolvedActiveSession as any).operatorSlideIds as string[] | undefined
+            const operatorSlides = resolvedActiveSession.operatorSlideIds
             if (operatorSlides && operatorSlides.length > 0) {
                 const currentIds = useAppStore.getState().liveOutputSlidesId
                 if (JSON.stringify(currentIds) !== JSON.stringify(operatorSlides)) {
@@ -350,12 +348,13 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         if (!sync || !scheduleSlides || !sessionScheduleId) return
         resetBaselineFor(sessionScheduleId)
 
-        const mappedSlides: Slide[] = scheduleSlides.map((slide: any, index: number) => ({
+        // The stored row's `data` validator is looser than the app's Slide union.
+        const mappedSlides: Slide[] = scheduleSlides.map((slide, index) => ({
             ...slide,
             _id: slide._id as string,
             id: slide.id || String(slide._id),
             index: typeof slide.index === 'number' ? slide.index : index,
-        }))
+        }) as unknown as Slide)
 
         const serverIds = new Set(mappedSlides.map((slide) => slide.id))
         const removed = removedOnServer(knownServerSlideIdsRef.current, serverIds)
@@ -391,8 +390,8 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         const idsFromSessionSlides = incoming.map((s) => s.id)
         const currentIds = useAppStore.getState().liveOutputSlidesId || []
         const hasOperatorOrdering =
-            Array.isArray((liveSession as any)?.operatorSlideIds) &&
-            ((liveSession as any).operatorSlideIds as string[]).length > 0
+            Array.isArray(liveSession?.operatorSlideIds) &&
+            liveSession.operatorSlideIds.length > 0
 
         // Fallback deck order so collaborators can still render feed/next-up
         // before explicit operator ordering is synced.
@@ -432,8 +431,8 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
 
         // Sync structured queue — handle both new `queue` field and legacy `queuedSlideIds`
         syncQueueFromServer({
-            queue: (liveSession as any).queue,
-            queuedSlideIds: (liveSession as any).queuedSlideIds,
+            queue: liveSession.queue,
+            queuedSlideIds: (liveSession as LegacyQueueFields).queuedSlideIds,
             pendingRef: pendingQueue.ids,
         })
 
@@ -445,7 +444,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         // or removal isn't clobbered. Existing local ids are preserved;
         // ids that appear on the server but not locally are appended.
         const isOperatorRemote = liveSession.operatorId === currentUser?._id
-        const operatorSlides = (liveSession as any).operatorSlideIds as string[] | undefined
+        const operatorSlides = liveSession.operatorSlideIds
         if (operatorSlides && operatorSlides.length > 0) {
             const currentIds = useAppStore.getState().liveOutputSlidesId || []
             if (!isOperatorRemote) {
@@ -688,7 +687,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             useAppStore.getState().removeSharedQueueSlideIds(slideIds)
             reportSessionError("Couldn't suggest that slide", err)
         }
-    }, [resolvedSessionId, isConvexConnected, isOffline, addToQueueMutation, addToOperatorDeckMutation, isOpenMode, setLiveOutputSlidesId, sessionScheduleId, upsertScheduleSlideMutation])
+    }, [resolvedSessionId, isConvexConnected, isOffline, addToQueueMutation, addToOperatorDeckMutation, isOpenMode, effectiveMode, setLiveOutputSlidesId, sessionScheduleId, upsertScheduleSlideMutation])
 
     const handleRemoveFromQueue = useCallback(async (slideIds: string[]) => {
         const prevQueue = useAppStore.getState().sharedQueueSlideIds

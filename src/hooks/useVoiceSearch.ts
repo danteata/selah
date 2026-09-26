@@ -271,10 +271,8 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
         // `onend` synchronously after `start()` (e.g. when no microphone
         // is available, or when the page lost permission). Without
         // this gate, the UI flickers red → off in the same frame and
-        // the user sees no indication of what happened. The closure-
-        // local `started` is a synchronous fast-path; `startedRef` is
+        // the user sees no indication of what happened. `startedRef` is
         // the cross-microtask source of truth read by `onend`.
-        let started = false
 
         const recognition = new Ctor() as unknown as SpeechRecognitionLike
         recognition.lang = lang
@@ -283,7 +281,6 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
         recognition.maxAlternatives = 1
 
         recognition.onstart = () => {
-            started = true
             startedRef.current = true
             setIsListening(true)
         }
@@ -410,7 +407,6 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
             // microtasks and may not run in the order we'd assume if
             // we relied on the closure-local `started` variable.
             const didStart = startedRef.current
-            started = false
             startedRef.current = false
             // Commit the final text via the ref (which mirrors the
             // latest committed value — see note at `finalTextRef`).

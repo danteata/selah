@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type { Song, Media, LibraryItem, Scripture, Hymn } from '../types'
+import type { GlobalAppSettings, TranscriptionConfig } from './useGlobalAppSettings'
 
 export interface LocalTemplate {
     id: string
@@ -85,9 +86,17 @@ export interface CachedDictionaryFile {
     cachedAt: string
 }
 
-export interface CachedSetting {
-    id: string
-    data: any
+/** What each cached app-setting id holds. */
+export interface CachedAppSettingValues {
+    globalSettings: GlobalAppSettings
+    transcriptionConfig: TranscriptionConfig
+}
+
+export type CachedAppSettingId = keyof CachedAppSettingValues
+
+export interface CachedSetting<K extends CachedAppSettingId = CachedAppSettingId> {
+    id: K
+    data: CachedAppSettingValues[K]
     cachedAt: string
 }
 
@@ -415,7 +424,7 @@ export async function getAllCachedChurches(): Promise<CachedChurch[]> {
 }
 
 // App settings caching
-export async function cacheAppSetting(id: string, data: any): Promise<void> {
+export async function cacheAppSetting<K extends CachedAppSettingId>(id: K, data: CachedAppSettingValues[K]): Promise<void> {
     const db = getIndexedDB()
     await db.appSettings.put({
         id,
@@ -424,9 +433,10 @@ export async function cacheAppSetting(id: string, data: any): Promise<void> {
     })
 }
 
-export async function getCachedAppSetting(id: string): Promise<CachedSetting | undefined> {
+export async function getCachedAppSetting<K extends CachedAppSettingId>(id: K): Promise<CachedSetting<K> | undefined> {
     const db = getIndexedDB()
-    return await db.appSettings.get(id)
+    // Rows are written by cacheAppSetting keyed by id, so the row under `id` holds that id's shape.
+    return (await db.appSettings.get(id)) as CachedSetting<K> | undefined
 }
 
 // Pending mutations

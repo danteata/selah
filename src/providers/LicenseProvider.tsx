@@ -118,6 +118,7 @@ const DEFAULT: Entitlements = {
 
 const LicenseContext = createContext<Entitlements>(DEFAULT)
 
+// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; hook exported beside its provider
 export function useEntitlements(): Entitlements {
     return useContext(LicenseContext)
 }

@@ -38,13 +38,13 @@ function isConvexError(error: unknown): boolean {
 }
 
 const originalReportError = window.reportError?.bind(window)
-window.reportError = function (error: any, ...args: any[]) {
+window.reportError = function (error: unknown, ...args: unknown[]) {
     if (isConvexError(error)) {
         console.warn('[Suppressed Convex Error]:', (error as Error).message?.substring(0, 100))
         return
     }
     if (originalReportError) {
-        return (originalReportError as any)(error, ...args)
+        return (originalReportError as (...reportArgs: unknown[]) => void)(error, ...args)
     }
 }
 

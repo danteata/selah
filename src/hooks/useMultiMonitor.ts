@@ -4,7 +4,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
     multiMonitorService,
-    type ScreenInfo,
     type MultiMonitorState,
 } from '../services/multi-monitor'
 

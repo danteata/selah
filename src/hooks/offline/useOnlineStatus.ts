@@ -70,6 +70,7 @@ export function useOnlineStatus(): OnlineStatus {
         window.addEventListener('offline', handleOffline)
 
         const currentOnline = navigator.onLine
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- re-reads navigator.onLine at subscribe time (external browser state) so a change before listeners attached is not missed
         setIsOnline(currentOnline)
         if (currentOnline) {
             const now = new Date()

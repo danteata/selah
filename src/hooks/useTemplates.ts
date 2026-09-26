@@ -7,7 +7,6 @@ import { stripEphemeralBackground } from './useLocalBackground'
 import {
     saveLocalTemplate,
     getLocalTemplates,
-    getLocalTemplate,
     deleteLocalTemplate as deleteLocalTemplateFromDB,
     updateLocalTemplate as updateLocalTemplateFromDB,
     getCachedTemplateBlob,
