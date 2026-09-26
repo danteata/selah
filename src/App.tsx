@@ -1,5 +1,4 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ClerkProvider, SignedIn, SignedOut, useAuth } from '@clerk/clerk-react'
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Toaster } from 'sonner'
@@ -13,16 +12,15 @@ import type { AnalyticsProviderType as AnalyticsType } from './services/analytic
 import { AnalyticsEventType } from './services/analytics/types'
 import { useAppStore } from './store/appStore'
 import { useOAuthCallback } from './hooks/useOAuthCallback'
+import { useSyncCurrentUser } from './hooks/useSyncCurrentUser'
 import { seedLocalSongs } from './services/songLibrary/localSongSeeder'
 import { notifySongsChanged } from './hooks/useSongs'
-import { invoke } from '@tauri-apps/api/core'
-import { getVersion } from '@tauri-apps/api/app'
 import { applyThemeClass } from './utils/theme'
 import { AppLoading } from './components/common/AppLoading'
 // Lazy-load all route components so the initial JS chunk stays small.
 // Each route's bundle is fetched only when the user navigates to it, which
 // matters most on desktop where the operator hits Dashboard immediately but
-// rarely opens /test or /join/:code.
+// rarely opens /join/:code.
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const LiveView = lazy(() => import('./pages/LiveView'))
 const JoinChurch = lazy(() => import('./pages/JoinChurch'))
@@ -30,7 +28,8 @@ const Landing = lazy(() => import('./pages/Landing'))
 const DesktopWelcome = lazy(() => import('./pages/DesktopWelcome'))
 const LoginPage = lazy(() => import('./pages/auth/Login'))
 const SignupPage = lazy(() => import('./pages/auth/Signup'))
-const TestPage = lazy(() => import('./pages/TestPage'))
+const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPassword'))
+const SsoCallback = lazy(() => import('./pages/auth/SsoCallback'))
 const Downloads = lazy(() => import('./pages/Downloads'))
 const BillingReturn = lazy(() => import('./pages/BillingReturn'))
 // Desktop OAuth handoff routes. Both render only on the web build —
@@ -62,7 +61,6 @@ function useDarkModeSync() {
 }
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL!
-const queryClient = new QueryClient()
 
 // Analytics configuration from environment variables.
 // Set VITE_ANALYTICS_PROVIDER to "posthog", "amplitude", "console", or "none".
@@ -94,6 +92,20 @@ function OfflineApp() {
     return <Landing />
 }
 
+/**
+ * `/` once online. `<SignedIn>`/`<SignedOut>` both render nothing until Clerk
+ * has loaded, and the boot splash is gone by then — so every cold start showed
+ * a blank page for however long Clerk took. The offline tree already waited
+ * with a spinner; this does the same.
+ */
+function OnlineHome() {
+    const { isSignedIn, isLoaded } = useAuth()
+
+    if (!isLoaded) return <AppLoading label="Signing you in" />
+    if (isSignedIn) return <Dashboard />
+    return isDesktop() ? <DesktopWelcome /> : <Navigate to="/landing" replace />
+}
+
 function JoinChurchRoute() {
     const location = useLocation()
     return (
@@ -118,6 +130,7 @@ function AppRoutes() {
     // tree. On web the hook is a no-op (no listener started) so it
     // doesn't affect the fly deployment.
     useOAuthCallback()
+    useSyncCurrentUser()
 
     // Desktop OAuth callback handling.
     //
@@ -196,21 +209,34 @@ function AppRoutes() {
         )
     }
 
+    // Routes common to both trees. Kept in one place: the two tables had
+    // already drifted (the offline one had /desktop-oauth-done, the online one
+    // didn't).
+    const sharedRoutes = (
+        <>
+            <Route path="/live" element={<RouteErrorBoundary name="live"><LiveView /></RouteErrorBoundary>} />
+            <Route path="/landing" element={<RouteErrorBoundary name="landing"><Landing /></RouteErrorBoundary>} />
+            <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
+            <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
+            <Route path="/forgot-password" element={<RouteErrorBoundary name="forgot-password"><ForgotPasswordPage /></RouteErrorBoundary>} />
+            <Route path="/sso-callback" element={<RouteErrorBoundary name="sso-callback"><SsoCallback /></RouteErrorBoundary>} />
+            <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
+            <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
+            <Route path="/billing/return" element={<RouteErrorBoundary name="billing-return"><BillingReturn /></RouteErrorBoundary>} />
+            <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
+            <Route path="/desktop-oauth-done" element={<RouteErrorBoundary name="oauth-done"><DesktopOAuthDone /></RouteErrorBoundary>} />
+            {/* An unknown route used to render nothing at all — a blank page
+                with only the toaster — e.g. after a navigate('/dashboard'). */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+        </>
+    )
+
     if (isOffline) {
         return (
             <>
                 <Suspense fallback={<RouteFallback />}>
                     <Routes>
-                        <Route path="/live" element={<RouteErrorBoundary name="live"><LiveView /></RouteErrorBoundary>} />
-                        <Route path="/landing" element={<RouteErrorBoundary name="landing"><Landing /></RouteErrorBoundary>} />
-                        <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
-                        <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
-                        <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
-                        <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
-                        <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
-                        <Route path="/billing/return" element={<RouteErrorBoundary name="billing-return"><BillingReturn /></RouteErrorBoundary>} />
-                        <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
-                        <Route path="/desktop-oauth-done" element={<RouteErrorBoundary name="oauth-done"><DesktopOAuthDone /></RouteErrorBoundary>} />
+                        {sharedRoutes}
                         <Route
                             path="/"
                             element={<RouteErrorBoundary name="home"><OfflineApp /></RouteErrorBoundary>}
@@ -226,27 +252,12 @@ function AppRoutes() {
         <>
             <Suspense fallback={<RouteFallback />}>
                 <Routes>
-                    <Route path="/live" element={<RouteErrorBoundary name="live"><LiveView /></RouteErrorBoundary>} />
-                    <Route path="/landing" element={<RouteErrorBoundary name="landing"><Landing /></RouteErrorBoundary>} />
-                    <Route path="/login" element={<RouteErrorBoundary name="login"><LoginPage /></RouteErrorBoundary>} />
-                    <Route path="/signup" element={<RouteErrorBoundary name="signup"><SignupPage /></RouteErrorBoundary>} />
-                    <Route path="/test" element={<RouteErrorBoundary name="test"><TestPage /></RouteErrorBoundary>} />
-                    <Route path="/join/:code" element={<RouteErrorBoundary name="join"><JoinChurchRoute /></RouteErrorBoundary>} />
-                    <Route path="/download" element={<RouteErrorBoundary name="download"><Downloads /></RouteErrorBoundary>} />
-                    <Route path="/billing/return" element={<RouteErrorBoundary name="billing-return"><BillingReturn /></RouteErrorBoundary>} />
-                    <Route path="/desktop-oauth-callback" element={<RouteErrorBoundary name="oauth-callback"><DesktopOAuthCallback /></RouteErrorBoundary>} />
+                    {sharedRoutes}
                     <Route
                         path="/"
                         element={
                             <RouteErrorBoundary name="dashboard">
-                                <>
-                                    <SignedIn>
-                                        <Dashboard />
-                                    </SignedIn>
-                                    <SignedOut>
-                                        {isDesktop() ? <DesktopWelcome /> : <Navigate to="/landing" replace />}
-                                    </SignedOut>
-                                </>
+                                <OnlineHome />
                             </RouteErrorBoundary>
                         }
                     />
@@ -258,21 +269,6 @@ function AppRoutes() {
 }
 
 function App() {
-    const [version, setVersion] = useState('')
-    const [checking, setChecking] = useState(false)
-    const [status, setStatus] = useState('')
-    const { analytics } = useAnalyticsContext()
-
-    useEffect(() => {
-        // Tauri APIs throw synchronously in the web build because
-        // window.__TAURI_INTERNALS__ is undefined. Only fetch the version
-        // when we're actually running inside Tauri.
-        if (!isDesktop()) return
-        getVersion().then(setVersion).catch(() => {
-            // Silently ignore — version is informational only
-        })
-    }, [])
-
     useEffect(() => {
         // Seed the structured EasyWorship song corpus into the local library
         // for now (Convex bulk load comes later). Idempotent + version-guarded.
@@ -293,30 +289,6 @@ function App() {
     // <AppRoutes /> below, which runs inside the <ClerkProvider>
     // tree. The hook calls `useClerk()` which requires that context,
     // so it can't run here at the App() root.
-
-    async function check() {
-        if (!isDesktop()) {
-            setStatus('updates are only available in the desktop app')
-            return
-        }
-        setChecking(true)
-        setStatus('checking...')
-        const start = Date.now()
-        analytics.trackEvent(AnalyticsEventType.DESKTOP_UPDATE_CHECKED)
-        try {
-            const r = await invoke<string>('check_update')
-            setStatus(r)
-            if (r && !r.toLowerCase().includes('up to date') && !r.toLowerCase().includes('no update')) {
-                analytics.trackEvent(AnalyticsEventType.DESKTOP_UPDATE_INSTALLED, {
-                    elapsed_ms: Date.now() - start,
-                })
-            }
-        } catch (e) {
-            setStatus(`error: ${e}`)
-        } finally {
-            setChecking(false)
-        }
-    }
 
     return (
         <RouteErrorBoundary name="app-root">
@@ -341,13 +313,11 @@ function App() {
                 >
                     <ConvexConnectionProvider convexUrl={CONVEX_URL}>
                         <ConvexErrorBoundary>
-                            <QueryClientProvider client={queryClient}>
-                                <LicenseProvider>
-                                    <HashRouter>
-                                        <AppRoutes />
-                                    </HashRouter>
-                                </LicenseProvider>
-                            </QueryClientProvider>
+                            <LicenseProvider>
+                                <HashRouter>
+                                    <AppRoutes />
+                                </HashRouter>
+                            </LicenseProvider>
                         </ConvexErrorBoundary>
                     </ConvexConnectionProvider>
                 </ClerkProvider>

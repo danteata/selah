@@ -64,7 +64,7 @@ export default function LoginPage() {
                     })
                 }
                 // Redirect to the original destination (invite link) or dashboard
-                navigate(from || '/dashboard')
+                navigate(from || '/')
             } else {
                 console.log('Sign in needs additional steps:', result)
             }
@@ -112,7 +112,9 @@ export default function LoginPage() {
                 : `${window.location.origin}/sso-callback`
             const callbackComplete = isDesktop()
                 ? 'http://localhost:19888/oauth-callback' // unused on Tauri; the Rust listener navigates
-                : from || '/'
+                // A hash route: `from` is a router path such as /join/ABC,
+                // and as a plain path the browser lands on the home page.
+                : `/#${from || '/'}`
             await signIn.authenticateWithRedirect({
                 strategy: 'oauth_google',
                 redirectUrl: callbackUrl,

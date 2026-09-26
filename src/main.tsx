@@ -5,6 +5,25 @@ import App from './App.tsx'
 import { prewarmSemanticSearch } from './services/sermon-listener/localEmbeddings'
 import { applyThemeClass, readStoredTheme } from './utils/theme'
 
+/**
+ * Fold a path-style route into the hash, before the router reads the URL.
+ *
+ * The web app runs on HashRouter, but two kinds of URL arrive as real paths:
+ * invite links sent before they were built as `/#/join/…`, and Clerk's OAuth
+ * return to `/sso-callback`. nginx serves index.html for both, and HashRouter,
+ * seeing no hash, rendered the home page — so the invite was lost and a Google
+ * sign-in was never completed. The query string stays where it is: Clerk reads
+ * its callback params from `location.search`.
+ */
+function adoptPathRoute() {
+    if ('__TAURI_INTERNALS__' in window) return
+    const { pathname, search, hash } = window.location
+    if (hash.startsWith('#/')) return
+    if (!/^\/(join\/[^/]+|sso-callback)\/?$/.test(pathname)) return
+    window.history.replaceState(null, '', `/${search}#${pathname.replace(/\/$/, '')}`)
+}
+adoptPathRoute()
+
 // Before React mounts, so the first paint is already in the right theme. The
 // store initialises from the same function, so the two can't disagree.
 applyThemeClass(readStoredTheme())

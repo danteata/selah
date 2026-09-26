@@ -216,7 +216,9 @@ export default function SignupPage() {
                 // `/sso-callback` route, which the App's
                 // <ClerkProvider> handles natively.
                 const callbackUrl = `${window.location.origin}/sso-callback`
-                const callbackComplete = from || '/'
+                // Hash route, so an invite flow (`from` = /join/ABC) comes
+                // back to the join screen rather than the home page.
+                const callbackComplete = `/#${from || '/'}`
                 await signUp.authenticateWithRedirect({
                     strategy: 'oauth_google',
                     redirectUrl: callbackUrl,

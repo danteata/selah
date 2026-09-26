@@ -1,36 +1,98 @@
 import { useState } from 'react'
 import { useSignIn } from '@clerk/clerk-react'
-import { Link } from 'react-router-dom'
-import { Mail, ArrowRight, Cloud, ArrowLeft, Check } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Mail, ArrowRight, Cloud, ArrowLeft, KeyRound, Lock } from 'lucide-react'
 
+type Step = 'email' | 'reset'
+
+const inputClass =
+    'w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent'
+
+function clerkMessage(err: unknown, fallback: string): string {
+    const entry = (err as { errors?: Array<{ longMessage?: string; message?: string }> })?.errors?.[0]
+    return entry?.longMessage || entry?.message || fallback
+}
+
+/**
+ * Password reset by emailed code.
+ *
+ * Clerk's `reset_password_email_code` sends a six-digit code, not a link. This
+ * page used to stop after sending it — telling the user to follow a link that
+ * never arrived, with nowhere to enter the code — so a reset could never be
+ * finished. Step two takes the code and the new password and signs them in.
+ */
 export default function ForgotPasswordPage() {
-    const { signIn, isLoaded } = useSignIn()
+    const { signIn, setActive, isLoaded } = useSignIn()
+    const navigate = useNavigate()
 
+    const [step, setStep] = useState<Step>('email')
     const [email, setEmail] = useState('')
+    const [code, setCode] = useState('')
+    const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState('')
-    const [isSuccess, setIsSuccess] = useState(false)
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const sendCode = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!isLoaded) return
 
         setIsLoading(true)
         setError('')
-
         try {
             await signIn.create({
                 strategy: 'reset_password_email_code',
-                identifier: email,
+                identifier: email.trim(),
             })
-            setIsSuccess(true)
-        } catch (err: any) {
-            console.error('Password reset error:', err)
-            setError(err.errors?.[0]?.message || 'Failed to send reset email.')
+            setStep('reset')
+        } catch (err) {
+            setError(clerkMessage(err, 'Failed to send the reset code.'))
         } finally {
             setIsLoading(false)
         }
     }
+
+    const resetPassword = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!isLoaded) return
+
+        setIsLoading(true)
+        setError('')
+        try {
+            const result = await signIn.attemptFirstFactor({
+                strategy: 'reset_password_email_code',
+                code: code.trim(),
+                password,
+            })
+            if (result.status === 'complete') {
+                await setActive({ session: result.createdSessionId })
+                navigate('/')
+            } else {
+                // e.g. a second factor is required — the sign-in page handles those.
+                setError('Password changed. Please sign in to finish.')
+            }
+        } catch (err) {
+            setError(clerkMessage(err, 'That code is incorrect or has expired.'))
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const submitButton = (label: string) => (
+        <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-xl font-medium hover:from-primary-700 hover:to-primary-800 focus:ring-4 focus:ring-primary-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        >
+            {isLoading ? (
+                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+                <>
+                    {label}
+                    <ArrowRight className="w-4 h-4" />
+                </>
+            )}
+        </button>
+    )
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-primary-100 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4">
@@ -41,91 +103,104 @@ export default function ForgotPasswordPage() {
                         <Cloud className="w-8 h-8 text-white" />
                     </div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                        {isSuccess ? 'Check your email' : 'Reset your password'}
+                        {step === 'reset' ? 'Choose a new password' : 'Reset your password'}
                     </h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-1">
-                        {isSuccess
-                            ? 'We sent a password reset link to your email'
-                            : 'Enter your email and we\'ll send you a reset link'}
+                        {step === 'reset'
+                            ? <>We emailed a code to <strong>{email}</strong></>
+                            : 'Enter your email and we\'ll send you a reset code'}
                     </p>
                 </div>
 
                 {/* Form Card */}
                 <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl shadow-gray-200/50 dark:shadow-none border border-gray-200 dark:border-gray-800 p-6">
-                    {isSuccess ? (
-                        <div className="text-center py-4">
-                            <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full mb-4">
-                                <Check className="w-8 h-8 text-green-600 dark:text-green-400" />
-                            </div>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                                We sent an email to <strong>{email}</strong> with instructions to reset your password.
-                            </p>
-                            <Link
-                                to="/login"
-                                className="inline-flex items-center gap-2 px-4 py-2 text-primary-600 hover:text-primary-700 font-medium"
-                            >
-                                <ArrowLeft className="w-4 h-4" />
-                                Back to login
-                            </Link>
+                    {error && (
+                        <div role="alert" className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
+                            {error}
                         </div>
+                    )}
+
+                    {step === 'email' ? (
+                        <form onSubmit={sendCode} className="space-y-4">
+                            <div>
+                                <label htmlFor="reset-email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Email
+                                </label>
+                                <div className="relative">
+                                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <input
+                                        id="reset-email"
+                                        type="email"
+                                        autoComplete="email"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        placeholder="you@church.com"
+                                        required
+                                        className={inputClass}
+                                    />
+                                </div>
+                            </div>
+                            {submitButton('Send Reset Code')}
+                        </form>
                     ) : (
-                        <>
-                            {/* Error Message */}
-                            {error && (
-                                <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400 text-sm">
-                                    {error}
+                        <form onSubmit={resetPassword} className="space-y-4">
+                            <div>
+                                <label htmlFor="reset-code" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Code from the email
+                                </label>
+                                <div className="relative">
+                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <input
+                                        id="reset-code"
+                                        inputMode="numeric"
+                                        autoComplete="one-time-code"
+                                        value={code}
+                                        onChange={(e) => setCode(e.target.value)}
+                                        placeholder="123456"
+                                        required
+                                        className={inputClass}
+                                    />
                                 </div>
-                            )}
-
-                            <form onSubmit={handleSubmit} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                        Email
-                                    </label>
-                                    <div className="relative">
-                                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                                        <input
-                                            type="email"
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
-                                            placeholder="you@church.com"
-                                            required
-                                            className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                        />
-                                    </div>
+                            </div>
+                            <div>
+                                <label htmlFor="reset-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    New password
+                                </label>
+                                <div className="relative">
+                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <input
+                                        id="reset-password"
+                                        type="password"
+                                        autoComplete="new-password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        minLength={8}
+                                        required
+                                        className={inputClass}
+                                    />
                                 </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={isLoading}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-xl font-medium hover:from-primary-700 hover:to-primary-800 focus:ring-4 focus:ring-primary-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                                >
-                                    {isLoading ? (
-                                        <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                    ) : (
-                                        <>
-                                            Send Reset Link
-                                            <ArrowRight className="w-4 h-4" />
-                                        </>
-                                    )}
-                                </button>
-                            </form>
-                        </>
+                            </div>
+                            {submitButton('Reset Password')}
+                            <button
+                                type="button"
+                                onClick={() => { setStep('email'); setCode(''); setError('') }}
+                                className="w-full text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                            >
+                                Use a different email or resend the code
+                            </button>
+                        </form>
                     )}
                 </div>
 
-                {/* Back to Login Link */}
-                {!isSuccess && (
-                    <p className="text-center mt-6">
-                        <Link
-                            to="/login"
-                            className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                        >
-                            <ArrowLeft className="w-4 h-4" />
-                            Back to login
-                        </Link>
-                    </p>
-                )}
+                <p className="text-center mt-6">
+                    <Link
+                        to="/login"
+                        className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                    >
+                        <ArrowLeft className="w-4 h-4" />
+                        Back to login
+                    </Link>
+                </p>
             </div>
         </div>
     )
