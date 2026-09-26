@@ -34,6 +34,7 @@ const h = vi.hoisted(() => ({ slideTypeProp: undefined as SlideType | undefined 
 
 vi.mock('@clerk/clerk-react', () => ({ useAuth: () => ({ isSignedIn: true }) }))
 vi.mock('../../modals', () => ({ CreateTemplateModal: () => null }))
+vi.mock('../../../hooks/useUserRole', () => ({ useUserRole: () => ({ isSuperadmin: false }) }))
 vi.mock('../../../hooks/useLocalBackground', () => ({ useLocalBackground: () => '' }))
 
 vi.mock('../../../hooks/useTemplates', async (importOriginal) => {

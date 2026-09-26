@@ -7,6 +7,11 @@
 
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { getCurrentUser, isSuperadmin, requireSuperadmin } from "./lib/auth";
+
+// Provider credentials live in this document. Only a superadmin (who edits
+// them) ever receives them; everyone else gets the settings without.
+const SECRET_FIELDS = ["sermonListener_whisperApiKey", "sermonListener_elevenLabsApiKey"] as const;
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -49,9 +54,15 @@ export const getGlobalSettings = query({
             };
         }
 
+        const user = await getCurrentUser(ctx);
+        const visible: Record<string, unknown> = { ...settings };
+        if (!user || !isSuperadmin(user)) {
+            for (const field of SECRET_FIELDS) delete visible[field];
+        }
+
         return {
             ...DEFAULT_SETTINGS,
-            ...settings,
+            ...visible,
             exists: true,
         };
     },
@@ -88,60 +99,21 @@ export const updateGlobalSettings = mutation({
         sermonListener_defaultLanguage: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        // Get the current user
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        // Get the user to check if they are a super admin
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_clerk_id", (q) => q.eq("clerkId", identity.subject))
-            .first();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
-
-        // Only super admins can update global settings
-        if (user.role !== "superadmin") {
-            throw new Error("Only system super admins can update global app settings");
-        }
-
+        const user = await requireSuperadmin(ctx);
         const now = new Date().toISOString();
 
-        // Check if settings already exist
         const existingSettings = await ctx.db
             .query("globalAppSettings")
             .first();
 
-        const settingsData = {
-            sermonListener_transcriptionProvider: args.sermonListener_transcriptionProvider,
-            sermonListener_whisperModel: args.sermonListener_whisperModel,
-            sermonListener_whisperEndpoint: args.sermonListener_whisperEndpoint,
-            sermonListener_whisperApiKey: args.sermonListener_whisperApiKey,
-            sermonListener_whisperChunkDurationMs: args.sermonListener_whisperChunkDurationMs,
-            sermonListener_whisperCppEndpoint: args.sermonListener_whisperCppEndpoint,
-            sermonListener_whisperCppChunkDurationMs: args.sermonListener_whisperCppChunkDurationMs,
-            sermonListener_fasterWhisperEndpoint: args.sermonListener_fasterWhisperEndpoint,
-            sermonListener_fasterWhisperModel: args.sermonListener_fasterWhisperModel,
-            sermonListener_fasterWhisperChunkDurationMs: args.sermonListener_fasterWhisperChunkDurationMs,
-            sermonListener_fasterWhisperAudioCaptureMode: args.sermonListener_fasterWhisperAudioCaptureMode,
-            sermonListener_fasterWhisperDisableBrowserProcessing: args.sermonListener_fasterWhisperDisableBrowserProcessing,
-            sermonListener_useVAD: args.sermonListener_useVAD,
-            sermonListener_vadPositiveSpeechThreshold: args.sermonListener_vadPositiveSpeechThreshold,
-            sermonListener_vadNegativeSpeechThreshold: args.sermonListener_vadNegativeSpeechThreshold,
-            sermonListener_vadMinSpeechFrames: args.sermonListener_vadMinSpeechFrames,
-            sermonListener_vadPreSpeechPadFrames: args.sermonListener_vadPreSpeechPadFrames,
-            sermonListener_vadRedemptionFrames: args.sermonListener_vadRedemptionFrames,
-            sermonListener_elevenLabsApiKey: args.sermonListener_elevenLabsApiKey,
-            sermonListener_elevenLabsModelId: args.sermonListener_elevenLabsModelId,
-            sermonListener_elevenLabsChunkDurationMs: args.sermonListener_elevenLabsChunkDurationMs,
-            sermonListener_defaultLanguage: args.sermonListener_defaultLanguage,
-            updatedAt: now,
-            updatedBy: user._id,
-        };
+        // Only the fields this call actually sets. Patching an explicit
+        // `undefined` deletes the field, so writing every key wiped whatever
+        // the caller left out — the admin form sends three, and each save
+        // erased the rest (endpoints, chunk sizes, VAD thresholds, API keys).
+        const settingsData: Record<string, unknown> = { updatedAt: now, updatedBy: user._id };
+        for (const [key, value] of Object.entries(args)) {
+            if (value !== undefined) settingsData[key] = value;
+        }
 
         if (existingSettings) {
             // Update existing settings
@@ -150,8 +122,11 @@ export const updateGlobalSettings = mutation({
         } else {
             // Create new settings
             await ctx.db.insert("globalAppSettings", {
+                ...DEFAULT_SETTINGS,
                 ...settingsData,
                 createdAt: now,
+                updatedAt: now,
+                updatedBy: user._id,
             });
             return { success: true, action: "created" };
         }
@@ -165,6 +140,7 @@ export const updateGlobalSettings = mutation({
 export const initializeDefaultSettings = mutation({
     args: {},
     handler: async (ctx) => {
+        await requireSuperadmin(ctx);
         // Check if settings already exist
         const existingSettings = await ctx.db
             .query("globalAppSettings")
@@ -196,6 +172,8 @@ export const initializeDefaultSettings = mutation({
 export const getTranscriptionConfig = query({
     args: {},
     handler: async (ctx) => {
+        // API keys are deliberately absent from this config: it goes to every
+        // signed-in client, and none of the providers still in use needs one.
         const settings = await ctx.db
             .query("globalAppSettings")
             .first();
@@ -219,7 +197,6 @@ export const getTranscriptionConfig = query({
                 config = {
                     model: settings.sermonListener_whisperModel || DEFAULT_SETTINGS.sermonListener_whisperModel,
                     endpoint: settings.sermonListener_whisperEndpoint,
-                    apiKey: settings.sermonListener_whisperApiKey,
                     chunkDurationMs: settings.sermonListener_whisperChunkDurationMs || DEFAULT_SETTINGS.sermonListener_whisperChunkDurationMs,
                 };
                 break;
@@ -251,7 +228,6 @@ export const getTranscriptionConfig = query({
 
             case "elevenlabs":
                 config = {
-                    apiKey: settings.sermonListener_elevenLabsApiKey,
                     modelId: settings.sermonListener_elevenLabsModelId || DEFAULT_SETTINGS.sermonListener_elevenLabsModelId,
                     chunkDurationMs: settings.sermonListener_elevenLabsChunkDurationMs || DEFAULT_SETTINGS.sermonListener_elevenLabsChunkDurationMs,
                 };

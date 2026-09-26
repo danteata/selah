@@ -1,20 +1,13 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
-import { assertTeamMemberLimit } from "./entitlements";
+import { getById, getCurrentUser, isMemberOf, isSuperadmin } from "./lib/auth";
+import {
+    generateUniqueInviteCode,
+    getOrCreateUserFromIdentity,
+    redeemInvitation,
+} from "./lib/invites";
 
-// Generate a random invite code (URL-safe, 12 characters)
-function generateInviteCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusing chars like I, O, 0, 1
-    let code = '';
-    for (let i = 0; i < 12; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    // Format as XXX-XXX-XXX for readability
-    return `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}`;
-}
-
-// Create a new church
+// Create a new church, with the caller as its admin
 export const createChurch = mutation({
     args: {
         name: v.string(),
@@ -23,61 +16,28 @@ export const createChurch = mutation({
         pastor: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
+        const user = await getOrCreateUserFromIdentity(ctx);
+
+        // Creating a church moves you into it. For a member of an existing
+        // church that silently abandoned the old one (leaving them in its
+        // `userIds`), so require leaving first. A superadmin can found churches
+        // freely — they switch between them anyway.
+        if (user.churchId && !isSuperadmin(user)) {
+            throw new Error("You already belong to a church. Leave it before creating a new one.");
         }
 
-        let user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
+        const name = args.name.trim();
+        if (!name) throw new Error("Church name is required");
 
-        // Create user if they don't exist (just-in-time user creation)
-        if (!user) {
-            const now = new Date().toISOString();
-            const userId = await ctx.db.insert("users", {
-                email: identity.email!,
-                fullname: identity.givenName && identity.familyName
-                    ? `${identity.givenName} ${identity.familyName}`
-                    : identity.email!.split('@')[0],
-                avatar: identity.pictureUrl || "",
-                theme: "light",
-                role: "member",
-                churchId: "",
-                clerkId: identity.subject,
-                emailVerified: true,
-                createdAt: now,
-                updatedAt: now,
-            });
-
-            user = await ctx.db.get(userId);
-        }
-
-        if (!user) {
-            throw new Error("Failed to create or retrieve user");
-        }
-
-        // Generate default invite code
-        let defaultInviteCode = generateInviteCode();
-        let attempts = 0;
-        while (attempts < 10) {
-            const existing = await ctx.db
-                .query("invitations")
-                .withIndex("by_code", (q) => q.eq("code", defaultInviteCode))
-                .unique();
-            if (!existing) break;
-            defaultInviteCode = generateInviteCode();
-            attempts++;
-        }
+        const defaultInviteCode = await generateUniqueInviteCode(ctx);
 
         const now = new Date().toISOString();
         const churchId = await ctx.db.insert("churches", {
-            name: args.name,
+            name,
             type: args.type || "church",
             address: args.address || "",
             pastor: args.pastor || user.fullname,
-            userIds: [user._id!],
+            userIds: [user._id],
             storageUsed: 0,
             subscriptionPlan: "free",
             defaultInviteCode,
@@ -85,21 +45,22 @@ export const createChurch = mutation({
             updatedAt: now,
         });
 
-        // Create the default invitation record
+        // The church's persistent join link.
         await ctx.db.insert("invitations", {
             code: defaultInviteCode,
-            churchId: churchId,
+            churchId,
             type: "link",
-            createdBy: user._id!,
+            createdBy: user._id,
             status: "pending",
             createdAt: now,
             updatedAt: now,
         });
 
-        // Update user with churchId and make them admin
-        await ctx.db.patch(user._id as Id<"users">, {
-            churchId: churchId,
-            role: "admin", // Church creator becomes admin
+        await ctx.db.patch(user._id, {
+            churchId,
+            // The founder administers the church — but never demote a
+            // superadmin to plain admin by founding one.
+            role: isSuperadmin(user) ? "superadmin" : "admin",
             updatedAt: now,
         });
 
@@ -113,157 +74,24 @@ export const joinChurch = mutation({
         inviteCode: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        // Find the invitation
-        const invitation = await ctx.db
-            .query("invitations")
-            .withIndex("by_code", (q) => q.eq("code", args.inviteCode))
-            .unique();
-
-        if (!invitation) {
-            throw new Error("Invalid invite code");
-        }
-
-        // Check if invitation is still valid
-        if (invitation.status !== "pending") {
-            if (invitation.status === "accepted") {
-                throw new Error("This invite code has already been used");
-            }
-            if (invitation.status === "revoked") {
-                throw new Error("This invite code has been revoked");
-            }
-            if (invitation.status === "expired") {
-                throw new Error("This invite code has expired");
-            }
-        }
-
-        // Check expiration
-        const now = new Date();
-        if (invitation.expiresAt && new Date(invitation.expiresAt) < now) {
-            await ctx.db.patch(invitation._id!, { status: "expired", updatedAt: now.toISOString() });
-            throw new Error("This invite code has expired");
-        }
-
-        // For email invitations, verify the email matches
-        if (invitation.type === "email" && invitation.email) {
-            if (identity.email?.toLowerCase() !== invitation.email.toLowerCase()) {
-                throw new Error("This invitation was sent to a different email address");
-            }
-        }
-
-        let user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        // Enforce the church's plan team-size cap before adding a NEW member.
-        if (user?.churchId !== invitation.churchId) {
-            await assertTeamMemberLimit(ctx, invitation.churchId);
-        }
-
-        // Create user if they don't exist (just-in-time user creation)
-        if (!user) {
-            const userId = await ctx.db.insert("users", {
-                email: identity.email!,
-                fullname: identity.givenName && identity.familyName
-                    ? `${identity.givenName} ${identity.familyName}`
-                    : identity.email!.split('@')[0],
-                avatar: identity.pictureUrl || "",
-                theme: "light",
-                role: "member",
-                churchId: invitation.churchId,
-                clerkId: identity.subject,
-                emailVerified: true,
-                createdAt: now.toISOString(),
-                updatedAt: now.toISOString(),
-            });
-
-            user = await ctx.db.get(userId);
-        } else {
-            // Check if user is already in a church
-            if (user.churchId && user.churchId !== invitation.churchId) {
-                throw new Error("You are already a member of another church. Please leave your current church before joining a new one.");
-            }
-            if (user.churchId === invitation.churchId) {
-                throw new Error("You are already a member of this church");
-            }
-        }
-
-        if (!user) {
-            throw new Error("Failed to create or retrieve user");
-        }
-
-        // Update user's churchId
-        await ctx.db.patch(user._id as Id<"users">, {
-            churchId: invitation.churchId,
-            updatedAt: now.toISOString(),
-        });
-
-        // Add user to church's userIds array
-        const church = await ctx.db
-            .query("churches")
-            .filter((q) => q.eq(q.field("_id"), invitation.churchId))
-            .unique();
-
-        if (church) {
-            const userIds = church.userIds || [];
-            if (!userIds.includes(user._id!)) {
-                await ctx.db.patch(church._id!, {
-                    userIds: [...userIds, user._id!],
-                    updatedAt: now.toISOString(),
-                });
-            }
-        }
-
-        // Mark invitation as accepted
-        await ctx.db.patch(invitation._id!, {
-            status: "accepted",
-            acceptedBy: user._id!,
-            acceptedAt: now.toISOString(),
-            updatedAt: now.toISOString(),
-        });
-
+        const { church } = await redeemInvitation(ctx, args.inviteCode);
         return church;
     },
 });
 
-// Get church by ID
+// The caller's church, or — for a superadmin — any church by id.
 export const getChurch = query({
     args: {
         churchId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            return null;
-        }
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
 
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            return null;
-        }
-
-        // Use provided churchId or fall back to user's churchId
         const churchId = args.churchId || user.churchId;
+        if (!isMemberOf(user, churchId) && !isSuperadmin(user)) return null;
 
-        if (!churchId) {
-            return null;
-        }
-
-        const church = await ctx.db
-            .query("churches")
-            .filter((q) => q.eq(q.field("_id"), churchId))
-            .unique();
-
-        return church;
+        return await getById(ctx, "churches", churchId);
     },
 });
 
@@ -271,26 +99,9 @@ export const getChurch = query({
 export const getMyChurch = query({
     args: {},
     handler: async (ctx) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            return null;
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || !user.churchId) {
-            return null;
-        }
-
-        const church = await ctx.db
-            .query("churches")
-            .filter((q) => q.eq(q.field("_id"), user.churchId))
-            .unique();
-
-        return church;
+        const user = await getCurrentUser(ctx);
+        if (!user?.churchId) return null;
+        return await getById(ctx, "churches", user.churchId);
     },
 });
 
@@ -298,37 +109,29 @@ export const getMyChurch = query({
 export const hasChurch = query({
     args: {},
     handler: async (ctx) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            return false;
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
+        const user = await getCurrentUser(ctx);
         return !!user?.churchId;
     },
 });
 
-// Get church by ID (simple query without auth)
+// A church by id, for its members (and superadmins). Returned null to anyone
+// else — it used to answer every caller, signed in or not.
 export const getChurchById = query({
     args: { id: v.string() },
     handler: async (ctx, args) => {
-        const church = await ctx.db
-            .query("churches")
-            .filter((q) => q.eq(q.field("_id"), args.id))
-            .unique();
-        return church;
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
+        if (!isMemberOf(user, args.id) && !isSuperadmin(user)) return null;
+        return await getById(ctx, "churches", args.id);
     },
 });
 
-// List all churches (for superadmin)
+// Every church, for the superadmin church switcher.
 export const listChurches = query({
     args: {},
     handler: async (ctx) => {
-        const churches = await ctx.db.query("churches").collect();
-        return churches;
+        const user = await getCurrentUser(ctx);
+        if (!user || !isSuperadmin(user)) return [];
+        return await ctx.db.query("churches").take(1000);
     },
 });

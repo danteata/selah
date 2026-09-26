@@ -12,7 +12,8 @@
  */
 
 import { v } from "convex/values";
-import { action, internalMutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, query } from "./_generated/server";
+import { getCurrentUser, isSuperadmin } from "./lib/auth";
 import { api, internal } from "./_generated/api";
 
 // Book name to number mapping (standard Protestant canon)
@@ -307,22 +308,38 @@ export const insertEmbedding = internalMutation({
 
 /**
  * Internal mutation to clear all embeddings for a version.
+ *
+ * A version is ~31k rows (more with fragments) — far past one transaction's
+ * write limit — so this deletes a batch and schedules itself for the rest.
  */
 export const clearEmbeddings = internalMutation({
     args: {
         version: v.string(),
     },
     handler: async (ctx, args) => {
-        const embeddings = await ctx.db
+        const BATCH = 500;
+        const batch = await ctx.db
             .query("verseEmbeddings")
             .withIndex("by_version", (q) => q.eq("version", args.version))
-            .collect();
+            .take(BATCH);
 
-        for (const embedding of embeddings) {
+        for (const embedding of batch) {
             await ctx.db.delete(embedding._id);
         }
 
-        return { deleted: embeddings.length };
+        if (batch.length === BATCH) {
+            await ctx.scheduler.runAfter(0, internal.verseEmbeddings.clearEmbeddings, args);
+        }
+        return { deleted: batch.length, done: batch.length < BATCH };
+    },
+});
+
+/** Actions can't read the database, so they ask through here. */
+export const callerIsSuperadmin = internalQuery({
+    args: {},
+    handler: async (ctx) => {
+        const user = await getCurrentUser(ctx);
+        return !!user && isSuperadmin(user);
     },
 });
 
@@ -351,6 +368,11 @@ export const seedEmbeddingsFromClient = action({
         })),
     },
     handler: async (ctx, args): Promise<{ success: boolean; count: number }> => {
+        // The embeddings every church's sermon listener searches: anyone able
+        // to write here could poison or wipe them.
+        if (!(await ctx.runQuery(internal.verseEmbeddings.callerIsSuperadmin, {}))) {
+            throw new Error("Superadmin only");
+        }
         let count = 0;
 
         for (const item of args.embeddings) {
@@ -384,7 +406,10 @@ export const clearVersionEmbeddings = action({
     args: {
         version: v.string(),
     },
-    handler: async (ctx, args): Promise<{ deleted: number }> => {
+    handler: async (ctx, args): Promise<{ deleted: number; done: boolean }> => {
+        if (!(await ctx.runQuery(internal.verseEmbeddings.callerIsSuperadmin, {}))) {
+            throw new Error("Superadmin only");
+        }
         const result = await ctx.runMutation(internal.verseEmbeddings.clearEmbeddings, {
             version: args.version,
         });

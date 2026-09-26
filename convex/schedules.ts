@@ -1,6 +1,19 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import { getById, getCurrentUser, isChurchAdmin, isMemberOf, requireUser, type User } from "./lib/auth";
+
+/** A schedule the caller's church owns, or a thrown error. */
+async function requireOwnSchedule(ctx: QueryCtx, scheduleId: string) {
+    const user = await requireUser(ctx);
+    const schedule = await getById(ctx, "schedules", scheduleId);
+    if (!schedule) throw new Error("Schedule not found");
+    if (!isMemberOf(user, schedule.churchId)) throw new Error("Unauthorized");
+    return { user, schedule };
+}
+
+function canManage(user: User, schedule: { authorId: string; churchId: string }) {
+    return schedule.authorId === user._id || isChurchAdmin(user, schedule.churchId);
+}
 
 // Get schedules by church
 export const getSchedules = query({
@@ -8,12 +21,13 @@ export const getSchedules = query({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
-        const schedules = await ctx.db
+        const user = await getCurrentUser(ctx);
+        if (!user || !isMemberOf(user, args.churchId)) return [];
+
+        return await ctx.db
             .query("schedules")
             .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
-            .collect();
-
-        return schedules;
+            .take(1000);
     },
 });
 
@@ -23,12 +37,10 @@ export const getSchedule = query({
         scheduleId: v.string(),
     },
     handler: async (ctx, args) => {
-        const schedule = await ctx.db
-            .query("schedules")
-            .filter((q) => q.eq(q.field("_id"), args.scheduleId))
-            .unique();
-
-        return schedule;
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
+        const schedule = await getById(ctx, "schedules", args.scheduleId);
+        return schedule && isMemberOf(user, schedule.churchId) ? schedule : null;
     },
 });
 
@@ -39,32 +51,19 @@ export const createSchedule = mutation({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== args.churchId) {
-            throw new Error("Unauthorized");
-        }
+        const user = await requireUser(ctx);
+        if (!isMemberOf(user, args.churchId)) throw new Error("Unauthorized");
 
         const now = new Date().toISOString();
-        const scheduleId = await ctx.db.insert("schedules", {
+        return await ctx.db.insert("schedules", {
             name: args.name,
-            authorId: user._id!,
-            editorIds: [user._id!],
+            authorId: user._id,
+            editorIds: [user._id],
             churchId: args.churchId,
             lastUpdated: now,
             createdAt: now,
             updatedAt: now,
         });
-
-        return scheduleId;
     },
 });
 
@@ -75,92 +74,47 @@ export const updateSchedule = mutation({
         name: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const { user, schedule } = await requireOwnSchedule(ctx, args.scheduleId);
 
-        const schedule = await ctx.db
-            .query("schedules")
-            .filter((q) => q.eq(q.field("_id"), args.scheduleId))
-            .unique();
-
-        if (!schedule) {
-            throw new Error("Schedule not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== schedule.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        const isEditor = schedule.editorIds?.includes(user._id!);
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
-
-        if (!isEditor && !isAdmin) {
+        const isEditor = schedule.editorIds?.includes(user._id);
+        if (!isEditor && !isChurchAdmin(user, schedule.churchId)) {
             throw new Error("Only editors and admins can update this schedule");
         }
 
-        await ctx.db.patch(args.scheduleId as Id<"schedules">, {
-            ...args,
-            updatedAt: new Date().toISOString(),
+        const now = new Date().toISOString();
+        // Only the schedule's own fields. Spreading `args` here wrote
+        // `scheduleId` into the document, which the schema rejects — so every
+        // rename failed.
+        await ctx.db.patch(schedule._id, {
+            ...(args.name !== undefined ? { name: args.name } : {}),
+            lastUpdated: now,
+            updatedAt: now,
         });
 
         return args.scheduleId;
     },
 });
 
-// Delete schedule
+// Delete schedule, with its slides
 export const deleteSchedule = mutation({
     args: {
         scheduleId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const schedule = await ctx.db
-            .query("schedules")
-            .filter((q) => q.eq(q.field("_id"), args.scheduleId))
-            .unique();
-
-        if (!schedule) {
-            throw new Error("Schedule not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== schedule.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        const isAuthor = schedule.authorId === user._id;
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
-
-        if (!isAuthor && !isAdmin) {
+        const { user, schedule } = await requireOwnSchedule(ctx, args.scheduleId);
+        if (!canManage(user, schedule)) {
             throw new Error("Only the schedule author or an admin can delete this schedule");
         }
 
-        // Delete all slides in this schedule
         const slides = await ctx.db
             .query("slides")
             .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
             .collect();
-
         for (const slide of slides) {
-            await ctx.db.delete(slide._id!);
+            await ctx.db.delete(slide._id);
         }
 
-        await ctx.db.delete(args.scheduleId as Id<"schedules">);
+        await ctx.db.delete(schedule._id);
         return true;
     },
 });
@@ -171,40 +125,20 @@ export const addScheduleEditor = mutation({
         editorId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const schedule = await ctx.db
-            .query("schedules")
-            .filter((q) => q.eq(q.field("_id"), args.scheduleId))
-            .unique();
-
-        if (!schedule) {
-            throw new Error("Schedule not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== schedule.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        const isAuthor = schedule.authorId === user._id;
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
-
-        if (!isAuthor && !isAdmin) {
+        const { user, schedule } = await requireOwnSchedule(ctx, args.scheduleId);
+        if (!canManage(user, schedule)) {
             throw new Error("Only the schedule author or an admin can add editors");
         }
 
+        const editor = await getById(ctx, "users", args.editorId);
+        if (!editor || !isMemberOf(editor, schedule.churchId)) {
+            throw new Error("Editors must be members of this church");
+        }
+
         const editorIds = schedule.editorIds || [];
-        if (!editorIds.includes(args.editorId)) {
-            await ctx.db.patch(args.scheduleId as Id<"schedules">, {
-                editorIds: [...editorIds, args.editorId],
+        if (!editorIds.includes(editor._id)) {
+            await ctx.db.patch(schedule._id, {
+                editorIds: [...editorIds, editor._id],
                 updatedAt: new Date().toISOString(),
             });
         }
@@ -219,39 +153,13 @@ export const removeScheduleEditor = mutation({
         editorId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const schedule = await ctx.db
-            .query("schedules")
-            .filter((q) => q.eq(q.field("_id"), args.scheduleId))
-            .unique();
-
-        if (!schedule) {
-            throw new Error("Schedule not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== schedule.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        const isAuthor = schedule.authorId === user._id;
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
-
-        if (!isAuthor && !isAdmin) {
+        const { user, schedule } = await requireOwnSchedule(ctx, args.scheduleId);
+        if (!canManage(user, schedule)) {
             throw new Error("Only the schedule author or an admin can remove editors");
         }
 
-        const editorIds = (schedule.editorIds || []).filter(id => id !== args.editorId);
-        await ctx.db.patch(args.scheduleId as Id<"schedules">, {
-            editorIds,
+        await ctx.db.patch(schedule._id, {
+            editorIds: (schedule.editorIds || []).filter((id) => id !== args.editorId),
             updatedAt: new Date().toISOString(),
         });
 

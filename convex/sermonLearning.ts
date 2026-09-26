@@ -1,5 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { getCurrentUser, isChurchAdmin, isMemberOf, requireChurchMember, requireUser } from "./lib/auth";
+import { requireOwnTranscript } from "./transcripts";
 
 // ─── Speaker Profile ────────────────────────────────────────────────────────
 
@@ -9,6 +11,8 @@ export const getSpeakerProfile = query({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
+        if (!user || !isMemberOf(user, args.churchId)) return null;
         return await ctx.db
             .query("speakerProfiles")
             .withIndex("by_speaker_church", (q) =>
@@ -27,6 +31,7 @@ export const upsertSpeakerProfile = mutation({
         bookStats: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
+        await requireChurchMember(ctx, args.churchId);
         const existing = await ctx.db
             .query("speakerProfiles")
             .withIndex("by_speaker_church", (q) =>
@@ -64,8 +69,7 @@ export const addCorrection = mutation({
         closestRawText: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const transcript = await ctx.db.get(args.transcriptId);
-        if (!transcript) throw new Error("Transcript not found");
+        const { transcript } = await requireOwnTranscript(ctx, args.transcriptId);
 
         const correction = {
             originalReference: args.originalReference,
@@ -112,8 +116,7 @@ export const addFailedCandidate = mutation({
         rawText: v.string(),
     },
     handler: async (ctx, args) => {
-        const transcript = await ctx.db.get(args.transcriptId);
-        if (!transcript) throw new Error("Transcript not found");
+        const { transcript } = await requireOwnTranscript(ctx, args.transcriptId);
 
         const candidate = {
             reference: args.reference,
@@ -145,6 +148,7 @@ export const proposePattern = mutation({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
+        await requireChurchMember(ctx, args.churchId);
         // Check if identical pending pattern already exists
         const existing = await ctx.db
             .query("misheardPatterns")
@@ -183,6 +187,12 @@ export const reviewPattern = mutation({
         status: v.union(v.literal("approved"), v.literal("rejected")),
     },
     handler: async (ctx, args) => {
+        const user = await requireUser(ctx);
+        const pattern = await ctx.db.get(args.id);
+        if (!pattern) throw new Error("Pattern not found");
+        if (!isChurchAdmin(user, pattern.churchId)) {
+            throw new Error("Only an admin of this church can review patterns");
+        }
         await ctx.db.patch(args.id, {
             status: args.status,
             updatedAt: new Date().toISOString(),
@@ -197,6 +207,8 @@ export const getPendingPatterns = query({
         speakerName: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
+        if (!user || !isMemberOf(user, args.churchId)) return [];
         let patterns = await ctx.db
             .query("misheardPatterns")
             .withIndex("by_status", (q) => q.eq("status", "pending"))
@@ -216,6 +228,8 @@ export const getApprovedPatterns = query({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
+        if (!user || !isMemberOf(user, args.churchId)) return [];
         const patterns = await ctx.db
             .query("misheardPatterns")
             .withIndex("by_status", (q) => q.eq("status", "approved"))
@@ -231,8 +245,9 @@ export const getMissedVersesReport = query({
         transcriptId: v.id("transcripts"),
     },
     handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
         const transcript = await ctx.db.get(args.transcriptId);
-        if (!transcript) return null;
+        if (!user || !transcript || !isMemberOf(user, transcript.churchId)) return null;
 
         const corrections = transcript.userCorrections || [];
         const detected = transcript.detectedVerses || [];

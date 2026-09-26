@@ -1,5 +1,20 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import { getCurrentUser, isMemberOf, requireUser } from "./lib/auth";
+
+// Transcripts carry every segment of a sermon, so a church's full history can
+// outgrow a query's read budget. The newest are the ones anyone reopens.
+const MAX_LISTED = 200;
+
+/** A transcript in the caller's church, or a thrown error. */
+export async function requireOwnTranscript(ctx: QueryCtx, id: Id<"transcripts">) {
+    const user = await requireUser(ctx);
+    const transcript = await ctx.db.get(id);
+    if (!transcript) throw new Error("Transcript not found");
+    if (!isMemberOf(user, transcript.churchId)) throw new Error("Unauthorized");
+    return { user, transcript };
+}
 
 // Get all transcripts for a church
 export const getByChurch = query({
@@ -7,11 +22,14 @@ export const getByChurch = query({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
+        if (!user || !isMemberOf(user, args.churchId)) return [];
+
         return await ctx.db
             .query("transcripts")
             .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
             .order("desc")
-            .collect();
+            .take(MAX_LISTED);
     },
 });
 
@@ -21,11 +39,15 @@ export const getBySchedule = query({
         scheduleId: v.string(),
     },
     handler: async (ctx, args) => {
-        return await ctx.db
+        const user = await getCurrentUser(ctx);
+        if (!user?.churchId) return [];
+
+        const transcripts = await ctx.db
             .query("transcripts")
             .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
             .order("desc")
-            .collect();
+            .take(MAX_LISTED);
+        return transcripts.filter((t) => t.churchId === user.churchId);
     },
 });
 
@@ -35,7 +57,10 @@ export const getById = query({
         id: v.id("transcripts"),
     },
     handler: async (ctx, args) => {
-        return await ctx.db.get(args.id);
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
+        const transcript = await ctx.db.get(args.id);
+        return transcript && isMemberOf(user, transcript.churchId) ? transcript : null;
     },
 });
 
@@ -45,11 +70,15 @@ export const getByCreator = query({
         createdBy: v.string(),
     },
     handler: async (ctx, args) => {
-        return await ctx.db
+        const user = await getCurrentUser(ctx);
+        if (!user?.churchId) return [];
+
+        const transcripts = await ctx.db
             .query("transcripts")
             .withIndex("by_creator", (q) => q.eq("createdBy", args.createdBy))
             .order("desc")
-            .collect();
+            .take(MAX_LISTED);
+        return transcripts.filter((t) => t.churchId === user.churchId);
     },
 });
 
@@ -86,10 +115,16 @@ export const create = mutation({
         provider: v.string(),
         language: v.optional(v.string()),
         scheduleId: v.optional(v.string()),
-        churchId: v.string(),
-        createdBy: v.string(),
+        // Both still accepted from older clients, but the transcript is always
+        // filed under the caller and their own church.
+        churchId: v.optional(v.string()),
+        createdBy: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
+        const user = await requireUser(ctx);
+        if (!user.churchId) throw new Error("Join a church before saving transcripts");
+        if (args.churchId && args.churchId !== user.churchId) throw new Error("Unauthorized");
+
         const now = new Date().toISOString();
 
         const transcriptId = await ctx.db.insert("transcripts", {
@@ -102,8 +137,8 @@ export const create = mutation({
             provider: args.provider,
             language: args.language,
             scheduleId: args.scheduleId,
-            churchId: args.churchId,
-            createdBy: args.createdBy,
+            churchId: user.churchId,
+            createdBy: user._id,
             createdAt: now,
             updatedAt: now,
         });
@@ -139,11 +174,7 @@ export const update = mutation({
     },
     handler: async (ctx, args) => {
         const { id, ...updates } = args;
-        const existing = await ctx.db.get(id);
-
-        if (!existing) {
-            throw new Error("Transcript not found");
-        }
+        await requireOwnTranscript(ctx, id);
 
         await ctx.db.patch(id, {
             ...updates,
@@ -160,11 +191,7 @@ export const remove = mutation({
         id: v.id("transcripts"),
     },
     handler: async (ctx, args) => {
-        const existing = await ctx.db.get(args.id);
-
-        if (!existing) {
-            throw new Error("Transcript not found");
-        }
+        await requireOwnTranscript(ctx, args.id);
 
         await ctx.db.delete(args.id);
         return args.id;
@@ -178,11 +205,7 @@ export const updateSchedule = mutation({
         scheduleId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const existing = await ctx.db.get(args.id);
-
-        if (!existing) {
-            throw new Error("Transcript not found");
-        }
+        await requireOwnTranscript(ctx, args.id);
 
         await ctx.db.patch(args.id, {
             scheduleId: args.scheduleId,

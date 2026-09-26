@@ -1,6 +1,29 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import { getById, getCurrentUser, isChurchAdmin, isMemberOf, requireUser, type User } from "./lib/auth";
+
+/**
+ * Refuse a schedule that belongs to another church.
+ *
+ * A schedule created offline has a local id that never reaches the server, so
+ * an id that doesn't resolve is allowed through: its slides are still stamped
+ * with — and only ever read back for — the caller's own church.
+ */
+async function assertScheduleWritable(ctx: QueryCtx, user: User, scheduleId: string) {
+    const schedule = await getById(ctx, "schedules", scheduleId);
+    if (schedule && !isMemberOf(user, schedule.churchId)) {
+        throw new Error("Unauthorized");
+    }
+}
+
+/** A slide in the caller's church, or a thrown error. */
+async function requireOwnSlide(ctx: QueryCtx, slideId: string) {
+    const user = await requireUser(ctx);
+    const slide = await getById(ctx, "slides", slideId);
+    if (!slide) throw new Error("Slide not found");
+    if (!isMemberOf(user, slide.churchId)) throw new Error("Unauthorized");
+    return { user, slide };
+}
 
 // Get slides by schedule
 export const getSlides = query({
@@ -8,12 +31,17 @@ export const getSlides = query({
         scheduleId: v.string(),
     },
     handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
+        if (!user?.churchId) return [];
+
         const slides = await ctx.db
             .query("slides")
             .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
             .collect();
 
-        return slides.sort((a, b) => a.index - b.index);
+        return slides
+            .filter((slide) => slide.churchId === user.churchId)
+            .sort((a, b) => a.index - b.index);
     },
 });
 
@@ -23,12 +51,10 @@ export const getSlide = query({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const slide = await ctx.db
-            .query("slides")
-            .filter((q) => q.eq(q.field("_id"), args.slideId))
-            .unique();
-
-        return slide;
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
+        const slide = await getById(ctx, "slides", args.slideId);
+        return slide && isMemberOf(user, slide.churchId) ? slide : null;
     },
 });
 
@@ -53,19 +79,10 @@ export const createSlide = mutation({
         }),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const user = await requireUser(ctx);
+        if (!user.churchId) throw new Error("Join a church first");
 
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
+        await assertScheduleWritable(ctx, user, args.scheduleId);
 
         // Get the highest index for this schedule
         const slides = await ctx.db
@@ -108,30 +125,9 @@ export const updateSlide = mutation({
         }),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
 
-        const slide = await ctx.db
-            .query("slides")
-            .filter((q) => q.eq(q.field("_id"), args.slideId))
-            .unique();
-
-        if (!slide) {
-            throw new Error("Slide not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== slide.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        await ctx.db.patch(args.slideId as Id<"slides">, {
+        await ctx.db.patch(slide._id, {
             ...args.updates,
             updatedAt: new Date().toISOString(),
         });
@@ -146,30 +142,9 @@ export const deleteSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
 
-        const slide = await ctx.db
-            .query("slides")
-            .filter((q) => q.eq(q.field("_id"), args.slideId))
-            .unique();
-
-        if (!slide) {
-            throw new Error("Slide not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== slide.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        await ctx.db.delete(args.slideId as Id<"slides">);
+        await ctx.db.delete(slide._id);
         return true;
     },
 });
@@ -194,28 +169,14 @@ export const batchUpdateSlides = mutation({
         })),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
+        const user = await requireUser(ctx);
+        if (!user.churchId) throw new Error("Join a church first");
 
         for (const slideUpdate of args.slides) {
-            const slide = await ctx.db
-                .query("slides")
-                .filter((q) => q.eq(q.field("_id"), slideUpdate._id))
-                .unique();
+            const slide = await getById(ctx, "slides", slideUpdate._id);
 
-            if (slide && user.churchId === slide.churchId) {
-                await ctx.db.patch(slideUpdate._id as Id<"slides">, {
+            if (slide && isMemberOf(user, slide.churchId)) {
+                await ctx.db.patch(slide._id, {
                     ...slideUpdate.updates,
                     updatedAt: new Date().toISOString(),
                 });
@@ -252,19 +213,10 @@ export const syncScheduleSlides = mutation({
         })),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const user = await requireUser(ctx);
+        if (!user.churchId) throw new Error("Join a church first");
 
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
+        await assertScheduleWritable(ctx, user, args.scheduleId);
 
         const now = new Date().toISOString();
         const existingSlides = await ctx.db
@@ -334,24 +286,18 @@ export const upsertScheduleSlide = mutation({
         }),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const user = await requireUser(ctx);
+        if (!user.churchId) throw new Error("Join a church first");
 
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
+        await assertScheduleWritable(ctx, user, args.scheduleId);
 
         const existing = await ctx.db
             .query("slides")
             .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-            .filter((q) => q.eq(q.field("id"), args.slide.id))
+            .filter((q) => q.and(
+                q.eq(q.field("id"), args.slide.id),
+                q.eq(q.field("churchId"), user.churchId),
+            ))
             .first();
 
         const now = new Date().toISOString();
@@ -384,30 +330,9 @@ export const saveSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
 
-        const slide = await ctx.db
-            .query("slides")
-            .filter((q) => q.eq(q.field("_id"), args.slideId))
-            .unique();
-
-        if (!slide) {
-            throw new Error("Slide not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== slide.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        await ctx.db.patch(args.slideId as Id<"slides">, {
+        await ctx.db.patch(slide._id, {
             saved: true,
             updatedAt: new Date().toISOString(),
         });
@@ -422,30 +347,9 @@ export const unsaveSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
 
-        const slide = await ctx.db
-            .query("slides")
-            .filter((q) => q.eq(q.field("_id"), args.slideId))
-            .unique();
-
-        if (!slide) {
-            throw new Error("Slide not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== slide.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        await ctx.db.patch(args.slideId as Id<"slides">, {
+        await ctx.db.patch(slide._id, {
             saved: false,
             updatedAt: new Date().toISOString(),
         });
@@ -459,39 +363,18 @@ export const lockSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const slide = await ctx.db
-            .query("slides")
-            .filter((q) => q.eq(q.field("_id"), args.slideId))
-            .unique();
-
-        if (!slide) {
-            throw new Error("Slide not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== slide.churchId) {
-            throw new Error("Unauthorized");
-        }
+        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
 
         const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
         if (slide.lockedBy && slide.lockedBy !== user._id) {
             const lockAge = Date.now() - (slide.lockedAt || 0);
             if (lockAge < LOCK_TIMEOUT_MS) {
-                const lockingUser = await ctx.db.get(slide.lockedBy as Id<"users">);
+                const lockingUser = await getById(ctx, "users", slide.lockedBy);
                 throw new Error(`This slide is being edited by ${lockingUser?.fullname || 'another user'}`);
             }
         }
 
-        await ctx.db.patch(args.slideId as Id<"slides">, {
+        await ctx.db.patch(slide._id, {
             lockedBy: user._id,
             lockedAt: Date.now(),
             updatedAt: new Date().toISOString(),
@@ -506,64 +389,18 @@ export const unlockSlide = mutation({
         slideId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const { user, slide } = await requireOwnSlide(ctx, args.slideId);
 
-        const slide = await ctx.db
-            .query("slides")
-            .filter((q) => q.eq(q.field("_id"), args.slideId))
-            .unique();
-
-        if (!slide) {
-            throw new Error("Slide not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || user.churchId !== slide.churchId) {
-            throw new Error("Unauthorized");
-        }
-
-        if (slide.lockedBy && slide.lockedBy !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+        if (slide.lockedBy && slide.lockedBy !== user._id && !isChurchAdmin(user, slide.churchId)) {
             throw new Error("Only the locking user or an admin can unlock this slide");
         }
 
-        await ctx.db.patch(args.slideId as Id<"slides">, {
+        await ctx.db.patch(slide._id, {
             lockedBy: undefined,
             lockedAt: undefined,
             updatedAt: new Date().toISOString(),
         });
 
         return args.slideId;
-    },
-});
-
-export const unlockExpiredLocks = mutation({
-    args: {
-        churchId: v.string(),
-    },
-    handler: async (ctx, args) => {
-        const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
-        const cutoff = Date.now() - LOCK_TIMEOUT_MS;
-
-        const lockedSlides = await ctx.db
-            .query("slides")
-            .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
-            .filter((q) => q.lt(q.field("lockedAt"), cutoff))
-            .collect();
-
-        for (const slide of lockedSlides) {
-            await ctx.db.patch(slide._id!, {
-                lockedBy: undefined,
-                lockedAt: undefined,
-            });
-        }
-
-        return lockedSlides.length;
     },
 });

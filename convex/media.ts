@@ -1,15 +1,17 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import { getById, getCurrentUser, isMemberOf, requireUser } from "./lib/auth";
+
+// A media item is created straight after its file is uploaded. Refusing older
+// files stops a caller wrapping someone else's storage id — which travel in
+// slides and templates — in an item of their own and then deleting it.
+const MAX_UPLOAD_AGE_MS = 6 * 60 * 60 * 1000;
 
 // Generate upload URL for media file storage
 export const generateUploadUrl = mutation({
     args: {},
     handler: async (ctx) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        await requireUser(ctx);
         return await ctx.storage.generateUploadUrl();
     },
 });
@@ -19,36 +21,30 @@ export const generateUploadUrl = mutation({
 export const getMediaLibrary = query({
     args: {},
     handler: async (ctx) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            return [];
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            return [];
-        }
+        const user = await getCurrentUser(ctx);
+        if (!user) return [];
 
         const userItems = await ctx.db
             .query("mediaLibrary")
             .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
-            .collect();
+            .take(1000);
 
-        const churchItems = await ctx.db
-            .query("mediaLibrary")
-            .withIndex("by_church", (q) => q.eq("churchId", user.churchId || ''))
-            .collect();
+        // Only a real church: "" would pool every churchless user's media.
+        const churchItems = user.churchId
+            ? await ctx.db
+                .query("mediaLibrary")
+                .withIndex("by_church", (q) => q.eq("churchId", user.churchId))
+                .take(1000)
+            : [];
 
-        const combined = [...userItems, ...churchItems];
-        const unique = combined.filter((item, index, self) =>
-            index === self.findIndex((i) => i._id === item._id)
-        );
-
-        return unique.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const seen = new Set<string>();
+        return [...userItems, ...churchItems]
+            .filter((item) => {
+                if (seen.has(item._id)) return false;
+                seen.add(item._id);
+                return true;
+            })
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
 });
 
@@ -64,35 +60,38 @@ export const createMediaLibraryItem = mutation({
         url: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const user = await requireUser(ctx);
 
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
+        if (args.storageId) {
+            const storageId = ctx.db.system.normalizeId("_storage", args.storageId);
+            const file = storageId ? await ctx.db.system.get(storageId) : null;
+            if (!file) throw new Error("Uploaded file not found");
+            if (Date.now() - file._creationTime > MAX_UPLOAD_AGE_MS) {
+                throw new Error("That upload has expired; please upload the file again");
+            }
 
-        if (!user) {
-            throw new Error("User not found");
+            const claimed = await ctx.db
+                .query("mediaLibrary")
+                .withIndex("by_storage", (q) => q.eq("storageId", args.storageId))
+                .take(20);
+            if (claimed.some((item) => item.createdBy !== user._id && !isMemberOf(user, item.churchId))) {
+                throw new Error("That file belongs to another library");
+            }
         }
 
         const now = new Date().toISOString();
-        const mediaId = await ctx.db.insert("mediaLibrary", {
+        return await ctx.db.insert("mediaLibrary", {
             name: args.name,
             type: args.type,
             storageId: args.storageId,
             isExternal: args.isExternal,
             externalType: args.externalType,
             url: args.url,
-            createdBy: user._id!,
+            createdBy: user._id,
             churchId: user.churchId,
             createdAt: now,
             updatedAt: now,
         });
-
-        return mediaId;
     },
 });
 
@@ -102,30 +101,27 @@ export const deleteMediaLibraryItem = mutation({
         mediaId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const item = await ctx.db.get(args.mediaId as Id<"mediaLibrary">);
-        if (!item) {
-            throw new Error("Media item not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || (item.createdBy !== user._id && item.churchId !== user.churchId)) {
+        const user = await requireUser(ctx);
+        const item = await getById(ctx, "mediaLibrary", args.mediaId);
+        if (!item) throw new Error("Media item not found");
+        if (item.createdBy !== user._id && !isMemberOf(user, item.churchId)) {
             throw new Error("Unauthorized");
         }
 
+        await ctx.db.delete(item._id);
+
+        // Remove the file only once nothing else in any library points at it.
         if (item.storageId) {
-            await ctx.storage.delete(item.storageId as Id<"_storage">);
+            const stillUsed = await ctx.db
+                .query("mediaLibrary")
+                .withIndex("by_storage", (q) => q.eq("storageId", item.storageId))
+                .first();
+            const storageId = ctx.db.system.normalizeId("_storage", item.storageId);
+            if (!stillUsed && storageId) {
+                await ctx.storage.delete(storageId);
+            }
         }
 
-        await ctx.db.delete(item._id);
         return true;
     },
 });

@@ -1,49 +1,40 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { query, mutation } from "./_generated/server";
+import { query, mutation, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-
-async function getAuthenticatedUser(ctx: any) {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-        throw new Error("Not authenticated");
-    }
-
-    const user = await ctx.db
-        .query("users")
-        .withIndex("by_email", (q: any) => q.eq("email", identity.email!))
-        .unique();
-
-    if (!user) {
-        throw new Error("User not found");
-    }
-
-    return user;
-}
+import type { Doc, Id } from "./_generated/dataModel";
+import { getCurrentUser, isMemberOf, requireUser } from "./lib/auth";
 
 /**
- * The same lookup, but returning null instead of throwing when the caller has no
- * identity yet.
- *
  * Presence is a heartbeat: it fires every 15 seconds whether or not the auth
  * token happens to be mid-refresh. Throwing made Convex log an uncaught
  * "Not authenticated" error with a full stack trace on every tick during a
  * reconnect — pages of noise in the console that would bury a real error
  * mid-service, for something whose only consequence is a presence dot lingering
- * a few seconds longer.
- *
- * Only the presence pings use this. Everything that reads or writes real data
- * still goes through `getAuthenticatedUser` and still throws.
+ * a few seconds longer. So the pings use `getCurrentUser` and quietly skip;
+ * everything that reads real data still goes through `requireUser`.
  */
-async function getUserOrNull(ctx: any) {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-        return null;
-    }
 
-    return await ctx.db
-        .query("users")
-        .withIndex("by_email", (q: any) => q.eq("email", identity.email!))
-        .unique();
+/**
+ * Attach each entry's user — the fields a presence avatar needs, not the whole
+ * row (clerkId, preferences, subscription).
+ */
+async function withUsers(ctx: QueryCtx, entries: Doc<"presence">[]) {
+    const ids = [...new Set(entries.map((entry) => entry.userId))];
+    const users = await Promise.all(
+        ids.map(async (id) => {
+            const normalized = ctx.db.normalizeId("users", id);
+            return normalized ? await ctx.db.get(normalized as Id<"users">) : null;
+        })
+    );
+    const byId = new Map(
+        users.filter((u) => u !== null).map((u) => [u._id as string, {
+            _id: u._id,
+            fullname: u.fullname,
+            email: u.email,
+            avatar: u.avatar,
+            role: u.role,
+        }])
+    );
+    return entries.map((entry) => ({ ...entry, user: byId.get(entry.userId) ?? null }));
 }
 
 export const getPresenceByChurch = query({
@@ -51,9 +42,9 @@ export const getPresenceByChurch = query({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const user = await requireUser(ctx);
 
-        if (user.churchId !== args.churchId) {
+        if (!isMemberOf(user, args.churchId)) {
             throw new Error("Unauthorized: not a member of this church");
         }
 
@@ -63,23 +54,9 @@ export const getPresenceByChurch = query({
             .query("presence")
             .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
             .filter((q) => q.gte(q.field("lastSeen"), cutoff))
-            .collect();
+            .take(200);
 
-        const userIds = [...new Set(presenceEntries.map(p => p.userId))];
-
-        const users = await Promise.all(
-            userIds.map(id => ctx.db.get(id as any))
-        );
-
-        const userMap = new Map();
-        for (const u of users) {
-            if (u) userMap.set(u._id, u);
-        }
-
-        return presenceEntries.map(entry => ({
-            ...entry,
-            user: userMap.get(entry.userId) || null,
-        }));
+        return await withUsers(ctx, presenceEntries);
     },
 });
 
@@ -88,14 +65,14 @@ export const getPresenceBySession = query({
         sessionId: v.id("liveSessions"),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const user = await requireUser(ctx);
 
         const session = await ctx.db.get(args.sessionId);
         if (!session || session.status !== "active") {
             return [];
         }
 
-        if (user.churchId !== session.churchId) {
+        if (!isMemberOf(user, session.churchId)) {
             throw new Error("Unauthorized: not a member of this church");
         }
 
@@ -105,21 +82,9 @@ export const getPresenceBySession = query({
             .query("presence")
             .withIndex("by_session", (q) => q.eq("liveSessionId", args.sessionId))
             .filter((q) => q.gte(q.field("lastSeen"), cutoff))
-            .collect();
+            .take(200);
 
-        const userIds = [...new Set(presenceEntries.map(p => p.userId))];
-        const users = await Promise.all(
-            userIds.map(id => ctx.db.get(id as any))
-        );
-        const userMap = new Map();
-        for (const u of users) {
-            if (u) userMap.set(u._id, u);
-        }
-
-        return presenceEntries.map(entry => ({
-            ...entry,
-            user: userMap.get(entry.userId) || null,
-        }));
+        return await withUsers(ctx, presenceEntries);
     },
 });
 
@@ -137,8 +102,14 @@ export const heartbeat = mutation({
     },
     handler: async (ctx, args) => {
         // Silently skip rather than throw — see getUserOrNull.
-        const user = await getUserOrNull(ctx);
+        const user = await getCurrentUser(ctx);
         if (!user) return null;
+
+        // Don't let a ping announce the caller inside another church's session.
+        if (args.liveSessionId) {
+            const session = await ctx.db.get(args.liveSessionId);
+            if (!session || !isMemberOf(user, session.churchId)) return null;
+        }
 
         const existingPresence = await ctx.db
             .query("presence")
@@ -147,6 +118,8 @@ export const heartbeat = mutation({
 
         if (existingPresence) {
             await ctx.db.patch(existingPresence._id, {
+                // Follow the user if they have switched churches since.
+                churchId: user.churchId,
                 location: args.location || existingPresence.location,
                 activeScheduleId: args.activeScheduleId ?? existingPresence.activeScheduleId,
                 liveSessionId: args.liveSessionId ?? existingPresence.liveSessionId,
@@ -176,7 +149,7 @@ export const leavePresence = mutation({
     handler: async (ctx) => {
         // Fires on unload, when the token may already be gone. Nothing to clean
         // up without an identity, so don't make it an error.
-        const user = await getUserOrNull(ctx);
+        const user = await getCurrentUser(ctx);
         if (!user) return null;
 
         const presenceEntry = await ctx.db
@@ -189,27 +162,5 @@ export const leavePresence = mutation({
         }
 
         return true;
-    },
-});
-
-export const cleanupStalePresence = mutation({
-    args: {
-        churchId: v.string(),
-        staleAfterMs: v.optional(v.number()),
-    },
-    handler: async (ctx, args) => {
-        const cutoff = Date.now() - (args.staleAfterMs || 120_000);
-
-        const staleEntries = await ctx.db
-            .query("presence")
-            .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
-            .filter((q) => q.lt(q.field("lastSeen"), cutoff))
-            .collect();
-
-        for (const entry of staleEntries) {
-            await ctx.db.delete(entry._id);
-        }
-
-        return staleEntries.length;
     },
 });

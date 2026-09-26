@@ -20,6 +20,7 @@
 import { query, mutation, action, internalQuery, internalMutation } from './_generated/server'
 import { internal } from './_generated/api'
 import { v } from 'convex/values'
+import { requireSuperadmin } from './lib/auth'
 
 export function normalizeCode(code: string): string {
     return code.trim().toUpperCase()
@@ -262,24 +263,6 @@ async function setPromoActiveImpl(db: any, code: string, active: boolean) {
     if (!promo) throw new Error('Code not found')
     await db.patch(promo._id, { active, updatedAt: new Date().toISOString() })
     return true
-}
-
-/** Throws unless the caller is a signed-in superadmin. */
-async function requireSuperadmin(ctx: any) {
-    const identity = await ctx.auth.getUserIdentity()
-    if (!identity?.email) throw new Error('Not authenticated')
-    const email: string = identity.email
-    const user =
-        (await ctx.db
-            .query('users')
-            .withIndex('by_email', (q: any) => q.eq('email', email.toLowerCase()))
-            .unique()) ??
-        (await ctx.db
-            .query('users')
-            .withIndex('by_email', (q: any) => q.eq('email', email))
-            .unique())
-    if (!user || user.role !== 'superadmin') throw new Error('Superadmin only')
-    return user
 }
 
 // Internal (operator / CLI)

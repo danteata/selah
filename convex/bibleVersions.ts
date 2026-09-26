@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requireSuperadmin } from "./lib/auth";
 
 // Get a Bible version by ID (metadata only)
 export const getBibleVersion = query({
@@ -56,6 +57,7 @@ export const hasBibleVersion = query({
 export const generateUploadUrl = mutation({
     args: {},
     handler: async (ctx) => {
+        await requireSuperadmin(ctx);
         return await ctx.storage.generateUploadUrl();
     },
 });
@@ -73,6 +75,7 @@ export const saveBibleVersion = mutation({
         fileSize: v.number(),
     },
     handler: async (ctx, args) => {
+        await requireSuperadmin(ctx);
         const existing = await ctx.db
             .query("bibleVersions")
             .withIndex("by_version_id", (q) => q.eq("id", args.id))
@@ -117,6 +120,7 @@ export const saveBibleVersion = mutation({
 export const deleteBibleVersion = mutation({
     args: { id: v.string() },
     handler: async (ctx, args) => {
+        await requireSuperadmin(ctx);
         const existing = await ctx.db
             .query("bibleVersions")
             .withIndex("by_version_id", (q) => q.eq("id", args.id))

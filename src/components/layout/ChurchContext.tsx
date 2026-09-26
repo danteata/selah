@@ -5,6 +5,7 @@ import { useUserRole } from '../../hooks/useUserRole'
 import { Building2, ChevronDown, Check } from 'lucide-react'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { cacheChurch, getCachedChurch, getAllCachedChurches } from '../../hooks/useIndexedDB'
+import { toast } from 'sonner'
 
 export function ChurchContext() {
     const [isOpen, setIsOpen] = useState(false)
@@ -62,13 +63,13 @@ export function ChurchContext() {
         if (!currentUser?._id || !isSuperadmin) return
 
         try {
-            await updateUserChurch({
-                userId: currentUser._id as any,
-                churchId,
-            })
+            // The server switches the caller; no id to send (a cached session's
+            // `_id` isn't a real user id anyway).
+            await updateUserChurch({ churchId })
             window.location.reload()
         } catch (error) {
             console.error('Failed to switch church:', error)
+            toast.error(error instanceof Error ? error.message : 'Failed to switch church')
         }
         setIsOpen(false)
     }

@@ -6,6 +6,8 @@ declare const __APP_VERSION__: string
 interface ImportMetaEnv {
     readonly VITE_CONVEX_URL: string
     readonly VITE_CLERK_PUBLISHABLE_KEY: string
+    /** Public web address, for links shared from the desktop app. */
+    readonly VITE_PUBLIC_WEB_URL?: string
     readonly VITE_FF_SERMON_LISTENER?: string
 
     // Analytics

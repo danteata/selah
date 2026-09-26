@@ -20,6 +20,7 @@ import { AnalyticsEventType } from '../../services/analytics/types'
 import type { Id } from '../../../convex/_generated/dataModel'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
+import { inviteLink } from '../../constants/links'
 
 /**
  * Pro team-size cap, for upgrade copy only. The server (convex/entitlements.ts
@@ -293,7 +294,7 @@ function InvitationsList({
     const [copiedCode, setCopiedCode] = useState<string | null>(null)
 
     const handleCopy = async (code: string) => {
-        const url = `${window.location.origin}/join/${code}`
+        const url = inviteLink(code)
         await navigator.clipboard.writeText(url)
         setCopiedCode(code)
         setTimeout(() => setCopiedCode(null), 2000)
@@ -509,7 +510,7 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
                 })
                 setSuccess({
                     code: result.code,
-                    url: result.inviteUrl,
+                    url: inviteLink(result.code),
                 })
             } else {
                 if (!email.trim()) {
@@ -527,27 +528,10 @@ function InviteModal({ churchId, onClose }: { churchId: string; onClose: () => v
                     expires_in_days: expiresInDays,
                 })
 
-                // Send the email via HTTP action
-                const response = await fetch('/api/emails/sendInviteEmail', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        to: result.email,
-                        churchName: result.churchName,
-                        inviterName: result.inviterName,
-                        inviteUrl: result.inviteUrl,
-                        message: message || undefined,
-                        expiresAt: result.expiresAt,
-                    }),
-                })
-
-                if (!response.ok) {
-                    console.error('Failed to send email, but invitation was created')
-                }
-
+                // The server sends the email itself (see convex/emails.ts).
                 setSuccess({
                     code: result.code,
-                    url: result.inviteUrl,
+                    url: inviteLink(result.code),
                     email: result.email,
                 })
             }

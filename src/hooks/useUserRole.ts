@@ -1,4 +1,4 @@
-import { useQuery } from 'convex/react'
+import { useConvexAuth, useQuery } from 'convex/react'
 import { useAuth } from '@clerk/clerk-react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
@@ -23,39 +23,48 @@ const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 export function useUserRole(): UseUserRoleReturn {
     const { userId: clerkId } = useAuth()
+    const { isAuthenticated } = useConvexAuth()
     const { isOffline } = useConvexConnection()
 
-    const [cachedSession, setCachedSession] = useState<CachedAuthSession | null>(null)
-    const [sessionLoaded, setSessionLoaded] = useState(false)
+    // Keyed by the Clerk user it was loaded for, so a different person signing
+    // in never sees the previous user's cached role while theirs loads.
+    const [cache, setCache] = useState<{ clerkId: string | null; session: CachedAuthSession | null } | null>(null)
+    const sessionLoaded = cache !== null && cache.clerkId === (clerkId ?? null)
+    const cachedSession = sessionLoaded ? cache.session : null
 
+    // Wait for Convex to hold the token, not just Clerk. The server resolves
+    // the caller from that token, so asking a tick early answers `null` — which
+    // reads as "no such user" rather than "still loading".
     const currentUser = useQuery(
         api.users.getCurrentUser,
-        clerkId ? { clerkId } : 'skip'
+        clerkId && isAuthenticated ? {} : 'skip'
     )
 
     useEffect(() => {
         let cancelled = false
         const loadCache = async () => {
+            let session: CachedAuthSession | null = null
             try {
-                const cached = await getCachedAuthSession()
-                if (!cancelled && cached) {
+                const cached = clerkId ? await getCachedAuthSession(clerkId) : undefined
+                if (cached) {
                     const age = Date.now() - new Date(cached.cachedAt).getTime()
-                    if (age < SESSION_MAX_AGE_MS) {
-                        setCachedSession(cached)
-                    }
+                    if (age < SESSION_MAX_AGE_MS) session = cached
                 }
             } catch (err) {
                 console.warn('[useUserRole] Failed to load cached session:', err)
             } finally {
-                setSessionLoaded(true)
+                if (!cancelled) setCache({ clerkId: clerkId ?? null, session })
             }
         }
         loadCache()
         return () => { cancelled = true }
-    }, [])
+    }, [clerkId])
 
     useEffect(() => {
-        if (!currentUser || !clerkId) return
+        // Only a real user document. The offline stand-in client answers every
+        // query with `[]`, and caching that overwrote a good admin session with
+        // an empty member one.
+        if (!clerkId || !currentUser || Array.isArray(currentUser) || !currentUser._id) return
 
         const user = currentUser as any
         Promise.resolve(cacheAuthSession({

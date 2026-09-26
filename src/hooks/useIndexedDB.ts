@@ -372,9 +372,16 @@ export async function cacheAuthSession(session: Omit<CachedAuthSession, 'cachedA
     })
 }
 
-export async function getCachedAuthSession(): Promise<CachedAuthSession | undefined> {
+/**
+ * The newest cached session — for `clerkId` only, when given. Without that
+ * filter a shared booth PC handed the next person to sign in the previous
+ * user's role and church until the server answered (or for a week offline).
+ */
+export async function getCachedAuthSession(clerkId?: string): Promise<CachedAuthSession | undefined> {
     const db = getIndexedDB()
-    const all = await db.authSessions.toArray()
+    const all = clerkId
+        ? await db.authSessions.where('clerkId').equals(clerkId).toArray()
+        : await db.authSessions.toArray()
     return all.sort((a, b) => new Date(b.cachedAt).getTime() - new Date(a.cachedAt).getTime())[0]
 }
 

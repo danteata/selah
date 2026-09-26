@@ -451,7 +451,8 @@ export default defineSchema({
         updatedAt: v.string(),
     })
         .index("by_church", ["churchId"])
-        .index("by_creator", ["createdBy"]),
+        .index("by_creator", ["createdBy"])
+        .index("by_storage", ["storageId"]),
 
     // Bible Versions table - metadata only (actual Bible text stored in Convex file storage)
     bibleVersions: defineTable({

@@ -1,7 +1,29 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { appliesToValidator } from "./schema";
+import { getById, getCurrentUser, requireSuperadmin, requireUser, type User } from "./lib/auth";
+
+/**
+ * Templates a user may see: the shared system templates (no creator) plus those
+ * made by anyone in their church. Templates carry no churchId, so membership is
+ * resolved through the creator. `getTemplates` used to return every church's
+ * templates — including their background storage ids — to any caller.
+ */
+async function templateVisibility(ctx: QueryCtx, user: User | null) {
+    const creators = new Set<string>();
+    if (user) {
+        creators.add(user._id);
+        if (user.churchId) {
+            const members = await ctx.db
+                .query("users")
+                .withIndex("by_church", (q) => q.eq("churchId", user.churchId))
+                .take(500);
+            for (const member of members) creators.add(member._id);
+        }
+    }
+    return (template: Doc<"templates">) => !template.createdBy || creators.has(template.createdBy);
+}
 
 // Generate upload URL for file storage
 export const generateUploadUrl = mutation({
@@ -21,11 +43,9 @@ export const getFileUrl = query({
         storageId: v.string(),
     },
     handler: async (ctx, args) => {
-        // Return null if no storage ID provided
-        if (!args.storageId || args.storageId === '') {
-            return null;
-        }
-        return await ctx.storage.getUrl(args.storageId as Id<"_storage">);
+        const storageId = args.storageId ? ctx.db.system.normalizeId("_storage", args.storageId) : null;
+        if (!storageId) return null;
+        return await ctx.storage.getUrl(storageId);
     },
 });
 
@@ -69,8 +89,9 @@ const DEFAULT_BACKGROUNDS = {
 export const getTemplates = query({
     args: {},
     handler: async (ctx) => {
-        const templates = await ctx.db.query("templates").collect();
-        return templates;
+        const visible = await templateVisibility(ctx, await getCurrentUser(ctx));
+        const templates = await ctx.db.query("templates").take(2000);
+        return templates.filter(visible);
     },
 });
 
@@ -86,12 +107,13 @@ export const getTemplatesByCategory = query({
         ),
     },
     handler: async (ctx, args) => {
+        const visible = await templateVisibility(ctx, await getCurrentUser(ctx));
         const templates = await ctx.db
             .query("templates")
             .withIndex("by_category", (q) => q.eq("category", args.category))
-            .collect();
+            .take(2000);
 
-        return templates;
+        return templates.filter(visible);
     },
 });
 
@@ -101,12 +123,10 @@ export const getTemplate = query({
         templateId: v.string(),
     },
     handler: async (ctx, args) => {
-        const template = await ctx.db
-            .query("templates")
-            .filter((q) => q.eq(q.field("_id"), args.templateId))
-            .unique();
-
-        return template;
+        const template = await getById(ctx, "templates", args.templateId);
+        if (!template) return null;
+        const visible = await templateVisibility(ctx, await getCurrentUser(ctx));
+        return visible(template) ? template : null;
     },
 });
 
@@ -128,19 +148,7 @@ export const createTemplate = mutation({
         backgroundStorageId: v.optional(v.string()), // Storage ID for video/image files
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
+        const user = await requireUser(ctx);
 
         const now = new Date().toISOString();
         const templateId = await ctx.db.insert("templates", {
@@ -181,30 +189,16 @@ export const updateTemplate = mutation({
         }),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const template = await ctx.db
-            .query("templates")
-            .filter((q) => q.eq(q.field("_id"), args.templateId))
-            .unique();
-
+        const user = await requireUser(ctx);
+        const template = await getById(ctx, "templates", args.templateId);
         if (!template) {
             throw new Error("Template not found");
         }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || template.createdBy !== user._id) {
+        if (template.createdBy !== user._id) {
             throw new Error("Unauthorized");
         }
 
-        await ctx.db.patch(args.templateId as Id<"templates">, {
+        await ctx.db.patch(template._id, {
             ...args.updates,
             updatedAt: new Date().toISOString(),
         });
@@ -219,30 +213,16 @@ export const deleteTemplate = mutation({
         templateId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const template = await ctx.db
-            .query("templates")
-            .filter((q) => q.eq(q.field("_id"), args.templateId))
-            .unique();
-
+        const user = await requireUser(ctx);
+        const template = await getById(ctx, "templates", args.templateId);
         if (!template) {
             throw new Error("Template not found");
         }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || template.createdBy !== user._id) {
+        if (template.createdBy !== user._id) {
             throw new Error("Unauthorized");
         }
 
-        await ctx.db.delete(args.templateId as Id<"templates">);
+        await ctx.db.delete(template._id);
         return true;
     },
 });
@@ -253,26 +233,11 @@ export const toggleFavoriteTemplate = mutation({
         templateId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
+        const user = await requireUser(ctx);
 
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
-
-        const template = await ctx.db
-            .query("templates")
-            .filter((q) => q.eq(q.field("_id"), args.templateId))
-            .unique();
-
-        if (!template) {
+        const template = await getById(ctx, "templates", args.templateId);
+        const visible = await templateVisibility(ctx, user);
+        if (!template || !visible(template)) {
             throw new Error("Template not found");
         }
 
@@ -283,7 +248,7 @@ export const toggleFavoriteTemplate = mutation({
             ? currentFavorites.filter(id => id !== user._id)
             : [...currentFavorites, user._id!];
 
-        await ctx.db.patch(args.templateId as Id<"templates">, {
+        await ctx.db.patch(template._id, {
             favoritedBy: updatedFavorites,
             updatedAt: new Date().toISOString(),
         });
@@ -303,230 +268,153 @@ export const getActiveAdvert = query({
     },
 });
 
+// The shared system templates (no creator), seeded once per deployment.
+function defaultTemplates(now: string) {
+    return [
+        {
+            name: "Welcome Slide",
+            description: "A welcoming slide for church services",
+            slideId: JSON.stringify({
+                type: "text",
+                layout: "full-text",
+                contents: ["Welcome to Church"],
+                background: DEFAULT_BACKGROUNDS.general.background,
+                backgroundType: DEFAULT_BACKGROUNDS.general.backgroundType
+            }),
+            category: "general" as const,
+            thumbnail: DEFAULT_BACKGROUNDS.general.background,
+            createdAt: now,
+            updatedAt: now,
+        },
+        {
+            name: "Announcement",
+            description: "General announcement template",
+            slideId: JSON.stringify({
+                type: "text",
+                layout: "full-text",
+                contents: ["Announcement Title", "Details go here"],
+                background: DEFAULT_BACKGROUNDS.announcement.background,
+                backgroundType: DEFAULT_BACKGROUNDS.announcement.backgroundType
+            }),
+            category: "announcement" as const,
+            thumbnail: DEFAULT_BACKGROUNDS.announcement.background,
+            createdAt: now,
+            updatedAt: now,
+        },
+        {
+            name: "Worship Lyrics",
+            description: "Template for song lyrics",
+            slideId: JSON.stringify({
+                type: "text",
+                layout: "full-text",
+                contents: ["Song lyrics here"],
+                background: DEFAULT_BACKGROUNDS.worship.background,
+                backgroundType: DEFAULT_BACKGROUNDS.worship.backgroundType
+            }),
+            category: "worship" as const,
+            thumbnail: DEFAULT_BACKGROUNDS.worship.background,
+            createdAt: now,
+            updatedAt: now,
+        },
+        {
+            name: "Sermon Title",
+            description: "Template for sermon titles",
+            slideId: JSON.stringify({
+                type: "text",
+                layout: "full-text",
+                contents: ["Sermon Title", "Scripture Reference"],
+                background: DEFAULT_BACKGROUNDS.sermon.background,
+                backgroundType: DEFAULT_BACKGROUNDS.sermon.backgroundType
+            }),
+            category: "sermon" as const,
+            thumbnail: DEFAULT_BACKGROUNDS.sermon.background,
+            createdAt: now,
+            updatedAt: now,
+        },
+        {
+            name: "Prayer Slide",
+            description: "Template for prayer points",
+            slideId: JSON.stringify({
+                type: "text",
+                layout: "full-text",
+                contents: ["Prayer Point"],
+                background: DEFAULT_BACKGROUNDS.prayer.background,
+                backgroundType: DEFAULT_BACKGROUNDS.prayer.backgroundType
+            }),
+            category: "prayer" as const,
+            thumbnail: DEFAULT_BACKGROUNDS.prayer.background,
+            createdAt: now,
+            updatedAt: now,
+        },
+        {
+            name: "Scripture Verse",
+            description: "Template for Bible verses",
+            slideId: JSON.stringify({
+                type: "text",
+                layout: "full-text",
+                contents: ["Bible verse text here", "- Reference"],
+                background: DEFAULT_BACKGROUNDS.bible.background,
+                backgroundType: DEFAULT_BACKGROUNDS.bible.backgroundType
+            }),
+            category: "general" as const,
+            thumbnail: DEFAULT_BACKGROUNDS.bible.background,
+            createdAt: now,
+            updatedAt: now,
+        },
+    ];
+}
+
 // Seed default templates (only if none exist)
 export const seedDefaultTemplates = mutation({
     args: {},
     handler: async (ctx) => {
-        const existingTemplates = await ctx.db.query("templates").collect();
+        await requireUser(ctx);
 
-        // Only seed if no templates exist
-        if (existingTemplates.length > 0) {
+        const existingSystem = await ctx.db
+            .query("templates")
+            .withIndex("by_creator", (q) => q.eq("createdBy", undefined))
+            .first();
+        if (existingSystem) {
             return { seeded: false, message: "Templates already exist" };
         }
 
-        const now = new Date().toISOString();
-        const defaultTemplates = [
-            {
-                name: "Welcome Slide",
-                description: "A welcoming slide for church services",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Welcome to Church"],
-                    background: DEFAULT_BACKGROUNDS.general.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.general.backgroundType
-                }),
-                category: "general" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.general.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Announcement",
-                description: "General announcement template",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Announcement Title", "Details go here"],
-                    background: DEFAULT_BACKGROUNDS.announcement.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.announcement.backgroundType
-                }),
-                category: "announcement" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.announcement.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Worship Lyrics",
-                description: "Template for song lyrics",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Song lyrics here"],
-                    background: DEFAULT_BACKGROUNDS.worship.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.worship.backgroundType
-                }),
-                category: "worship" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.worship.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Sermon Title",
-                description: "Template for sermon titles",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Sermon Title", "Scripture Reference"],
-                    background: DEFAULT_BACKGROUNDS.sermon.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.sermon.backgroundType
-                }),
-                category: "sermon" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.sermon.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Prayer Slide",
-                description: "Template for prayer points",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Prayer Point"],
-                    background: DEFAULT_BACKGROUNDS.prayer.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.prayer.backgroundType
-                }),
-                category: "prayer" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.prayer.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Scripture Verse",
-                description: "Template for Bible verses",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Bible verse text here", "- Reference"],
-                    background: DEFAULT_BACKGROUNDS.bible.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.bible.backgroundType
-                }),
-                category: "general" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.bible.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-        ];
-
-        for (const template of defaultTemplates) {
+        const templates = defaultTemplates(new Date().toISOString());
+        for (const template of templates) {
             await ctx.db.insert("templates", template);
         }
 
-        return { seeded: true, count: defaultTemplates.length };
+        return { seeded: true, count: templates.length };
     },
 });
 
-// Reset default templates (delete all non-custom templates and re-seed)
+// Replace the system templates with the latest versions. Custom templates are
+// untouched. Superadmin only: the system templates are shared by every church,
+// so a reset by anyone else rewrote them — and dropped their favourites — for
+// all of them.
 export const resetDefaultTemplates = mutation({
     args: {},
     handler: async (ctx) => {
-        const existingTemplates = await ctx.db.query("templates").collect();
+        await requireSuperadmin(ctx);
 
-        // Delete all non-custom templates (those without createdBy)
-        for (const template of existingTemplates) {
-            if (!template.createdBy) {
-                await ctx.db.delete(template._id);
-            }
+        const existingSystem = await ctx.db
+            .query("templates")
+            .withIndex("by_creator", (q) => q.eq("createdBy", undefined))
+            .collect();
+
+        // Keep each template's favourites across the reset, matched by name.
+        const favoritesByName = new Map(existingSystem.map((t) => [t.name, t.favoritedBy]));
+        for (const template of existingSystem) {
+            await ctx.db.delete(template._id);
         }
 
-        const now = new Date().toISOString();
-        const defaultTemplates = [
-            {
-                name: "Welcome Slide",
-                description: "A welcoming slide for church services",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Welcome to Church"],
-                    background: DEFAULT_BACKGROUNDS.general.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.general.backgroundType
-                }),
-                category: "general" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.general.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Announcement",
-                description: "General announcement template",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Announcement Title", "Details go here"],
-                    background: DEFAULT_BACKGROUNDS.announcement.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.announcement.backgroundType
-                }),
-                category: "announcement" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.announcement.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Worship Lyrics",
-                description: "Template for song lyrics",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Song lyrics here"],
-                    background: DEFAULT_BACKGROUNDS.worship.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.worship.backgroundType
-                }),
-                category: "worship" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.worship.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Sermon Title",
-                description: "Template for sermon titles",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Sermon Title", "Scripture Reference"],
-                    background: DEFAULT_BACKGROUNDS.sermon.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.sermon.backgroundType
-                }),
-                category: "sermon" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.sermon.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Prayer Slide",
-                description: "Template for prayer points",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Prayer Point"],
-                    background: DEFAULT_BACKGROUNDS.prayer.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.prayer.backgroundType
-                }),
-                category: "prayer" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.prayer.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-            {
-                name: "Scripture Verse",
-                description: "Template for Bible verses",
-                slideId: JSON.stringify({
-                    type: "text",
-                    layout: "full-text",
-                    contents: ["Bible verse text here", "- Reference"],
-                    background: DEFAULT_BACKGROUNDS.bible.background,
-                    backgroundType: DEFAULT_BACKGROUNDS.bible.backgroundType
-                }),
-                category: "general" as const,
-                thumbnail: DEFAULT_BACKGROUNDS.bible.background,
-                createdAt: now,
-                updatedAt: now,
-            },
-        ];
-
-        for (const template of defaultTemplates) {
-            await ctx.db.insert("templates", template);
+        const templates = defaultTemplates(new Date().toISOString());
+        for (const template of templates) {
+            await ctx.db.insert("templates", {
+                ...template,
+                favoritedBy: favoritesByName.get(template.name),
+            });
         }
 
-        return { seeded: true, count: defaultTemplates.length };
+        return { seeded: true, count: templates.length };
     },
 });

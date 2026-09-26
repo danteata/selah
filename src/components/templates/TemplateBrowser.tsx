@@ -11,6 +11,7 @@ import {
 } from '../../hooks/useTemplates'
 import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
+import { useUserRole } from '../../hooks/useUserRole'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 
 const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
@@ -258,6 +259,9 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     const { templates, isLoading, deleteTemplate, toggleFavorite, seedDefaultTemplates, resetDefaultTemplates, getTemplatesForSlideType } = useTemplates()
     const { isSignedIn } = useAuth()
     const isAuthenticated = isSignedIn ?? false
+    // The system templates are shared by every church, so only a superadmin
+    // may reset them (the server enforces this too).
+    const { isSuperadmin } = useUserRole()
 
     useEffect(() => {
         if ((isOpen || isInline) && !isLoading && templates?.length === 0) {
@@ -550,12 +554,13 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                                 </button>
                             </div>
                         )}
-                        {!isInline && (
+                        {!isInline && isSuperadmin && (
                             <button
                                 onClick={handleResetDefaults}
                                 disabled={isResetting}
                                 className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                                 title="Reset default templates"
+                                aria-label="Reset default templates"
                             >
                                 <RefreshCw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
                             </button>

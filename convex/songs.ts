@@ -1,101 +1,76 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
 import { songSectionValidator } from "./schema";
+import { getById, getCurrentUser, isMemberOf, requireUser, type User } from "./lib/auth";
+import type { Doc } from "./_generated/dataModel";
+
+/** Songs a user may read and change: their own, and their church's. */
+function canAccessSong(user: User, song: Doc<"songs">): boolean {
+    return song.createdBy === user._id || isMemberOf(user, song.churchId);
+}
+
+async function requireOwnSong(ctx: QueryCtx, songId: string) {
+    const user = await requireUser(ctx);
+    const song = await getById(ctx, "songs", songId);
+    if (!song) throw new Error("Song not found");
+    if (!canAccessSong(user, song)) throw new Error("Unauthorized");
+    return { user, song };
+}
+
+/**
+ * The caller's own songs plus their church's, deduplicated. An empty churchId
+ * means "no church", not a church of its own: querying `by_church` for "" used
+ * to hand every churchless user every other churchless user's songs.
+ */
+async function songsVisibleTo(ctx: QueryCtx, user: User, limit: number) {
+    const own = await ctx.db
+        .query("songs")
+        .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
+        .take(limit);
+    const church = user.churchId
+        ? await ctx.db
+            .query("songs")
+            .withIndex("by_church", (q) => q.eq("churchId", user.churchId))
+            .take(limit)
+        : [];
+    const seen = new Set<string>();
+    return [...church, ...own].filter((song) => {
+        if (seen.has(song._id)) return false;
+        seen.add(song._id);
+        return true;
+    });
+}
 
 // Get all songs for current user (fallback when no churchId)
 export const getAllSongsForUser = query({
     args: {},
     handler: async (ctx) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            return [];
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            return [];
-        }
-
-        // Get songs created by user or in user's church
-        const userSongs = await ctx.db
-            .query("songs")
-            .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
-            .take(1000);
-
-        const churchSongs = await ctx.db
-            .query("songs")
-            .withIndex("by_church", (q) => q.eq("churchId", user.churchId || ''))
-            .take(1000);
-
-        // Combine and dedupe
-        const allSongs = [...userSongs, ...churchSongs];
-        const uniqueSongs = allSongs.filter((song, index, self) =>
-            index === self.findIndex((s) => s._id === song._id)
-        );
-
-        return uniqueSongs;
+        const user = await getCurrentUser(ctx);
+        if (!user) return [];
+        return await songsVisibleTo(ctx, user, 1000);
     },
 });
 
 // Search songs
 export const searchSongs = query({
     args: {
+        // Accepted for older clients; the caller's own church is always used.
         churchId: v.optional(v.string()),
         query: v.optional(v.string()),
         limit: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            return [];
-        }
+        const user = await getCurrentUser(ctx);
+        if (!user) return [];
 
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
+        const songs = await songsVisibleTo(ctx, user, Math.min(args.limit || 1000, 5000));
 
-        if (!user) {
-            return [];
-        }
+        const searchQuery = (args.query || '').trim().toLowerCase();
+        if (!searchQuery) return songs;
 
-        // Use provided churchId or fall back to user's churchId
-        const churchId = args.churchId || user.churchId || '';
-
-        // Get all songs for the church
-        const allSongs = await ctx.db
-            .query("songs")
-            .withIndex("by_church", (q) => q.eq("churchId", churchId))
-            .take(args.limit || 1000);
-
-        // Also get songs created by the user directly
-        const userSongs = await ctx.db
-            .query("songs")
-            .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
-            .take(args.limit || 1000);
-
-        // Combine and dedupe
-        const combined = [...allSongs, ...userSongs];
-        const uniqueSongs = combined.filter((song, index, self) =>
-            index === self.findIndex((s) => s._id === song._id)
-        );
-
-        // If no query, return all unique songs
-        const searchQuery = args.query || '';
-        if (searchQuery.trim() === '') {
-            return uniqueSongs;
-        }
-
-        // Filter by query
-        const queryLower = searchQuery.toLowerCase();
-        return uniqueSongs.filter((song) =>
-            song.title.toLowerCase().includes(queryLower) ||
-            song.artist.toLowerCase().includes(queryLower)
+        return songs.filter((song) =>
+            song.title.toLowerCase().includes(searchQuery) ||
+            song.artist.toLowerCase().includes(searchQuery)
         );
     },
 });
@@ -106,12 +81,10 @@ export const getSong = query({
         songId: v.string(),
     },
     handler: async (ctx, args) => {
-        const song = await ctx.db
-            .query("songs")
-            .filter((q) => q.eq(q.field("_id"), args.songId))
-            .unique();
-
-        return song;
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
+        const song = await getById(ctx, "songs", args.songId);
+        return song && canAccessSong(user, song) ? song : null;
     },
 });
 
@@ -128,22 +101,12 @@ export const createSong = mutation({
         sections: v.optional(v.array(songSectionValidator)),
         defaultArrangement: v.optional(v.array(v.string())),
         isPublic: v.optional(v.boolean()),
+        // Accepted for older clients; a song always lands in the caller's own
+        // church. Honouring it let anyone write songs into any church.
         churchId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user) {
-            throw new Error("User not found");
-        }
+        const user = await requireUser(ctx);
 
         const now = new Date().toISOString();
         const songId = await ctx.db.insert("songs", {
@@ -159,7 +122,7 @@ export const createSong = mutation({
             defaultArrangement: args.defaultArrangement,
             isPublic: args.isPublic || false,
             createdBy: user._id!,
-            churchId: args.churchId || user.churchId,
+            churchId: user.churchId,
             createdAt: now,
             updatedAt: now,
         });
@@ -186,25 +149,7 @@ export const updateSong = mutation({
         }),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const song = await ctx.db.get(args.songId as Id<"songs">);
-
-        if (!song) {
-            throw new Error("Song not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || (song.createdBy !== user._id && user.churchId !== song.churchId)) {
-            throw new Error("Unauthorized");
-        }
+        const { song } = await requireOwnSong(ctx, args.songId);
 
         await ctx.db.patch(song._id, {
             ...args.updates,
@@ -221,25 +166,7 @@ export const deleteSong = mutation({
         songId: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await ctx.auth.getUserIdentity();
-        if (!identity) {
-            throw new Error("Not authenticated");
-        }
-
-        const song = await ctx.db.get(args.songId as Id<"songs">);
-
-        if (!song) {
-            throw new Error("Song not found");
-        }
-
-        const user = await ctx.db
-            .query("users")
-            .withIndex("by_email", (q) => q.eq("email", identity.email!))
-            .unique();
-
-        if (!user || (song.createdBy !== user._id && song.churchId !== user.churchId)) {
-            throw new Error("Unauthorized");
-        }
+        const { song } = await requireOwnSong(ctx, args.songId);
 
         await ctx.db.delete(song._id);
         return true;
@@ -253,12 +180,13 @@ export const getSavedSlides = query({
         scheduleId: v.string(),
     },
     handler: async (ctx, args) => {
-        const slides = await ctx.db
+        const user = await getCurrentUser(ctx);
+        if (!user || !isMemberOf(user, args.churchId)) return [];
+
+        return await ctx.db
             .query("slides")
             .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
             .filter((q) => q.eq(q.field("saved"), true))
-            .collect();
-
-        return slides;
+            .take(1000);
     },
 });

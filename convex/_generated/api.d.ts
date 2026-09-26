@@ -8,7 +8,6 @@
  * @module
  */
 
-import type * as auth from "../auth.js";
 import type * as bibleVersions from "../bibleVersions.js";
 import type * as churches from "../churches.js";
 import type * as emails from "../emails.js";
@@ -16,10 +15,11 @@ import type * as entitlements from "../entitlements.js";
 import type * as globalAppSettings from "../globalAppSettings.js";
 import type * as http from "../http.js";
 import type * as invitations from "../invitations.js";
+import type * as lib_auth from "../lib/auth.js";
+import type * as lib_invites from "../lib/invites.js";
 import type * as licensing from "../licensing.js";
 import type * as liveSessions from "../liveSessions.js";
 import type * as media from "../media.js";
-import type * as migration from "../migration.js";
 import type * as migrations from "../migrations.js";
 import type * as paystack from "../paystack.js";
 import type * as presence from "../presence.js";
@@ -40,7 +40,6 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  auth: typeof auth;
   bibleVersions: typeof bibleVersions;
   churches: typeof churches;
   emails: typeof emails;
@@ -48,10 +47,11 @@ declare const fullApi: ApiFromModules<{
   globalAppSettings: typeof globalAppSettings;
   http: typeof http;
   invitations: typeof invitations;
+  "lib/auth": typeof lib_auth;
+  "lib/invites": typeof lib_invites;
   licensing: typeof licensing;
   liveSessions: typeof liveSessions;
   media: typeof media;
-  migration: typeof migration;
   migrations: typeof migrations;
   paystack: typeof paystack;
   presence: typeof presence;

@@ -1,23 +1,38 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { query, mutation } from "./_generated/server";
+import { query, mutation, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import { getById, isChurchAdmin, isMemberOf, requireUser, type User } from "./lib/auth";
 
-async function getAuthenticatedUser(ctx: any) {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-        throw new Error("Not authenticated");
+/**
+ * An active session in the caller's own church.
+ *
+ * Every control below used to trust `role === "admin"` alone. The role is
+ * global, and anyone can become an admin by founding a church, so any admin
+ * anywhere could blank or hijack another church's projector mid-service.
+ */
+async function requireActiveSession(ctx: QueryCtx, sessionId: Id<"liveSessions">) {
+    const user = await requireUser(ctx);
+    const session = await ctx.db.get(sessionId);
+    if (!session || session.status !== "active") {
+        throw new Error("No active session found");
     }
-
-    const user = await ctx.db
-        .query("users")
-        .withIndex("by_email", (q: any) => q.eq("email", identity.email!))
-        .unique();
-
-    if (!user) {
-        throw new Error("User not found");
+    if (!isMemberOf(user, session.churchId)) {
+        throw new Error("Unauthorized: not a member of this church");
     }
+    return { user, session };
+}
 
-    return user;
+function isOperatorOrAdmin(user: User, session: { operatorId: string; churchId: string }) {
+    return session.operatorId === user._id || isChurchAdmin(user, session.churchId);
+}
+
+/** The church's active session for a schedule, if there is one. */
+async function findActiveSession(ctx: QueryCtx, churchId: string, scheduleId: string) {
+    return await ctx.db
+        .query("liveSessions")
+        .withIndex("by_church_active", (q) => q.eq("churchId", churchId).eq("status", "active"))
+        .filter((q) => q.eq(q.field("scheduleId"), scheduleId))
+        .first();
 }
 
 function removeQueueEntriesByOccurrence(
@@ -44,19 +59,11 @@ export const getActiveSession = query({
         scheduleId: v.string(),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db
-            .query("liveSessions")
-            .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-            .filter((q) => q.eq(q.field("status"), "active"))
-            .first();
-
-        if (session && user.churchId !== session.churchId) {
-            throw new Error("Unauthorized: not a member of this church");
-        }
-
-        return session;
+        const user = await requireUser(ctx);
+        if (!user.churchId) return null;
+        // Scoped to the caller's church: a session another church opened on
+        // this schedule id is not ours to see — and used to make this throw.
+        return await findActiveSession(ctx, user.churchId, args.scheduleId);
     },
 });
 
@@ -65,9 +72,9 @@ export const getActiveSessionByChurch = query({
         churchId: v.string(),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const user = await requireUser(ctx);
 
-        if (user.churchId !== args.churchId) {
+        if (!isMemberOf(user, args.churchId)) {
             throw new Error("Unauthorized: not a member of this church");
         }
 
@@ -76,7 +83,7 @@ export const getActiveSessionByChurch = query({
             .withIndex("by_church_active", (q) =>
                 q.eq("churchId", args.churchId).eq("status", "active")
             )
-            .collect();
+            .take(50);
 
         return sessions;
     },
@@ -87,11 +94,11 @@ export const getSession = query({
         sessionId: v.id("liveSessions"),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const user = await requireUser(ctx);
 
         const session = await ctx.db.get(args.sessionId);
 
-        if (session && user.churchId !== session.churchId) {
+        if (session && !isMemberOf(user, session.churchId)) {
             throw new Error("Unauthorized: not a member of this church");
         }
 
@@ -110,17 +117,18 @@ export const startSession = mutation({
         )),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const user = await requireUser(ctx);
 
-        if (user.churchId !== args.churchId) {
+        if (!isMemberOf(user, args.churchId)) {
             throw new Error("Unauthorized: not a member of this church");
         }
 
-        const existingSession = await ctx.db
-            .query("liveSessions")
-            .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
-            .filter((q) => q.eq(q.field("status"), "active"))
-            .first();
+        const schedule = await getById(ctx, "schedules", args.scheduleId);
+        if (schedule && schedule.churchId !== args.churchId) {
+            throw new Error("Unauthorized");
+        }
+
+        const existingSession = await findActiveSession(ctx, args.churchId, args.scheduleId);
 
         if (existingSession) {
             throw new Error("An active session already exists for this schedule");
@@ -168,14 +176,17 @@ export const endSession = mutation({
         sessionId: v.id("liveSessions"),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const user = await requireUser(ctx);
 
         const session = await ctx.db.get(args.sessionId);
         if (!session) {
             throw new Error("Session not found");
         }
+        if (!isMemberOf(user, session.churchId)) {
+            throw new Error("Unauthorized: not a member of this church");
+        }
 
-        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+        if (!isOperatorOrAdmin(user, session)) {
             throw new Error("Only the operator or an admin can end the session");
         }
 
@@ -206,15 +217,10 @@ export const setLiveSlide = mutation({
         slideId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         const isOperator = session.operatorId === user._id;
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
+        const isAdmin = isChurchAdmin(user, session.churchId);
         const isOpen = session.collaborationMode === "open";
 
         if (!isOperator && !isAdmin && !isOpen) {
@@ -238,14 +244,9 @@ export const setOperatorSlides = mutation({
         slideIds: v.array(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+        if (!isOperatorOrAdmin(user, session)) {
             throw new Error("Only the operator can set the slide order");
         }
 
@@ -265,20 +266,11 @@ export const addToQueue = mutation({
         position: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (user.churchId !== session.churchId) {
-            throw new Error("Unauthorized");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         const mode = session.collaborationMode || "moderated";
         const isOperator = session.operatorId === user._id;
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
+        const isAdmin = isChurchAdmin(user, session.churchId);
 
         if (mode === "strict" && !isOperator && !isAdmin) {
             throw new Error("Only the operator can add slides in strict mode");
@@ -321,19 +313,10 @@ export const addToOperatorDeck = mutation({
         position: v.optional(v.number()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (user.churchId !== session.churchId) {
-            throw new Error("Unauthorized");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         const mode = session.collaborationMode || "moderated";
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
+        const isAdmin = isChurchAdmin(user, session.churchId);
 
         if (mode === "strict" && session.operatorId !== user._id && !isAdmin) {
             throw new Error("Only the operator can add slides in strict mode");
@@ -366,16 +349,7 @@ export const removeFromQueue = mutation({
         slideIds: v.array(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (user.churchId !== session.churchId) {
-            throw new Error("Unauthorized");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         const currentQueue = session.queue || [];
         const updatedQueue = removeQueueEntriesByOccurrence(currentQueue, args.slideIds);
@@ -395,14 +369,9 @@ export const acceptFromQueue = mutation({
         slideIds: v.array(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+        if (!isOperatorOrAdmin(user, session)) {
             throw new Error("Only the operator can accept slides from the queue");
         }
 
@@ -428,14 +397,9 @@ export const reorderQueue = mutation({
         orderedSlideIds: v.array(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+        if (!isOperatorOrAdmin(user, session)) {
             throw new Error("Only the operator can reorder the queue");
         }
 
@@ -471,14 +435,9 @@ export const toggleBlank = mutation({
         isBlank: v.boolean(),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (session.operatorId !== user._id && user.role !== "superadmin" && user.role !== "admin") {
+        if (!isOperatorOrAdmin(user, session)) {
             throw new Error("Only the operator can toggle blank");
         }
 
@@ -498,16 +457,7 @@ export const setOverlay = mutation({
         alertId: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (user.churchId !== session.churchId) {
-            throw new Error("Unauthorized");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         await ctx.db.patch(args.sessionId, {
             activeOverlay: args.overlay,
@@ -525,15 +475,10 @@ export const transferOperator = mutation({
         newOperatorId: v.id("users"),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         const isCurrentOperator = session.operatorId === user._id;
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
+        const isAdmin = isChurchAdmin(user, session.churchId);
 
         if (!isCurrentOperator && !isAdmin) {
             throw new Error("Only the current operator or an admin can transfer control");
@@ -588,15 +533,10 @@ export const updateCollaborationMode = mutation({
         ),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         const isOperator = session.operatorId === user._id;
-        const isAdmin = user.role === "superadmin" || user.role === "admin";
+        const isAdmin = isChurchAdmin(user, session.churchId);
 
         if (!isOperator && !isAdmin) {
             throw new Error("Only the operator or an admin can change collaboration mode");
@@ -620,16 +560,7 @@ export const joinSession = mutation({
         )),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
-
-        const session = await ctx.db.get(args.sessionId);
-        if (!session || session.status !== "active") {
-            throw new Error("No active session found");
-        }
-
-        if (user.churchId !== session.churchId) {
-            throw new Error("Unauthorized: not a member of this church");
-        }
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
         const existingPresence = await ctx.db
             .query("presence")
@@ -666,7 +597,7 @@ export const leaveSession = mutation({
         sessionId: v.id("liveSessions"),
     },
     handler: async (ctx, args) => {
-        const user = await getAuthenticatedUser(ctx);
+        const user = await requireUser(ctx);
 
         const presenceEntry = await ctx.db
             .query("presence")

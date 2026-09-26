@@ -7,6 +7,7 @@ vi.mock('@clerk/clerk-react', () => ({
 
 vi.mock('convex/react', () => ({
     useQuery: vi.fn(),
+    useConvexAuth: vi.fn(() => ({ isAuthenticated: true, isLoading: false })),
 }))
 
 vi.mock('../../convex/_generated/api', () => ({
@@ -24,12 +25,13 @@ vi.mock('../useIndexedDB', () => ({
 
 import { useUserRole, hasRequiredRole } from '../useUserRole'
 import { useAuth } from '@clerk/clerk-react'
-import { useQuery } from 'convex/react'
+import { useConvexAuth, useQuery } from 'convex/react'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { getCachedAuthSession, cacheAuthSession } from '../useIndexedDB'
 
 const mockUseAuth = vi.mocked(useAuth) as any
 const mockUseQuery = vi.mocked(useQuery) as any
+const mockUseConvexAuth = vi.mocked(useConvexAuth) as any
 const mockUseConvexConnection = vi.mocked(useConvexConnection) as any
 const mockGetCachedAuthSession = vi.mocked(getCachedAuthSession) as any
 const mockCacheAuthSession = vi.mocked(cacheAuthSession) as any
@@ -59,6 +61,7 @@ describe('useUserRole', () => {
         vi.clearAllMocks()
         mockUseAuth.mockReturnValue({ userId: 'user_123', isLoaded: true, isSignedIn: true })
         mockUseConvexConnection.mockReturnValue({ isOffline: false })
+        mockUseConvexAuth.mockReturnValue({ isAuthenticated: true, isLoading: false })
         mockUseQuery.mockReturnValue(undefined)
         mockGetCachedAuthSession.mockResolvedValue(null)
     })
@@ -250,6 +253,57 @@ describe('useUserRole', () => {
 
         expect(result.current.role).toBeNull()
         expect(result.current.currentUser).toBeNull()
+    })
+
+    // -----------------------------------------------------------------------
+    // Auth hand-off and per-user cache
+    // -----------------------------------------------------------------------
+    it('skips the user query until Convex holds the token', () => {
+        mockUseConvexAuth.mockReturnValue({ isAuthenticated: false, isLoading: true })
+
+        renderHook(() => useUserRole())
+
+        // Asked early, the server resolves no caller and answers null, which
+        // reads as "no such user" rather than "still loading".
+        expect(mockUseQuery).toHaveBeenCalledWith(expect.anything(), 'skip')
+    })
+
+    it('queries once Convex is authenticated', () => {
+        renderHook(() => useUserRole())
+
+        expect(mockUseQuery).toHaveBeenCalledWith(expect.anything(), {})
+    })
+
+    it('looks up the cached session for the signed-in Clerk user only', async () => {
+        renderHook(() => useUserRole())
+
+        await waitFor(() => {
+            expect(mockGetCachedAuthSession).toHaveBeenCalledWith('user_123')
+        })
+    })
+
+    it('ignores the cache entirely when signed out', async () => {
+        mockUseAuth.mockReturnValue({ userId: null, isLoaded: true, isSignedIn: false })
+        mockGetCachedAuthSession.mockResolvedValue(createCachedSession({ role: 'admin' }))
+
+        const { result } = renderHook(() => useUserRole())
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+        expect(mockGetCachedAuthSession).not.toHaveBeenCalled()
+        expect(result.current.role).toBeNull()
+    })
+
+    it("never caches the offline client's empty-array answer", async () => {
+        mockUseQuery.mockReturnValue([])
+
+        renderHook(() => useUserRole())
+
+        await waitFor(() => {
+            expect(mockGetCachedAuthSession).toHaveBeenCalled()
+        })
+        expect(mockCacheAuthSession).not.toHaveBeenCalled()
     })
 })
 

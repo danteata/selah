@@ -18,8 +18,42 @@ import { internal, api } from './_generated/api'
 import { v } from 'convex/values'
 import { normalizeCode } from './promos'
 import { getEffectiveSubscription, churchIsPro, countTeamMembers, PLAN_LIMITS } from './entitlements'
+import { getCurrentUser } from './lib/auth'
 
 const PAYSTACK_API = 'https://api.paystack.co'
+
+/**
+ * The client names where Paystack should send the user after paying. Accept
+ * only our own origins (the configured return page, the site, and local dev);
+ * anything else falls back to the default rather than letting a crafted
+ * checkout bounce a paying user to an arbitrary site.
+ */
+function safeCallbackUrl(requested: string | undefined): string | undefined {
+    const fallback = process.env.PAYSTACK_CALLBACK_URL
+    if (!requested) return fallback
+    try {
+        const url = new URL(requested)
+        const allowed = new Set<string>(['http://localhost', 'http://127.0.0.1'])
+        for (const configured of [
+            process.env.PAYSTACK_CALLBACK_URL,
+            process.env.SITE_URL,
+            ...(process.env.PAYSTACK_ALLOWED_RETURN_ORIGINS ?? '').split(','),
+        ]) {
+            if (!configured?.trim()) continue
+            try {
+                allowed.add(new URL(configured.trim()).origin)
+            } catch {
+                // A malformed entry in the env just doesn't allow anything.
+            }
+        }
+        const origin = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+            ? `${url.protocol}//${url.hostname}`
+            : url.origin
+        return allowed.has(origin) ? url.toString() : fallback
+    } catch {
+        return fallback
+    }
+}
 
 function secretKey(): string {
     const key = process.env.PAYSTACK_SECRET_KEY
@@ -137,7 +171,7 @@ export const initializeProCheckout = action({
             plan: planCode,
             amount: planDetails.amount,
             currency: planDetails.currency,
-            callback_url: args.callbackUrl ?? process.env.PAYSTACK_CALLBACK_URL,
+            callback_url: safeCallbackUrl(args.callbackUrl),
             // Echoed back on the webhook so we can resolve the church/user reliably.
             metadata: { email, plan: 'pro', promoCode: appliedPromo, churchId },
         })
@@ -185,10 +219,9 @@ export const getMySubscription = query({
         if (!identity?.email) return null
         // Resolve entitlement through the user's CHURCH (with a legacy
         // per-email fallback), so invited members inherit the church's plan.
-        const user = await ctx.db
-            .query('users')
-            .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
-            .unique()
+        // Not `.unique()`: a duplicated user row made this throw, blanking the
+        // billing screen for exactly the accounts that most needed support.
+        const user = await getCurrentUser(ctx)
         return await getEffectiveSubscription(ctx, {
             churchId: user?.churchId ?? null,
             email: identity.email,
@@ -208,10 +241,9 @@ export const getMyChurchBilling = query({
     handler: async (ctx) => {
         const identity = await ctx.auth.getUserIdentity()
         if (!identity?.email) return null
-        const user = await ctx.db
-            .query('users')
-            .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
-            .unique()
+        // Not `.unique()`: a duplicated user row made this throw, blanking the
+        // billing screen for exactly the accounts that most needed support.
+        const user = await getCurrentUser(ctx)
         const churchId = user?.churchId ?? null
 
         const pro = churchId ? await churchIsPro(ctx, churchId) : false
