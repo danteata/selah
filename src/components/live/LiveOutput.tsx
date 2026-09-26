@@ -16,23 +16,16 @@ import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import type { Slide, Scripture, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
-import { LocalMediaPlaceholder } from '../slides/LocalMediaPlaceholder'
 import { ScreenPicker } from './ScreenPicker'
-import { AutoFitText } from './AutoFitText'
-import { KineticText } from './KineticText'
-import { audioFeatures } from '../../services/visualizer/audioFeatures'
+import { SlideView } from './SlideView'
+import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { PanelErrorBoundary } from '../offline/PanelErrorBoundary'
 import { ContextSectionContent } from '../layout/ContextPanel'
-import { VideoBackground } from './VideoBackground'
-import { MediaContent, type MediaProgress } from './MediaContent'
-import { AudioReactiveBackground } from './AudioReactiveBackground'
+import type { MediaProgress } from './MediaContent'
 import { Play, Pause, Volume2, VolumeX, RotateCcw, Repeat } from 'lucide-react'
-import { getVerseRefStyle } from '../../utils/verseRefStyle'
-import { slideCaptionHtml } from '../../utils/slideCaption'
 import { countdownDurationSeconds, formatCountdownTime, isCountdownPaused, pauseCountdown, resumeCountdown, useCountdownSeconds } from '../../utils/countdown'
-import { slideBackgroundFilter } from '../../utils/slideBackground'
 
 // Shared with the projector so both format time the same way.
 const formatSecondsToTime = formatCountdownTime
@@ -146,29 +139,22 @@ export function LiveOutput() {
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
     const liveOutputBlanked = useAppStore((state) => state.liveOutputBlanked)
     const setLiveOutputBlanked = useAppStore((state) => state.setLiveOutputBlanked)
-    // Global default for verse reference position (per-slide setting overrides this at render time).
-    const globalVerseRefPosition = useAppStore((state) => state.settings.slideStyles?.verseRefPosition)
-    // Global defaults for verse reference color/weight/style/underline/size (per-slide overrides at render time).
-    const globalSlideStyles = useAppStore((state) => state.settings.slideStyles)
-    const animationsEnabled = useAppStore((state) => state.settings.animations ?? true)
-    const transitionInterval = useAppStore((state) => state.settings.transitionInterval ?? 0.7)
-    const defaultFont = useAppStore((state) => state.settings.defaultFont || 'Inter')
-    const visualizerEnabled = useAppStore((state) => state.visualizerEnabled)
-
-    // Read the beat pulse once, exactly when the live slide changes (not on
-    // every unrelated re-render) — a slide change landing right on a beat
-    // gets a punchier entrance instead of the plain fade.
-    const isBeatTransition = useMemo(
-        () => visualizerEnabled && audioFeatures.beatPulse > 0.5,
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [liveSlideId]
+    // Exactly what the projector is sent, so the monitor draws what it draws.
+    const outputSettings = useLiveOutputSettings()
+    // Next Up shows what's coming even while the output is cleared, and
+    // without the visualizer's motion.
+    const nextUpSettings = useMemo(
+        () => ({ ...outputSettings, visualizerEnabled: false, liveOutputBlanked: false }),
+        [outputSettings]
     )
 
     // Clear stale transport-bar progress from whatever media slide was
-    // previously live.
-    useEffect(() => {
+    // previously live (adjusted during render, not in an effect).
+    const [progressFor, setProgressFor] = useState(liveSlideId)
+    if (progressFor !== liveSlideId) {
+        setProgressFor(liveSlideId)
         setLiveMediaProgress(null)
-    }, [liveSlideId])
+    }
 
     // Shared live session — operator controls
     const {
@@ -269,21 +255,11 @@ export function LiveOutput() {
 
     // Determine the background URL for live slide
     const liveSlideBackground = liveSlideFileUrl || liveSlideLocalBg || liveSlideLocalMediaBlobUrl
-    const isLiveSlideVideo = liveSlide?.backgroundType === 'video' && liveSlideBackground
 
     const prevSlide = liveOutputSlides[currentIndex - 1]
 
     // Determine the background URL for next slide preview
     const nextSlideBackground = nextSlideFileUrl || nextSlideLocalBg || nextSlideLocalMediaBlobUrl
-    const isNextSlideVideo = nextSlide?.backgroundType === 'video' && nextSlideBackground
-
-    // Split slide HTML into body + reference for two-zone layout (matches LiveView).
-    // For bible slides contents[1] is the "Book Chapter:Verse · Version" label;
-    // for dictionary slides it is the "Headword · Pack" label.
-    const liveBodyHtml = liveSlide?.contents[0] || ''
-    const liveRefHtml = slideCaptionHtml(liveSlide)
-    const nextUpBodyHtml = nextSlide?.contents[0] || ''
-    const nextUpRefHtml = slideCaptionHtml(nextSlide)
 
     // Blank the live output to a plain black screen without touching
     // liveSlideId, so the queue position/selected slide is preserved and
@@ -807,116 +783,18 @@ export function LiveOutput() {
                             <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Next Up</div>
                             <div className="aspect-video rounded-xl overflow-hidden relative border border-[var(--border-subtle)] bg-black/30 shadow-sm">
                                 {nextSlide ? (
-                                    <div
-                                        className="w-full h-full relative"
-                                        style={{
-                                            backgroundImage: nextSlide.type !== slideTypes.media && !isNextSlideVideo && nextSlideBackground ? `url(${nextSlideBackground})` : undefined,
-                                            backgroundSize: 'cover',
-                                            backgroundPosition: 'center',
-                                            backgroundColor: !nextSlideBackground ? '#0a0a0a' : undefined,
-                                        }}
-                                    >
-                                        {nextSlide.type === slideTypes.media ? (
-                                            nextSlide.backgroundType !== backgroundTypes.external && !nextSlideBackground ? (
-                                                <LocalMediaPlaceholder backgroundType={nextSlide.backgroundType} />
-                                            ) : (
-                                                <MediaContent
-                                                    slide={nextSlide}
-                                                    src={nextSlideBackground || undefined}
-                                                    muted
-                                                    className="absolute inset-0 w-full h-full"
-                                                />
-                                            )
-                                        ) : isNextSlideVideo && (
-                                            <VideoBackground
-                                                src={nextSlideBackground}
-                                                className="absolute inset-0 w-full h-full object-cover"
-                                            />
-                                        )}
-                                        {nextSlide.type === slideTypes.media ? null : nextSlide.layout === 'lower-third' ? (
-                                            /* Lower-third Next Up — body in a bottom strip, reference/subtitle as caption */
-                                            (() => {
-                                                const isBibleNU = nextSlide.type === 'bible'
-                                                const subtitleNU = nextSlide.slideStyle?.lowerThirdSubtitle || ''
-                                                const captionNU = isBibleNU ? nextUpRefHtml : ''
-                                                const captionOnTopNU = isBibleNU &&
-                                                    (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top'
-
-                                                const alignItemsNU = nextSlide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
-                                                    : nextSlide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
-                                                        : 'flex-start'
-                                                const textAlignNU = (nextSlide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left'
-
-                                                const styleBarNU: React.CSSProperties =
-                                                    nextSlide.slideStyle?.lowerThirdStyle === 'minimalist'
-                                                        ? { background: 'transparent' }
-                                                        : nextSlide.slideStyle?.lowerThirdStyle === 'accent-bar'
-                                                            ? {
-                                                                background: 'rgba(0,0,0,0.75)',
-                                                                borderLeft: `2px solid ${nextSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
-                                                            }
-                                                            : nextSlide.slideStyle?.lowerThirdStyle === 'gradient-bar'
-                                                                ? {
-                                                                    background: `linear-gradient(135deg, ${nextSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${nextSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
-                                                                }
-                                                                : { background: 'rgba(0,0,0,0.75)' }
-
-                                                const captionElNU = (captionNU || subtitleNU) && (
-                                                    <div
-                                                        className="shrink-0 text-white/80 text-[8px] line-clamp-1 truncate"
-                                                        style={{ width: '100%', textAlign: textAlignNU }}
-                                                        {...(captionNU
-                                                            ? { dangerouslySetInnerHTML: { __html: captionNU } }
-                                                            : { children: subtitleNU })}
-                                                    />
-                                                )
-
-                                                return (
-                                                    <div className="absolute inset-x-0 bottom-0" style={{ height: '32%' }}>
-                                                        <div
-                                                            className="w-full h-full flex flex-col px-2 py-1"
-                                                            style={{ alignItems: alignItemsNU, gap: '2px', ...styleBarNU }}
-                                                        >
-                                                            {captionOnTopNU && captionElNU}
-                                                            <div
-                                                                className="flex-1 min-h-0 text-white text-[10px] font-semibold drop-shadow-lg tiptap-preview line-clamp-2 leading-tight"
-                                                                style={{ width: '100%', textAlign: textAlignNU }}
-                                                                dangerouslySetInnerHTML={{ __html: nextUpBodyHtml }}
-                                                            />
-                                                            {!captionOnTopNU && captionElNU}
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })()
-                                        ) : (
-                                            // Default branch — no opaque overlay so the slide's video/image bg
-                                            // shows through. Text legibility is carried by drop-shadow-2xl and
-                                            // a subtle vignette at the top/bottom edges only where the caption sits.
-                                            <div className="absolute inset-0 flex flex-col p-3">
-                                                {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
-                                                    <div
-                                                        className="shrink-0 text-center pb-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
-                                                        style={getVerseRefStyle(nextSlide.slideStyle, globalSlideStyles, { minPx: 7, coefficient: 1.4, unit: 'cqw', maxPx: 13 })}
-                                                        dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
-                                                    />
-                                                )}
-                                                <AutoFitText
-                                                    html={nextUpBodyHtml}
-                                                    className="flex-1 min-h-0 text-white text-center drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]"
-                                                    minPx={10}
-                                                    maxPx={36}
-                                                    style={{ lineHeight: 1.2 }}
-                                                />
-                                                {nextUpRefHtml && (nextSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
-                                                    <div
-                                                        className="shrink-0 text-center pt-1 truncate drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"
-                                                        style={getVerseRefStyle(nextSlide.slideStyle, globalSlideStyles, { minPx: 7, coefficient: 1.4, unit: 'cqw', maxPx: 13 })}
-                                                        dangerouslySetInnerHTML={{ __html: nextUpRefHtml }}
-                                                    />
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
+                                    // A thumbnail of the projector: same renderer, no
+                                    // motion, text kept readable at this size.
+                                    <SlideView
+                                        slide={nextSlide}
+                                        settings={nextUpSettings}
+                                        backgroundUrl={nextSlideBackground}
+                                        animate={false}
+                                        muted
+                                        showMissingMedia
+                                        minTextPx={10}
+                                        className="w-full h-full"
+                                    />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center bg-black/30 text-[var(--text-muted)] italic text-[10px] text-center leading-tight px-2">
                                         End of Schedule
@@ -998,190 +876,26 @@ export function LiveOutput() {
                             </div>
                             <div className={`flex-1 min-h-0 studio-live-monitor ${liveSlide ? 'is-live' : ''}`}>
                                 {liveSlide ? (
-                                    <div
-                                        key={liveSlide.id}
-                                        className={`w-full h-full relative studio-slide-transition ${animationsEnabled ? '' : 'no-transition'} ${isBeatTransition ? 'beat-punch' : ''}`}
-                                        style={{
-                                            '--studio-transition-duration': `${isBeatTransition ? Math.min(transitionInterval, 0.35) : transitionInterval}s`,
-                                        } as React.CSSProperties}
+                                    <SlideView
+                                        slide={liveSlide}
+                                        settings={outputSettings}
+                                        backgroundUrl={liveSlideBackground}
+                                        muted
+                                        showMissingMedia
+                                        onMediaProgress={setLiveMediaProgress}
+                                        className="w-full h-full"
                                     >
-                                        {/* The background as the projector draws it: its own
-                                            layer, so the dimming filter doesn't reach the text. */}
-                                        {liveSlide.type !== slideTypes.media && !isLiveSlideVideo && liveSlideBackground && (
-                                            <div
-                                                className="absolute inset-0 bg-cover bg-center"
-                                                style={{ backgroundImage: `url(${liveSlideBackground})`, filter: slideBackgroundFilter(liveSlide) }}
-                                            />
+                                        {liveSlide.type === 'countdown' && (
+                                            <button
+                                                type="button"
+                                                onClick={handleToggleCountdown}
+                                                className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-medium hover:bg-black/80 transition-colors"
+                                                aria-label={countdownPaused ? 'Resume countdown' : 'Pause countdown'}
+                                            >
+                                                {countdownPaused ? '▶ Resume' : '⏸ Pause'}
+                                            </button>
                                         )}
-                                        {liveSlide.type === slideTypes.media ? (
-                                            liveSlide.backgroundType !== backgroundTypes.external && !liveSlideBackground ? (
-                                                <LocalMediaPlaceholder backgroundType={liveSlide.backgroundType} />
-                                            ) : (
-                                                <MediaContent
-                                                    slide={liveSlide}
-                                                    src={liveSlideBackground || undefined}
-                                                    muted
-                                                    className="absolute inset-0 w-full h-full"
-                                                    onProgress={setLiveMediaProgress}
-                                                />
-                                            )
-                                        ) : isLiveSlideVideo && (
-                                            <VideoBackground
-                                                src={liveSlideBackground}
-                                                className="absolute inset-0 w-full h-full object-cover"
-                                                style={{ filter: slideBackgroundFilter(liveSlide) }}
-                                            />
-                                        )}
-                                        <AudioReactiveBackground />
-                                        {liveSlide.type === slideTypes.media ? null : liveSlide.type === 'countdown' ? (
-                                            <div className="absolute inset-0 flex items-center justify-center p-6">
-                                                <AutoFitText
-                                                    html={formatSecondsToTime(previewCountdownSeconds)}
-                                                    className="w-full h-full text-white font-mono font-bold tabular-nums drop-shadow-2xl"
-                                                    minPx={24}
-                                                    maxPx={320}
-                                                    style={{ lineHeight: 1 }}
-                                                />
-                                                <button
-                                                    type="button"
-                                                    onClick={handleToggleCountdown}
-                                                    className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-medium hover:bg-black/80 transition-colors"
-                                                    aria-label={countdownPaused ? 'Resume countdown' : 'Pause countdown'}
-                                                >
-                                                    {countdownPaused ? '▶ Resume' : '⏸ Pause'}
-                                                </button>
-                                            </div>
-                                        ) : liveSlide.layout === 'lower-third' ? (
-                                            /* Lower Third Preview — body auto-fits inside a bottom strip, reference as caption */
-                                            (() => {
-                                                const isBibleLT = liveSlide.type === 'bible'
-                                                const subtitleLT = liveSlide.slideStyle?.lowerThirdSubtitle || ''
-                                                const captionLT = isBibleLT ? liveRefHtml : ''
-                                                const captionOnTopLT = isBibleLT &&
-                                                    (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top'
-
-                                                const alignItemsLT = liveSlide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
-                                                    : liveSlide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
-                                                        : 'flex-start'
-                                                const textAlignLT = (liveSlide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left'
-
-                                                const styleBarLT: React.CSSProperties =
-                                                    liveSlide.slideStyle?.lowerThirdStyle === 'minimalist'
-                                                        ? { background: 'transparent' }
-                                                        : liveSlide.slideStyle?.lowerThirdStyle === 'accent-bar'
-                                                            ? {
-                                                                background: 'rgba(0,0,0,0.75)',
-                                                                backdropFilter: 'blur(8px)',
-                                                                borderLeft: `3px solid ${liveSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
-                                                            }
-                                                            : liveSlide.slideStyle?.lowerThirdStyle === 'gradient-bar'
-                                                                ? {
-                                                                    background: `linear-gradient(135deg, ${liveSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${liveSlide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
-                                                                    backdropFilter: 'blur(8px)',
-                                                                }
-                                                                : {
-                                                                    background: 'rgba(0,0,0,0.75)',
-                                                                    backdropFilter: 'blur(8px)',
-                                                                }
-
-                                                const captionNodeLT = (captionLT || subtitleLT) && (
-                                                    <div
-                                                        className="shrink-0 drop-shadow-lg"
-                                                        style={{
-                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                            lineHeight: 1.25,
-                                                            width: '100%',
-                                                            textAlign: textAlignLT,
-                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 14, coefficient: 3, unit: 'cqw', maxPx: 36 }),
-                                                        }}
-                                                        {...(captionLT
-                                                            ? { dangerouslySetInnerHTML: { __html: captionLT } }
-                                                            : { children: subtitleLT })}
-                                                    />
-                                                )
-
-                                                return (
-                                                    <div
-                                                        className="absolute inset-x-0 bottom-0"
-                                                        style={{ height: '30cqh' }}
-                                                    >
-                                                        <div
-                                                            className="w-full h-full flex flex-col"
-                                                            style={{
-                                                                alignItems: alignItemsLT,
-                                                                padding: '10px 18px',
-                                                                gap: '4px',
-                                                                ...styleBarLT,
-                                                            }}
-                                                        >
-                                                            {captionOnTopLT && captionNodeLT}
-                                                            <KineticText enabled={visualizerEnabled} className="w-full flex-1 min-h-0">
-                                                                <AutoFitText
-                                                                    html={liveBodyHtml}
-                                                                    className="w-full h-full text-white drop-shadow-lg tiptap-preview"
-                                                                    minPx={10}
-                                                                    maxPx={120}
-                                                                    style={{
-                                                                        fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                                        textAlign: textAlignLT,
-                                                                        fontWeight: 600,
-                                                                        lineHeight: 1.2,
-                                                                    }}
-                                                                />
-                                                            </KineticText>
-                                                            {!captionOnTopLT && captionNodeLT}
-                                                        </div>
-                                                    </div>
-                                                )
-                                            })()
-                                        ) : (
-                                            <div className="absolute inset-0 flex flex-col p-6">
-                                                {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') === 'top' && (
-                                                    <div
-                                                        className="shrink-0 text-center pb-2 drop-shadow-lg"
-                                                        style={{
-                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                            lineHeight: 1.05,
-                                                            // cqw (not vw) so the reference scales with the preview
-                                                            // box, and a low px floor so it doesn't dominate the
-                                                            // small monitor — matches the output's 2.4vw proportion.
-                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 8, coefficient: 2.4, unit: 'cqw', maxPx: 28 }),
-                                                        }}
-                                                        dangerouslySetInnerHTML={{ __html: liveRefHtml }}
-                                                    />
-                                                )}
-                                                <KineticText enabled={visualizerEnabled} className="flex-1 min-h-0">
-                                                    <AutoFitText
-                                                        html={liveBodyHtml}
-                                                        className="w-full h-full text-white text-center drop-shadow-2xl tiptap-preview"
-                                                        minPx={14}
-                                                        maxPx={240}
-                                                        style={{
-                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                            textAlign: (liveSlide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
-                                                            textTransform: (liveSlide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
-                                                            lineHeight: 1.0,
-                                                            textShadow: liveSlide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
-                                                        }}
-                                                    />
-                                                </KineticText>
-                                                {liveRefHtml && (liveSlide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom') !== 'top' && (
-                                                    <div
-                                                        className="shrink-0 text-center pt-2 drop-shadow-lg"
-                                                        style={{
-                                                            fontFamily: liveSlide.slideStyle?.font || defaultFont,
-                                                            lineHeight: 1.05,
-                                                            // cqw (not vw) so the reference scales with the preview
-                                                            // box, and a low px floor so it doesn't dominate the
-                                                            // small monitor — matches the output's 2.4vw proportion.
-                                                            ...getVerseRefStyle(liveSlide.slideStyle, globalSlideStyles, { minPx: 8, coefficient: 2.4, unit: 'cqw', maxPx: 28 }),
-                                                        }}
-                                                        dangerouslySetInnerHTML={{ __html: liveRefHtml }}
-                                                    />
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
+                                    </SlideView>
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">
                                         <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/5 flex items-center justify-center border border-[var(--accent-teal)]/10">

@@ -4,33 +4,22 @@ import { useNativeMultiMonitor } from './useNativeMultiMonitor'
 
 const STORAGE_KEY = 'selah-live-state'
 
-export function useLiveSync() {
-    const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
-    const { isDesktop, sendSlideToLive, sendSettingsToLive, clearLiveOutput } = useNativeMultiMonitor()
-    const hadLiveSlideRef = useRef(false)
-
-    const activeSlides = useAppStore((state) => state.activeSlides)
-    const liveSlideId = useAppStore((state) => state.liveSlideId)
+/**
+ * Subset of settings the live output window actually needs. Memoized so
+ * its identity only changes when one of these values actually changes,
+ * not on every unrelated settings update. The operator's monitor renders
+ * from this same object (SlideView), so it can't drift from the projector.
+ *
+ * `liveOutputBlanked` rides along in this same object (rather than a
+ * separate channel) so it reaches the live window through the exact same
+ * paths settings already do: native IPC (`sendSettingsToLive`, below) and
+ * the localStorage/BroadcastChannel state used by web-mode windows.
+ */
+export function useLiveOutputSettings() {
     const liveOutputBlanked = useAppStore((state) => state.liveOutputBlanked)
     const settings = useAppStore((state) => state.settings)
-    const activeOverlay = useAppStore((state) => state.activeOverlay)
-    const activeAlert = useAppStore((state) => state.activeAlert)
     const visualizerEnabled = useAppStore((state) => state.visualizerEnabled)
-
-    const liveSlide = useMemo(() => {
-        if (!liveSlideId) return null
-        return activeSlides.find(slide => slide.id === liveSlideId)
-    }, [activeSlides, liveSlideId])
-
-    // Subset of settings the live output window actually needs. Memoized so
-    // its identity only changes when one of these values actually changes,
-    // not on every unrelated settings update.
-    //
-    // `liveOutputBlanked` rides along in this same object (rather than a
-    // separate channel) so it reaches the live window through the exact same
-    // paths settings already do: native IPC (`sendSettingsToLive`, below) and
-    // the localStorage/BroadcastChannel state used by web-mode windows.
-    const liveSettings = useMemo(() => ({
+    return useMemo(() => ({
         liveWindowFullscreen: settings.liveWindowFullscreen,
         songAndHymnLabelsVisibility: settings.songAndHymnLabelsVisibility,
         defaultFont: settings.defaultFont,
@@ -45,6 +34,24 @@ export function useLiveSync() {
         visualizerEnabled,
         liveOutputBlanked,
     }), [settings, visualizerEnabled, liveOutputBlanked])
+}
+
+export function useLiveSync() {
+    const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
+    const { isDesktop, sendSlideToLive, sendSettingsToLive, clearLiveOutput } = useNativeMultiMonitor()
+    const hadLiveSlideRef = useRef(false)
+
+    const activeSlides = useAppStore((state) => state.activeSlides)
+    const liveSlideId = useAppStore((state) => state.liveSlideId)
+    const activeOverlay = useAppStore((state) => state.activeOverlay)
+    const activeAlert = useAppStore((state) => state.activeAlert)
+
+    const liveSlide = useMemo(() => {
+        if (!liveSlideId) return null
+        return activeSlides.find(slide => slide.id === liveSlideId)
+    }, [activeSlides, liveSlideId])
+
+    const liveSettings = useLiveOutputSettings()
 
     useEffect(() => {
         broadcastChannelRef.current = new BroadcastChannel('selah-live-channel')

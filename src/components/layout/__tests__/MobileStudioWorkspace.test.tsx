@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => {
                 sharedQueueSlideIds: [] as string[],
                 openModal: vi.fn(),
                 workspaceMode: 'studio',
+                settings: { defaultFont: 'Inter', slideStyles: {} },
+                liveOutputBlanked: false,
+                visualizerEnabled: false,
             },
         },
         session: {
@@ -86,6 +89,9 @@ function setStore(slides: Slide[], liveSlideId: string, sharedQueueSlideIds: str
         sharedQueueSlideIds,
         openModal: vi.fn(),
         workspaceMode: 'studio',
+        settings: { defaultFont: 'Inter', slideStyles: {} },
+        liveOutputBlanked: false,
+        visualizerEnabled: false,
     }
 }
 

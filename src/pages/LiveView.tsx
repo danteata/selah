@@ -5,23 +5,10 @@ import { useQuery } from 'convex/react'
 import { useAuth } from '@clerk/clerk-react'
 import { api } from '../../convex/_generated/api'
 import type { Slide } from '../types'
-import { slideTypes } from '../types'
-import { useFileUrl } from '../hooks/useTemplates'
-import { useLocalBackground } from '../hooks/useLocalBackground'
-import { useLocalMediaBlobUrl } from '../hooks/useLocalMediaBlobUrl'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
-import { AutoFitText } from '../components/live/AutoFitText'
-import { VideoBackground } from '../components/live/VideoBackground'
-import { MediaContent } from '../components/live/MediaContent'
-import { AudioReactiveBackground } from '../components/live/AudioReactiveBackground'
-import { KineticText } from '../components/live/KineticText'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
-import { audioFeatures } from '../services/visualizer/audioFeatures'
+import { SlideView } from '../components/live/SlideView'
 import { useAnalytics } from '../hooks'
-import { getVerseRefStyle, VERSE_REF_BOUNDS } from '../utils/verseRefStyle'
-import { isCaptionedSlideType, slideCaptionHtml } from '../utils/slideCaption'
-import { formatCountdownTime, useCountdownSeconds } from '../utils/countdown'
-import { slideBackgroundFilter } from '../utils/slideBackground'
 
 const STORAGE_KEY = 'selah-live-state'
 
@@ -228,6 +215,7 @@ export default function LiveView() {
         if (storedState) {
             try {
                 const parsed = JSON.parse(storedState)
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- the snapshot another window wrote, read as this effect subscribes to its updates
                 setLiveState(parsed)
                 // The alternate output must not adopt the projector's slide — its
                 // own content arrives addressed to its window. The rest of this
@@ -276,23 +264,6 @@ export default function LiveView() {
         if (!resolvedSlides.length) return null
         return resolvedSlides.find(s => s.id === currentSlideId) || null
     }, [resolvedSlides, currentSlideId])
-
-    // Driven by the slide's own clock (utils/countdown), so it agrees with the
-    // operator's preview and survives this window being reopened.
-    const countdownSeconds = useCountdownSeconds(slide)
-
-    // Get file URL if slide has a backgroundStorageId
-    const fileUrl = useFileUrl(slide?.backgroundStorageId || null)
-
-    // Resolve local file paths on desktop
-    const localBg = useLocalBackground(slide?.background, slide?.localFilePath)
-
-    // Resolve a local IndexedDB-backed media library item on web
-    const localMediaBlobUrl = useLocalMediaBlobUrl(slide?.localMediaId)
-
-    // Determine the background to use
-    const backgroundUrl = fileUrl || localBg || localMediaBlobUrl
-    const isVideoBackground = slide?.backgroundType === 'video' && backgroundUrl
 
     const settings = liveState?.settings || {
         liveWindowFullscreen: false,
@@ -362,15 +333,6 @@ export default function LiveView() {
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [toggleFullscreen])
 
-    // Read the beat pulse once, exactly when the slide changes (not on every
-    // unrelated re-render) — a slide change landing right on a beat gets a
-    // punchier entrance instead of the plain fade.
-    const isBeatTransition = useMemo(
-        () => (settings.visualizerEnabled ?? false) && audioFeatures.beatPulse > 0.5,
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [slide?.id]
-    )
-
     // Nothing selected yet (distinct from a deliberate "Clear" — see the
     // liveOutputBlanked guard around the Content section below, which keeps
     // the current slide's background so the audience sees the projector is
@@ -396,284 +358,14 @@ export default function LiveView() {
     }
 
     return (
-        // Only the text is keyed by slide. The whole screen used to be, so every
-        // slide change remounted the background too: a song's motion
-        // background restarted — and flashed black — on each of its slides.
-        // The background is keyed by its source instead and fades only when
-        // that actually changes; the visualizer layer never remounts.
         <div
             className="h-screen w-screen bg-black relative overflow-hidden"
-            style={
-                {
-                    ...(monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : {}),
-                    '--studio-transition-duration': `${isBeatTransition ? Math.min(settings.transitionInterval ?? 0.7, 0.35) : (settings.transitionInterval ?? 0.7)}s`,
-                } as React.CSSProperties
-            }
+            style={monitorColor ? { boxShadow: `inset 0 0 0 3px ${monitorColor}` } : undefined}
             onDoubleClick={toggleFullscreen}
         >
-            {/* Background */}
-            <div
-                key={slide.type === slideTypes.media ? 'media' : (backgroundUrl || 'none')}
-                className={`absolute inset-0 studio-slide-transition ${settings.animations === false ? 'no-transition' : ''}`}
-            >
-            {slide.type === slideTypes.media ? (
-                /* Media slides render their own full-bleed content below —
-                   no dimming filter, since the media IS the content, not a
-                   backdrop for text. */
-                <div className="absolute inset-0 bg-black" />
-            ) : isVideoBackground && backgroundUrl ? (
-                <VideoBackground
-                    src={backgroundUrl}
-                    className="absolute inset-0 w-full h-full object-cover"
-                    style={{
-                        filter: slideBackgroundFilter(slide)
-                    }}
-                />
-            ) : backgroundUrl ? (
-                <div
-                    className="absolute inset-0 bg-cover bg-center"
-                    style={{
-                        backgroundImage: `url(${backgroundUrl})`,
-                        filter: slideBackgroundFilter(slide)
-                    }}
-                />
-            ) : (
-                <div className="absolute inset-0 bg-gradient-to-br from-gray-900 to-black" />
-            )}
-            </div>
-
-            {/* Audio-reactive motion layer (behind lyrics). Passes the synced
-                `visualizerEnabled` explicitly — this window's own Zustand
-                store only hydrates from localStorage at load time and won't
-                see the operator toggling it live in the main window. */}
-            <AudioReactiveBackground enabled={settings.visualizerEnabled ?? false} />
-
-            <div
-                key={slide.id}
-                className={`absolute inset-0 studio-slide-transition ${settings.animations === false ? 'no-transition' : ''} ${isBeatTransition ? 'beat-punch' : ''}`}
-            >
-            {/* Content — suppressed while the operator has "Cleared" the
-                output, keeping the background above so the audience still
-                sees the projector is live, just with the text/media hidden
-                rather than looking like nothing is being sent at all. */}
-            {!settings.liveOutputBlanked && (slide.type === slideTypes.media ? (
-                <MediaContent
-                    slide={slide}
-                    src={backgroundUrl || undefined}
-                    className="absolute inset-0 w-full h-full"
-                />
-            ) : slide.layout === 'lower-third' ? (
-                /* Lower Third Layout — strip anchored to the bottom; body auto-fits, caption stays small */
-                (() => {
-                    const isBible = isCaptionedSlideType(slide.type)
-                    const bodyHtml = slide.contents[0] || ''
-                    const captionHtml = slideCaptionHtml(slide)
-                    const subtitle = slide.slideStyle?.lowerThirdSubtitle || ''
-                    // Per-slide setting wins, then global default from settings, then 'bottom'.
-                    const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? settings.verseRefPosition ?? 'bottom'
-                    const captionOnTop = isBible && effectiveRefPos === 'top'
-
-                    const alignItems = slide.slideStyle?.lowerThirdPosition === 'center' ? 'center'
-                        : slide.slideStyle?.lowerThirdPosition === 'right' ? 'flex-end'
-                            : 'flex-start'
-                    const textAlign = (slide.slideStyle?.lowerThirdPosition as 'left' | 'center' | 'right') || 'left'
-
-                    const styleBar: React.CSSProperties =
-                        slide.slideStyle?.lowerThirdStyle === 'minimalist'
-                            ? { background: 'transparent' }
-                            : slide.slideStyle?.lowerThirdStyle === 'accent-bar'
-                                ? {
-                                    background: 'rgba(0, 0, 0, 0.75)',
-                                    backdropFilter: 'blur(12px)',
-                                    borderLeft: `6px solid ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}`,
-                                }
-                                : slide.slideStyle?.lowerThirdStyle === 'gradient-bar'
-                                    ? {
-                                        background: `linear-gradient(135deg, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}ee, ${slide.slideStyle?.lowerThirdAccentColor || '#0d9488'}88)`,
-                                        backdropFilter: 'blur(12px)',
-                                    }
-                                    : {
-                                        background: 'rgba(0, 0, 0, 0.75)',
-                                        backdropFilter: 'blur(12px)',
-                                    }
-
-                    const captionNode = (captionHtml || subtitle) && (
-                        <div
-                            className="shrink-0 drop-shadow-lg"
-                            style={{
-                                fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                lineHeight: 1.25,
-                                letterSpacing: '0.02em',
-                                width: '100%',
-                                textAlign,
-                                ...getVerseRefStyle(slide.slideStyle, settings, VERSE_REF_BOUNDS.lowerThird),
-                            }}
-                            // Bible reference uses raw HTML so the `<b>` book title renders; subtitle is plain.
-                            {...(captionHtml
-                                ? { dangerouslySetInnerHTML: { __html: captionHtml } }
-                                : { children: subtitle })}
-                        />
-                    )
-
-                    return (
-                        <div
-                            className="absolute inset-x-0 bottom-0"
-                            style={{ height: '30vh' }}
-                        >
-                            <div
-                                className="w-full h-full flex flex-col"
-                                style={{
-                                    alignItems,
-                                    padding: '20px 48px',
-                                    gap: '8px',
-                                    ...styleBar,
-                                }}
-                            >
-                                {captionOnTop && captionNode}
-                                <KineticText enabled={settings.visualizerEnabled ?? false} className="w-full flex-1 min-h-0">
-                                    <AutoFitText
-                                        html={bodyHtml}
-                                        className="w-full h-full text-white drop-shadow-lg tiptap-preview"
-                                        minPx={18}
-                                        maxPx={160}
-                                        style={{
-                                            fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                            textAlign,
-                                            fontWeight: 600,
-                                            lineHeight: 1.2,
-                                        }}
-                                    />
-                                </KineticText>
-                                {!captionOnTop && captionNode}
-                            </div>
-                        </div>
-                    )
-                })()
-            ) : slide.type === 'countdown' ? (
-                /* Countdown Layout - live ticking timer */
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    {/* Title */}
-                    {slide.contents[0] && (
-                        <div
-                            className="text-white/80 drop-shadow-lg mb-6 text-center"
-                            style={{
-                                fontSize: '4vw',
-                                fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                fontWeight: 400,
-                                letterSpacing: '0.04em',
-                            }}
-                        >
-                            {slide.contents[0]}
-                        </div>
-                    )}
-
-                    {/* Live countdown display */}
-                    <div
-                        className="text-white drop-shadow-2xl font-mono font-bold tabular-nums"
-                        style={{
-                            fontSize: '20vw',
-                            fontFamily: slide.slideStyle?.font || 'monospace',
-                            lineHeight: 1,
-                            letterSpacing: '-0.02em',
-                            textShadow: '0 4px 32px rgba(0,0,0,0.6)',
-                        }}
-                    >
-                        {formatCountdownTime(countdownSeconds)}
-                    </div>
-
-                    {/* Finished state */}
-                    {countdownSeconds === 0 && (
-                        <div
-                            className="text-white/60 mt-8 text-center"
-                            style={{
-                                fontSize: '3vw',
-                                fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                            }}
-                        >
-                            Time's up!
-                        </div>
-                    )}
-
-                    {/* Pause/Resume is the operator's (LiveOutput); a button here
-                        paused only this screen, so the two disagreed. */}
-                </div>
-            ) : (
-                /* Default Centered Layout — auto-fit body fills the screen, references pinned above/below */
-                (() => {
-                    // Per-slide setting wins, then broadcasted global default, then 'bottom'.
-                    const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? settings.verseRefPosition ?? 'bottom'
-                    const hasRef = slide.contents.length > 1
-                    const refOnTop = hasRef && effectiveRefPos === 'top'
-                    const refOnBottom = hasRef && effectiveRefPos !== 'top'
-                    return (
-                        <div
-                            className="absolute inset-0 flex flex-col"
-                            style={{
-                                paddingLeft: `${slide.slideStyle?.windowPadding?.left ?? 32}px`,
-                                paddingRight: `${slide.slideStyle?.windowPadding?.right ?? 32}px`,
-                                paddingTop: `${slide.slideStyle?.windowPadding?.top ?? 32}px`,
-                                paddingBottom: `${slide.slideStyle?.windowPadding?.bottom ?? 32}px`,
-                            }}
-                        >
-                            {refOnTop && (
-                                <div
-                                    className="shrink-0 text-center pb-3 drop-shadow-lg"
-                                    style={{
-                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                        lineHeight: 1.05,
-                                        letterSpacing: '0.01em',
-                                        textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
-                                        ...getVerseRefStyle(slide.slideStyle, settings, VERSE_REF_BOUNDS.fullSlide),
-                                    }}
-                                >
-                                    {slide.contents.slice(1).map((ref, i) => (
-                                        <div key={i} dangerouslySetInnerHTML={{ __html: ref }} />
-                                    ))}
-                                </div>
-                            )}
-                            <KineticText enabled={settings.visualizerEnabled ?? false} className="flex-1 min-h-0">
-                                <AutoFitText
-                                    html={slide.contents[0] || ''}
-                                    className="w-full h-full text-white drop-shadow-lg tiptap-preview"
-                                    minPx={24}
-                                    maxPx={640}
-                                    style={{
-                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                        textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
-                                        textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
-                                        lineHeight: 1.0,
-                                        textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
-                                    }}
-                                />
-                            </KineticText>
-                            {refOnBottom && (
-                                <div
-                                    className="shrink-0 text-center pt-3 drop-shadow-lg"
-                                    style={{
-                                        fontFamily: slide.slideStyle?.font || settings.defaultFont,
-                                        lineHeight: 1.05,
-                                        letterSpacing: '0.01em',
-                                        textShadow: slide.slideStyle?.textOutlined ? '1px 1px 3px rgba(0,0,0,0.8)' : undefined,
-                                        ...getVerseRefStyle(slide.slideStyle, settings, VERSE_REF_BOUNDS.fullSlide),
-                                    }}
-                                >
-                                    {slide.contents.slice(1).map((ref, i) => (
-                                        <div key={i} dangerouslySetInnerHTML={{ __html: ref }} />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )
-                })()
-            ))}
-
-            {/* Title overlay for hymns/songs — also part of the "content"
-                the Clear action hides. */}
-            {!settings.liveOutputBlanked && slide.title && settings.songAndHymnLabelsVisibility && (
-                <div className="absolute top-8 left-8 text-white/80 text-lg">
-                    {slide.title}
-                </div>
-            )}
+            {/* The same renderer as the operator's monitor, so what they
+                approve is what the room sees. */}
+            <SlideView slide={slide} settings={settings} className="absolute inset-0" />
 
             {/* Controls (show on hover) - only in web mode */}
             {!isDesktop && (
@@ -701,8 +393,6 @@ export default function LiveView() {
                     Double-click to enter fullscreen • Ctrl+F
                 </div>
             )}
-
-            </div>
 
             {/* Monitor identification flash overlay */}
             {flashColor && (

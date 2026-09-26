@@ -20,15 +20,14 @@
 import { useMemo, useCallback } from 'react'
 import { ChevronLeft, ChevronRight, Plus, Play, Mic, FileText, Lightbulb, Check, X } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { slideCaptionHtml } from '../../utils/slideCaption'
 import { useLiveSession } from '../../hooks/useLiveSession'
 import { useUserRole } from '../../hooks/useUserRole'
-import { AutoFitText } from '../live/AutoFitText'
 import { LiveSessionControls } from '../live/LiveSessionControls'
+import { SlideView } from '../live/SlideView'
+import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { PresenceAvatars } from '../live/PresenceAvatars'
 import type { Slide } from '../../types'
 
-const SLIDE_PREVIEW_BG = 'linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%)'
 
 export function MobileStudioWorkspace() {
     const activeSlides = useAppStore((s) => s.activeSlides)
@@ -79,6 +78,7 @@ export function MobileStudioWorkspace() {
     const fallbackIndex = queue.findIndex(slide => slide.id === liveSlideId)
     const effectiveIndex = currentIndex >= 0 ? currentIndex : fallbackIndex
     const effectiveLiveSlide = liveSlide ?? (effectiveIndex >= 0 ? queue[effectiveIndex] : null)
+    const outputSettings = useLiveOutputSettings()
     const effectiveNextSlide = queue[effectiveIndex + 1] ?? null
     const effectivePrevSlide = queue[effectiveIndex - 1] ?? null
 
@@ -133,11 +133,6 @@ export function MobileStudioWorkspace() {
         }
     }, [openModal])
 
-    const liveBodyHtml = effectiveLiveSlide?.contents[0] ?? ''
-    const liveRefHtml = slideCaptionHtml(effectiveLiveSlide)
-
-    const liveBg = effectiveLiveSlide?.background || SLIDE_PREVIEW_BG
-    const isLiveVideo = effectiveLiveSlide?.backgroundType === 'video'
 
     return (
         <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
@@ -180,39 +175,16 @@ export function MobileStudioWorkspace() {
             {/* Main live slide — fills available space, scrolls if text overflows. */}
             <div className="flex-1 min-h-0 px-3 py-3 overflow-hidden">
                 {effectiveLiveSlide ? (
-                    <div
-                        className="w-full h-full rounded-xl border border-[var(--border-subtle)] shadow-lg overflow-hidden flex flex-col"
-                        style={{ background: liveBg, backgroundSize: 'cover', backgroundPosition: 'center' }}
-                    >
-                        {isLiveVideo ? (
-                            <video
-                                src={liveBg}
-                                className="w-full h-full object-cover"
-                                autoPlay
-                                loop
-                                muted
-                            />
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center p-4 text-center overflow-hidden">
-                                <AutoFitText
-                                    html={liveBodyHtml}
-                                    minPx={14}
-                                    maxPx={64}
-                                    className="font-bold leading-tight w-full"
-                                    style={{
-                                        color: '#fff',
-                                        textShadow: '0 2px 8px rgba(0,0,0,0.5)',
-                                    }}
-                                />
-                                {liveRefHtml && (
-                                    <div
-                                        className="mt-3 text-sm opacity-80"
-                                        style={{ color: '#fff' }}
-                                        dangerouslySetInnerHTML={{ __html: liveRefHtml }}
-                                    />
-                                )}
-                            </div>
-                        )}
+                    // The projector's renderer, in the projector's 16:9 frame.
+                    <div className="w-full h-full flex items-center justify-center">
+                        <SlideView
+                            slide={effectiveLiveSlide}
+                            settings={outputSettings}
+                            muted
+                            showMissingMedia
+                            minTextPx={12}
+                            className="w-full aspect-video max-h-full rounded-xl border border-[var(--border-subtle)] shadow-lg"
+                        />
                     </div>
                 ) : (
                     <button
