@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../../convex/_generated/api'
 import {
@@ -289,6 +290,7 @@ function InvitationsList({
     isAdmin: boolean
 }) {
     const [menuOpen, setMenuOpen] = useState<string | null>(null)
+    const { confirm: askConfirm, ConfirmDialog } = useConfirmDialog()
     const revokeInvitation = useMutation(api.invitations.revokeInvitation)
     const regenerateCode = useMutation(api.invitations.regenerateInviteCode)
     const [copiedCode, setCopiedCode] = useState<string | null>(null)
@@ -301,13 +303,23 @@ function InvitationsList({
     }
 
     const handleRevoke = async (invitationId: string) => {
-        if (confirm('Are you sure you want to revoke this invitation?')) {
+        if (await askConfirm({
+            title: 'Revoke invitation?',
+            message: 'The invite link will stop working.',
+            type: 'danger',
+            confirmText: 'Revoke',
+        })) {
             await revokeInvitation({ invitationId })
         }
     }
 
     const handleRegenerate = async (invitationId: string) => {
-        if (confirm('This will generate a new invite link. The old link will no longer work.')) {
+        if (await askConfirm({
+            title: 'Generate a new invite link?',
+            message: 'The old link will no longer work.',
+            type: 'warning',
+            confirmText: 'Generate',
+        })) {
             await regenerateCode({ invitationId })
         }
     }
@@ -342,6 +354,7 @@ function InvitationsList({
     return (
         <div className="space-y-6">
             {/* Pending Invitations */}
+            <ConfirmDialog />
             {pendingInvitations.length > 0 && (
                 <div>
                     <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">

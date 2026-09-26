@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { useSermonListener, type UseSermonListenerReturn } from '../../hooks/useSermonListener'
 import { useSermonListenerContext } from './SermonListenerContext'
 import { SermonListenerWizard, isSermonListenerWizardComplete } from './SermonListenerWizard'
@@ -101,6 +102,7 @@ function SermonListenerPanelInner({
     onHide,
     sermonListener,
 }: SermonListenerPanelInnerProps) {
+    const { confirm: askConfirm, ConfirmDialog } = useConfirmDialog()
     const [showSavedTranscripts, setShowSavedTranscripts] = useState(false)
     const [showSaveDialog, setShowSaveDialog] = useState(false)
     const [showExportPicker, setShowExportPicker] = useState(false)
@@ -423,7 +425,12 @@ function SermonListenerPanelInner({
 
     const handleDeleteTranscript = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation()
-        if (confirm('Are you sure you want to delete this transcript?')) {
+        if (await askConfirm({
+            title: 'Delete transcript?',
+            message: 'This transcript will be removed for good.',
+            type: 'danger',
+            confirmText: 'Delete',
+        })) {
             await deleteTranscript(id)
             if (selectedTranscript?._id === id) {
                 setSelectedTranscript(null)
@@ -481,6 +488,7 @@ function SermonListenerPanelInner({
     return (
         <div className={`flex flex-col h-full ${compact ? 'gap-2' : 'gap-3'}`}>
             {/* Save feedback toast */}
+            <ConfirmDialog />
             {saveMessage && (
                 <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium animate-in slide-in-from-top-2 ${
                     saveMessage.type === 'success' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { AppSettings, SlideStyle } from '../../types'
@@ -1470,6 +1471,7 @@ function ProfileSettings() {
 
 // Storage Settings Tab
 function StorageSettings() {
+    const { confirm: askConfirm, ConfirmDialog } = useConfirmDialog()
     // Calculate localStorage usage once, on mount
     const [storageUsed] = useState(() => {
         let total = 0
@@ -1487,8 +1489,13 @@ function StorageSettings() {
         return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
     }
 
-    const clearCache = () => {
-        if (confirm('Are you sure you want to clear local cache? This will not delete your saved slides.')) {
+    const clearCache = async () => {
+        if (await askConfirm({
+            title: 'Clear local cache?',
+            message: 'This will not delete your saved slides.',
+            type: 'warning',
+            confirmText: 'Clear cache',
+        })) {
             // Clear specific cache keys while preserving important data
             const preserveKeys = ['selah_library_slides', 'app-storage']
             for (const key in localStorage) {
@@ -1502,6 +1509,7 @@ function StorageSettings() {
 
     return (
         <div className="space-y-6">
+            <ConfirmDialog />
             <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                 <div className="flex justify-between items-center mb-2">
                     <span className="text-sm text-gray-600 dark:text-gray-400">Local Storage Used</span>

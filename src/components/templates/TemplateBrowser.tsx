@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video } from 'lucide-react'
 import {
     useTemplates,
@@ -239,6 +240,7 @@ interface TemplateBrowserProps {
 }
 
 export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCustom, isInline = false, slideType }: TemplateBrowserProps) {
+    const { confirm: askConfirm, ConfirmDialog } = useConfirmDialog()
     const backdropDismiss = useBackdropDismiss(onClose)
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
@@ -272,7 +274,12 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     }, [isOpen, isInline, isLoading, templates, seedDefaultTemplates])
 
     const handleResetDefaults = async () => {
-        if (!confirm('Reset default templates to latest versions? Your custom templates will be preserved.')) return
+        if (!await askConfirm({
+            title: 'Reset default templates?',
+            message: 'The built-in templates go back to their latest versions. Your custom templates are kept.',
+            type: 'warning',
+            confirmText: 'Reset',
+        })) return
         setIsResetting(true)
         try {
             await resetDefaultTemplates()
@@ -324,7 +331,12 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
 
     const handleDeleteTemplate = async (e: React.MouseEvent, templateId: string) => {
         e.stopPropagation()
-        if (!confirm('Are you sure you want to delete this template?')) return
+        if (!await askConfirm({
+            title: 'Delete template?',
+            message: 'This template will be removed for good.',
+            type: 'danger',
+            confirmText: 'Delete',
+        })) return
         setDeletingId(templateId)
         try {
             await deleteTemplate(templateId)
@@ -658,6 +670,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     if (isInline) return (
         <>
             {content}
+            <ConfirmDialog />
             <CreateTemplateModal
                 isOpen={showCreateModal}
                 onClose={() => {
@@ -677,6 +690,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
             >
                 {content}
             </div>
+            <ConfirmDialog />
 
             <CreateTemplateModal
                 isOpen={showCreateModal}
