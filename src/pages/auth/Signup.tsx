@@ -367,6 +367,7 @@ export default function SignupPage() {
                                         <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                                         <input
                                             type="email"
+                                            autoComplete="email"
                                             value={email}
                                             onChange={(e) => setEmail(e.target.value)}
                                             placeholder="you@church.com"
@@ -384,6 +385,7 @@ export default function SignupPage() {
                                         <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                                         <input
                                             type={showPassword ? 'text' : 'password'}
+                                            autoComplete="new-password"
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                             placeholder="Min. 8 characters"
