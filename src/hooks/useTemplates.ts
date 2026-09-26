@@ -294,16 +294,16 @@ function getTemplateObjectUrl(storageId: string, blob: Blob): string {
 
 export function useFileUrl(storageId: string | null) {
     const convex = useConvex()
-    const [url, setUrl] = useState<string | null>(null)
+    // Remembered with the id it resolves, and only returned for that id: a
+    // plain `url` state kept serving the previous template's background while
+    // the next one resolved, so a new slide briefly showed the wrong image.
+    const [resolved, setResolved] = useState<{ sid: string; url: string | null } | null>(null)
     // Tracks the storageId the in-flight resolver is operating on so we
     // ignore stale resolutions when storageId changes mid-fetch.
     const resolvingForRef = useRef<string | null>(null)
 
     useEffect(() => {
-        if (!storageId) {
-            setUrl(null)
-            return
-        }
+        if (!storageId) return
 
         // Narrow storageId for the closure — TypeScript's flow analysis
         // doesn't always propagate the post-`if (!storageId) return` narrowing
@@ -321,7 +321,7 @@ export function useFileUrl(storageId: string | null) {
             // 1. In-memory signed-URL cache
             const urlCacheHit = getCachedSignedUrl(sid)
             if (urlCacheHit) {
-                if (!cancelled) setUrl(urlCacheHit)
+                if (!cancelled) setResolved({ sid, url: urlCacheHit })
                 return
             }
 
@@ -329,7 +329,7 @@ export function useFileUrl(storageId: string | null) {
             const blob = await getCachedTemplateBlob(sid)
             if (cancelled || resolvingForRef.current !== sid) return
             if (blob) {
-                setUrl(getTemplateObjectUrl(sid, blob))
+                setResolved({ sid, url: getTemplateObjectUrl(sid, blob) })
                 return
             }
 
@@ -339,16 +339,16 @@ export function useFileUrl(storageId: string | null) {
                 if (cancelled || resolvingForRef.current !== sid) return
                 if (signedUrl) {
                     setCachedSignedUrl(sid, signedUrl)
-                    setUrl(signedUrl)
+                    setResolved({ sid, url: signedUrl })
                     // Background: fetch the bytes so the NEXT mount is fully local
                     backgroundCacheBlob(sid, signedUrl)
                 } else {
-                    setUrl(null)
+                    setResolved({ sid, url: null })
                 }
             } catch (err) {
                 if (cancelled) return
                 console.warn('[useFileUrl] Convex query failed for', sid, err)
-                setUrl(null)
+                setResolved({ sid, url: null })
             }
         }
 
@@ -362,7 +362,11 @@ export function useFileUrl(storageId: string | null) {
     // No unmount cleanup: the URL is shared and may outlive this component on
     // a live slide. See `templateObjectUrls`.
 
-    return url
+    if (!storageId) return null
+    if (resolved?.sid === storageId) return resolved.url
+    // Until this id resolves, anything already in memory for it — never the
+    // previous id's URL.
+    return getCachedSignedUrl(storageId) ?? templateObjectUrls.get(storageId) ?? null
 }
 
 export function useTemplates(): UseTemplatesReturn {

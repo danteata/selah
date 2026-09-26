@@ -283,8 +283,20 @@ describe('AddSongModal', () => {
         const { container } = render(<AddSongModal {...baseProps} onClose={onClose} />)
         const backdrop = container.querySelector('.bg-black\\/50')
         expect(backdrop).toBeTruthy()
+        fireEvent.mouseDown(backdrop!)
         fireEvent.click(backdrop!)
         expect(onClose).toHaveBeenCalled()
+    })
+
+    it('does not close when a text selection ends over the backdrop', () => {
+        const onClose = vi.fn()
+        const { container } = render(<AddSongModal {...baseProps} onClose={onClose} />)
+        const backdrop = container.querySelector('.bg-black\\/50')
+        expect(backdrop).toBeTruthy()
+        // Pressed inside the dialog (e.g. selecting lyrics), released outside.
+        fireEvent.mouseDown(screen.getAllByRole('textbox')[0])
+        fireEvent.click(backdrop!)
+        expect(onClose).not.toHaveBeenCalled()
     })
 
     it('shows verse count when lyrics are entered', () => {

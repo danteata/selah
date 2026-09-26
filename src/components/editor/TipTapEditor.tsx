@@ -100,10 +100,12 @@ export function TipTapEditor({
         }
     }, [editor, font])
 
-    // Update alignment
+    // Update alignment. No `.focus()`: this also runs on mount, and with it
+    // every block of a multi-block slide grabbed focus (and scrolled) as the
+    // editor opened, the last one winning.
     useEffect(() => {
         if (editor) {
-            editor.chain().focus().setTextAlign(alignment).run()
+            editor.chain().setTextAlign(alignment).run()
         }
     }, [editor, alignment])
 
@@ -199,10 +201,12 @@ export function TipTapInlineEditor({
         }
     }, [editor, font])
 
-    // Update alignment
+    // Update alignment. No `.focus()`: this also runs on mount, and with it
+    // every block of a multi-block slide grabbed focus (and scrolled) as the
+    // editor opened, the last one winning.
     useEffect(() => {
         if (editor) {
-            editor.chain().focus().setTextAlign(alignment).run()
+            editor.chain().setTextAlign(alignment).run()
         }
     }, [editor, alignment])
 

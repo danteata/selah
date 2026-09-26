@@ -164,7 +164,11 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
     /** Non-null while a local-engine session is in flight. */
     const nativeSessionRef = useRef<NativeVoiceSearchSession | null>(null)
     const onFinalRef = useRef(onFinal)
-    onFinalRef.current = onFinal
+    // Refreshed after commit, not during render (render must stay pure). It's
+    // only read in `onend`, which fires long after any commit.
+    useEffect(() => {
+        onFinalRef.current = onFinal
+    }, [onFinal])
 
     // The local engine needs no browser support at all, so on desktop the mic
     // button must not be hidden just because this WebView lacks Web Speech —

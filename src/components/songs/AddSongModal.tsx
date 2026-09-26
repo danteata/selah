@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { X, Music, Plus, Lightbulb, Globe, Eye, EyeOff } from 'lucide-react'
 import { useSongs } from '../../hooks/useSongs'
 import type { Song } from '../../types'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 interface AddSongModalProps {
     isOpen: boolean
@@ -11,10 +12,13 @@ interface AddSongModalProps {
 }
 
 export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalProps) {
-    const [title, setTitle] = useState('')
-    const [artist, setArtist] = useState('')
-    const [lyrics, setLyrics] = useState('')
-    const [isPublic, setIsPublic] = useState(true)
+    // Seeded from the song once per mount; callers key this modal per song, so
+    // each open starts fresh. Copying them in an effect instead painted the
+    // previous song's fields (and any old error) for a frame on every open.
+    const [title, setTitle] = useState(() => song?.title || '')
+    const [artist, setArtist] = useState(() => song?.artist || '')
+    const [lyrics, setLyrics] = useState(() => song?.lyrics || '')
+    const [isPublic, setIsPublic] = useState(() => song?.isPublic ?? true)
     const [error, setError] = useState('')
     const [showPreview, setShowPreview] = useState(false)
 
@@ -22,24 +26,6 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
 
     // Parse verses for preview
     const parsedVerses = lyrics.trim() ? lyrics.split(/\n\s*\n/).filter(v => v.trim()) : []
-
-    // Populate form when editing an existing song or when modal opens
-    useEffect(() => {
-        if (isOpen) {
-            if (song) {
-                setTitle(song.title || '')
-                setArtist(song.artist || '')
-                setLyrics(song.lyrics || '')
-                setIsPublic(song.isPublic ?? true)
-            } else {
-                setTitle('')
-                setArtist('')
-                setLyrics('')
-                setIsPublic(true)
-                setError('')
-            }
-        }
-    }, [song, isOpen])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -85,6 +71,7 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
             onClose()
         }
     }
+    const backdropDismiss = useBackdropDismiss(handleClose)
 
     if (!isOpen) return null
 
@@ -97,7 +84,7 @@ export function AddSongModal({ isOpen, onClose, song, onSuccess }: AddSongModalP
             aria-modal="true"
             aria-label={isEditing ? 'Edit song' : 'Add song'}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && handleClose()}
+            {...backdropDismiss}
             // Keys typed in this editor belong to this editor. Every surface that
             // opens it — the songs panel, the music browser's search results, the
             // browse list nested inside that browser — binds its own key handler

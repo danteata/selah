@@ -104,13 +104,22 @@ export function DashboardLayout({
         return set
     }, [userHiddenPanels, sermonDuplicatedInSidebar])
 
-    // Save layouts to localStorage
+    // Save layouts to localStorage (best-effort: it throws in private mode or
+    // with storage blocked, which would take the dashboard down with it).
     useEffect(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts))
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts))
+        } catch (err) {
+            console.warn('[DashboardLayout] layout not saved:', err)
+        }
     }, [layouts])
 
-    // Handle sermon listener visibility — restore layout when showing
-    useEffect(() => {
+    // Restore the sermon listener panel's size when it is switched on. Done
+    // during render on the change itself, not in an effect: the effect also ran
+    // on mount, resetting a user's resize of that panel on every reload.
+    const [prevShowSermonListener, setPrevShowSermonListener] = useState(showSermonListener)
+    if (showSermonListener !== prevShowSermonListener) {
+        setPrevShowSermonListener(showSermonListener)
         if (showSermonListener) {
             const panelConfig = DEFAULT_PANEL_CONFIGS.find(p => p.id === 'sermonListener')
             if (panelConfig) {
@@ -132,7 +141,7 @@ export function DashboardLayout({
                 })
             }
         }
-    }, [showSermonListener])
+    }
 
     const handleLayoutChange = useCallback((newLayouts: { [key: string]: LayoutItem[] }) => {
         // react-grid-layout fires onLayoutChange on every pass (including its own

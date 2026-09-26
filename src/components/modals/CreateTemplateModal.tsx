@@ -11,6 +11,7 @@ import { generateThumbnail } from '../../utils/templateThumbnail'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 import type { SlideStyle } from '../../types'
+import { useBackdropDismiss } from '../../hooks/useBackdropDismiss'
 
 type TemplateLayout = 'full-text' | 'lower-third'
 
@@ -47,7 +48,26 @@ interface CreateTemplateModalProps {
     editingTemplate?: TemplateItem | null
 }
 
+const DEFAULT_BACKGROUND_IMAGE = DEFAULT_BACKGROUNDS.general.background
+
+const GRADIENT_OPTIONS = [
+    { name: 'Purple Dream', value: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
+    { name: 'Ocean Blue', value: 'linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%)' },
+    { name: 'Sunset', value: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)' },
+    { name: 'Forest', value: 'linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%)' },
+    { name: 'Night Sky', value: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)' },
+    { name: 'Warm Glow', value: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)' },
+]
+
+const PRESET_IMAGES = [
+    { name: 'Hymn', url: DEFAULT_BACKGROUNDS.hymn.background },
+    { name: 'Bible', url: DEFAULT_BACKGROUNDS.bible.background },
+    { name: 'Text', url: DEFAULT_BACKGROUNDS.text.background },
+    { name: 'Prayer', url: DEFAULT_BACKGROUNDS.prayer.background },
+]
+
 export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: CreateTemplateModalProps) {
+    const backdropDismiss = useBackdropDismiss(onClose)
     const { createTemplate, updateTemplate, generateUploadUrl } = useTemplates()
     const { isOffline } = useConvexConnection()
     const [name, setName] = useState('')
@@ -84,22 +104,6 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     // Shared with SaveAsTemplateModal — the two lists had drifted apart, and
     // only one of them offered options the backend then discarded.
     const slideTypes = TEMPLATE_SLIDE_TYPE_OPTIONS
-
-    const gradientOptions = [
-        { name: 'Purple Dream', value: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
-        { name: 'Ocean Blue', value: 'linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%)' },
-        { name: 'Sunset', value: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)' },
-        { name: 'Forest', value: 'linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%)' },
-        { name: 'Night Sky', value: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)' },
-        { name: 'Warm Glow', value: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)' },
-    ]
-
-    const presetImages = [
-        { name: 'Hymn', url: DEFAULT_BACKGROUNDS.hymn.background },
-        { name: 'Bible', url: DEFAULT_BACKGROUNDS.bible.background },
-        { name: 'Text', url: DEFAULT_BACKGROUNDS.text.background },
-        { name: 'Prayer', url: DEFAULT_BACKGROUNDS.prayer.background },
-    ]
 
     // Reset form when modal opens or editing template changes
     useEffect(() => {
@@ -165,16 +169,21 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
         }
     }, [isOpen, editingTemplate])
 
-    // Update background when type changes
-    useEffect(() => {
-        if (backgroundType === 'image') {
-            setBackground(DEFAULT_BACKGROUNDS.general.background)
-        } else if (backgroundType === 'gradient') {
-            setBackground(gradientOptions[0].value)
-        } else if (backgroundType === 'color') {
-            setBackground(customColor)
-        }
-    }, [backgroundType, customColor])
+    // Choosing a background type starts it from that type's default. This used
+    // to be an effect on the type, which also ran right after the form was
+    // populated — so opening a template to edit replaced its saved background
+    // with the stock one for its type.
+    const chooseBackgroundType = (type: 'image' | 'gradient' | 'color') => {
+        setBackgroundType(type)
+        if (type === 'image') setBackground(DEFAULT_BACKGROUND_IMAGE)
+        else if (type === 'gradient') setBackground(GRADIENT_OPTIONS[0].value)
+        else setBackground(customColor)
+    }
+
+    const chooseCustomColor = (color: string) => {
+        setCustomColor(color)
+        if (backgroundType === 'color') setBackground(color)
+    }
 
     const handleCustomImageChange = (url: string) => {
         setCustomImageUrl(url)
@@ -426,7 +435,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     return (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={(e) => e.target === e.currentTarget && onClose()}
+            {...backdropDismiss}
         >
             <div className="w-full max-w-2xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-2xl overflow-hidden flex flex-col">
                 {/* Header */}
@@ -709,7 +718,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                             <div className="flex gap-2 flex-wrap">
                                 <button
                                     type="button"
-                                    onClick={() => setBackgroundType('image')}
+                                    onClick={() => chooseBackgroundType('image')}
                                     className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${backgroundType === 'image'
                                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 ring-2 ring-primary-500'
                                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -731,7 +740,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setBackgroundType('gradient')}
+                                    onClick={() => chooseBackgroundType('gradient')}
                                     className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${backgroundType === 'gradient'
                                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 ring-2 ring-primary-500'
                                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -742,7 +751,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setBackgroundType('color')}
+                                    onClick={() => chooseBackgroundType('color')}
                                     className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${backgroundType === 'color'
                                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 ring-2 ring-primary-500'
                                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -764,7 +773,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
                                 {/* Preset Images */}
                                 <div className="grid grid-cols-4 gap-2">
-                                    {presetImages.map((img) => (
+                                    {PRESET_IMAGES.map((img) => (
                                         <button
                                             key={img.name}
                                             type="button"
@@ -871,7 +880,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                     Gradient Preset
                                 </label>
                                 <div className="grid grid-cols-3 gap-2">
-                                    {gradientOptions.map((gradient) => (
+                                    {GRADIENT_OPTIONS.map((gradient) => (
                                         <button
                                             key={gradient.name}
                                             type="button"
@@ -901,13 +910,13 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                     <input
                                         type="color"
                                         value={customColor}
-                                        onChange={(e) => setCustomColor(e.target.value)}
+                                        onChange={(e) => chooseCustomColor(e.target.value)}
                                         className="w-12 h-12 rounded-lg border border-gray-300 dark:border-gray-700 cursor-pointer"
                                     />
                                     <input
                                         type="text"
                                         value={customColor}
-                                        onChange={(e) => setCustomColor(e.target.value)}
+                                        onChange={(e) => chooseCustomColor(e.target.value)}
                                         className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     />
                                 </div>

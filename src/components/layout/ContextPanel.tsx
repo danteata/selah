@@ -725,6 +725,7 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
             {/* Editor for a song opened from the search results, or a new song
                 started from the + button. */}
             <AddSongModal
+                key={songToEdit ? (songToEdit._id ?? songToEdit.id ?? 'edit') : showAddSong ? 'new' : 'closed'}
                 isOpen={songToEdit !== null || showAddSong}
                 song={songToEdit}
                 onClose={() => { setSongToEdit(null); setShowAddSong(false) }}

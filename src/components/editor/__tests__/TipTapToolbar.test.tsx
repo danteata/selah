@@ -4,6 +4,7 @@ import { TipTapToolbar } from '../TipTapToolbar'
 
 vi.mock('@tiptap/react', () => ({
     Editor: vi.fn(),
+    useEditorState: vi.fn(),
 }))
 
 describe('TipTapToolbar', () => {

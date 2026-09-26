@@ -470,6 +470,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
 
             {/* Add/Edit Song Modal */}
             <AddSongModal
+                key={isAddModalOpen ? (songToEdit?._id ?? songToEdit?.id ?? 'new') : 'closed'}
                 isOpen={isAddModalOpen}
                 onClose={handleCloseModal}
                 song={songToEdit}

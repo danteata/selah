@@ -750,7 +750,9 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         }
 
         return () => { if (autoSearchTimerRef.current) clearTimeout(autoSearchTimerRef.current) }
-    }, [query, selectedVersion, hasEmbeddings, semanticSearch, clearSemanticResults, parseQuery, handleSearch])
+        // isEmbedderReady matters: a meaning query typed while the model was
+        // still loading otherwise stayed empty until the next keystroke.
+    }, [query, selectedVersion, hasEmbeddings, isEmbedderReady, semanticSearch, clearSemanticResults, parseQuery, handleSearch])
 
     const navigateVerse = useCallback(async (direction: 'prev' | 'next') => {
         if (!currentBookIndex || !currentChapter || !currentStartVerse) return

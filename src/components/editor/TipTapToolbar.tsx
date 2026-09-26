@@ -1,8 +1,8 @@
-import { Editor } from '@tiptap/react'
+import { Editor, useEditorState } from '@tiptap/react'
 import {
     Bold, Italic, Underline, Strikethrough, Code, Heading1, Heading2, Heading3,
     List, ListOrdered, Quote, Undo, Redo, AlignLeft, AlignCenter,
-    AlignRight, Highlighter, Type, Palette
+    AlignRight, Highlighter, Type
 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 
@@ -10,11 +10,60 @@ interface TipTapToolbarProps {
     editor: Editor | null
 }
 
+const COLORS = [
+    '#ffffff', '#000000', '#ef4444', '#f97316', '#eab308',
+    '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899',
+]
+
+const HIGHLIGHT_COLORS = [
+    '#fef08a', '#bbf7d0', '#a5f3fc', '#c4b5fd', '#fbcfe8',
+    '#fecaca', '#fed7aa', '#d9f99d', '#e0e7ff', '#fce7f3',
+]
+
+// At module scope: declared inside the toolbar it was a new component type on
+// every render, so all the buttons remounted — dropping keyboard focus and
+// hover — whenever the editor above re-rendered (every keystroke).
+function ToolbarButton({
+    onClick,
+    isActive = false,
+    disabled = false,
+    children,
+    title,
+}: {
+    onClick: () => void
+    isActive?: boolean
+    disabled?: boolean
+    children: React.ReactNode
+    title: string
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            title={title}
+            aria-label={title}
+            aria-pressed={isActive}
+            className={`p-1.5 rounded transition-colors ${isActive
+                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
+                } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        >
+            {children}
+        </button>
+    )
+}
+
 export function TipTapToolbar({ editor }: TipTapToolbarProps) {
     const [showColorPicker, setShowColorPicker] = useState(false)
     const [showHighlightPicker, setShowHighlightPicker] = useState(false)
     const colorPickerRef = useRef<HTMLDivElement>(null)
     const highlightPickerRef = useRef<HTMLDivElement>(null)
+
+    // TipTap v3 doesn't re-render on editor transactions by default, so the
+    // bold/italic/alignment states lagged the cursor until the next keystroke.
+    // Subscribing to the transaction count keeps them current.
+    useEditorState({ editor, selector: (ctx) => ctx.transactionNumber })
 
     // Close color pickers when clicking outside
     useEffect(() => {
@@ -34,16 +83,6 @@ export function TipTapToolbar({ editor }: TipTapToolbarProps) {
         return null
     }
 
-    const colors = [
-        '#ffffff', '#000000', '#ef4444', '#f97316', '#eab308',
-        '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899',
-    ]
-
-    const highlightColors = [
-        '#fef08a', '#bbf7d0', '#a5f3fc', '#c4b5fd', '#fbcfe8',
-        '#fecaca', '#fed7aa', '#d9f99d', '#e0e7ff', '#fce7f3',
-    ]
-
     const setHeading = (level: 1 | 2 | 3) => {
         editor.chain().focus().toggleHeading({ level }).run()
     }
@@ -61,32 +100,6 @@ export function TipTapToolbar({ editor }: TipTapToolbarProps) {
         editor.chain().focus().toggleHighlight({ color }).run()
         setShowHighlightPicker(false)
     }
-
-    const ToolbarButton = ({
-        onClick,
-        isActive = false,
-        disabled = false,
-        children,
-        title,
-    }: {
-        onClick: () => void
-        isActive?: boolean
-        disabled?: boolean
-        children: React.ReactNode
-        title: string
-    }) => (
-        <button
-            onClick={onClick}
-            disabled={disabled}
-            title={title}
-            className={`p-1.5 rounded transition-colors ${isActive
-                ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-                : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300'
-                } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-        >
-            {children}
-        </button>
-    )
 
     return (
         <div className="flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex-wrap">
@@ -183,7 +196,7 @@ export function TipTapToolbar({ editor }: TipTapToolbarProps) {
                 {showColorPicker && (
                     <div className="absolute top-full left-0 mt-1 p-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
                         <div className="grid grid-cols-5 gap-1">
-                            {colors.map((color) => (
+                            {COLORS.map((color) => (
                                 <button
                                     key={color}
                                     onClick={() => setColor(color)}
@@ -209,7 +222,7 @@ export function TipTapToolbar({ editor }: TipTapToolbarProps) {
                 {showHighlightPicker && (
                     <div className="absolute top-full left-0 mt-1 p-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
                         <div className="grid grid-cols-5 gap-1">
-                            {highlightColors.map((color) => (
+                            {HIGHLIGHT_COLORS.map((color) => (
                                 <button
                                     key={color}
                                     onClick={() => setHighlight(color)}
