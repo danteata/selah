@@ -10,8 +10,8 @@
 
 | # | Component | Bug | Severity | File |
 |---|-----------|-----|----------|------|
-| 1 | `useUserRole` | `isLoading` flips to `false` while Convex query is still resolving | Medium | `src/hooks/useUserRole.ts:91` |
-| 2 | `useUserRole` | Stale cached session shown when server returns `null` (deleted user) | **High** | `src/hooks/useUserRole.ts:80` |
+| 1 | `useUserRole` | (FIXED) `isLoading` flips to `false` while Convex query is still resolving | ~~Medium~~ | `src/hooks/useUserRole.ts:91` |
+| 2 | `useUserRole` | (FIXED) Stale cached session shown when server returns `null` (deleted user) | ~~**High**~~ | `src/hooks/useUserRole.ts:80` |
 | 3 | `appStore` | (HISTORICAL) Undo/redo nested full state objects | ~~Medium~~ | `src/store/appStore.ts:809-822` |
 | 4 | `appStore` | (HISTORICAL) `liveOutputSlidesId` not captured in `pastStates` | ~~Medium~~ | `src/store/appStore.ts:809-822` |
 | 5 | `useSlideCreation` | (HISTORICAL) `duplicateSlide` shallow copy | ~~Medium~~ | `src/hooks/useSlideCreation.ts:222` |
@@ -19,8 +19,8 @@
 | 7 | `verseDetection` | (HISTORICAL) Regex matches time expressions as verses | ~~Low~~ | `src/services/sermon-listener/verseDetection.ts:270-273` |
 | 8 | `verseDetection` | (HISTORICAL) No verse-number bounds checking | ~~Medium~~ | `src/services/sermon-listener/verseDetection.ts:549-551` |
 | 9 | `verseDetection` | (FIXED) Regex path had no per-book verse-count data → impossible verses slipped through (e.g. "Genesis 50:999" accepted) | ~~Medium~~ | `src/services/sermon-listener/verseDetection.ts:272-337` |
-| 10 | `voiceCommandDetection` | **NEW** Intent filter (COMMAND_KEYWORDS) excludes "pause/resume/begin listening" even though the detection regexes match them | Medium | `src/services/sermon-listener/voiceCommandDetection.ts:407-418` |
-| 11 | `voiceCommandDetection` | **NEW** `AVAILABLE_VERSIONS` alias list is out of sync with `bibleVersionObjects` (e.g. ESV is in aliases but not in objects) | Low | `src/services/sermon-listener/voiceCommandDetection.ts:19-40` |
+| 10 | `voiceCommandDetection` | (FIXED) Intent filter (COMMAND_KEYWORDS) excluded "pause/resume/begin listening". Control commands are now whole-utterance matches checked before the gate, which also stops sermon sentences like "never stop listening to the Spirit" switching the listener off | ~~Medium~~ | `src/services/sermon-listener/voiceCommandDetection.ts:407-418` |
+| 11 | `voiceCommandDetection` | (OBSOLETE) `AVAILABLE_VERSIONS` is now built from `bibleVersionObjects`. The remaining drift runs the other way: the hard-coded version regex omits NASB/TPT/YBCV | Low | `src/services/sermon-listener/voiceCommandDetection.ts:19-40` |
 | 12 | `useUserRole` | (HISTORICAL) `effectiveUser` derivation only handles `undefined` vs `null` correctly since the `=== undefined` check excludes `null` (this is the **fix** in place) | ~~Info~~ | `src/hooks/useUserRole.ts:80-86` |
 | 13 | `BibleVerseNavigator` / `useKeyboardShortcuts` | **NEW** Verse navigator has no keyboard shortcut; arrow keys collide with the global slide-queue navigation so the operator has to use the mouse for every verse step | **High** | `src/components/bible/BibleVerseNavigator.tsx:183-195`, `src/pages/Dashboard.tsx:230-231`, `src/components/live/LiveOutput.tsx:251-254` |
 | 14 | `voiceCommandDetection` / `verseDetection` / `referenceContext` | (FIXED) "verse" mis-transcribed as "versus" was not recognized by ANY of the three separate detectors that require the literal word "verse" | ~~**High**~~ | `voiceCommandDetection.ts`, `verseDetection.ts`, `referenceContext.ts` |

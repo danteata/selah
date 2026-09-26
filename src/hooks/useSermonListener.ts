@@ -475,6 +475,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     // Debounce timer for interim transcript processing
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    // `stop` reads this rather than the state: its identity only changes with
+    // `provider`, so the captured value was the mount-time `false` forever —
+    // the stop chime never played and the stop was never recorded.
+    const isListeningRef = useRef(false)
+    const analyserGenerationRef = useRef(0)
     const INTERIM_DEBOUNCE_MS = 300
 
     // Read current live Bible slide as fallback when currentVerseRef is null
@@ -566,7 +571,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Reuses the transcription service's media stream to avoid duplicate getUserMedia calls.
     // If the primary stream isn't ready yet (VAD still initializing), retries for up to 3s
     // before falling back to opening a separate stream.
-    const startAudioAnalyser = useCallback(async () => {
+    const startAudioAnalyser = useCallback(async (generation: number) => {
+        // Each run checks after every await that it is still the current one
+        // and releases what it acquired if not. Without that, a mic change or a
+        // fallback mid-session started a second run on top of the first, whose
+        // AudioContext, stream (mic light still on) and native listener were
+        // orphaned — as was anything acquired by a run a Stop overtook.
+        const isStale = () => analyserGenerationRef.current !== generation
         try {
             const userCaptureSource = sermonSettings?.captureSource || 'microphone'
 
@@ -582,6 +593,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (isDesktop() && (provider === 'native' || userCaptureSource === 'system')) {
                 setCaptureSource(userCaptureSource === 'system' ? 'system' : 'microphone')
                 const unlisten = await startNativeAudioFeatures((rms) => setAudioLevel(rms))
+                if (isStale()) {
+                    unlisten()
+                    return
+                }
                 nativeFeaturesUnlistenRef.current = unlisten
                 return
             }
@@ -604,6 +619,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 const maxRetries = 15
                 for (let i = 0; i < maxRetries; i++) {
                     await new Promise(r => setTimeout(r, retryDelay))
+                    if (isStale()) return
                     stream = unifiedTranscriptionService.getMediaStream()
                     if (stream) break
                 }
@@ -617,22 +633,29 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     : true
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
-                    audioStreamRef.current = stream
                 } catch (err) {
                     if (err instanceof OverconstrainedError && sermonSettings?.selectedMicrophoneId) {
                         stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-                        audioStreamRef.current = stream
                     } else {
                         console.warn('[useSermonListener] Could not acquire audio stream for analyser')
                         return
                     }
                 }
+                if (isStale()) {
+                    stream.getTracks().forEach(t => t.stop())
+                    return
+                }
+                audioStreamRef.current = stream
             }
 
             setCaptureSource(userCaptureSource)
             const ctx = new AudioContext()
             if (ctx.state === 'suspended') {
                 await ctx.resume()
+            }
+            if (isStale()) {
+                ctx.close().catch(() => {})
+                return
             }
             audioContextRef.current = ctx
             const source = ctx.createMediaStreamSource(stream)
@@ -675,7 +698,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const visArray = new Uint8Array(visAnalyser.frequencyBinCount)
 
             const poll = () => {
-                if (!audioAnalyserRef.current) return
+                if (isStale() || !audioAnalyserRef.current) return
                 analyser.getByteFrequencyData(dataArray)
                 const sum = dataArray.reduce((a, b) => a + b, 0)
                 const avg = sum / dataArray.length
@@ -718,10 +741,15 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [])
 
     useEffect(() => {
-        if (isListening) {
-            startAudioAnalyser()
-            return () => {} // cleanup is handled by stopAudioAnalyser on !isListening
-        } else {
+        if (!isListening) {
+            stopAudioAnalyser()
+            return
+        }
+        const generation = ++analyserGenerationRef.current
+        void startAudioAnalyser(generation)
+        return () => {
+            // Retire this run before the next one (or a Stop) takes over.
+            analyserGenerationRef.current++
             stopAudioAnalyser()
         }
     }, [isListening, startAudioAnalyser, stopAudioAnalyser])
@@ -1488,7 +1516,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             const alreadyDetected = Array.from(detectedRefsRef.current)
             const regexGenerationAtSchedule = regexVerseDetectionRef.current
             extractVersesWithLLM(text, llm, alreadyDetected, controller.signal)
-                .then((result) => activateLlmVerses(result.newVerses, regexGenerationAtSchedule))
+                .then((result) => {
+                    // The desktop proxy can't be aborted, so an answer can
+                    // still arrive after Stop (or a newer request). Drop it
+                    // rather than put a slide up nobody asked for.
+                    if (controller.signal.aborted) return
+                    activateLlmVerses(result.newVerses, regexGenerationAtSchedule)
+                })
                 .catch(() => { /* best-effort augmentation */ })
         }, LLM_EXTRACTION_DEBOUNCE_MS)
     }, [activateLlmVerses])
@@ -1775,8 +1809,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         break
                     }
                     case 'stop_listening':
-                        unifiedTranscriptionService.stop()
-                        setIsListening(false)
+                        // The full stop, as the button does: this used to stop
+                        // only the transcription, leaving keep-awake held and
+                        // an LLM lookup free to put a slide up afterwards.
+                        stopRef.current()
                         break
                     case 'start_listening':
                         startRef.current()
@@ -2922,7 +2958,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
         llmAbortRef.current?.abort()
         llmAbortRef.current = null
-        const wasListening = isListening
+        // A pending interim pass would otherwise still run commands and
+        // auto-display 300 ms after Stop.
+        if (interimDebounceRef.current) {
+            clearTimeout(interimDebounceRef.current)
+            interimDebounceRef.current = null
+        }
+        const wasListening = isListeningRef.current
         const durationMs = sessionStartTimeRef.current
             ? Date.now() - sessionStartTimeRef.current
             : 0
@@ -2948,6 +2990,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     useEffect(() => {
         stopRef.current = stop
     }, [stop])
+
+    useEffect(() => {
+        isListeningRef.current = isListening
+    }, [isListening])
 
     // Watchdog: recover from a silently-dead capture. While listening, the
     // audio-features bus is fed continuously (Rust on desktop, the analyser on

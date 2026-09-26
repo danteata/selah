@@ -245,19 +245,61 @@ function SermonListenerPanelInner({
         deleteTranscript,
     } = useTranscripts()
 
+    // Autosave while listening.
+    //
+    // The latest values live in a ref so the interval depends only on whether
+    // we're listening. Keyed on the transcript itself, it was torn down and
+    // re-armed with every new sentence, so it only ever fired after fifteen
+    // seconds of silence — and a crash mid-sermon lost everything since the
+    // last long pause.
+    const autoSaveRef = useRef({
+        transcript, transcriptSegments, detectedVerses, transcriptTitle,
+        provider, language, scheduleId: activeSchedule?._id,
+        autoSaveTranscriptId, createTranscript, updateTranscript,
+    })
     useEffect(() => {
-        if (!isListening || !transcript.trim()) return
+        autoSaveRef.current = {
+            transcript, transcriptSegments, detectedVerses, transcriptTitle,
+            provider, language, scheduleId: activeSchedule?._id,
+            autoSaveTranscriptId, createTranscript, updateTranscript,
+        }
+    })
+    const autoSaveInFlightRef = useRef(false)
+    const lastAutoSavedRef = useRef('')
+
+    useEffect(() => {
+        if (!isListening) return
         const timer = setInterval(async () => {
-            const title = transcriptTitle.trim() || `Sermon Transcript ${new Date().toLocaleDateString()}`
-            if (!autoSaveTranscriptId) {
-                const id = await createTranscript({ title, transcript, segments: transcriptSegments, detectedVerses, provider, language, scheduleId: activeSchedule?._id })
-                if (id) setAutoSaveTranscriptId(id)
-                return
+            const current = autoSaveRef.current
+            const text = current.transcript
+            // One save at a time (a slow create racing the next tick made two
+            // transcripts), and none when nothing new has been said.
+            if (!text.trim() || autoSaveInFlightRef.current || text === lastAutoSavedRef.current) return
+            autoSaveInFlightRef.current = true
+            try {
+                const title = current.transcriptTitle.trim() || `Sermon Transcript ${new Date().toLocaleDateString()}`
+                const payload = {
+                    title,
+                    transcript: text,
+                    segments: current.transcriptSegments,
+                    detectedVerses: current.detectedVerses,
+                    scheduleId: current.scheduleId,
+                }
+                if (!current.autoSaveTranscriptId) {
+                    const id = await current.createTranscript({ ...payload, provider: current.provider, language: current.language })
+                    if (id) setAutoSaveTranscriptId(id)
+                } else {
+                    await current.updateTranscript(current.autoSaveTranscriptId, payload)
+                }
+                lastAutoSavedRef.current = text
+            } catch (err) {
+                console.warn('[SermonListenerPanel] autosave failed; will retry:', err)
+            } finally {
+                autoSaveInFlightRef.current = false
             }
-            await updateTranscript(autoSaveTranscriptId, { title, transcript, segments: transcriptSegments, detectedVerses, scheduleId: activeSchedule?._id })
         }, 15000)
         return () => clearInterval(timer)
-    }, [isListening, transcript, transcriptSegments, transcriptTitle, autoSaveTranscriptId, createTranscript, updateTranscript, detectedVerses, provider, language, activeSchedule?._id])
+    }, [isListening])
 
     const handleGenerateNotes = async () => {
         const fullText = transcript.trim()

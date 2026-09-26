@@ -306,30 +306,31 @@ describe('voiceCommandDetection', () => {
             expect(cmds[0].type).toBe('start_listening')
         })
 
-        it('"pause listening" is blocked by the intent filter (known bug)', () => {
-            // KNOWN BUG: The intent filter (COMMAND_KEYWORDS) only includes
-            // "stop listening" and "start listening" — not "pause listening",
-            // "resume listening", or "begin listening". So those phrases are
-            // blocked before reaching detectControlCommands, even though
-            // detectControlCommands has regexes that would match them.
-            // Documenting this as a real implementation gap.
-            const cmds = detectVoiceCommands('pause listening')
-            expect(cmds).toHaveLength(0)
+        it.each([
+            ['pause listening', 'stop_listening'],
+            ['end listening', 'stop_listening'],
+            ['stop the listener', 'stop_listening'],
+            ['resume listening', 'start_listening'],
+            ['begin listening', 'start_listening'],
+        ])('detects "%s" (the keyword gate used to drop it)', (phrase, type) => {
+            const cmds = detectVoiceCommands(phrase)
+            expect(cmds.map(c => c.type)).toEqual([type])
         })
 
-        it('"resume listening" is blocked by the intent filter (known bug)', () => {
-            const cmds = detectVoiceCommands('resume listening')
-            expect(cmds).toHaveLength(0)
+        it('allows a filler or wake word around the command', () => {
+            expect(detectVoiceCommands('Okay, stop listening.').map(c => c.type)).toEqual(['stop_listening'])
+            expect(detectVoiceCommands('Selah, resume listening please').map(c => c.type)).toEqual(['start_listening'])
         })
 
-        it('"begin listening" is blocked by the intent filter (known bug)', () => {
-            const cmds = detectVoiceCommands('begin listening')
-            expect(cmds).toHaveLength(0)
-        })
-
-        it('"end listening" is blocked by the intent filter (known bug)', () => {
-            const cmds = detectVoiceCommands('end listening')
-            expect(cmds).toHaveLength(0)
+        it.each([
+            'we must never stop listening to the Holy Spirit',
+            'if you start listening to the world you will drift',
+            'when did you stop listening to your mother',
+        ])('does not act on a sermon sentence: "%s"', (sentence) => {
+            // These used to switch the listener off (or on) mid-sermon.
+            const types = detectVoiceCommands(sentence).map(c => c.type)
+            expect(types).not.toContain('stop_listening')
+            expect(types).not.toContain('start_listening')
         })
     })
 

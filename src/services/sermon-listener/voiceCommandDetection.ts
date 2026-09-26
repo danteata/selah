@@ -655,27 +655,39 @@ function detectBookChapterVerseCommands(text: string): VoiceCommand[] {
     return commands
 }
 
+// Words a speaker wraps around a command without changing it: fillers, a
+// wake word, politeness.
+const CONTROL_LEAD = /^(?:(?:ok(?:ay)?|hey|um+|uh+|so|now|and|selah|please)[\s,]+)*/
+const CONTROL_TAIL = /(?:[\s,]+(?:please|now|thanks|thank you))*$/
+const STOP_CONTROL = /^(?:stop|pause|end)\s+(?:the\s+)?(?:listening|listener)$/
+const START_CONTROL = /^(?:start|resume|begin)\s+(?:the\s+)?(?:listening|listener)$/
+
+/**
+ * "Stop listening" / "start listening" — but only as the whole utterance.
+ *
+ * Matched anywhere in the recent text, and with no confidence gate, these
+ * fired on ordinary preaching: "we must never stop listening to the Holy
+ * Spirit" switched the listener off mid-sermon. A command someone means is
+ * said on its own, so anything else in the utterance — beyond a filler or
+ * wake word around it — means it was just a sentence.
+ */
 function detectControlCommands(text: string): VoiceCommand[] {
-    const commands: VoiceCommand[] = []
-    const lower = text.toLowerCase()
+    const utterance = text
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s,']/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(CONTROL_LEAD, '')
+        .replace(CONTROL_TAIL, '')
+        .trim()
 
-    if (/(?:stop listening|stop the listener|pause listening|end listening)/i.test(lower)) {
-        commands.push({
-            type: 'stop_listening',
-            raw: lower.match(/(?:stop listening|stop the listener|pause listening|end listening)/i)![0],
-            confidence: 'high',
-        })
+    if (STOP_CONTROL.test(utterance)) {
+        return [{ type: 'stop_listening', raw: utterance, confidence: 'high' }]
     }
-
-    if (/(?:start listening|resume listening|begin listening)/i.test(lower)) {
-        commands.push({
-            type: 'start_listening',
-            raw: lower.match(/(?:start listening|resume listening|begin listening)/i)![0],
-            confidence: 'high',
-        })
+    if (START_CONTROL.test(utterance)) {
+        return [{ type: 'start_listening', raw: utterance, confidence: 'high' }]
     }
-
-    return commands
+    return []
 }
 
 const COMMAND_KEYWORDS = [
@@ -752,12 +764,17 @@ export function detectVoiceCommands(
         ? detectBareVerseCommands(text, options.hasFreshChapterContext ?? false)
         : []
 
+    // Whole-utterance matches, so checked before the keyword gate (which used
+    // to drop "pause/resume/begin listening") and against `text`, not a window.
+    const controlCommands = detectControlCommands(text)
+
     const hasIntent = hasCommandIntent(recentText)
     if (
         !hasIntent &&
         referenceCommands.length === 0 &&
         bookChapterVerseCommands.length === 0 &&
-        bareVerseCommands.length === 0
+        bareVerseCommands.length === 0 &&
+        controlCommands.length === 0
     ) {
         if (debug) console.log('[VoiceCommand] No command intent in:', recentText.slice(-80))
         return []
@@ -800,7 +817,7 @@ export function detectVoiceCommands(
         ...bareVerseCommands,
         ...bookChapterVerseCommands,
         ...effectiveReferenceCommands,
-        ...detectControlCommands(recentText),
+        ...controlCommands,
     ]
 
     if (debug) {
