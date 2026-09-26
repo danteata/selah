@@ -33,6 +33,7 @@ import { EmbeddingSyncIndicator } from '../components/settings/EmbeddingSyncIndi
 import { SubscriptionBanner } from '../components/licensing/SubscriptionBanner'
 import type { Slide, ExtendedFileT } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
+import { clearSignedOutUser } from '../services/auth/signOutCleanup'
 
 // Custom event to focus quick actions search
 const FOCUS_QUICK_ACTIONS_EVENT = 'selah:focus-quick-actions'
@@ -440,11 +441,12 @@ export default function Dashboard() {
             activeSchedule={activeSchedule}
             user={{
                 name: clerkUser?.firstName || clerkUser?.username || 'User',
-                onSignOut: () => {
+                onSignOut: async () => {
                     trackEvent(AnalyticsEventType.USER_SIGNED_OUT, {
                         method: 'menu',
                     })
-                    signOut()
+                    await clearSignedOutUser()
+                    await signOut()
                 }
             }}
             showAdminPanel={showAdminPanel}

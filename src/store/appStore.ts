@@ -280,6 +280,23 @@ const initialState: AppState = {
 }
 
 // Helper to ensure unique slide IDs
+// Enough to walk back through a service's worth of edits; unbounded, the
+// history kept every slide array ever held (backgrounds and all) alive.
+const MAX_HISTORY = 100
+
+/**
+ * Snapshot the two fields undo restores. Every path takes both: several
+ * captured only `activeSlides`, so undoing a removal brought the slide back
+ * without its place in the live deck, and it never reappeared in LiveOutput.
+ */
+function pushHistory(state: Pick<AppState, 'pastStates' | 'activeSlides' | 'liveOutputSlidesId'>) {
+    const next = [...state.pastStates, {
+        activeSlides: state.activeSlides,
+        liveOutputSlidesId: state.liveOutputSlidesId,
+    }]
+    return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next
+}
+
 function ensureUniqueIds(arr: Slide[]): Slide[] {
     const seenIds = new Set<string>()
     return arr.filter((obj) => {
@@ -363,6 +380,8 @@ interface AppStore extends AppState {
      *  value an older build persisted can be cleared. */
     setDefaultTemplate: (slideType: 'scripture' | 'hymn' | 'song' | 'text' | 'dictionary' | 'sermon' | 'announcement' | 'prayer' | 'countdown', templateId: string | null) => void
     signOut: () => void
+    /** Forget the signed-out person's work; keep this device's display setup. */
+    clearUserSession: () => void
     // Schedule CRUD
     createSchedule: (name: string) => void
     deleteSchedule: (scheduleId: string) => void
@@ -484,10 +503,7 @@ export const useAppStore = create<AppStore>()(
                         : currentOrder
 
                     return {
-                        pastStates: [...state.pastStates, {
-                            activeSlides: state.activeSlides,
-                            liveOutputSlidesId: state.liveOutputSlidesId
-                        }],
+                        pastStates: pushHistory(state),
                         activeSlides: ensureUniqueIds(updatedSlides),
                         liveOutputSlidesId: updatedOrder,
                         futureStates: []
@@ -512,7 +528,7 @@ export const useAppStore = create<AppStore>()(
                         s.id === slide.id ? slide : s
                     )
                     return {
-                        pastStates: [...state.pastStates, { activeSlides: state.activeSlides }],
+                        pastStates: pushHistory(state),
                         activeSlides: updatedSlides,
                         futureStates: []
                     }
@@ -523,9 +539,12 @@ export const useAppStore = create<AppStore>()(
                 set((state) => {
                     const updatedSlides = state.activeSlides.filter((s) => s.id !== slide.id)
                     return {
-                        pastStates: [...state.pastStates, { activeSlides: state.activeSlides }],
+                        pastStates: pushHistory(state),
                         activeSlides: updatedSlides,
-                        liveOutputSlidesId: Array.from(new Set(updatedSlides.map((slide) => slide.id))),
+                        // Take the one id out of the operator's deck. Rebuilding
+                        // it from every remaining slide put back every slide the
+                        // operator had deliberately left out.
+                        liveOutputSlidesId: (state.liveOutputSlidesId || []).filter((id) => id !== slide.id),
                         futureStates: []
                     }
                 })
@@ -541,10 +560,16 @@ export const useAppStore = create<AppStore>()(
                     const [moved] = updatedSlides.splice(fromIndex, 1)
                     updatedSlides.splice(toIndex, 0, moved)
 
+                    // The deck follows the new order but keeps its members;
+                    // slides left out of it stay out.
+                    const inDeck = new Set(state.liveOutputSlidesId || [])
+                    const reorderedDeck = updatedSlides.map((s) => s.id).filter((id) => inDeck.has(id))
+                    const orphans = (state.liveOutputSlidesId || []).filter((id) => !reorderedDeck.includes(id))
+
                     return {
-                        pastStates: [...state.pastStates, { activeSlides: state.activeSlides }],
+                        pastStates: pushHistory(state),
                         activeSlides: updatedSlides,
-                        liveOutputSlidesId: Array.from(new Set(updatedSlides.map((slide) => slide.id))),
+                        liveOutputSlidesId: [...reorderedDeck, ...orphans],
                         futureStates: []
                     }
                 })
@@ -611,7 +636,16 @@ export const useAppStore = create<AppStore>()(
                     ]
                     const uniqueSlides = ensureUniqueIds(mergedSlides)
 
+                    // A collaborator's slides just arrived. Undo would restore a
+                    // snapshot from before they existed, and the operator's
+                    // sync then deletes them on the server for everyone. The
+                    // echo of our own edits brings no new ids, so solo undo is
+                    // unaffected.
+                    const localIds = new Set(existingForSchedule.map((slide) => slide.id))
+                    const remoteAdded = slides.some((slide) => !localIds.has(slide.id))
+
                     return {
+                        ...(remoteAdded ? { pastStates: [] } : {}),
                         activeSlides: uniqueSlides,
                         liveOutputSlidesId: preserveLiveOutputOrder
                             ? state.liveOutputSlidesId
@@ -643,10 +677,7 @@ export const useAppStore = create<AppStore>()(
                     }
 
                     return {
-                        pastStates: [...state.pastStates, {
-                            activeSlides: state.activeSlides,
-                            liveOutputSlidesId: state.liveOutputSlidesId
-                        }],
+                        pastStates: pushHistory(state),
                         liveOutputSlidesId: newIds,
                         futureStates: []
                     }
@@ -1066,6 +1097,28 @@ export const useAppStore = create<AppStore>()(
                     ...initialState,
                     pastStates: [],
                     futureStates: []
+                })
+            },
+
+            // Everything that belongs to the person rather than the machine.
+            // Schedules and the active schedule are persisted, so without this
+            // the next person to sign in on a shared booth PC was shown the
+            // last user's services — and the live session hook queried them.
+            // Display settings (fonts, output monitor) stay: they belong to
+            // the room.
+            clearUserSession: () => {
+                set({
+                    schedules: initialState.schedules,
+                    activeSchedule: initialState.activeSchedule,
+                    activeSlides: initialState.activeSlides,
+                    liveOutputSlidesId: initialState.liveOutputSlidesId,
+                    liveSlideId: initialState.liveSlideId,
+                    sharedQueueSlideIds: initialState.sharedQueueSlideIds,
+                    selectedSlideIds: initialState.selectedSlideIds,
+                    editingSlide: initialState.editingSlide,
+                    liveOutputBlanked: initialState.liveOutputBlanked,
+                    pastStates: [],
+                    futureStates: [],
                 })
             },
 
