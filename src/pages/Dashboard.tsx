@@ -35,6 +35,7 @@ import type { Slide, ExtendedFileT } from '../types'
 import type { TemplateItem } from '../hooks/useTemplates'
 import { clearSignedOutUser } from '../services/auth/signOutCleanup'
 import { prewarmSemanticSearch } from '../services/sermon-listener/localEmbeddings'
+import { useScheduleOutboxSync } from '../hooks/useScheduleOutboxSync'
 
 // Custom event to focus quick actions search
 const FOCUS_QUICK_ACTIONS_EVENT = 'selah:focus-quick-actions'
@@ -166,6 +167,9 @@ export default function Dashboard() {
     useEffect(() => {
         initGlobalEmitter()
     }, [])
+
+    // Send schedule changes made offline once Convex is reachable.
+    useScheduleOutboxSync()
 
     // Warm semantic verse search once the studio is idle, so the first
     // meaning search doesn't wait on the model. Only operators reach this

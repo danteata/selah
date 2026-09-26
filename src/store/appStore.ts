@@ -386,6 +386,8 @@ interface AppStore extends AppState {
     createSchedule: (name: string) => void
     deleteSchedule: (scheduleId: string) => void
     updateSchedule: (scheduleId: string, updates: Partial<Schedule>) => void
+    /** A schedule created offline reached the server: adopt its real id. */
+    remapScheduleId: (localId: string, serverId: string) => void
     // Undo/Redo
     undo: () => void
     redo: () => void
@@ -1164,6 +1166,28 @@ export const useAppStore = create<AppStore>()(
                         ? { ...state.activeSchedule, ...updates, updatedAt: new Date().toISOString() }
                         : state.activeSchedule,
                 }))
+            },
+
+            remapScheduleId: (localId, serverId) => {
+                set((state) => {
+                    // The server's list may already hold the real row; keep one.
+                    const hasServerRow = state.schedules.some((schedule) => schedule._id === serverId)
+                    const schedules = hasServerRow
+                        ? state.schedules.filter((schedule) => schedule._id !== localId)
+                        : state.schedules.map((schedule) =>
+                            schedule._id === localId ? { ...schedule, _id: serverId } : schedule
+                        )
+                    return {
+                        schedules,
+                        activeSchedule: state.activeSchedule?._id === localId
+                            ? { ...state.activeSchedule, _id: serverId }
+                            : state.activeSchedule,
+                        // Slides built while offline belong to the same schedule.
+                        activeSlides: state.activeSlides.map((slide) =>
+                            slide.scheduleId === localId ? { ...slide, scheduleId: serverId } : slide
+                        ),
+                    }
+                })
             },
 
             undo: () => {
