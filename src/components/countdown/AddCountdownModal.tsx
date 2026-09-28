@@ -22,6 +22,7 @@ export interface CountdownData {
     backgroundType: string
     backgroundStorageId?: string | null
     localFilePath?: string
+    localMediaId?: string
 }
 
 const DEFAULT_BG: BackgroundSelection = {
@@ -58,6 +59,7 @@ function formFromSlide(slide: Slide | null | undefined): CountdownForm {
                 backgroundType: slide.backgroundType || 'gradient',
                 backgroundStorageId: slide.backgroundStorageId,
                 localFilePath: slide.localFilePath,
+                localMediaId: slide.localMediaId,
             }
             : DEFAULT_BG,
     }
@@ -103,6 +105,7 @@ export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide,
             backgroundType: selectedBg.backgroundType,
             backgroundStorageId: selectedBg.backgroundStorageId ?? null,
             localFilePath: selectedBg.localFilePath,
+            localMediaId: selectedBg.localMediaId,
         })
 
         if (!isInline) {

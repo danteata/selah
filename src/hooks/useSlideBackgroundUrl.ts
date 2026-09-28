@@ -8,5 +8,8 @@ export function useSlideBackgroundUrl(slide: Slide | null | undefined): string |
     const fileUrl = useFileUrl(slide?.backgroundStorageId || null)
     const localBg = useLocalBackground(slide?.background, slide?.localFilePath)
     const localMediaBlobUrl = useLocalMediaBlobUrl(slide?.localMediaId)
-    return fileUrl || localBg || localMediaBlobUrl || null
+    // An object URL only works in the tab that made it; when the slide names
+    // its local media library item, that is what every window should load.
+    const staleObjectUrl = !!slide?.localMediaId && localBg.startsWith('blob:')
+    return fileUrl || localMediaBlobUrl || (staleObjectUrl ? null : localBg) || null
 }

@@ -80,6 +80,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
                     backgroundType: editingSlide.backgroundType || 'gradient',
                     backgroundStorageId: editingSlide.backgroundStorageId,
                     localFilePath: editingSlide.localFilePath,
+                    localMediaId: editingSlide.localMediaId,
                 })
             }
         } else {
@@ -126,6 +127,7 @@ export function AddAlertModal({ isOpen = true, onClose, editingSlide, isInline =
             backgroundType: selectedBg.backgroundType,
             backgroundStorageId: selectedBg.backgroundStorageId ?? null,
             localFilePath: selectedBg.localFilePath,
+            localMediaId: selectedBg.localMediaId,
             slideStyle: {
                 fontSize: alertStyle === 'banner' ? 3.5 : 5,
                 alignment: 'center',

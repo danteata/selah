@@ -86,6 +86,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
             backgroundType: selection.backgroundType,
             backgroundStorageId: selection.backgroundStorageId,
             localFilePath: selection.localFilePath,
+            localMediaId: selection.localMediaId,
         })
     }
 
@@ -410,6 +411,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
                                     backgroundType: editedSlide.backgroundType || 'gradient',
                                     backgroundStorageId: editedSlide.backgroundStorageId,
                                     localFilePath: editedSlide.localFilePath,
+                                    localMediaId: editedSlide.localMediaId,
                                 }}
                                 onChange={handleBackgroundChange}
                             />

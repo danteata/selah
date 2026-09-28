@@ -449,6 +449,7 @@ export default function Dashboard() {
             backgroundType: countdownData.backgroundType,
             backgroundStorageId: countdownData.backgroundStorageId ?? null,
             localFilePath: countdownData.localFilePath,
+            localMediaId: countdownData.localMediaId,
             data: {
                 id: countdownData.id,
                 time: timeString,

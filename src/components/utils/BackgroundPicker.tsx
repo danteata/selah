@@ -12,6 +12,8 @@ export interface BackgroundSelection {
     backgroundStorageId?: string | null
     /** Original filesystem path on desktop (Tauri). Required to re-resolve asset URLs across sessions. */
     localFilePath?: string
+    /** Web: local media library item for an uploaded file (see pickLocalBackgroundAsset). */
+    localMediaId?: string
     label?: string
 }
 
@@ -95,6 +97,7 @@ export function BackgroundPicker({ value, onChange, previewChildren }: Backgroun
                 background: picked.background,
                 backgroundType: picked.backgroundType,
                 localFilePath: picked.localFilePath,
+                localMediaId: picked.localMediaId,
                 backgroundStorageId: null,
                 label: picked.name,
             })

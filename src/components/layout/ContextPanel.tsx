@@ -25,7 +25,7 @@ import { PanelErrorBoundary } from '../offline/PanelErrorBoundary'
 import { MediaPicker, type MediaItem } from '../media/MediaPicker'
 import { TemplateBrowser } from '../templates/TemplateBrowser'
 import { TemplateSelector } from '../templates/TemplateSelector'
-import { AddCountdownModal } from '../countdown/AddCountdownModal'
+import { AddCountdownModal, type CountdownData } from '../countdown/AddCountdownModal'
 import { AddAlertModal } from '../alerts/AddAlertModal'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 
@@ -284,7 +284,7 @@ export function ContextSectionContent({
         appendActiveSlide(slide)
     }
 
-    const handleCountdownCreate = (countdownData: { id: string; title: string; hours: number; minutes: number; seconds: number; background: string; backgroundType: string; backgroundStorageId?: string | null; localFilePath?: string }) => {
+    const handleCountdownCreate = (countdownData: CountdownData) => {
         const timeString = `${String(countdownData.hours).padStart(2, '0')}:${String(countdownData.minutes).padStart(2, '0')}:${String(countdownData.seconds).padStart(2, '0')}`
         const isEditing = editingSlide?.id === countdownData.id
 
@@ -302,6 +302,7 @@ export function ContextSectionContent({
             backgroundType: countdownData.backgroundType,
             backgroundStorageId: countdownData.backgroundStorageId ?? null,
             localFilePath: countdownData.localFilePath,
+            localMediaId: countdownData.localMediaId,
             data: {
                 id: countdownData.id,
                 time: timeString,

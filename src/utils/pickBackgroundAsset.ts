@@ -1,5 +1,6 @@
 import { isDesktop } from '../platform'
 import { openFileDialog } from './fileDialog'
+import { saveLocalMediaBlob, saveLocalMediaItem } from '../hooks/useIndexedDB'
 
 export type BackgroundAssetKind = 'image' | 'video'
 
@@ -9,6 +10,8 @@ export interface PickedBackgroundAsset {
     backgroundType: BackgroundAssetKind
     /** Original filesystem path on desktop. Empty on web. */
     localFilePath?: string
+    /** Web: the local media library item holding the file, so any window can load it. */
+    localMediaId?: string
     /** Display name. */
     name: string
 }
@@ -121,11 +124,23 @@ export async function pickLocalBackgroundAsset(kind: BackgroundAssetKind): Promi
         }
     }
 
-    // Videos as data URLs would be huge — use object URL instead.
-    const blobUrl = URL.createObjectURL(file)
+    // Videos as data URLs would be huge. They used to become a bare object
+    // URL, which only works in the tab that made it: the projector window, a
+    // reload, and every other device got nothing. The file goes into the
+    // local media library instead, which any window of this browser can read;
+    // the object URL is only for this tab's preview.
+    // Same id scheme as the media library's own uploads (useMediaLibrary).
+    const id = crypto.randomUUID?.() ?? `media_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+    const now = new Date().toISOString()
+    await saveLocalMediaBlob(id, file)
+    await saveLocalMediaItem({
+        id, name: file.name, type: 'video', hasBlob: true,
+        size: file.size, contentType: file.type, createdAt: now, updatedAt: now,
+    })
     return {
-        background: blobUrl,
+        background: URL.createObjectURL(file),
         backgroundType: 'video',
+        localMediaId: id,
         name: file.name,
     }
 }
