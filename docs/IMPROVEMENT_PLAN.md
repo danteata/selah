@@ -107,3 +107,20 @@ Legend: ✅ done · ⏭️ skipped (reason given) · ⬜ not started
 - ✅ Native `confirm()` replaced by ConfirmDialog everywhere. The migrated
   dialogs' chrome uses the colour tokens. Slide previews keep their own
   colours, since those are content.
+
+## 9. Found while making the demo video (2026-09-28)
+
+- ✅ The projector showed only black in 0.1.23 (renderer box 0px tall). Fixed and shipped in 0.1.24.
+- ✅ A service order prepared outside a live session was never saved (every release). Shipped in 0.1.24.
+- ✅ Song slides from the library were rejected on save (strict `slides` schema), so services with songs never synced. Shipped in 0.1.24.
+- ✅ Lyric line breaks were lost; each sung line now stays on one line and the text fits the longest. Web now; desktop in the next release.
+- ✅ Uploaded video backgrounds (web) were blob links that died with the tab; now stored in the local media library, and the pointer survives a reload. Web now; desktop next release.
+- ✅ Next Up counted a waiting countdown down early; the countdown form ran off a narrow panel.
+- ✅ Phone view: the studio ran off the right edge (grid blowout), and the status bar covered the bottom navigation.
+- ✅ ⌘K only searched commands although the top bar promises songs and the Bible; it now hands the query to Songs or the Bible.
+- ✅ A failed save of the service order now retries on its own (5 s, 15 s, then every minute).
+- ✅ One countdown slide builder instead of two copies.
+- ✅ Landing page: "Watch it work" plays the demo (public/selah-demo.mp4, 7 MB).
+- ⬜ Decision: `public/songs/easyworship.json` ships a song library that includes likely copyrighted songs (e.g. "Awesome God"), the same licensing question as the Bibles in section 1.
+- ⬜ Two operator tabs on one machine both write to the same projector channel, and a stale one can clear the live slide.
+- ⬜ The desktop app hasn't had a release with the web-only fixes above (lyric fitting, background pointers, phone layout, search, save retry): next desktop release.
