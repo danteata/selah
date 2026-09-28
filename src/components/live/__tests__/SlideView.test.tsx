@@ -60,6 +60,12 @@ describe('SlideView', () => {
         expect(root.className).not.toMatch(/\brelative\b/)
     })
 
+    it('keeps each sung line of a song on one line', () => {
+        const { container } = render(<SlideView slide={slide({ type: 'song', contents: ['Amazing grace\nhow sweet the sound'] })} settings={settings} />)
+        const body = [...container.querySelectorAll('div')].find((d) => d.innerHTML === 'Amazing grace<br>how sweet the sound')
+        expect(body?.parentElement?.style.whiteSpace).toBe('nowrap')
+    })
+
     it('draws operator controls passed as children', () => {
         render(<SlideView slide={slide({})} settings={settings}><button>Pause</button></SlideView>)
         expect(screen.getByText('Pause')).toBeInTheDocument()

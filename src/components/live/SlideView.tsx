@@ -150,6 +150,11 @@ export function SlideView({
     const captionFloor = minTextPx * 0.7
 
     const font = slide.slideStyle?.font || settings.defaultFont || 'Inter'
+    // A sung line stays on one line: the text shrinks to fit the longest one
+    // instead of filling the screen and stranding a word ("me") on a line of
+    // its own. The verse's own line breaks still apply.
+    const keepLines = slide.type === slideTypes.song || slide.type === slideTypes.hymn
+    const bodyWhiteSpace = keepLines ? ('nowrap' as const) : undefined
     const visualizer = settings.visualizerEnabled ?? false
     const transition = animate && settings.animations !== false ? '' : 'no-transition'
     const transitionSeconds = settings.transitionInterval ?? 0.7
@@ -223,7 +228,7 @@ export function SlideView({
                                 className="w-full h-full text-white drop-shadow-lg tiptap-preview"
                                 minPx={px(18)}
                                 maxPx={px(160)}
-                                style={{ fontFamily: font, textAlign, fontWeight: 600, lineHeight: 1.2 }}
+                                style={{ fontFamily: font, textAlign, fontWeight: 600, lineHeight: 1.2, whiteSpace: bodyWhiteSpace }}
                             />
                         </KineticText>
                         {!captionOnTop && captionNode}
@@ -312,6 +317,7 @@ export function SlideView({
                             textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
                             textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
                             lineHeight: 1.0,
+                            whiteSpace: bodyWhiteSpace,
                             textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
                         }}
                     />
