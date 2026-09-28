@@ -10,6 +10,7 @@ import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
 import { getObjectFit, getBackgroundSize } from '../../utils/mediaFit'
 import { slideCaptionHtml } from '../../utils/slideCaption'
 import { useAppStore } from '../../store/appStore'
+import { slideBodyHtml } from '../../utils/slideHtml'
 
 interface SlideCardProps {
     slide: Slide
@@ -87,7 +88,7 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     const effectiveRefPos = slide.slideStyle?.verseRefPosition ?? globalVerseRefPosition ?? 'bottom'
     const refOnTop = hasCaption && effectiveRefPos === 'top'
 
-    const previewBodyHtml = slide.contents[0] || ''
+    const previewBodyHtml = slideBodyHtml(slide.contents[0])
 
     const cardFontSize = (() => {
         const measuringText = previewBodyHtml + previewRefHtml

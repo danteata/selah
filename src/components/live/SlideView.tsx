@@ -7,6 +7,7 @@ import { getVerseRefStyle, VERSE_REF_BOUNDS, type ClampBase } from '../../utils/
 import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
 import { formatCountdownTime, useCountdownSeconds } from '../../utils/countdown'
 import { slideBackgroundFilter } from '../../utils/slideBackground'
+import { slideBodyHtml } from '../../utils/slideHtml'
 import { AutoFitText } from './AutoFitText'
 import { KineticText } from './KineticText'
 import { VideoBackground } from './VideoBackground'
@@ -211,7 +212,7 @@ export function SlideView({
                         {captionOnTop && captionNode}
                         <KineticText enabled={visualizer} className="w-full flex-1 min-h-0">
                             <AutoFitText
-                                html={slide.contents[0] || ''}
+                                html={slideBodyHtml(slide.contents[0])}
                                 className="w-full h-full text-white drop-shadow-lg tiptap-preview"
                                 minPx={px(18)}
                                 maxPx={px(160)}
@@ -295,7 +296,7 @@ export function SlideView({
                 )}
                 <KineticText enabled={visualizer} className="flex-1 min-h-0">
                     <AutoFitText
-                        html={slide.contents[0] || ''}
+                        html={slideBodyHtml(slide.contents[0])}
                         className="w-full h-full text-white drop-shadow-lg tiptap-preview"
                         minPx={px(24)}
                         maxPx={px(640)}
