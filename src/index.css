@@ -746,6 +746,10 @@ h6 {
 .studio-shell {
     display: grid;
     grid-template-rows: 40px 1fr 32px;
+    /* One column the width of the screen. Left implicit, it grew to fit the
+       widest row (the top bar, 646px), so on a phone the whole studio ran off
+       the right edge and the search, session and account controls were cut. */
+    grid-template-columns: minmax(0, 1fr);
     height: 100vh;
     width: 100vw;
     overflow: hidden;
