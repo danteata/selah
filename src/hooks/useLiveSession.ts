@@ -860,7 +860,10 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                     slideBaselineRef.current = next
                 })
                 .catch((err: unknown) => {
-                    reportSessionError("Couldn't share your slide changes with the team", err)
+                    reportSessionError(
+                        inSession ? "Couldn't share your slide changes with the team" : "Couldn't save the service order",
+                        err,
+                    )
                 })
         }, 750)
 
