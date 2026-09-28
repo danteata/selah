@@ -20,6 +20,11 @@ describe('SlideView', () => {
         expect(screen.getByText('05:00')).toBeInTheDocument()
     })
 
+    it("holds a countdown that isn't live at its full time", () => {
+        render(<SlideView slide={slide({ type: 'countdown', contents: ['Soon', '00:05:00'] })} settings={settings} clock={false} />)
+        expect(screen.getByText('05:00')).toBeInTheDocument()
+    })
+
     it('shows the song title when labels are on', () => {
         const { rerender } = render(<SlideView slide={slide({ title: 'Amazing Grace' })} settings={settings} />)
         expect(screen.getByText('Amazing Grace')).toBeInTheDocument()

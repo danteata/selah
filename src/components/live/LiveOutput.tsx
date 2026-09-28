@@ -791,6 +791,7 @@ export function LiveOutput() {
                                         settings={nextUpSettings}
                                         backgroundUrl={nextSlideBackground}
                                         animate={false}
+                                        clock={false}
                                         muted
                                         showMissingMedia
                                         minTextPx={10}

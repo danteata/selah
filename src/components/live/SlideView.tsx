@@ -5,7 +5,7 @@ import { useSlideBackgroundUrl } from '../../hooks/useSlideBackgroundUrl'
 import { audioFeatures } from '../../services/visualizer/audioFeatures'
 import { getVerseRefStyle, VERSE_REF_BOUNDS, type ClampBase } from '../../utils/verseRefStyle'
 import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
-import { formatCountdownTime, useCountdownSeconds } from '../../utils/countdown'
+import { countdownDurationSeconds, formatCountdownTime, useCountdownSeconds } from '../../utils/countdown'
 import { slideBackgroundFilter } from '../../utils/slideBackground'
 import { slideBodyHtml } from '../../utils/slideHtml'
 import { AutoFitText } from './AutoFitText'
@@ -71,6 +71,11 @@ interface SlideViewProps {
      * projector's proportions exactly.
      */
     minTextPx?: number
+    /**
+     * Run a countdown's clock. Off for previews of a slide that isn't live
+     * (Next Up): they show the full time instead of counting down early.
+     */
+    clock?: boolean
     className?: string
     /** Drawn above the slide, outside its transitions (operator controls). */
     children?: ReactNode
@@ -119,12 +124,14 @@ export function SlideView({
     onMediaProgress,
     showMissingMedia = false,
     minTextPx = 0,
+    clock = true,
     className = '',
     children,
 }: SlideViewProps) {
     const resolvedBackground = useSlideBackgroundUrl(providedBackground === undefined ? slide : null)
     const backgroundUrl = providedBackground === undefined ? resolvedBackground : providedBackground
-    const countdownSeconds = useCountdownSeconds(slide)
+    const runningSeconds = useCountdownSeconds(clock ? slide : null)
+    const countdownSeconds = clock ? runningSeconds : countdownDurationSeconds(slide)
 
     // AutoFitText's bounds are pixels, so they scale with the frame too.
     const rootRef = useRef<HTMLDivElement>(null)

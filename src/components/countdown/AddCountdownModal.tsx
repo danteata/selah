@@ -164,39 +164,39 @@ export function AddCountdownModal({ isOpen = true, onClose, onAdd, editingSlide,
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                             Duration
                         </label>
-                        <div className="flex gap-4 justify-center">
-                            <div className="text-center">
+                        <div className="flex gap-2 sm:gap-4 justify-center">
+                            <div className="text-center flex-1 min-w-0 max-w-20">
                                 <input
                                     type="number"
                                     value={hours}
                                     onChange={(e) => setHours(Math.max(0, Math.min(23, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="23"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                                    className="w-full px-1 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Hours</p>
                             </div>
                             <span className="text-3xl font-bold text-gray-400 self-center pb-5">:</span>
-                            <div className="text-center">
+                            <div className="text-center flex-1 min-w-0 max-w-20">
                                 <input
                                     type="number"
                                     value={minutes}
                                     onChange={(e) => setMinutes(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="59"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                                    className="w-full px-1 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Minutes</p>
                             </div>
                             <span className="text-3xl font-bold text-gray-400 self-center pb-5">:</span>
-                            <div className="text-center">
+                            <div className="text-center flex-1 min-w-0 max-w-20">
                                 <input
                                     type="number"
                                     value={seconds}
                                     onChange={(e) => setSeconds(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
                                     min="0"
                                     max="59"
-                                    className="w-20 px-3 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
+                                    className="w-full px-1 py-4 text-center text-3xl font-bold border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[var(--accent-teal)] focus:border-transparent"
                                 />
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Seconds</p>
                             </div>
