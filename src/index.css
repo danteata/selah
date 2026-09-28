@@ -1062,14 +1062,21 @@ h6 {
 
 @media (max-width: 768px) {
     .studio-shell {
-        /* On mobile: top bar (taller for touch), workspace, status bar.
-            The MobileBottomNav component floats over the workspace
-            bottom edge, so workspace gets 14px (h-14) of bottom
-            padding via padding-bottom below. */
-        grid-template-rows: 44px 1fr 32px;
+        /* On mobile: top bar (taller for touch) and workspace. The
+            MobileBottomNav component floats over the workspace bottom
+            edge, so workspace gets 14px (h-14) of bottom padding via
+            padding-bottom below. */
+        grid-template-rows: 44px 1fr;
     }
 
     .studio-nav-rail {
+        display: none;
+    }
+
+    /* The bottom nav owns the bottom edge on a phone. The status bar sat in the
+       same place and covered its labels; what it says (live, next) is already
+       on the phone's own live view. */
+    .studio-status-bar {
         display: none;
     }
 
@@ -1084,10 +1091,6 @@ h6 {
 
     .studio-workspace-split {
         flex-direction: column;
-    }
-
-    .studio-status-bar {
-        font-size: 10px;
     }
 }
 
