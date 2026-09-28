@@ -1,0 +1,231 @@
+<template>
+  <div id="root" data-composition-id="02-intro" data-width="1920" data-height="1080" data-duration="7.5">
+    <style>
+      @font-face {
+        font-family: "Crimson Pro";
+        src: url("assets/fonts/crimson-pro-latin-600-normal.woff2") format("woff2");
+        font-weight: 600;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+        font-weight: 500;
+        font-style: normal;
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      [id="f02-intro-ground"] {
+        position: absolute;
+        inset: 0;
+        background: #08090c;
+      }
+      [id="f02-intro-content"] {
+        position: absolute;
+        inset: 0;
+        container-type: size;
+      }
+      [id="f02-intro-topbar"] {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        top: 40px;
+        display: flex;
+        justify-content: space-between;
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500;
+        font-size: 24px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #14b8a6;
+      }
+      [id="f02-intro-topbar"] span:last-child {
+        color: #ffffff;
+      }
+      [id="f02-intro-head"] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 96px;
+        text-align: center;
+        font-family: "Crimson Pro", serif;
+        font-weight: 600;
+        font-size: 96px;
+        line-height: 1;
+        letter-spacing: -0.02em;
+        color: #ffffff;
+      }
+      .f02-intro-line {
+        display: block;
+        white-space: nowrap;
+      }
+      .f02-intro-word {
+        display: inline-block;
+        transform-origin: 50% 60%;
+      }
+      .f02-intro-green {
+        color: #14b8a6;
+      }
+      [id="f02-intro-rule"] {
+        position: absolute;
+        left: 820px;
+        width: 280px;
+        top: 308px;
+        height: 2px;
+        background: #14b8a6;
+        transform-origin: 50% 50%;
+      }
+      /* depth layer 2: flat offset paper plate (frame.md bans blurred shadows) */
+      [id="f02-intro-plate"] {
+        position: absolute;
+        left: 312px;
+        top: 350px;
+        width: 1344px;
+        height: 548px;
+        border-radius: 8px;
+        background: #12151b;
+        border: 2px solid #0d9488;
+        box-sizing: border-box;
+      }
+      /* depth layer 3: the device window */
+      [id="f02-intro-device"] {
+        position: absolute;
+        left: 288px;
+        top: 336px;
+        width: 1344px;
+        height: 548px;
+        transform-origin: 50% 50%;
+      }
+      [id="f02-intro-window"] {
+        position: absolute;
+        inset: 0;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #12151b;
+      }
+      [id="f02-intro-zoom-outer"] {
+        position: absolute;
+        inset: 0;
+        transform-origin: 50% 50%;
+        will-change: transform;
+      }
+      [id="f02-intro-zoom-inner"] {
+        position: absolute;
+        inset: 0;
+        will-change: transform;
+      }
+      /* 2880x1800 screenshot at 1344px wide (scale 0.4667); top 80 source px
+         (the app bar, incl. the account avatar) cropped above the window. */
+      [id="f02-intro-shot"] {
+        position: absolute;
+        left: 0;
+        top: -37.33px;
+        width: 1344px;
+        height: 840px;
+        display: block;
+      }
+      [id="f02-intro-frame-line"] {
+        position: absolute;
+        inset: 0;
+        border-radius: 8px;
+        border: 2px solid #14b8a6;
+        box-sizing: border-box;
+        pointer-events: none;
+      }
+    </style>
+
+    <div id="f02-intro-ground" class="clip" data-start="0" data-duration="7.5" data-track-index="0"></div>
+
+    <div id="f02-intro-content" class="clip" data-start="0" data-duration="7.5" data-track-index="1">
+      <div id="f02-intro-topbar"><span>Selah Studio</span><span>02 / 10</span></div>
+
+      <div id="f02-intro-head">
+        <span class="f02-intro-line" id="f02-intro-line1">Selah runs the screens</span>
+        <span class="f02-intro-line" id="f02-intro-line2"
+          ><span class="f02-intro-word">for</span> <span class="f02-intro-word">the</span>
+          <span class="f02-intro-word f02-intro-green">whole</span>
+          <span class="f02-intro-word f02-intro-green">service.</span></span
+        >
+      </div>
+      <div id="f02-intro-rule"></div>
+
+      <div id="f02-intro-plate"></div>
+      <div id="f02-intro-device">
+        <div id="f02-intro-window">
+          <div id="f02-intro-zoom-outer">
+            <div id="f02-intro-zoom-inner" data-layout-allow-overflow>
+              <img id="f02-intro-shot" src="assets/studio-service-order.png" alt="" />
+            </div>
+          </div>
+        </div>
+        <div id="f02-intro-frame-line"></div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        var scope = document.querySelector('[data-composition-id="02-intro"]') || document;
+        var $ = function (id) {
+          return scope.querySelector('[id="' + id + '"]');
+        };
+        var words = scope.querySelectorAll(".f02-intro-word");
+        var tl = gsap.timeline({ paused: true });
+
+        // Scene 1 (0.0-1.8s): line 1 pops in (smooth register); device rises from below the fold.
+        tl.fromTo($("f02-intro-topbar"), { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
+        tl.fromTo(
+          $("f02-intro-line1"),
+          { scale: 0, opacity: 0, y: 12 },
+          { scale: 1, opacity: 1, y: 0, duration: 0.7, ease: "power3.out" },
+          0.1
+        );
+        tl.fromTo($("f02-intro-device"), { y: 760 }, { y: 0, duration: 2.5, ease: "expo.out" }, 0.25);
+        tl.fromTo($("f02-intro-plate"), { y: 800, opacity: 0 }, { y: 0, opacity: 1, duration: 2.7, ease: "expo.out" }, 0.35);
+
+        // Scene 2 (1.8-4.2s): second line arrives word by word; rule draws; device settles with a slow push.
+        words.forEach(function (el, i) {
+          tl.fromTo(
+            el,
+            { scale: 0, opacity: 0, y: 20 },
+            { scale: 1, opacity: 1, y: 0, duration: 0.6, ease: "power3.out" },
+            1.85 + i * 0.07
+          );
+        });
+        tl.fromTo($("f02-intro-rule"), { scaleX: 0 }, { scaleX: 1, duration: 0.8, ease: "power3.out" }, 2.4);
+        tl.fromTo($("f02-intro-device"), { scale: 1 }, { scale: 1.012, duration: 1.6, ease: "sine.inOut" }, 2.7);
+
+        // Scene 3 (4.2-7.0s): coordinate-target-zoom onto the slide queue (countdown live, Amazing Grace expanded).
+        // Target measured from the screenshot geometry (image is absolutely sized, so no font dependency):
+        // queue column centre = (176.5, 196) in window px vs window centre (672, 274) -> offset (-495.5, -78).
+        // T = -offset, clamped on x to 284 so the image's left edge never pulls inside the window at 1.75x.
+        var ZOOM_AT = 4.3,
+          ZOOM_DUR = 1.6,
+          ZOOM_SCALE = 1.75;
+        tl.fromTo(
+          $("f02-intro-zoom-outer"),
+          { scale: 1 },
+          { scale: ZOOM_SCALE, duration: ZOOM_DUR, ease: "power3.inOut" },
+          ZOOM_AT
+        );
+        tl.fromTo(
+          $("f02-intro-zoom-inner"),
+          { x: 0, y: 0 },
+          { x: 284, y: 78, duration: ZOOM_DUR, ease: "power3.inOut" },
+          ZOOM_AT
+        );
+        tl.fromTo($("f02-intro-head"), { opacity: 1 }, { opacity: 0.6, duration: 1.0, ease: "power2.out" }, ZOOM_AT);
+        tl.fromTo($("f02-intro-rule"), { opacity: 1 }, { opacity: 0.6, duration: 1.0, ease: "power2.out" }, ZOOM_AT);
+        // hold to 7.0s
+        tl.to({}, { duration: 0.01 }, 6.99);
+
+        window.__timelines = window.__timelines || {};
+        window.__timelines["02-intro"] = tl;
+      })();
+    </script>
+  </div>
+</template>

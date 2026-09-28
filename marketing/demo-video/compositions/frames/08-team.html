@@ -1,0 +1,367 @@
+<template>
+  <div
+    id="root"
+    data-composition-id="08-team"
+    data-start="0"
+    data-duration="10.5"
+    data-width="1920"
+    data-height="1080"
+  >
+    <style>
+      @font-face { font-family: "Crimson Pro"; src: url("assets/fonts/crimson-pro-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-style: normal; }
+      @font-face { font-family: "Crimson Pro"; src: url("assets/fonts/crimson-pro-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-style: normal; }
+      @font-face { font-family: "JetBrains Mono"; src: url("assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-style: normal; }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        container-type: size;
+      }
+      #root [id="f08-team-ground"] {
+        position: absolute;
+        inset: 0;
+        background: #08090c;
+      }
+      #root [id="f08-team-stage"] {
+        position: absolute;
+        inset: 0;
+        transform-origin: 50% 48%;
+      }
+
+      /* chrome */
+      #root [id="f08-team-topbar"] {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        top: 40px;
+        height: 52px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 2px solid #14b8a6;
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500;
+        font-size: 24px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #ffffff;
+      }
+      #root .team08-accent { color: #14b8a6; }
+
+      /* laptop (supporting, behind) */
+      #root [id="f08-team-laptop"] {
+        position: absolute;
+        left: 60px;
+        top: 214px;
+        width: 1100px;
+        height: 648px;
+        transform-origin: 0% 50%;
+      }
+      #root [id="f08-team-bezel"] {
+        position: absolute;
+        left: 36px;
+        top: 0;
+        width: 1028px;
+        height: 634px;
+        padding: 14px;
+        box-sizing: border-box;
+        border-radius: 8px;
+        background: #12151b;
+      }
+      #root [id="f08-team-base"] {
+        position: absolute;
+        left: 0;
+        top: 634px;
+        width: 1100px;
+        height: 14px;
+        border-radius: 0 0 8px 8px;
+        background: #12151b;
+        border-top: 2px solid #0d9488;
+      }
+      #root [id="f08-team-screen"] {
+        position: relative;
+        width: 1000px;
+        height: 606px;
+        overflow: hidden;
+        border-radius: 6px;
+        background: #1f1c19;
+      }
+      #root [id="f08-team-screen"] img {
+        position: absolute;
+        /* 2880x1800 scaled by 1000/2130; crop origin (700, 0) */
+        width: 1352.1px;
+        height: 845.1px;
+        left: -328.6px;
+        top: 0;
+        max-width: none;
+      }
+      /* covers the account avatar: source x 2680+, y 0-76 */
+      #root [id="f08-team-laptop-mask"] {
+        position: absolute;
+        left: 929.6px;
+        top: 0;
+        width: 80px;
+        height: 35.5px;
+        background: #1f1c19;
+      }
+      /* SESSION pill: source ~ (1868-2185, 14-65) */
+      #root [id="f08-team-laptop-ring"] {
+        position: absolute;
+        left: 544px;
+        top: 3px;
+        width: 158px;
+        height: 30px;
+        border-radius: 10px;
+        border: 2px solid #5eead4;
+        box-sizing: border-box;
+        opacity: 0;
+      }
+
+      /* phone (focal cutout, in front) */
+      #root [id="f08-team-phone"] {
+        position: absolute;
+        left: 1010px;
+        top: 236px;
+        width: 304px;
+        height: 630px;
+        padding: 12px;
+        box-sizing: border-box;
+        border-radius: 44px;
+        background: #12151b;
+        border: 2px solid #0d9488;
+      }
+      #root [id="f08-team-phone-screen"] {
+        position: relative;
+        width: 276px;
+        height: 602px;
+        overflow: hidden;
+        border-radius: 32px;
+        background: #1d1a18;
+      }
+      #root [id="f08-team-phone-screen"] img {
+        position: absolute;
+        /* 1170x2532 scaled by 280/1170, nudged to centre in a 276-wide screen */
+        width: 280px;
+        height: 606px;
+        left: -2px;
+        top: -2px;
+        max-width: none;
+      }
+      /* covers the account avatar: source x 1015-1155, y 10-120 */
+      #root [id="f08-team-phone-mask"] {
+        position: absolute;
+        left: 240.9px;
+        top: 0;
+        width: 40px;
+        height: 28px;
+        background: #1d1a18;
+      }
+      /* session bar: source ~ (371-847, 157-240) */
+      #root [id="f08-team-phone-ring"] {
+        position: absolute;
+        left: 82.8px;
+        top: 31.6px;
+        width: 122px;
+        height: 28px;
+        border-radius: 9px;
+        border: 2px solid #5eead4;
+        box-sizing: border-box;
+        opacity: 0;
+      }
+
+      /* copy column */
+      #root [id="f08-team-copy"] {
+        position: absolute;
+        left: 1392px;
+        top: 214px;
+        width: 432px;
+      }
+      #root [id="f08-team-label"] {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500;
+        font-size: 24px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #14b8a6;
+        margin-bottom: 26px;
+      }
+      #root [id="f08-team-head"] {
+        font-family: "Crimson Pro", serif;
+        font-weight: 600;
+        font-size: 96px;
+        line-height: 0.96;
+        letter-spacing: -0.02em;
+        color: #ffffff;
+      }
+      #root .team08-w {
+        display: inline-block;
+        transform-origin: 50% 70%;
+      }
+      #root .team08-hl { color: #14b8a6; }
+      #root [id="f08-team-rule"] {
+        width: 120px;
+        height: 2px;
+        margin: 30px 0 24px;
+        background: #14b8a6;
+        transform-origin: 0% 50%;
+      }
+      #root [id="f08-team-sub"] {
+        font-family: "Crimson Pro", serif;
+        font-weight: 400;
+        font-size: 46px;
+        line-height: 1.12;
+        color: #ffffff;
+      }
+      #root [id="f08-team-sub"] .team08-k {
+        display: inline-block;
+        transform-origin: 50% 70%;
+      }
+    </style>
+
+    <div id="f08-team-ground" class="clip" data-start="0" data-duration="10.5" data-track-index="0"></div>
+
+    <div id="f08-team-stage" class="clip" data-start="0" data-duration="10.5" data-track-index="1">
+      <div id="f08-team-topbar">
+        <span>08 <span class="team08-accent">/</span> Together</span>
+        <span>Selah</span>
+      </div>
+
+      <div id="f08-team-laptop">
+        <div id="f08-team-bezel">
+          <div id="f08-team-screen">
+            <img src="assets/studio-live-session.png" alt="" />
+            <div id="f08-team-laptop-mask"></div>
+            <div id="f08-team-laptop-ring"></div>
+          </div>
+        </div>
+        <div id="f08-team-base"></div>
+      </div>
+
+      <div id="f08-team-phone">
+        <div id="f08-team-phone-screen">
+          <img src="assets/phone-studio.png" alt="" />
+          <div id="f08-team-phone-mask"></div>
+          <div id="f08-team-phone-ring"></div>
+        </div>
+      </div>
+
+      <div id="f08-team-copy">
+        <div id="f08-team-label">Live session</div>
+        <div id="f08-team-head">
+          <span class="team08-w">Bring</span> <span class="team08-w">the</span><br />
+          <span class="team08-w team08-hl">team</span> <span class="team08-w team08-hl">in.</span>
+        </div>
+        <div id="f08-team-rule"></div>
+        <div id="f08-team-sub">
+          <span class="team08-w">Help</span> <span class="team08-w">from</span> <span class="team08-w">a</span>
+          <span class="team08-w"><span class="team08-k" data-word="phone">phone,</span></span><br />
+          <span class="team08-w"><span class="team08-k" data-word="live">live.</span></span>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        const $ = (id) => document.getElementById("f08-team-" + id);
+        const stage = $("stage");
+        const topbar = $("topbar");
+        const laptop = $("laptop");
+        const phone = $("phone");
+        const label = $("label");
+        const headWords = $("head").querySelectorAll(".team08-w");
+        const rule = $("rule");
+        const subWords = $("sub").querySelectorAll(".team08-w");
+        const laptopRing = $("laptop-ring");
+        const phoneRing = $("phone-ring");
+        const keyWords = $("sub").querySelectorAll("[data-word]");
+
+        const tl = gsap.timeline({ paused: true });
+
+        // Camera: slow, continuous micro-push across the whole shot.
+        tl.fromTo(stage, { scale: 1 }, { scale: 1.02, duration: 10, ease: "sine.inOut" }, 0);
+
+        // Scene 1 (0-3s): laptop establishes from the left; headline lands upper right.
+        tl.fromTo(topbar, { opacity: 0, y: -12 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0);
+        tl.fromTo(laptop, { opacity: 0, x: -80 }, { opacity: 1, x: 0, duration: 0.9, ease: "power3.out" }, 0.05);
+        tl.fromTo(label, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.45);
+        tl.fromTo(
+          headWords,
+          { opacity: 0, y: 40 },
+          { opacity: 1, y: 0, duration: 0.7, ease: "power3.out", stagger: 0.14 },
+          0.6,
+        );
+        tl.fromTo(rule, { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power2.out" }, 1.4);
+
+        // Scene 2 (3-6.5s): phone slides up over the laptop's edge; laptop recedes a touch.
+        tl.fromTo(
+          phone,
+          { opacity: 0, y: 520, rotation: 5 },
+          { opacity: 1, y: 0, rotation: 0, duration: 1.1, ease: "power3.out" },
+          3.0,
+        );
+        tl.fromTo(laptop, { scale: 1 }, { scale: 0.975, duration: 1.1, ease: "power2.out", immediateRender: false }, 3.0);
+
+        // Scene 3 (6.5-10s): second line arrives under the first; hold.
+        tl.fromTo(
+          subWords,
+          { opacity: 0, y: 28 },
+          { opacity: 1, y: 0, duration: 0.6, ease: "power3.out", stagger: 0.14 },
+          6.5,
+        );
+
+        // asr-keyword-glow: one linear driver with attack/sustain/release.
+        // Flat per frame.md (no glow/shadow): the envelope drives ring opacity/scale
+        // on the two session bars and a colour lerp + scale on the key words.
+        const ATTACK_DUR = 0.2;
+        const RELEASE = 0.5;
+        const REST_LEVEL = 0.3;
+        const SCENE_DURATION = 10;
+        const TIMINGS = {
+          laptop: { start: 1.8, end: 2.7 },
+          phone: { start: 4.3, end: 5.8 },
+          wphone: { start: 7.2, end: 7.7 },
+          wlive: { start: 7.6, end: 8.4 },
+        };
+        function envelope(time, start, end) {
+          if (time < start) return 0;
+          if (time < end) return Math.min((time - start) / ATTACK_DUR, 1);
+          const releaseEnd = end + RELEASE;
+          if (time < releaseEnd) return 1 - ((time - end) / RELEASE) * (1 - REST_LEVEL);
+          return REST_LEVEL;
+        }
+        const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+        const colorAt = (e) => `rgb(${lerp(255, 94, e)}, ${lerp(255, 234, e)}, ${lerp(255, 212, e)})`;
+
+        const driver = { t: 0 };
+        tl.to(
+          driver,
+          {
+            t: SCENE_DURATION,
+            duration: SCENE_DURATION,
+            ease: "none",
+            onUpdate: () => {
+              const eL = envelope(driver.t, TIMINGS.laptop.start, TIMINGS.laptop.end);
+              laptopRing.style.opacity = String(eL);
+              laptopRing.style.transform = `scale(${1 + 0.08 * eL})`;
+              const eP = envelope(driver.t, TIMINGS.phone.start, TIMINGS.phone.end);
+              phoneRing.style.opacity = String(eP);
+              phoneRing.style.transform = `scale(${1 + 0.1 * eP})`;
+              keyWords.forEach((el) => {
+                const tm = TIMINGS["w" + el.dataset.word];
+                const e = envelope(driver.t, tm.start, tm.end);
+                el.style.color = colorAt(e);
+                el.style.transform = `scale(${1 + 0.06 * e})`;
+              });
+            },
+          },
+          0,
+        );
+
+        window.__timelines = window.__timelines || {};
+        window.__timelines["08-team"] = tl;
+      })();
+    </script>
+  </div>
+</template>

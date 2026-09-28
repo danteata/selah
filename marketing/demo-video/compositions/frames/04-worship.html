@@ -1,0 +1,222 @@
+<template>
+  <div id="root" data-composition-id="04-worship" data-start="0" data-duration="10.4" data-width="1920" data-height="1080">
+    <style>
+      @font-face { font-family: "Crimson Pro"; src: url("assets/fonts/crimson-pro-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-style: normal; }
+      @font-face { font-family: "JetBrains Mono"; src: url("assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-style: normal; }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        container-type: size;
+      }
+      #root * { box-sizing: border-box; margin: 0; padding: 0; }
+      .w04-ground {
+        position: absolute;
+        inset: 0;
+        background: #08090C;
+      }
+      .w04-stage {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+      }
+      /* The one camera. transform-origin 0 0: screen = S * world + T, T = c - S * w. */
+      .w04-world {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 4900px;
+        height: 3100px;
+        transform-origin: 0 0;
+        will-change: transform;
+      }
+      .w04-projector {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      .w04-projector img {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+        display: block;
+      }
+      .w04-dim {
+        position: absolute;
+        inset: 0;
+        background: #08090C;
+        opacity: 0.35;
+      }
+      /* Device frame: bezel 24px, screen shows source px 0..2560 x 0..1600 (avatar cropped off). */
+      .w04-device {
+        position: absolute;
+        left: 2300px;
+        top: 1400px;
+        width: 2608px;
+        height: 1648px;
+        padding: 24px;
+        background: #12151B;
+        border: 2px solid #14B8A6;
+        border-radius: 8px;
+      }
+      .w04-screen {
+        position: relative;
+        width: 2560px;
+        height: 1600px;
+        overflow: hidden;
+        border-radius: 6px;
+      }
+      .w04-screen img {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 2880px;
+        height: 1800px;
+        display: block;
+      }
+      .w04-mark {
+        position: absolute;
+        border-style: solid;
+        border-color: #FCD34D;
+        border-radius: 8px;
+      }
+      /* Verse 2 card, source 226..634 x 1116..1541 -> world +2324,+1424 */
+      #w04-mark-verse {
+        left: 2542px;
+        top: 2532px;
+        width: 416px;
+        height: 433px;
+        border-width: 3px;
+      }
+      /* Next Up monitor, source 730..1246 x 288..579 */
+      #w04-mark-next {
+        left: 3050px;
+        top: 1708px;
+        width: 524px;
+        height: 297px;
+        border-width: 1.6px;
+      }
+      .w04-topbar {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        top: 44px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .w04-chip {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500;
+        font-size: 24px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #FFFFFF;
+        background: #08090C;
+        border-radius: 6px;
+        padding: 10px 16px;
+      }
+      .w04-chip b { color: #14B8A6; font-weight: 500; }
+      .w04-head {
+        position: absolute;
+        left: 96px;
+        top: 150px;
+        font-family: "Crimson Pro", serif;
+        font-weight: 600;
+        font-size: 5cqw;
+        line-height: 0.96;
+        letter-spacing: -0.02em;
+        color: #FFFFFF;
+        white-space: nowrap;
+      }
+      .w04-head span { display: inline-block; }
+      .w04-head .w04-acc1 { color: #FCD34D; }
+      .w04-head .w04-acc2 { color: #14B8A6; }
+      #w04-head2 {
+        background: #08090C;
+        border-radius: 6px;
+        padding: 26px 40px 32px;
+        border-top: 2px solid #14B8A6;
+      }
+    </style>
+
+    <div class="w04-ground clip" data-start="0" data-duration="10.4" data-track-index="0"></div>
+
+    <div class="w04-stage clip" data-start="0" data-duration="10.4" data-track-index="1">
+      <div class="w04-world" id="w04-world" data-layout-allow-overflow>
+        <div class="w04-projector">
+          <img src="assets/projector-lyrics.png" alt="" />
+          <div class="w04-dim" id="w04-dim"></div>
+        </div>
+        <div class="w04-device">
+          <div class="w04-screen">
+            <img src="assets/studio-song-live.png" alt="" />
+          </div>
+        </div>
+        <div class="w04-mark" id="w04-mark-verse"></div>
+        <div class="w04-mark" id="w04-mark-next"></div>
+      </div>
+    </div>
+
+    <div class="w04-topbar clip" data-start="0" data-duration="10.4" data-track-index="2">
+      <div class="w04-chip" id="w04-chip-l"><b>04</b> &nbsp;Worship</div>
+      <div class="w04-chip" id="w04-chip-r">Songs</div>
+    </div>
+
+    <div class="w04-head clip" id="w04-head1" data-start="0" data-duration="3.6" data-track-index="3">
+      <span>Every</span> <span>verse,</span> <span>a</span> <span class="w04-acc1">slide.</span>
+    </div>
+
+    <div class="w04-head clip" id="w04-head2" data-start="7.4" data-duration="3" data-track-index="4">
+      <span>Next</span> <span>is</span> <span>already</span> <span class="w04-acc2">waiting.</span>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        const world = document.getElementById("w04-world");
+        // Camera: world point (wx, wy) is placed at screen point (cx, cy) at scale s * dip.
+        const cam = { wx: 960, wy: 540, cx: 960, cy: 540, s: 1 };
+        const dip = { v: 1 };
+        function applyCamera() {
+          const S = cam.s * dip.v;
+          const tx = cam.cx - S * cam.wx;
+          const ty = cam.cy - S * cam.wy;
+          world.style.transform = "translate(" + tx + "px, " + ty + "px) scale(" + S + ")";
+        }
+        applyCamera();
+
+        const tl = gsap.timeline({ paused: true });
+
+        // Scene 1 (0-3.0): dimmed projector, headline in the upper third, slow push.
+        tl.to(cam, { s: 1.03, duration: 3.6, ease: "none", onUpdate: applyCamera }, 0);
+        tl.fromTo(".w04-chip", { opacity: 0, y: -12 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.1, ease: "power3.out" }, 0.1);
+        tl.fromTo("#w04-head1 span", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.7, stagger: 0.14, ease: "power3.out" }, 0.3);
+
+        // Scene 2 (3.0-6.5): line clears, lyrics undim, camera travels down-right to the queue.
+        tl.to("#w04-head1", { opacity: 0, filter: "blur(10px)", y: -20, duration: 0.5, ease: "power2.in" }, 3.0);
+        tl.to("#w04-dim", { opacity: 0, duration: 0.6, ease: "power2.out" }, 3.0);
+        tl.to(cam, { wx: 3324, wy: 2544, cx: 960, cy: 480, s: 0.7, duration: 2.2, ease: "power2.inOut", onUpdate: applyCamera }, 3.6);
+        tl.to(dip, { v: 0.62, duration: 1.1, ease: "power2.out", onUpdate: applyCamera }, 3.6);
+        tl.to(dip, { v: 1, duration: 1.1, ease: "power3.inOut", onUpdate: applyCamera }, 4.7);
+        tl.fromTo("#w04-mark-verse", { opacity: 0, scale: 1.06 }, { opacity: 1, scale: 1, duration: 0.5, ease: "power3.out" }, 5.9);
+
+        // Scene 3 (6.5-10): zoom-to-target onto the Next Up monitor, headline arrives, hold.
+        tl.to(cam, { wx: 3312, wy: 1856, cx: 960, cy: 600, s: 1.25, duration: 1.3, ease: "power3.inOut", onUpdate: applyCamera }, 6.5);
+        tl.fromTo("#w04-head2", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 7.4);
+        tl.fromTo("#w04-head2 span", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, stagger: 0.12, ease: "power3.out" }, 7.5);
+        tl.fromTo("#w04-mark-next", { opacity: 0, scale: 1.05 }, { opacity: 1, scale: 1, duration: 0.5, ease: "power3.out" }, 8.0);
+        tl.to(cam, { s: 1.29, duration: 2.2, ease: "none", onUpdate: applyCamera }, 7.8);
+
+        window.__timelines = window.__timelines || {};
+        window.__timelines["04-worship"] = tl;
+      })();
+    </script>
+  </div>
+</template>

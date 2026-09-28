@@ -1,0 +1,229 @@
+<template>
+  <div id="root" data-composition-id="01-sunday" data-start="0" data-duration="6.4" data-width="1920" data-height="1080">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* Font files are not staged in this project (assets/fonts and capture/assets/fonts are empty).
+         the project's own font files (assets/fonts). */
+      @font-face {
+        font-family: "Crimson Pro";
+        font-weight: 600;
+        font-style: normal;
+        src: url("assets/fonts/crimson-pro-latin-600-normal.woff2") format("woff2");
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        font-weight: 500;
+        font-style: normal;
+        src: url("assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        container-type: size;
+      }
+      #sunday01-bg {
+        position: absolute;
+        inset: 0;
+        background: #08090c;
+      }
+      .sunday01-topbar {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        top: 64px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #14b8a6;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-weight: 500;
+        font-size: 26px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #ffffff;
+      }
+      .sunday01-topbar .sunday01-accent {
+        color: #14b8a6;
+      }
+      .sunday01-stage {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 900px; /* caption keep-out: all content above y = 900 */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .sunday01-line {
+        font-family: "Crimson Pro", Georgia, "Times New Roman", serif;
+        font-weight: 600;
+        color: #ffffff;
+        white-space: nowrap;
+        text-align: center;
+      }
+      .sunday01-display {
+        font-size: 7.3cqw; /* display ramp */
+        line-height: 1.02;
+        letter-spacing: -0.02em;
+      }
+      .sunday01-headline {
+        font-size: 5cqw; /* headline-xl ramp */
+        line-height: 0.96;
+        letter-spacing: -0.02em;
+      }
+      .sunday01-word {
+        display: inline-block;
+      }
+      .sunday01-green {
+        color: #14b8a6;
+      }
+      .sunday01-green-lite {
+        color: #5eead4;
+      }
+      .sunday01-block {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      #sunday01-rule {
+        width: 100%;
+        height: 2px;
+        margin-top: 44px;
+        background: #14b8a6;
+        transform-origin: left center;
+      }
+    </style>
+
+    <!-- full-bleed near-black ground -->
+    <div id="sunday01-bg" class="clip" data-start="0" data-duration="6.4" data-track-index="0"></div>
+
+    <!-- chrome: topbar holds across the shot -->
+    <div id="sunday01-topbar" class="clip sunday01-topbar" data-start="0" data-duration="6.4" data-track-index="1">
+      <span>Sunday</span>
+      <span class="sunday01-accent">01</span>
+    </div>
+
+    <!-- Scene 1 (0.0-1.6s): "Sunday, 9:55." per-word staggered reveal -->
+    <div id="sunday01-s1" class="clip sunday01-stage" data-start="0" data-duration="1.6" data-track-index="2">
+      <div class="sunday01-line sunday01-display">
+        <span class="sunday01-word" id="sunday01-w-sunday">Sunday,</span>
+        <span class="sunday01-word sunday01-green" id="sunday01-w-time">9:55.</span>
+      </div>
+    </div>
+
+    <!-- Scene 2 (1.6-3.6s): hard-cut swap, words land one per beat, left to right -->
+    <div id="sunday01-s2" class="clip sunday01-stage" data-start="1.6" data-duration="2" data-track-index="2">
+      <div class="sunday01-line sunday01-display">
+        <span class="sunday01-word" id="sunday01-w-songs">Songs.</span>
+        <span class="sunday01-word" id="sunday01-w-scripture">Scripture.</span>
+        <span class="sunday01-word" id="sunday01-w-notices">Notices.</span>
+      </div>
+    </div>
+
+    <!-- Scene 3 (3.6-6.0s): hard-cut to the held line -->
+    <div id="sunday01-s3" class="clip sunday01-stage" data-start="3.6" data-duration="2.8" data-track-index="2">
+      <div class="sunday01-block" id="sunday01-s3-block">
+        <div class="sunday01-line sunday01-headline">
+          <span class="sunday01-green-lite">One volunteer</span> at the laptop.
+        </div>
+        <div id="sunday01-rule"></div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+        const TOTAL = 6;
+
+        // Scene 1 — per-word staggered fade/blur reveal (dynamic-content-sequencing beat 1)
+        tl.fromTo(
+          "#sunday01-w-sunday",
+          { opacity: 0, y: 28, filter: "blur(10px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.45, ease: "power3.out" },
+          0.05
+        );
+        tl.fromTo(
+          "#sunday01-w-time",
+          { opacity: 0, y: 28, filter: "blur(10px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.45, ease: "power3.out" },
+          0.42
+        );
+
+        // Scene 2 — discrete-text-sequence: whole states swap instantly at thresholds.
+        // Words keep their layout slots (visibility, not removal) so the line never re-centers.
+        const WORDS = [
+          document.getElementById("sunday01-w-songs"),
+          document.getElementById("sunday01-w-scripture"),
+          document.getElementById("sunday01-w-notices"),
+        ];
+        const SEQUENCE = [
+          { t: 0.0, shown: 0 },
+          { t: 1.6, shown: 1 }, // hard cut: "Songs." lands with the swap
+          { t: 2.25, shown: 2 }, // "Scripture."
+          { t: 2.9, shown: 3 }, // "Notices."
+          // Hard cut to Scene 3: hide them again. A word's own visibility:visible
+          // outranks its line being hidden, so they stayed under the next line.
+          { t: 3.6, shown: 0 },
+        ];
+        function stateAt(time) {
+          for (let i = SEQUENCE.length - 1; i >= 0; i--) {
+            if (time >= SEQUENCE[i].t) return SEQUENCE[i].shown;
+          }
+          return 0;
+        }
+        function render(shown) {
+          for (let i = 0; i < WORDS.length; i++) {
+            WORDS[i].style.visibility = i < shown ? "visible" : "hidden";
+          }
+        }
+        render(0);
+        let lastShown = -1;
+        const driver = { t: 0 };
+        tl.to(
+          driver,
+          {
+            t: TOTAL,
+            duration: TOTAL,
+            ease: "none",
+            onUpdate: function () {
+              const shown = stateAt(driver.t);
+              if (shown !== lastShown) {
+                render(shown);
+                lastShown = shown;
+              }
+            },
+          },
+          0
+        );
+        // tiny landing settle on each word (the appearance itself is instant)
+        [1.6, 2.25, 2.9].forEach(function (t, i) {
+          tl.fromTo(WORDS[i], { scale: 1.06 }, { scale: 1, duration: 0.22, ease: "power2.out" }, t);
+        });
+
+        // Scene 3 — hard cut in, settle, then hold still; a hairline draws under the held line
+        tl.fromTo(
+          "#sunday01-s3-block",
+          { scale: 1.03 },
+          { scale: 1, duration: 0.7, ease: "power2.out" },
+          3.6
+        );
+        tl.fromTo(
+          "#sunday01-rule",
+          { scaleX: 0 },
+          { scaleX: 1, duration: 1.2, ease: "power2.inOut" },
+          4.1
+        );
+
+        // pad the timeline to the full frame length
+        tl.set({}, {}, TOTAL);
+
+        window.__timelines["01-sunday"] = tl;
+      })();
+    </script>
+  </div>
+</template>

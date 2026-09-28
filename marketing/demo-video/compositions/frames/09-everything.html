@@ -1,0 +1,297 @@
+<template>
+  <div id="root" data-composition-id="09-everything" data-start="0" data-duration="8.4" data-width="1920" data-height="1080">
+    <style>
+      @font-face {
+        font-family: "Crimson Pro";
+        src: url("assets/fonts/crimson-pro-latin-600-normal.woff2") format("woff2");
+        font-weight: 600;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "DM Sans";
+        src: url("assets/fonts/dm-sans-latin-500-normal.woff2") format("woff2");
+        font-weight: 500;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+        font-weight: 500;
+        font-style: normal;
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      [id="f09-everything-ground"] {
+        position: absolute;
+        inset: 0;
+        background: #08090c;
+      }
+      [id="f09-everything-content"] {
+        position: absolute;
+        inset: 0;
+        container-type: size;
+      }
+      [id="f09-everything-topbar"] {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        top: 40px;
+        display: flex;
+        justify-content: space-between;
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500;
+        font-size: 24px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #14b8a6;
+      }
+      [id="f09-everything-topbar"] span:last-child {
+        color: #ffffff;
+      }
+      /* camera wrapper: slow push-in over the hold */
+      [id="f09-everything-cam"] {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 900px; /* caption keep-out: everything above y = 900 */
+        transform-origin: 50% 55%;
+      }
+      [id="f09-everything-head"] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 132px;
+        text-align: center;
+        font-family: "Crimson Pro", serif;
+        font-weight: 600;
+        font-size: 5cqw; /* headline-xl */
+        line-height: 0.96;
+        letter-spacing: -0.02em;
+        color: #ffffff;
+        white-space: nowrap;
+      }
+      .f09-everything-word {
+        display: inline-block;
+      }
+      .f09-everything-green {
+        color: #14b8a6;
+      }
+      [id="f09-everything-grid"] {
+        position: absolute;
+        left: 148px;
+        top: 318px;
+        width: 1624px;
+        display: grid;
+        grid-template-columns: repeat(3, 520px);
+        grid-auto-rows: 250px;
+        column-gap: 32px;
+        row-gap: 32px;
+      }
+      .f09-everything-tile {
+        position: relative;
+        box-sizing: border-box;
+        background: #12151b;
+        border: 2px solid #232833;
+        border-radius: 6px;
+        padding: 40px 44px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .f09-everything-emph {
+        position: absolute;
+        inset: -2px;
+        border: 2px solid #14b8a6;
+        border-radius: 6px;
+        opacity: 0;
+      }
+      .f09-everything-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+      }
+      .f09-everything-icon {
+        width: 72px;
+        height: 72px;
+        fill: none;
+        stroke: #14b8a6;
+        stroke-width: 2.4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .f09-everything-icon * {
+        stroke-dasharray: 1;
+        stroke-dashoffset: 0;
+      }
+      .f09-everything-num {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500;
+        font-size: 22px;
+        letter-spacing: 0.14em;
+        color: #5eead4;
+      }
+      .f09-everything-label {
+        font-family: "DM Sans", sans-serif;
+        font-weight: 500;
+        font-size: 38px;
+        line-height: 1.2;
+        color: #ffffff;
+        white-space: nowrap;
+      }
+    </style>
+
+    <div id="f09-everything-ground" class="clip" data-start="0" data-duration="8.4" data-track-index="0"></div>
+
+    <div id="f09-everything-content" class="clip" data-start="0" data-duration="8.4" data-track-index="1">
+      <div id="f09-everything-topbar"><span>Selah Studio</span><span>09 / 10</span></div>
+
+      <div id="f09-everything-cam">
+        <div id="f09-everything-head">
+          <span class="f09-everything-word">Everything</span>
+          <span class="f09-everything-word">the</span>
+          <span class="f09-everything-word">room</span>
+          <span class="f09-everything-word f09-everything-green">sees.</span>
+        </div>
+
+        <div id="f09-everything-grid">
+          <div class="f09-everything-tile">
+            <div class="f09-everything-row">
+              <svg class="f09-everything-icon" viewBox="0 0 48 48">
+                <path pathLength="1" d="M18 34V11l20-4v23" />
+                <circle pathLength="1" cx="13" cy="34" r="5" />
+                <circle pathLength="1" cx="33" cy="30" r="5" />
+              </svg>
+              <span class="f09-everything-num">01</span>
+            </div>
+            <div class="f09-everything-label">Songs and hymns</div>
+          </div>
+
+          <div class="f09-everything-tile" id="f09-everything-bible">
+            <div class="f09-everything-emph" id="f09-everything-emph"></div>
+            <div class="f09-everything-row">
+              <svg class="f09-everything-icon" viewBox="0 0 48 48">
+                <path pathLength="1" d="M24 13c-4-3-10-4-18-4v28c8 0 14 1 18 4 4-3 10-4 18-4V9c-8 0-14 1-18 4z" />
+                <path pathLength="1" d="M24 13v28" />
+              </svg>
+              <span class="f09-everything-num">02</span>
+            </div>
+            <div class="f09-everything-label">Bible on screen</div>
+          </div>
+
+          <div class="f09-everything-tile">
+            <div class="f09-everything-row">
+              <svg class="f09-everything-icon" viewBox="0 0 48 48">
+                <circle pathLength="1" cx="24" cy="25" r="17" />
+                <path pathLength="1" d="M24 15v10l7 5" />
+              </svg>
+              <span class="f09-everything-num">03</span>
+            </div>
+            <div class="f09-everything-label">Countdowns</div>
+          </div>
+
+          <div class="f09-everything-tile">
+            <div class="f09-everything-row">
+              <svg class="f09-everything-icon" viewBox="0 0 48 48">
+                <path pathLength="1" d="M8 20v8h6l16 9V11l-16 9z" />
+                <path pathLength="1" d="M14 28l3 10h5l-2-9" />
+                <path pathLength="1" d="M36 18a7 7 0 0 1 0 12" />
+              </svg>
+              <span class="f09-everything-num">04</span>
+            </div>
+            <div class="f09-everything-label">Live announcements</div>
+          </div>
+
+          <div class="f09-everything-tile">
+            <div class="f09-everything-row">
+              <svg class="f09-everything-icon" viewBox="0 0 48 48">
+                <rect pathLength="1" x="6" y="10" width="36" height="28" rx="3" />
+                <path pathLength="1" d="M21 18v12l10-6z" />
+              </svg>
+              <span class="f09-everything-num">05</span>
+            </div>
+            <div class="f09-everything-label">Media and video</div>
+          </div>
+
+          <div class="f09-everything-tile">
+            <div class="f09-everything-row">
+              <svg class="f09-everything-icon" viewBox="0 0 48 48">
+                <rect pathLength="1" x="6" y="8" width="36" height="24" rx="3" />
+                <path pathLength="1" d="M24 32v8" />
+                <path pathLength="1" d="M17 40h14" />
+              </svg>
+              <span class="f09-everything-num">06</span>
+            </div>
+            <div class="f09-everything-label">Projector output</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        var root = document.querySelector('[data-composition-id="09-everything"]');
+        function $(id) {
+          return root.querySelector('[id="' + id + '"]');
+        }
+        function $$(cls, scope) {
+          return Array.prototype.slice.call((scope || root).querySelectorAll('[class~="' + cls + '"]'));
+        }
+
+        var tl = gsap.timeline({ paused: true });
+
+        // Chrome
+        tl.fromTo($("f09-everything-topbar"), { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
+
+        // Camera: steady slow push-in under the whole shot
+        tl.fromTo($("f09-everything-cam"), { scale: 1 }, { scale: 1.03, duration: 8, ease: "sine.inOut" }, 0);
+
+        // Scene 1 (0.0-1.5s): headline fills word by word
+        tl.fromTo(
+          $$("f09-everything-word"),
+          { opacity: 0, y: 28 },
+          { opacity: 1, y: 0, duration: 0.7, ease: "power3.out", stagger: 0.14 },
+          0.1
+        );
+
+        // Scene 2 (1.5-5.5s): six tiles cascade into the 3x2 grid, icons draw in once landed
+        var tiles = $$("f09-everything-tile");
+        tiles.forEach(function (tile, i) {
+          var t = 1.5 + i * 0.45;
+          tl.fromTo(
+            tile,
+            { opacity: 0, y: 44, scale: 0.96 },
+            { opacity: 1, y: 0, scale: 1, duration: 0.75, ease: "power3.out" },
+            t
+          );
+          var strokes = tile.querySelectorAll("svg *");
+          tl.fromTo(
+            strokes,
+            { strokeDashoffset: 1 },
+            { strokeDashoffset: 0, duration: 0.8, ease: "power2.inOut", stagger: 0.12 },
+            t + 0.3
+          );
+          var num = tile.querySelector('[class~="f09-everything-num"]');
+          tl.fromTo(num, { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "none" }, t + 0.45);
+        });
+
+        // Scene 3 (5.5-8.0s): grid holds; "Bible on screen" takes the one green border
+        tl.fromTo($("f09-everything-emph"), { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power2.out" }, 5.5);
+        tl.fromTo(
+          $("f09-everything-bible"),
+          { scale: 1 },
+          { scale: 1.03, duration: 0.9, ease: "back.out(1.6)", immediateRender: false },
+          5.5
+        );
+
+        window.__timelines = window.__timelines || {};
+        window.__timelines["09-everything"] = tl;
+      })();
+    </script>
+  </div>
+</template>

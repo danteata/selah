@@ -1,0 +1,226 @@
+<template>
+  <div id="root" data-composition-id="07-offline" data-start="0" data-duration="6.5" data-width="1920" data-height="1080">
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face {
+        font-family: "Crimson Pro";
+        src: url("assets/fonts/crimson-pro-latin-600-normal.woff2") format("woff2");
+        font-weight: 600;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+        font-weight: 500;
+        font-style: normal;
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        container-type: size;
+      }
+      [id="f07-offline-ground"] {
+        position: absolute;
+        inset: 0;
+        background: #08090c;
+      }
+      [id="f07-offline-topbar"] {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        top: 64px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #14b8a6;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-weight: 500;
+        font-size: 26px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #ffffff;
+      }
+      [class~="f07-offline-accent"] {
+        color: #14b8a6;
+      }
+      /* caption keep-out: every stage ends at y = 900 */
+      [class~="f07-offline-stage"] {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 900px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      [class~="f07-offline-line"] {
+        font-family: "Crimson Pro", Georgia, "Times New Roman", serif;
+        font-weight: 600;
+        color: #ffffff;
+        white-space: nowrap;
+        text-align: center;
+      }
+      [id="f07-offline-q"] {
+        font-size: 7.3cqw; /* display ramp */
+        line-height: 1.02;
+        letter-spacing: -0.02em;
+        margin-top: 56px;
+      }
+      [id="f07-offline-wifi"] {
+        width: 250px;
+        height: 200px;
+        overflow: visible;
+      }
+      [id="f07-offline-wifi"] path {
+        fill: none;
+        stroke: #14b8a6;
+        stroke-width: 14;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      [id="f07-offline-dot"] {
+        fill: #14b8a6;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+      [id="f07-offline-answer-block"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      [id="f07-offline-answer"] {
+        font-size: 5cqw; /* headline-xl ramp (5 words) */
+        line-height: 0.96;
+        letter-spacing: -0.02em;
+      }
+      [id="f07-offline-keeps"] {
+        color: #14b8a6;
+      }
+      [id="f07-offline-rule"] {
+        width: 100%;
+        height: 2px;
+        margin-top: 44px;
+        background: #14b8a6;
+        transform-origin: left center;
+      }
+    </style>
+
+    <!-- full-bleed near-black ground -->
+    <div id="f07-offline-ground" class="clip" data-start="0" data-duration="6.5" data-track-index="0"></div>
+
+    <!-- chrome: topbar holds across the shot -->
+    <div id="f07-offline-topbar" class="clip" data-start="0" data-duration="6.5" data-track-index="1">
+      <span>07 <span class="f07-offline-accent">/</span> Offline</span>
+      <span class="f07-offline-accent">Desktop</span>
+    </div>
+
+    <!-- Scene 1 (0.0-2.4s): the question, a Wi-Fi glyph draws on, then its arcs go out one by one -->
+    <div id="f07-offline-s1" class="clip f07-offline-stage" data-start="0" data-duration="2.4" data-track-index="2">
+      <svg id="f07-offline-wifi" viewBox="0 0 200 160" xmlns="http://www.w3.org/2000/svg">
+        <path id="f07-offline-arc1" d="M 71.72 111.72 A 40 40 0 0 1 128.28 111.72" />
+        <path id="f07-offline-arc2" d="M 43.43 83.43 A 80 80 0 0 1 156.57 83.43" />
+        <path id="f07-offline-arc3" d="M 15.15 55.15 A 120 120 0 0 1 184.85 55.15" />
+        <circle id="f07-offline-dot" cx="100" cy="140" r="11" />
+      </svg>
+      <div id="f07-offline-q" class="f07-offline-line">Church Wi-Fi down?</div>
+    </div>
+
+    <!-- Scene 2 (2.4-6.0s): hard-cut swap to the answer; the glyph is gone; holds -->
+    <div id="f07-offline-s2" class="clip f07-offline-stage" data-start="2.4" data-duration="4.1" data-track-index="2">
+      <div id="f07-offline-answer-block">
+        <div id="f07-offline-answer" class="f07-offline-line">
+          The desktop app <span id="f07-offline-keeps">keeps going.</span>
+        </div>
+        <div id="f07-offline-rule"></div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+        const TOTAL = 6;
+        const $ = function (id) {
+          return document.getElementById("f07-offline-" + id);
+        };
+
+        // svg-path-draw setup: measured length (fallback to the exact quarter-arc length)
+        const ARCS = [
+          { el: $("arc1"), r: 40 },
+          { el: $("arc2"), r: 80 },
+          { el: $("arc3"), r: 120 },
+        ];
+        ARCS.forEach(function (a) {
+          let len = 0;
+          try {
+            len = a.el.getTotalLength();
+          } catch (e) {
+            len = 0;
+          }
+          if (!len) len = (Math.PI * a.r) / 2;
+          a.len = len * 1.02;
+          a.el.style.strokeDasharray = String(a.len);
+          a.el.style.strokeDashoffset = String(a.len);
+        });
+
+        // Scene 1: the question lands first (hero visible well before 0.5s)
+        tl.fromTo(
+          $("q"),
+          { opacity: 0, y: 24, filter: "blur(8px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.5, ease: "power3.out" },
+          0.05
+        );
+
+        // Glyph draws on: dot, then arcs inner to outer, each starting at ~75% of the previous
+        tl.fromTo($("dot"), { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "back.out(2)" }, 0.2);
+        const DRAW = 0.4;
+        [0.35, 0.65, 0.95].forEach(function (t, i) {
+          tl.fromTo(
+            ARCS[i].el,
+            { strokeDashoffset: ARCS[i].len },
+            { strokeDashoffset: 0, duration: DRAW, ease: "power2.out" },
+            t
+          );
+        });
+
+        // Signal drops: arcs go out one by one, outer first, down to a faint trace
+        [1.5, 1.78, 2.04].forEach(function (t, k) {
+          const a = ARCS[2 - k];
+          tl.to(a.el, { opacity: 0.12, duration: 0.18, ease: "power2.in" }, t);
+        });
+        // the lone dot turns amber: no signal left
+        tl.to($("dot"), { fill: "#FCD34D", duration: 0.12, ease: "none" }, 2.2);
+
+        // Scene 2: hard cut in (instant), tiny landing settle, then hold
+        tl.fromTo(
+          $("answer-block"),
+          { scale: 1.03 },
+          { scale: 1, duration: 0.6, ease: "power2.out" },
+          2.4
+        );
+        tl.fromTo(
+          $("keeps"),
+          { color: "#FFFFFF" },
+          { color: "#14B8A6", duration: 0.35, ease: "power1.out" },
+          2.75
+        );
+        tl.fromTo(
+          $("rule"),
+          { scaleX: 0 },
+          { scaleX: 1, duration: 1.1, ease: "power2.inOut" },
+          3.1
+        );
+
+        // pad the timeline to the full frame length
+        tl.set({}, {}, TOTAL);
+
+        window.__timelines["07-offline"] = tl;
+      })();
+    </script>
+  </div>
+</template>

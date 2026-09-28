@@ -1,0 +1,287 @@
+<template>
+  <div id="root" data-composition-id="10-cta" data-width="1920" data-height="1080">
+    <style>
+      @font-face {
+        font-family: "Crimson Pro";
+        src: url("assets/fonts/crimson-pro-latin-600-normal.woff2") format("woff2");
+        font-weight: 600;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "DM Sans";
+        src: url("assets/fonts/dm-sans-latin-600-normal.woff2") format("woff2");
+        font-weight: 600;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "JetBrains Mono";
+        src: url("assets/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+        font-weight: 500;
+        font-style: normal;
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      [id="f10-cta-ground"] {
+        position: absolute;
+        inset: 0;
+        background: #08090c;
+      }
+      [id="f10-cta-content"] {
+        position: absolute;
+        inset: 0;
+        container-type: size;
+      }
+      [id="f10-cta-topbar"] {
+        position: absolute;
+        left: 96px;
+        right: 96px;
+        top: 40px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-weight: 500;
+        font-size: 24px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #14b8a6;
+      }
+      [id="f10-cta-topbar"] span:last-child {
+        color: #ffffff;
+      }
+      /* the whole stack: slow settle through the hold */
+      [id="f10-cta-stack"] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 900px;
+        transform-origin: 50% 45%;
+      }
+      /* lockup: flex-centred final layout; the tile starts centred via an x offset */
+      [id="f10-cta-lockup"] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 236px;
+        height: 184px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 44px;
+      }
+      [id="f10-cta-tile"] {
+        position: relative;
+        z-index: 2;
+        width: 176px;
+        height: 176px;
+        flex: 0 0 176px;
+        border-radius: 40px;
+        box-sizing: border-box;
+        border: 2px solid #14b8a6;
+        background: #08090c;
+      }
+      [id="f10-cta-tile-fill"] {
+        position: absolute;
+        inset: -2px;
+        border-radius: 40px;
+        background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+      }
+      [id="f10-cta-mark"] {
+        position: absolute;
+        left: 30px;
+        top: 30px;
+        width: 116px;
+        height: 116px;
+        overflow: visible;
+      }
+      [id="f10-cta-mark"] path {
+        fill: none;
+        stroke: #ffffff;
+        stroke-width: 2.25;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      [id="f10-cta-word-mask"] {
+        position: relative;
+        z-index: 1;
+        overflow: hidden;
+        padding: 0 8px 12px 0;
+      }
+      [id="f10-cta-word"] {
+        display: block;
+        font-family: "Crimson Pro", serif;
+        font-weight: 600;
+        font-size: 184px;
+        line-height: 1;
+        letter-spacing: -0.02em;
+        color: #ffffff;
+        white-space: nowrap;
+      }
+      [id="f10-cta-line"] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 492px;
+        text-align: center;
+        font-family: "Crimson Pro", serif;
+        font-weight: 600;
+        font-size: 84px;
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+        color: #ffffff;
+        white-space: nowrap;
+      }
+      .f10-cta-w {
+        display: inline-block;
+        padding-bottom: 8px;
+      }
+      [id="f10-cta-grad"] {
+        background: linear-gradient(90deg, #5eead4 0%, #fcd34d 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      [id="f10-cta-pill-row"] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 660px;
+        display: flex;
+        justify-content: center;
+      }
+      [id="f10-cta-pill"] {
+        display: inline-flex;
+        align-items: center;
+        height: 96px;
+        padding: 0 56px;
+        border-radius: 48px;
+        background: #14b8a6;
+        font-family: "DM Sans", sans-serif;
+        font-weight: 600;
+        font-size: 40px;
+        letter-spacing: -0.005em;
+        color: #08090c;
+        white-space: nowrap;
+      }
+      [id="f10-cta-trial"] {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 800px;
+        text-align: center;
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-weight: 500;
+        font-size: 26px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #5eead4;
+        white-space: nowrap;
+      }
+    </style>
+
+    <div id="f10-cta-ground" class="clip" data-start="0" data-duration="7" data-track-index="0"></div>
+
+    <div id="f10-cta-content" class="clip" data-start="0" data-duration="7" data-track-index="1">
+      <div id="f10-cta-topbar"><span>Selah Studio</span><span>10 / 10</span></div>
+
+      <div id="f10-cta-stack">
+        <div id="f10-cta-lockup">
+          <div id="f10-cta-tile">
+            <div id="f10-cta-tile-fill"></div>
+            <svg id="f10-cta-mark" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path id="f10-cta-spine" d="M12 7v14"></path>
+              <path
+                id="f10-cta-book"
+                d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"
+              ></path>
+            </svg>
+          </div>
+          <div id="f10-cta-word-mask"><span id="f10-cta-word">Selah</span></div>
+        </div>
+
+        <div id="f10-cta-line">
+          <span class="f10-cta-w">Preach</span> <span class="f10-cta-w">the</span>
+          <span class="f10-cta-w">sermon.</span> <span class="f10-cta-w">Selah</span>
+          <span class="f10-cta-w" id="f10-cta-grad">finds the verse.</span>
+        </div>
+
+        <div id="f10-cta-pill-row"><span id="f10-cta-pill">Get your church started</span></div>
+        <div id="f10-cta-trial">14-day free trial · No credit card</div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        var scope = document.querySelector('[data-composition-id="10-cta"]') || document;
+        var $ = function (id) {
+          return scope.querySelector('[id="' + id + '"]');
+        };
+        var tl = gsap.timeline({ paused: true });
+
+        // svg-path-draw setup: measured lengths (user units), slight overestimate for the compound path.
+        var spine = $("f10-cta-spine");
+        var book = $("f10-cta-book");
+        var spineLen = spine.getTotalLength();
+        var bookLen = book.getTotalLength() * 1.05;
+        spine.style.strokeDasharray = spineLen;
+        book.style.strokeDasharray = bookLen;
+
+        // Tile starts dead centre: half of (wordmark width ~2.05em x 184px + 44px gap).
+        var CENTER_OFFSET = 211;
+
+        // Scene 1 (0.0-2.5s): tile outline pops, the open book draws itself, tile fills teal,
+        // then the tile slides left as "Selah" slides out from behind it.
+        tl.fromTo($("f10-cta-topbar"), { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
+        tl.fromTo(
+          $("f10-cta-tile"),
+          { x: CENTER_OFFSET, scale: 0.6, opacity: 0 },
+          { x: CENTER_OFFSET, scale: 1, opacity: 1, duration: 0.55, ease: "back.out(1.6)" },
+          0.1
+        );
+        tl.fromTo(spine, { strokeDashoffset: spineLen }, { strokeDashoffset: 0, duration: 0.45, ease: "power2.out" }, 0.3);
+        tl.fromTo(book, { strokeDashoffset: bookLen }, { strokeDashoffset: 0, duration: 0.9, ease: "power2.out" }, 0.62);
+        tl.fromTo($("f10-cta-tile-fill"), { opacity: 0 }, { opacity: 1, duration: 0.45, ease: "power1.out" }, 1.35);
+        tl.fromTo($("f10-cta-tile"), { x: CENTER_OFFSET }, { x: 0, duration: 0.8, ease: "power3.inOut", immediateRender: false }, 1.55);
+        tl.fromTo(
+          $("f10-cta-word"),
+          { x: -260, opacity: 0 },
+          { x: 0, opacity: 1, duration: 0.85, ease: "power3.out" },
+          1.7
+        );
+
+        // Scene 2 (2.5-4.5s): the landing hero line, word by word; "finds the verse." lands last in mint-to-gold.
+        var words = scope.querySelectorAll(".f10-cta-w");
+        words.forEach(function (el, i) {
+          var last = i === words.length - 1;
+          tl.fromTo(
+            el,
+            { opacity: 0, y: 28 },
+            { opacity: 1, y: 0, duration: last ? 0.7 : 0.55, ease: "power3.out" },
+            2.55 + i * 0.12 + (last ? 0.18 : 0)
+          );
+        });
+
+        // Scene 3 (4.5-7.0s): the ask pops in, the trial line follows, then the frame holds.
+        tl.fromTo(
+          $("f10-cta-pill"),
+          { scale: 0.7, opacity: 0 },
+          { scale: 1, opacity: 1, duration: 0.55, ease: "back.out(1.7)" },
+          4.55
+        );
+        tl.fromTo($("f10-cta-trial"), { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 4.95);
+
+        // Life in the hold: near-imperceptible settle of the whole stack to the last frame.
+        tl.fromTo($("f10-cta-stack"), { scale: 1 }, { scale: 1.015, duration: 7, ease: "none" }, 0);
+
+        window.__timelines = window.__timelines || {};
+        window.__timelines["10-cta"] = tl;
+      })();
+    </script>
+  </div>
+</template>
