@@ -448,6 +448,13 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
     // hymns, so operators don't have to be on the right tab to find something.
     // Empty query falls back to the per-tab browse lists below.
     const [query, setQuery] = useState('')
+    // A search handed over from the command bar: take it and clear it.
+    const musicPanelQuery = useAppStore((s) => s.musicPanelQuery)
+    const setMusicPanelQuery = useAppStore((s) => s.setMusicPanelQuery)
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- consumes a one-shot request from the external app store
+        if (musicPanelQuery) { setQuery(musicPanelQuery); setMusicPanelQuery('') }
+    }, [musicPanelQuery, setMusicPanelQuery])
 
     const { songs, deleteSong } = useSongs()
     const { getSong } = useSong()

@@ -22,6 +22,9 @@ export function CommandBar() {
     const commandBarOpen = useAppStore((s) => s.commandBarOpen)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
+    const setMusicPanelQuery = useAppStore((s) => s.setMusicPanelQuery)
+    const setBiblePanelQuery = useAppStore((s) => s.setBiblePanelQuery)
+    const setContextPanelOpen = useAppStore((s) => s.setContextPanelOpen)
     const activeSlides = useAppStore((s) => s.activeSlides)
     const setLiveSlide = useAppStore((s) => s.setLiveSlide)
     const activeSchedule = useAppStore((s) => s.activeSchedule)
@@ -138,10 +141,33 @@ export function CommandBar() {
             action: () => { setLiveSlide(s.id); handleClose() }
         })) : []
 
+    // The top bar promises a search of songs, hymns and the Bible, but this
+    // only knew its own commands: "Amazing Grace" found nothing. Any query
+    // also offers to search the songs panel and the Bible for it.
+    const trimmed = query.trim()
+    const searchCommands: CommandItem[] = trimmed ? [
+        {
+            id: 'search-songs',
+            title: `Find “${trimmed}” in songs and hymns`,
+            description: 'Opens Songs with this search',
+            icon: Music,
+            category: 'navigation',
+            action: () => { setMusicPanelQuery(trimmed); setActiveNavSection('music'); setContextPanelOpen(true); handleClose() }
+        },
+        {
+            id: 'search-bible',
+            title: `Look up “${trimmed}” in the Bible`,
+            description: 'A reference like John 3:16, or words from a verse',
+            icon: Book,
+            category: 'bible',
+            action: () => { setBiblePanelQuery(trimmed); setActiveNavSection('bible'); setContextPanelOpen(true); handleClose() }
+        },
+    ] : []
+
     const filteredCommands = [...dynamicCommands, ...staticCommands.filter(c =>
         c.title.toLowerCase().includes(query.toLowerCase()) ||
         c.description?.toLowerCase().includes(query.toLowerCase())
-    )]
+    ), ...searchCommands]
 
     const commandCount = filteredCommands.length
 
@@ -254,7 +280,8 @@ export function CommandBar() {
                                 ref={inputRef}
                                 type="text"
                                 value={query}
-                                onChange={(e) => setQuery(e.target.value)}
+                                // A new query selects its best match, the first row.
+                                onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0) }}
                                 placeholder="Type a command or search..."
                                 aria-label="Search commands"
                                 className="flex-1 bg-transparent border-none text-[var(--text-primary)] text-lg focus:outline-none focus:ring-0 placeholder:text-[var(--text-muted)]"

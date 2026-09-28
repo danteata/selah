@@ -166,6 +166,8 @@ export interface AppState {
     commandBarOpen: boolean
     quickBibleBarOpen: boolean
     biblePanelQuery: string
+    /** A search to open the Songs panel with (the command bar sets it). */
+    musicPanelQuery: string
     splitPanelMode: SplitPanelMode | null
     splitPanelQuery: string | null
 
@@ -272,6 +274,7 @@ const initialState: AppState = {
     commandBarOpen: false,
     quickBibleBarOpen: false,
     biblePanelQuery: '',
+    musicPanelQuery: '',
     splitPanelMode: null as SplitPanelMode | null,
     splitPanelQuery: null as string | null,
     // Workspace mode
@@ -443,6 +446,7 @@ interface AppStore extends AppState {
     setQuickBibleBarOpen: (open: boolean) => void
     toggleQuickBibleBar: () => void
     setBiblePanelQuery: (query: string) => void
+    setMusicPanelQuery: (query: string) => void
     setSplitPanelMode: (mode: SplitPanelMode | null) => void
     setSplitPanelQuery: (query: string | null) => void
     openBibleFromSermon: (verseReference: string) => void
@@ -1420,6 +1424,10 @@ export const useAppStore = create<AppStore>()(
 
             setBiblePanelQuery: (query) => {
                 set({ biblePanelQuery: query })
+            },
+
+            setMusicPanelQuery: (query) => {
+                set({ musicPanelQuery: query })
             },
 
             setSplitPanelMode: (mode) => {

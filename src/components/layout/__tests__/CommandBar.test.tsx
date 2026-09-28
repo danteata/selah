@@ -5,6 +5,8 @@ import { CommandBar } from '../CommandBar'
 const setActiveNavSection = vi.fn()
 const setCommandBarOpen = vi.fn()
 const setLiveSlide = vi.fn()
+const setMusicPanelQuery = vi.fn()
+const setBiblePanelQuery = vi.fn()
 
 let commandBarOpen = true
 
@@ -15,6 +17,9 @@ vi.mock('../../../store/appStore', () => ({
             setCommandBarOpen,
             setActiveNavSection,
             setLiveSlide,
+            setMusicPanelQuery,
+            setBiblePanelQuery,
+            setContextPanelOpen: vi.fn(),
             activeSlides: [],
             liveSlideId: null,
             activeSchedule: null,
@@ -110,7 +115,7 @@ describe('CommandBar', () => {
             fireEvent.keyDown(window, { key: 'End' })
             fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: 'define' } })
 
-            expect(rowTitles()).toEqual(['Define a Word'])
+            expect(rowTitles()[0]).toBe('Define a Word')
             fireEvent.keyDown(window, { key: 'Enter' })
 
             expect(setActiveNavSection).toHaveBeenCalledWith('dictionary')
@@ -125,14 +130,26 @@ describe('CommandBar', () => {
             expect(selectedTitle()).toBe('Define a Word')
         })
 
-        it('does nothing on Enter when the query matches no command', () => {
+        it('offers to search songs and the Bible for a query that is not a command', () => {
+            // The top bar says "Search bible, hymns, songs"; this used to find
+            // nothing for a song title.
             render(<CommandBar />)
 
-            fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: 'zzzzz' } })
-            fireEvent.keyDown(window, { key: 'Enter' })
+            fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: 'Amazing Grace' } })
+            expect(rowTitles()).toEqual(['Find “Amazing Grace” in songs and hymns', 'Look up “Amazing Grace” in the Bible'])
 
-            expect(setActiveNavSection).not.toHaveBeenCalled()
+            fireEvent.keyDown(window, { key: 'Enter' })
+            expect(setMusicPanelQuery).toHaveBeenCalledWith('Amazing Grace')
+            expect(setActiveNavSection).toHaveBeenCalledWith('music')
             expect(setLiveSlide).not.toHaveBeenCalled()
+        })
+
+        it('hands a reference to the Bible panel', () => {
+            render(<CommandBar />)
+            fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: 'John 3:16' } })
+            fireEvent.click(screen.getByText('Look up “John 3:16” in the Bible'))
+            expect(setBiblePanelQuery).toHaveBeenCalledWith('John 3:16')
+            expect(setActiveNavSection).toHaveBeenCalledWith('bible')
         })
 
         it('works when focus is not in the search box', () => {
