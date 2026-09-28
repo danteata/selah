@@ -96,6 +96,33 @@ describe('useLiveSession background sync', () => {
         expect(third[0].deletes).toEqual(['a'])
     })
 
+    it('saves the service order when no live session is running', async () => {
+        Object.assign(queryResults, {
+            'liveSessions:getActiveSession': null,
+            'liveSessions:getActiveSessionByChurch': [],
+            'liveSessions:getSession': null,
+        })
+        renderHook(() => useLiveSession(undefined, { sync: true }))
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+
+        const [first] = calls('slides:applyScheduleSlideChanges')
+        expect(first[0].scheduleId).toBe('sched1')
+        expect(first[0].upserts.map((s: { id: string }) => s.id)).toEqual(['a'])
+    })
+
+    it("doesn't write for a contributor in someone else's session", async () => {
+        const theirs = { ...session, operatorId: 'someone-else' }
+        Object.assign(queryResults, {
+            'liveSessions:getActiveSession': theirs,
+            'liveSessions:getActiveSessionByChurch': [theirs],
+            'liveSessions:getSession': theirs,
+        })
+        renderHook(() => useLiveSession(undefined, { sync: true }))
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+
+        expect(calls('slides:applyScheduleSlideChanges')).toHaveLength(0)
+    })
+
     it('copies that do not own the sync never write to the server', async () => {
         renderHook(() => useLiveSession())
         await act(async () => { await vi.advanceTimersByTimeAsync(1000) })

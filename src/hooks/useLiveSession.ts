@@ -836,10 +836,15 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         return () => clearTimeout(timeoutId)
     }, [sync, liveOutputSlidesId, resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
 
-    // Push the operator's slide edits: only what changed since the last sync
-    // or server update, and deletes only for slides this device had and lost.
+    // Push the service order: only what changed since the last sync or server
+    // update, and deletes only for slides this device had and lost. Outside a
+    // live session this is the only thing that saves it. It used to push only
+    // for a session's operator, so an order prepared ahead of time lived only
+    // in memory and a reload, a crash or another computer lost it. Inside a
+    // session, only the operator writes; everyone else suggests.
     useEffect(() => {
-        if (!sync || !sessionScheduleId || !isConvexConnected || isOffline || sessionRole !== 'operator') return
+        const inSession = !!resolvedSessionId
+        if (!sync || !sessionScheduleId || !isConvexConnected || isOffline || (inSession && sessionRole !== 'operator')) return
         resetBaselineFor(sessionScheduleId)
 
         const scheduleActiveSlides = activeSlides
@@ -860,7 +865,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         }, 750)
 
         return () => clearTimeout(timeoutId)
-    }, [sync, activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, applyScheduleSlideChangesMutation])
+    }, [sync, activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, resolvedSessionId, applyScheduleSlideChangesMutation])
 
     // Reconnection recovery: reconcile session state when Convex reconnects
     const prevConnectedRef = useRef(isConvexConnected)
