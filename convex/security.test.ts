@@ -133,13 +133,15 @@ describe('saving a service order', () => {
             scheduleId,
             upserts: [{
                 id: 'verse-1', index: 0, name: 'Amazing Grace - Verse 1', type: 'song', layout: 'full-text',
-                contents: ['Amazing grace'], songId: 'song-doc', data: song,
+                contents: ['Amazing grace'], songId: 'song-doc', data: song, localMediaId: 'media-on-this-laptop',
                 slideStyle: { verseRefPosition: 'top', countdownEndsAt: 1790580000000, mediaSeekNonce: 2 },
             }],
             deletes: [],
         })
         const saved = await t.run(async (ctx) => await ctx.db.query('slides').first())
         expect(saved?.data?.title).toBe('Amazing Grace')
+        // So the laptop that chose the background still finds it after a reload.
+        expect(saved?.localMediaId).toBe('media-on-this-laptop')
     })
 })
 

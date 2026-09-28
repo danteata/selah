@@ -261,6 +261,12 @@ export default defineSchema({
         title: v.optional(v.string()),
         songId: v.optional(v.string()),
         hasChorus: v.optional(v.boolean()),
+        // Where this device keeps an uploaded background: a local media library
+        // id (web) or a file path (desktop). Only the device that has the file
+        // can resolve it; everyone else falls back, as before. Without it a
+        // reload lost the background even on the computer that chose it.
+        localMediaId: v.optional(v.string()),
+        localFilePath: v.optional(v.string()),
         // The client's own record of what made the slide (a song, a passage, a
         // countdown). This was a strict copy of the client types and fell behind
         // them: a library song's `_creationTime`, `copyright` or `ccli` made every

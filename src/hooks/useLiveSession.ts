@@ -45,14 +45,13 @@ function mergePendingQueue(serverQueue: string[], pendingQueue: string[]) {
 }
 
 /**
- * Builds the exact shape Convex's `syncScheduleSlides`/`upsertScheduleSlide`
- * mutations accept. Their `v.object({...})` argument validators are
- * exact/closed — any extra key (e.g. the client-only `localFilePath`/
- * `localMediaId`, never declared there or in the schema) throws an
+ * Builds the exact shape Convex's slide mutations accept. Their argument
+ * validators are exact/closed: any undeclared key throws an
  * `ArgumentValidationError` and fails the whole call. A `blob:`/`asset://`
- * `background` value is also meaningless on another device, so for
- * local-only media (no `backgroundStorageId`) it's omitted too —
- * `backgroundType` still travels so a placeholder can show the right icon.
+ * `background` is meaningless on another device, so for local-only media
+ * (no `backgroundStorageId`) it's omitted; `backgroundType` still travels so
+ * a placeholder can show the right icon, and `localMediaId`/`localFilePath`
+ * travel so the device that has the file still finds it after a reload.
  */
 function toSyncableSlide(slide: Slide, index: number) {
     const isLocalOnlyMedia = !slide.backgroundStorageId && !!(slide.localFilePath || slide.localMediaId)
@@ -70,6 +69,10 @@ function toSyncableSlide(slide: Slide, index: number) {
         title: slide.title,
         songId: slide.songId,
         hasChorus: slide.hasChorus,
+        // Kept so this device finds its own upload after a reload; another
+        // device just doesn't have it.
+        localMediaId: slide.localMediaId,
+        localFilePath: slide.localFilePath,
         data: slide.data,
         slideStyle: slide.slideStyle,
         saved: slide.saved,

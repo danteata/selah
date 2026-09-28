@@ -274,6 +274,8 @@ const scheduleSlideValidator = v.object({
     title: v.optional(v.string()),
     songId: v.optional(v.string()),
     hasChorus: v.optional(v.boolean()),
+    localMediaId: v.optional(v.string()),
+    localFilePath: v.optional(v.string()),
     data: v.optional(v.any()),
     slideStyle: v.optional(v.any()),
     saved: v.optional(v.boolean()),
