@@ -27,6 +27,7 @@ import type { TemplateItem, SlideType } from '../hooks/useTemplates'
 import { clearSignedOutUser } from '../services/auth/signOutCleanup'
 import { prewarmSemanticSearch } from '../services/sermon-listener/localEmbeddings'
 import { useScheduleOutboxSync } from '../hooks/useScheduleOutboxSync'
+import { countdownSlideFromForm } from '../utils/countdown'
 
 // Modals and the admin panel load on first open, keeping them out of the
 // Dashboard chunk every operator downloads before the studio appears.
@@ -430,34 +431,7 @@ export default function Dashboard() {
 
     // Handle countdown creation - convert CountdownData to Countdown slide
     const handleCountdownCreate = (countdownData: CountdownData) => {
-        const timeString = `${String(countdownData.hours).padStart(2, '0')}:${String(countdownData.minutes).padStart(2, '0')}:${String(countdownData.seconds).padStart(2, '0')}`
-
-        // Check if we're editing an existing slide
-        const isEditing = editingSlide?.id === countdownData.id
-
-        const slide: Slide = {
-            id: countdownData.id,
-            index: isEditing ? editingSlide?.index ?? 0 : 0,
-            name: `Countdown: ${countdownData.title}`,
-            type: 'countdown',
-            layout: 'countdown',
-            contents: [countdownData.title, timeString],
-            userId: isEditing ? editingSlide?.userId || '' : '',
-            churchId: isEditing ? editingSlide?.churchId || '' : '',
-            scheduleId: activeSchedule?._id || '',
-            background: countdownData.background,
-            backgroundType: countdownData.backgroundType,
-            backgroundStorageId: countdownData.backgroundStorageId ?? null,
-            localFilePath: countdownData.localFilePath,
-            localMediaId: countdownData.localMediaId,
-            data: {
-                id: countdownData.id,
-                time: timeString,
-                timeLeft: timeString,
-                content: countdownData.title,
-            },
-            slideStyle: isEditing ? editingSlide?.slideStyle ?? { fontSize: 17.5, alignment: 'center' } : { fontSize: 17.5, alignment: 'center' },
-        }
+        const { slide, isEditing } = countdownSlideFromForm(countdownData, editingSlide, activeSchedule?._id || '')
 
         if (isEditing) {
             updateActiveSlide(slide)

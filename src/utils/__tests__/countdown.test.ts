@@ -6,6 +6,7 @@ import {
     pauseCountdown,
     resumeCountdown,
     startCountdown,
+    countdownSlideFromForm,
 } from '../countdown'
 import { useAppStore } from '../../store/appStore'
 import type { Slide } from '../../types'
@@ -69,5 +70,30 @@ describe('going live starts the clock', () => {
         // A live session echoing the same live slide back.
         useAppStore.getState().setLiveSlide('cd')
         expect(useAppStore.getState().activeSlides[0].slideStyle?.countdownEndsAt).toBe(first)
+    })
+})
+
+describe('countdownSlideFromForm', () => {
+    const form = {
+        id: 'countdown_1', hours: 0, minutes: 5, seconds: 0, title: 'Service starts in',
+        background: 'blob:x', backgroundType: 'video', localMediaId: 'media-1',
+    }
+
+    it('builds a new countdown slide for the schedule', () => {
+        const { slide, isEditing } = countdownSlideFromForm(form, null, 'sched1')
+        expect(isEditing).toBe(false)
+        expect(slide).toMatchObject({
+            id: 'countdown_1', type: 'countdown', name: 'Countdown: Service starts in',
+            contents: ['Service starts in', '00:05:00'], scheduleId: 'sched1', localMediaId: 'media-1',
+        })
+    })
+
+    it('keeps an edited countdown in place with its styling', () => {
+        const editing = { id: 'countdown_1', index: 4, slideStyle: { fontSize: 20 } } as never
+        const { slide, isEditing } = countdownSlideFromForm({ ...form, minutes: 10 }, editing, 'sched1')
+        expect(isEditing).toBe(true)
+        expect(slide.index).toBe(4)
+        expect(slide.slideStyle).toEqual({ fontSize: 20 })
+        expect(slide.contents[1]).toBe('00:10:00')
     })
 })

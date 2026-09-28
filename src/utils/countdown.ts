@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Countdown, Slide } from '../types'
+import type { CountdownData } from '../components/countdown/AddCountdownModal'
 
 /**
  * Countdown timing shared by the operator's preview and the projector.
@@ -106,4 +107,38 @@ export function useCountdownSeconds(slide: Slide | null | undefined): number {
 
     if (!slide || slide.type !== 'countdown') return 0
     return countdownRemainingSeconds(slide, now, localStart.at)
+}
+
+/**
+ * The slide the countdown form describes. When `editingSlide` is the same
+ * countdown, its place and styling are kept. The Dashboard's modal and the
+ * side panel each had a copy of this, and they drifted apart.
+ */
+export function countdownSlideFromForm(
+    form: CountdownData,
+    editingSlide: Slide | null | undefined,
+    scheduleId: string,
+): { slide: Slide; isEditing: boolean } {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const time = `${pad(form.hours)}:${pad(form.minutes)}:${pad(form.seconds)}`
+    const isEditing = editingSlide?.id === form.id
+    const slide: Slide = {
+        id: form.id,
+        index: isEditing ? editingSlide?.index ?? 0 : 0,
+        name: `Countdown: ${form.title}`,
+        type: 'countdown',
+        layout: 'countdown',
+        contents: [form.title, time],
+        userId: isEditing ? editingSlide?.userId || '' : '',
+        churchId: isEditing ? editingSlide?.churchId || '' : '',
+        scheduleId,
+        background: form.background,
+        backgroundType: form.backgroundType,
+        backgroundStorageId: form.backgroundStorageId ?? null,
+        localFilePath: form.localFilePath,
+        localMediaId: form.localMediaId,
+        data: { id: form.id, time, timeLeft: time, content: form.title },
+        slideStyle: isEditing ? editingSlide?.slideStyle ?? { fontSize: 17.5, alignment: 'center' } : { fontSize: 17.5, alignment: 'center' },
+    }
+    return { slide, isEditing }
 }

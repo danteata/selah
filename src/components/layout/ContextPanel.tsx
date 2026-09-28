@@ -28,6 +28,7 @@ import { TemplateSelector } from '../templates/TemplateSelector'
 import { AddCountdownModal, type CountdownData } from '../countdown/AddCountdownModal'
 import { AddAlertModal } from '../alerts/AddAlertModal'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
+import { countdownSlideFromForm } from '../../utils/countdown'
 
 
 const SECTION_META: Record<NavSection, { icon: React.ElementType; title: string }> = {
@@ -285,32 +286,7 @@ export function ContextSectionContent({
     }
 
     const handleCountdownCreate = (countdownData: CountdownData) => {
-        const timeString = `${String(countdownData.hours).padStart(2, '0')}:${String(countdownData.minutes).padStart(2, '0')}:${String(countdownData.seconds).padStart(2, '0')}`
-        const isEditing = editingSlide?.id === countdownData.id
-
-        const slide: Slide = {
-            id: countdownData.id,
-            index: isEditing ? editingSlide?.index ?? 0 : 0,
-            name: `Countdown: ${countdownData.title}`,
-            type: 'countdown',
-            layout: 'countdown',
-            contents: [countdownData.title, timeString],
-            userId: isEditing ? editingSlide?.userId || '' : '',
-            churchId: isEditing ? editingSlide?.churchId || '' : '',
-            scheduleId: activeSchedule?._id || '',
-            background: countdownData.background,
-            backgroundType: countdownData.backgroundType,
-            backgroundStorageId: countdownData.backgroundStorageId ?? null,
-            localFilePath: countdownData.localFilePath,
-            localMediaId: countdownData.localMediaId,
-            data: {
-                id: countdownData.id,
-                time: timeString,
-                timeLeft: timeString,
-                content: countdownData.title,
-            },
-            slideStyle: isEditing ? editingSlide?.slideStyle ?? { fontSize: 17.5, alignment: 'center' } : { fontSize: 17.5, alignment: 'center' },
-        }
+        const { slide, isEditing } = countdownSlideFromForm(countdownData, editingSlide, activeSchedule?._id || '')
 
         if (isEditing) {
             updateActiveSlide(slide)
