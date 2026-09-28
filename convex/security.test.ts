@@ -119,6 +119,30 @@ describe('slide sync only deletes what the operator removed', () => {
     })
 })
 
+describe('saving a service order', () => {
+    it('accepts a slide carrying a library song and a live countdown clock', async () => {
+        const { t, asAlice, churchA } = await twoChurches()
+        const scheduleId = await asAlice.mutation(api.schedules.createSchedule, { name: 'Sunday', churchId: churchA })
+        // What the client really sends: its copy of the library song, system
+        // fields and all, and slide styling the table's old strict copy lacked.
+        const song = {
+            _id: 'song-doc', _creationTime: 1790579152317.658, id: 'song_1', title: 'Amazing Grace',
+            artist: 'John Newton', lyrics: 'Amazing grace', copyright: 'Public domain', ccli: '22025',
+        }
+        await asAlice.mutation(api.slides.applyScheduleSlideChanges, {
+            scheduleId,
+            upserts: [{
+                id: 'verse-1', index: 0, name: 'Amazing Grace - Verse 1', type: 'song', layout: 'full-text',
+                contents: ['Amazing grace'], songId: 'song-doc', data: song,
+                slideStyle: { verseRefPosition: 'top', countdownEndsAt: 1790580000000, mediaSeekNonce: 2 },
+            }],
+            deletes: [],
+        })
+        const saved = await t.run(async (ctx) => await ctx.db.query('slides').first())
+        expect(saved?.data?.title).toBe('Amazing Grace')
+    })
+})
+
 describe('invitations', () => {
     it("keeps the church's default link working after someone joins with it", async () => {
         const { t, asAlice, churchA } = await twoChurches()

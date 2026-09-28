@@ -261,108 +261,15 @@ export default defineSchema({
         title: v.optional(v.string()),
         songId: v.optional(v.string()),
         hasChorus: v.optional(v.boolean()),
-        data: v.optional(v.union(
-            v.object({
-                _id: v.optional(v.string()),
-                id: v.string(),
-                lyrics: v.string(),
-                title: v.string(),
-                artist: v.string(),
-                album: v.optional(v.string()),
-                cover: v.optional(v.string()),
-                author: v.optional(v.string()),
-                verses: v.optional(v.array(v.string())),
-                sections: v.optional(v.array(songSectionValidator)),
-                defaultArrangement: v.optional(v.array(v.string())),
-                isPublic: v.optional(v.boolean()),
-                createdBy: v.optional(v.string()),
-                churchId: v.optional(v.string()),
-                createdAt: v.optional(v.string()),
-                updatedAt: v.optional(v.string()),
-            }),
-            v.object({
-                label: v.string(),
-                labelShortFormat: v.string(),
-                version: v.string(),
-                content: v.union(v.string(), v.array(v.object({
-                    book: v.string(),
-                    chapter: v.string(),
-                    verse: v.string(),
-                    scripture: v.string(),
-                }))),
-            }),
-            v.object({
-                number: v.string(),
-                title: v.string(),
-                chorus: v.string(),
-                verses: v.array(v.string()),
-                author: v.string(),
-                source: v.string(),
-                meta: v.string(),
-            }),
-            // Dictionary entry (see DictionaryEntry in src/types) — kept on the
-            // slide so a definition split across several slides can be
-            // re-chunked or re-labelled without another lookup.
-            v.object({
-                key: v.string(),
-                word: v.string(),
-                packId: v.string(),
-                senses: v.array(v.object({
-                    text: v.string(),
-                    label: v.optional(v.string()),
-                })),
-                refs: v.optional(v.array(v.string())),
-                transliteration: v.optional(v.string()),
-                lemma: v.optional(v.string()),
-                strongs: v.optional(v.string()),
-            }),
-            v.object({
-                _id: v.optional(v.string()),
-                id: v.string(),
-                time: v.string(),
-                timeLeft: v.string(),
-                content: v.string(),
-            }),
-            v.object({
-                blob: v.optional(v.any()),
-                url: v.string(),
-            }),
-            v.object({
-                url: v.string(),
-                type: v.string(),
-                name: v.optional(v.string()),
-                thumbnail: v.optional(v.string()),
-            })
-        )),
-        slideStyle: v.optional(v.object({
-            blur: v.optional(v.number()),
-            brightness: v.optional(v.number()),
-            alignment: v.optional(v.string()),
-            font: v.optional(v.string()),
-            linesPerSlide: v.optional(v.number()),
-            fontSize: v.optional(v.number()),
-            fontSizePercent: v.optional(v.number()),
-            backgroundFillType: v.optional(v.string()),
-            repeatMedia: v.optional(v.boolean()),
-            isMediaPlaying: v.optional(v.boolean()),
-            mediaSeekPosition: v.optional(v.number()),
-            isMediaMuted: v.optional(v.boolean()),
-            windowPadding: v.optional(v.object({
-                left: v.optional(v.number()),
-                right: v.optional(v.number()),
-                top: v.optional(v.number()),
-                bottom: v.optional(v.number()),
-            })),
-            lettercase: v.optional(v.string()),
-            lineSpacing: v.optional(v.string()),
-            textOutlined: v.optional(v.boolean()),
-            bibleVersion: v.optional(v.string()),
-            // Lower Third settings
-            lowerThirdStyle: v.optional(v.string()),
-            lowerThirdPosition: v.optional(v.string()),
-            lowerThirdAccentColor: v.optional(v.string()),
-            lowerThirdSubtitle: v.optional(v.string()),
-        })),
+        // The client's own record of what made the slide (a song, a passage, a
+        // countdown). This was a strict copy of the client types and fell behind
+        // them: a library song's `_creationTime`, `copyright` or `ccli` made every
+        // song slide fail to save, so schedules with songs never synced. The
+        // server never reads it, so it takes whatever the client sends.
+        data: v.optional(v.any()),
+        // Display settings. Same story as `data`: the strict copy rejected the
+        // verse-reference styling and a live countdown's clock.
+        slideStyle: v.optional(v.any()),
         lockedBy: v.optional(v.string()),
         lockedAt: v.optional(v.number()),
         saved: v.optional(v.boolean()),
