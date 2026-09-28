@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { BookOpen } from "lucide-react";
 import { gsap } from "@/lib/gsap";
 import { WelcomeScene } from "@/components/landing/WelcomeScene";
 import { Magnetic } from "@/components/landing/Magnetic";
+import { DemoVideoModal } from "@/components/landing/DemoVideoModal";
 
 function splitChars(el: HTMLElement) {
   const text = el.textContent ?? "";
@@ -18,6 +19,9 @@ function splitChars(el: HTMLElement) {
 }
 
 export function Hero({ started }: { started: boolean }) {
+  // "Watch it work" used to scroll to the Sermon Listener section, which
+  // plays nothing. It opens the demo video.
+  const [demoOpen, setDemoOpen] = useState(false);
   const h1 = useRef<HTMLHeadingElement>(null);
   const mockupRef = useRef<HTMLDivElement>(null);
 
@@ -96,15 +100,16 @@ export function Hero({ started }: { started: boolean }) {
             </Link>
           </Magnetic>
           <Magnetic strength={0.25}>
-            <a
-              href="#sermon-listener"
+            <button
+              type="button"
+              onClick={() => setDemoOpen(true)}
               data-cursor="Watch"
               className="hero-cta inline-flex items-center gap-2 rounded-full border border-zinc-700/80 px-7 py-4 text-zinc-200 hover:border-teal-500/60 hover:text-white transition-colors"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
               <span>Watch it work</span>
-              <span className="text-zinc-500">90s</span>
-            </a>
+              <span className="text-zinc-500">1:24</span>
+            </button>
           </Magnetic>
         </div>
 
@@ -252,6 +257,7 @@ export function Hero({ started }: { started: boolean }) {
           <span style={{ color: 'rgba(255,255,255,0.85)' }}>On screen in one keystroke</span>
         </div>
       </div>
+      <DemoVideoModal isOpen={demoOpen} onClose={() => setDemoOpen(false)} />
     </section>
   );
 }
