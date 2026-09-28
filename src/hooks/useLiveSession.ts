@@ -839,6 +839,16 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         return () => clearTimeout(timeoutId)
     }, [sync, liveOutputSlidesId, resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
 
+    // A failed save is tried again on its own, with backoff: before, it waited
+    // for the operator's next edit, so an order left alone after a blip stayed
+    // unsaved. Bumping this re-runs the push below with the same changes.
+    const [saveRetry, setSaveRetry] = useState(0)
+    const saveAttemptsRef = useRef(0)
+    const saveRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    useEffect(() => () => {
+        if (saveRetryTimerRef.current) clearTimeout(saveRetryTimerRef.current)
+    }, [])
+
     // Push the service order: only what changed since the last sync or server
     // update, and deletes only for slides this device had and lost. Outside a
     // live session this is the only thing that saves it. It used to push only
@@ -861,8 +871,14 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             applyScheduleSlideChangesMutation({ scheduleId: sessionScheduleId, upserts, deletes })
                 .then(() => {
                     slideBaselineRef.current = next
+                    saveAttemptsRef.current = 0
                 })
                 .catch((err: unknown) => {
+                    // Schedule the retry first, so nothing in reporting can skip it.
+                    const attempt = saveAttemptsRef.current++
+                    const delay = [5_000, 15_000][attempt] ?? 60_000
+                    if (saveRetryTimerRef.current) clearTimeout(saveRetryTimerRef.current)
+                    saveRetryTimerRef.current = setTimeout(() => setSaveRetry((n) => n + 1), delay)
                     reportSessionError(
                         inSession ? "Couldn't share your slide changes with the team" : "Couldn't save the service order",
                         err,
@@ -871,7 +887,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         }, 750)
 
         return () => clearTimeout(timeoutId)
-    }, [sync, activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, resolvedSessionId, applyScheduleSlideChangesMutation])
+    }, [sync, activeSlides, sessionScheduleId, isConvexConnected, isOffline, sessionRole, resolvedSessionId, applyScheduleSlideChangesMutation, saveRetry])
 
     // Reconnection recovery: reconcile session state when Convex reconnects
     const prevConnectedRef = useRef(isConvexConnected)

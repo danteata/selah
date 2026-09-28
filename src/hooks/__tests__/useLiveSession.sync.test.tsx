@@ -110,6 +110,27 @@ describe('useLiveSession background sync', () => {
         expect(first[0].upserts.map((s: { id: string }) => s.id)).toEqual(['a'])
     })
 
+    it('tries a failed save again on its own', async () => {
+        Object.assign(queryResults, {
+            'liveSessions:getActiveSession': null,
+            'liveSessions:getActiveSessionByChurch': [],
+            'liveSessions:getSession': null,
+        })
+        renderHook(() => useLiveSession(undefined, { sync: true }))
+        const apply = mutations.get('slides:applyScheduleSlideChanges')!
+        apply.mockRejectedValueOnce(new Error('network blip'))
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+        expect(apply).toHaveBeenCalledTimes(1)
+
+        // No edit in between: the retry alone sends the same change again.
+        await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
+        // The retry's re-render lands as the act above ends; its send then waits
+        // out the usual short debounce.
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+        expect(apply).toHaveBeenCalledTimes(2)
+        expect(apply.mock.calls[1][0].upserts.map((s: { id: string }) => s.id)).toEqual(['a'])
+    })
+
     it("doesn't write for a contributor in someone else's session", async () => {
         const theirs = { ...session, operatorId: 'someone-else' }
         Object.assign(queryResults, {
