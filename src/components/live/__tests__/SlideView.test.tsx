@@ -51,6 +51,15 @@ describe('SlideView', () => {
         expect(container.firstChild).not.toBeNull()
     })
 
+    it("lets a caller position the frame (the projector's full-screen box)", () => {
+        const { container } = render(<SlideView slide={slide({})} settings={settings} className="absolute inset-0" />)
+        const root = container.firstChild as HTMLElement
+        expect(root.className).toContain('absolute')
+        // Both classes made it relative, and a relative size container with
+        // no height is 0px tall: the projector showed nothing.
+        expect(root.className).not.toMatch(/\brelative\b/)
+    })
+
     it('draws operator controls passed as children', () => {
         render(<SlideView slide={slide({})} settings={settings}><button>Pause</button></SlideView>)
         expect(screen.getByText('Pause')).toBeInTheDocument()

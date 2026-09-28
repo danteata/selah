@@ -365,7 +365,7 @@ export default function LiveView() {
         >
             {/* The same renderer as the operator's monitor, so what they
                 approve is what the room sees. */}
-            <SlideView slide={slide} settings={settings} className="absolute inset-0" />
+            <SlideView slide={slide} settings={settings} className="absolute inset-0 h-full w-full" />
 
             {/* Controls (show on hover) - only in web mode */}
             {!isDesktop && (

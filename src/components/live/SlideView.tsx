@@ -328,7 +328,11 @@ export function SlideView({
     return (
         <div
             ref={rootRef}
-            className={`relative overflow-hidden bg-black ${className}`}
+            // A caller that positions the frame itself (absolute/fixed) must win:
+            // with both classes, CSS order made it relative, and a relative
+            // size container with no height is 0px tall. That blanked the
+            // projector entirely in 0.1.23.
+            className={`${/\b(absolute|fixed)\b/.test(className) ? '' : 'relative '}overflow-hidden bg-black ${className}`}
             style={{
                 containerType: 'size',
                 '--studio-transition-duration': `${isBeatTransition ? Math.min(transitionSeconds, 0.35) : transitionSeconds}s`,
