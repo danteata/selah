@@ -39,7 +39,7 @@ const aiFeatures = [
     { icon: Mic, title: 'Listens as you preach', description: 'Selah follows the sermon through your microphone. Nothing to type, nothing to cue.' },
     { icon: Brain, title: 'Follows the context', description: "When no reference is spoken, Selah suggests verses that match what's being preached." },
     { icon: FileText, title: 'Hears spoken references', description: 'Say “John chapter three, verse sixteen” and the verse is queued, ready to send to the screen.' },
-    { icon: WifiOff, title: 'Works without the internet', description: 'Transcription, Bible text and slides are all on your machine. Church wifi is optional.' },
+    { icon: WifiOff, title: 'Works without the internet', description: 'In the desktop app, transcription, Bible text and slides all run on your computer. Church wifi is optional.' },
 ]
 
 const dashboardFeatures = [
@@ -60,15 +60,6 @@ const betaPerks = [
     { title: 'Direct line to the team', description: 'Report a problem and hear back from the people building Selah.' },
     { title: 'Free plan after your trial', description: 'Keep running Selah on the Free plan, or upgrade to Pro anytime.' },
     { title: 'Set-up help', description: 'We will walk your team through the first service on a call.' },
-]
-
-// Mock dashboard panels
-const dashboardPanels = [
-    { label: 'Quick Actions', col: 'col-span-1', row: 'row-span-2', accent: '#0d9488' },
-    { label: 'Live Preview', col: 'col-span-2', row: '', accent: '#be123c' },
-    { label: 'Service Order', col: 'col-span-2', row: '', accent: '#4338ca' },
-    { label: 'AI Listener', col: 'col-span-2', row: '', accent: '#0d9488' },
-    { label: 'Library', col: 'col-span-1', row: 'row-span-2', accent: '#d97706' },
 ]
 
 // Standout section demo data
@@ -411,31 +402,18 @@ function DashboardSection() {
                                 Live
                             </span>
                         </div>
-                        <div
-                            className="p-4 grid grid-cols-3 gap-2 grid-rows-2 text-xs"
-                            style={{ minHeight: '360px' }}
-                        >
-                            {dashboardPanels.map((p) => (
-                                <div
-                                    key={p.label}
-                                    className={`${p.col} ${p.row} flex items-center justify-center rounded-xl p-3 font-semibold relative overflow-hidden`}
-                                    style={{
-                                        background: `linear-gradient(135deg, ${p.accent}18 0%, ${p.accent}08 100%)`,
-                                        border: `1px solid ${p.accent}30`,
-                                        color: p.accent,
-                                        minHeight: '68px',
-                                    }}
-                                >
-                                    <span className="relative z-10">{p.label}</span>
-                                    {p.label === 'AI Listener' && (
-                                        <div
-                                            className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-teal-400/60 to-transparent"
-                                            style={{ animation: 'lp-shimmer 3s linear infinite' }}
-                                        />
-                                    )}
-                                </div>
-                            ))}
-                        </div>
+                        {/* The real studio, captured for the demo video: a hymn live,
+                            its verses queued, the next one waiting. It used to be
+                            labelled placeholder boxes. */}
+                        <img
+                            src="/landing/studio.jpg"
+                            alt="The Selah studio during worship: Amazing Grace live on the projector, its verses in the queue, the next verse waiting"
+                            width={1600}
+                            height={1000}
+                            loading="lazy"
+                            decoding="async"
+                            className="block w-full h-auto"
+                        />
                     </div>
                 </div>
             </div>
@@ -905,7 +883,7 @@ const freePlanFeatures = [
     { label: 'Sermon transcription — 40 min / session', included: true },
     { label: 'One user account', included: true },
     { label: 'Slides, songs & service order', included: true },
-    { label: 'Works fully offline', included: true },
+    { label: 'Works offline in the desktop app', included: true },
     { label: 'NDI network output', included: false },
     { label: 'Unlimited sermon recording', included: false },
     { label: 'Up to 5 team members', included: false },
@@ -1125,16 +1103,31 @@ function EarlyAccessSection() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function FooterSection() {
-    const linkGroups = [
-        { title: 'Product', links: ['Features', 'AI Listener', 'Pricing', 'Templates'] },
-        { title: 'Resources', links: ['Documentation', 'Whisper Setup', 'Blog', 'Community'] },
-        { title: 'Company', links: ['About', 'Contact', 'Privacy', 'Terms'] },
+    // Only links that go somewhere. Every link here used to be "#": Blog,
+    // Documentation, About, Privacy and the rest have no page yet.
+    const linkGroups: { title: string; links: { label: string; href?: string; to?: string }[] }[] = [
+        {
+            title: 'Product',
+            links: [
+                { label: 'Features', href: '#features' },
+                { label: 'Sermon Listener', href: '#sermon-listener' },
+                { label: 'Pricing', href: '#pricing' },
+            ],
+        },
+        {
+            title: 'Get started',
+            links: [
+                { label: 'Start free trial', to: '/signup' },
+                { label: 'Download for desktop', to: '/download' },
+                { label: 'Sign in', to: '/login' },
+            ],
+        },
     ]
 
     return (
         <footer className="py-16 border-t border-white/5" style={{ background: '#08090c' }}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="grid md:grid-cols-4 gap-12 mb-12">
+                <div className="grid md:grid-cols-3 gap-12 mb-12">
                     <div className="md:col-span-1">
                         <Link to="/" className="flex items-center gap-3 mb-4">
                             <div
@@ -1165,13 +1158,16 @@ function FooterSection() {
                             <h4 className="font-semibold text-white mb-4 text-sm">{group.title}</h4>
                             <ul className="space-y-2.5">
                                 {group.links.map((link) => (
-                                    <li key={link}>
-                                        <a
-                                            href={link === 'Pricing' ? '#pricing' : '#'}
-                                            className="text-sm text-zinc-500 hover:text-white transition-colors"
-                                        >
-                                            {link}
-                                        </a>
+                                    <li key={link.label}>
+                                        {link.to ? (
+                                            <Link to={link.to} className="text-sm text-zinc-500 hover:text-white transition-colors">
+                                                {link.label}
+                                            </Link>
+                                        ) : (
+                                            <a href={link.href} className="text-sm text-zinc-500 hover:text-white transition-colors">
+                                                {link.label}
+                                            </a>
+                                        )}
                                     </li>
                                 ))}
                             </ul>
@@ -1181,14 +1177,6 @@ function FooterSection() {
 
                 <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
                     <p className="text-xs text-zinc-600">© {new Date().getFullYear()} Selah · Built for the Church</p>
-                    <div className="flex items-center gap-6">
-                        <a href="#" className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">
-                            Privacy Policy
-                        </a>
-                        <a href="#" className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors">
-                            Terms of Service
-                        </a>
-                    </div>
                 </div>
             </div>
         </footer>
