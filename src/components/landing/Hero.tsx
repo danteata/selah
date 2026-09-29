@@ -97,7 +97,7 @@ export function Hero({ started }: { started: boolean }) {
       <div className="relative z-10 max-w-6xl mx-auto text-center" style={{ perspective: "800px" }}>
         <div className="hero-eyebrow inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-7 text-[10px] font-bold uppercase tracking-[0.22em]" style={{ background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.05) 100%)', border: '1px solid rgba(20,184,166,0.35)', color: '#5eead4' }}>
           <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
-          Now in open beta · v2 ships this month
+          Now in open beta
         </div>
 
         <h1 ref={h1} className="text-5xl sm:text-7xl lg:text-[5.5rem] text-white leading-[1.02] tracking-tight" style={{ fontFamily: "Crimson Pro, serif", fontWeight: 600 }}>
@@ -108,7 +108,7 @@ export function Hero({ started }: { started: boolean }) {
         </h1>
 
         <p className="hero-sub mt-7 text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-          It hears the reference as you say it and puts the verse on screen &mdash; <span className="text-zinc-200">no typing, no internet.</span>
+          It hears the reference as you say it and puts the verse on screen. <span className="text-zinc-200">No typing, and no internet needed on the desktop app.</span>
         </p>
 
         <div className="mt-9 flex flex-wrap justify-center gap-4">
@@ -139,8 +139,8 @@ export function Hero({ started }: { started: boolean }) {
           {[
             { label: '14-day free trial', check: true },
             { label: 'No credit card', check: true },
-            { label: 'Works fully offline', check: true },
-            { label: 'Under 30-min setup', check: true },
+            { label: 'Works offline on desktop', check: true },
+            { label: 'Free plan forever', check: true },
           ].map((s) => (
             <span key={s.label} className="hero-stat inline-flex items-center gap-1.5">
               <svg className="w-3.5 h-3.5 text-primary-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>
@@ -177,9 +177,11 @@ export function Hero({ started }: { started: boolean }) {
           </div>
 
           {/* App body */}
-          <div className="grid grid-cols-[180px_1fr_220px] min-h-[280px]">
+          {/* On a phone the two side panels squeezed the verse to a word a line;
+              below md only the screen preview shows. */}
+          <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_220px] min-h-[240px] md:min-h-[280px]">
             {/* Left rail — service order */}
-            <div className="p-3 border-r" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="hidden md:block p-3 border-r" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
               <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40 mb-2.5 px-1">Service order</div>
               {[
                 { label: 'Welcome', done: true },
@@ -221,15 +223,15 @@ export function Hero({ started }: { started: boolean }) {
                 <div className="relative">
                   <div className="text-[9px] font-mono uppercase tracking-[0.3em] text-teal-300/80 mb-2">John 3:16</div>
                   <div className="text-white text-base sm:text-lg leading-snug" style={{ fontFamily: 'Crimson Pro, serif' }}>
-                    &ldquo;For God so loved the world<br/>that he gave his one and only Son…&rdquo;
+                    &ldquo;For God so loved the world,<br/>that he gave his only begotten Son…&rdquo;
                   </div>
-                  <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/30 mt-3">NIV · Pushed 2s ago</div>
+                  <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/30 mt-3">KJV · Pushed 2s ago</div>
                 </div>
               </div>
             </div>
 
             {/* Right — AI listener status */}
-            <div className="p-3 border-l" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="hidden md:block p-3 border-l" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
               <div className="flex items-center justify-between mb-2.5 px-1">
                 <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40">AI Listener</div>
                 <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-[0.22em] text-emerald-400">
@@ -263,16 +265,18 @@ export function Hero({ started }: { started: boolean }) {
           </div>
         </div>
 
-        {/* Floating annotation chips around the mockup */}
+        {/* Annotation chips, on the top and bottom edges where they frame the
+            verse. Placed on the sides they covered the service order and the
+            listener panel. */}
         <div
-          className="hidden lg:flex absolute -left-6 top-1/4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
+          className="hidden lg:flex absolute left-1/2 -translate-x-1/2 -top-4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
           style={{ background: 'rgba(15,18,22,0.95)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)' }}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           <span style={{ color: 'rgba(255,255,255,0.85)' }}>Caught it the moment you said it</span>
         </div>
         <div
-          className="hidden lg:flex absolute -right-6 bottom-12 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
+          className="hidden lg:flex absolute left-1/2 -translate-x-1/2 -bottom-4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
           style={{ background: 'rgba(15,18,22,0.95)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)' }}
         >
           <svg className="w-3.5 h-3.5 text-teal-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>
