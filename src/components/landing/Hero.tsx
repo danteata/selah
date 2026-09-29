@@ -6,16 +6,34 @@ import { WelcomeScene } from "@/components/landing/WelcomeScene";
 import { Magnetic } from "@/components/landing/Magnetic";
 import { DemoVideoModal } from "@/components/landing/DemoVideoModal";
 
+// Letters animate one by one, but each word's letters sit in a span that
+// can't wrap: split into bare letters (with the spaces as &nbsp;), a narrow
+// screen broke lines mid-word ("Preach the sermo / n.").
 function splitChars(el: HTMLElement) {
   const text = el.textContent ?? "";
   el.setAttribute("aria-label", text);
   el.innerHTML = text
-    .split("")
+    .split(" ")
     .map(
-      (c) =>
-        `<span class="hero-char inline-block will-change-transform" aria-hidden="true">${c === " " ? "&nbsp;" : c}</span>`
+      (word) =>
+        `<span class="inline-block whitespace-nowrap" aria-hidden="true">${word
+          .split("")
+          .map((c) => `<span class="hero-char inline-block will-change-transform">${c}</span>`)
+          .join("")}</span>`
     )
-    .join("");
+    .join(" ");
+}
+
+// A gradient clipped to the text can't paint through letters that are each
+// their own inline-block, so each letter gets its own step of it instead.
+function paintGradient(el: HTMLElement) {
+  const from = [0x5e, 0xea, 0xd4];
+  const to = [0xfc, 0xd3, 0x4d];
+  const chars = el.querySelectorAll<HTMLElement>(".hero-char");
+  chars.forEach((c, i) => {
+    const k = chars.length > 1 ? i / (chars.length - 1) : 0;
+    c.style.color = `rgb(${from.map((f, j) => Math.round(f + (to[j] - f) * k)).join(",")})`;
+  });
 }
 
 export function Hero({ started }: { started: boolean }) {
@@ -27,7 +45,13 @@ export function Hero({ started }: { started: boolean }) {
 
   useEffect(() => {
     if (!started || !h1.current) return;
-    h1.current.querySelectorAll(".hero-line").forEach((line) => splitChars(line as HTMLElement));
+    h1.current.querySelectorAll(".hero-line").forEach((line) => {
+      // Split inside a styled span (the italic gradient line), not around it:
+      // splitting the whole line threw the span, and its styling, away.
+      const target = (line.querySelector("[data-gradient]") as HTMLElement | null) ?? (line as HTMLElement);
+      splitChars(target);
+      if (target.dataset.gradient) paintGradient(target);
+    });
 
     const tl = gsap.timeline();
     tl.from(".hero-char", {
@@ -79,7 +103,7 @@ export function Hero({ started }: { started: boolean }) {
         <h1 ref={h1} className="text-5xl sm:text-7xl lg:text-[5.5rem] text-white leading-[1.02] tracking-tight" style={{ fontFamily: "Crimson Pro, serif", fontWeight: 600 }}>
           <span className="hero-line block">Preach the sermon.</span>
           <span className="hero-line block">
-            <span className="italic" style={{ background: 'linear-gradient(135deg, #5eead4 0%, #fcd34d 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Selah finds the verse.</span>
+            <span className="italic" data-gradient="mint-gold" style={{ color: '#5eead4' }}>Selah finds the verse.</span>
           </span>
         </h1>
 
@@ -91,7 +115,6 @@ export function Hero({ started }: { started: boolean }) {
           <Magnetic>
             <Link
               to="/signup"
-              data-cursor="Go"
               className="hero-cta group inline-flex items-center gap-2 rounded-full px-8 py-4 font-semibold text-[#08090c] transition-all"
               style={{ background: 'linear-gradient(135deg, #14b8a6, #0d9488)', boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.2)' }}
             >
@@ -103,7 +126,6 @@ export function Hero({ started }: { started: boolean }) {
             <button
               type="button"
               onClick={() => setDemoOpen(true)}
-              data-cursor="Watch"
               className="hero-cta inline-flex items-center gap-2 rounded-full border border-zinc-700/80 px-7 py-4 text-zinc-200 hover:border-teal-500/60 hover:text-white transition-colors"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />

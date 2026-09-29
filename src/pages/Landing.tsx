@@ -27,7 +27,6 @@ import {
 } from 'lucide-react'
 import { useScrollReveal } from '@/hooks/useScrollReveal'
 import { Preloader } from '@/components/landing/Preloader'
-import { Cursor } from '@/components/landing/Cursor'
 import { Hero } from '@/components/landing/Hero'
 import { SermonListener } from '@/components/landing/SermonListener'
 import { FeaturesRail } from '@/components/landing/FeaturesRail'
@@ -171,7 +170,6 @@ function NavBar({
                         </Link>
                         <Link
                             to="/signup"
-                            data-cursor="Go"
                             className="group flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-full text-[#08090c] transition-all hover:-translate-y-px"
                             style={{
                                 background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
@@ -495,7 +493,6 @@ function StandoutSection() {
                 <div ref={gridRef} className="grid lg:grid-cols-3 gap-5">
                     {/* Card 1 — Collaboration */}
                     <article
-                        data-cursor="Team"
                         className="group relative rounded-2xl p-6 overflow-hidden transition-all duration-300 hover:-translate-y-1"
                         style={{
                             background:
@@ -610,7 +607,6 @@ function StandoutSection() {
 
                     {/* Card 2 — Audio Pipeline */}
                     <article
-                        data-cursor="Audio"
                         className="group relative rounded-2xl p-6 overflow-hidden transition-all duration-300 hover:-translate-y-1"
                         style={{
                             background:
@@ -749,7 +745,6 @@ function StandoutSection() {
 
                     {/* Card 3 — NDI */}
                     <article
-                        data-cursor="Output"
                         className="group relative rounded-2xl p-6 overflow-hidden transition-all duration-300 hover:-translate-y-1"
                         style={{
                             background:
@@ -981,7 +976,6 @@ function PlanCard({
             </ul>
             <Link
                 to="/signup"
-                data-cursor="Go"
                 className={`group inline-flex items-center justify-center gap-2 px-6 py-3 font-semibold rounded-full transition-all hover:-translate-y-px ${
                     highlight ? 'text-[#08090c]' : 'text-white border border-white/15 hover:bg-white/5'
                 }`}
@@ -1109,7 +1103,6 @@ function EarlyAccessSection() {
 
                     <Link
                         to="/signup"
-                        data-cursor="Go"
                         className="group inline-flex items-center gap-2 px-8 py-4 font-semibold rounded-full text-[#08090c] text-lg transition-all hover:-translate-y-px"
                         style={{
                             background: 'linear-gradient(135deg, #14b8a6, #0d9488)',
@@ -1232,7 +1225,6 @@ export default function Landing() {
             style={{ background: '#08090c', color: '#fff' }}
         >
             <Preloader onDone={() => setStarted(true)} />
-            <Cursor />
             <NavBar
                 scrolled={scrolled}
                 mobileMenuOpen={mobileMenuOpen}

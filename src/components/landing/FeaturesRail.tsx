@@ -72,7 +72,6 @@ export function FeaturesRail() {
         {FEATURES.map((f) => (
           <article
             key={f.title}
-            data-cursor="Drag"
             className={`group rounded-3xl border border-zinc-800 bg-zinc-950/60 p-8 transition-colors ${ACCENT[f.accent].card} lg:min-w-[24rem] ${f.y}`}
           >
             <div className={`feat-icon h-12 w-12 rounded-xl ${ACCENT[f.accent].icon}`}>

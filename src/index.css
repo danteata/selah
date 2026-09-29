@@ -1155,56 +1155,8 @@ h6 {
 }
 
 /* ============================================================
-   LANDING REDESIGN — Custom Cursor + Marquee + Reduced Motion
+   LANDING REDESIGN — Marquee + Reduced Motion
    ============================================================ */
-
-/* Custom cursor — hidden on touch devices */
-.has-custom-cursor,
-.has-custom-cursor a,
-.has-custom-cursor button {
-    cursor: none;
-}
-
-.cursor-dot {
-    position: fixed;
-    top: -4px;
-    left: -4px;
-    z-index: 99;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #5eead4;
-    pointer-events: none;
-}
-
-.cursor-ring {
-    position: fixed;
-    top: -20px;
-    left: -20px;
-    z-index: 99;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    border: 1px solid rgba(94, 234, 212, 0.5);
-    pointer-events: none;
-    mix-blend-mode: difference;
-    display: grid;
-    place-items: center;
-}
-
-.cursor-ring::after {
-    content: attr(data-label);
-    font-size: 6px;
-    color: #fff;
-    letter-spacing: 0.1em;
-}
-
-@media (pointer: coarse) {
-    .cursor-dot,
-    .cursor-ring {
-        display: none;
-    }
-}
 
 /* Infinite marquee animation */
 @keyframes marquee {
@@ -1215,11 +1167,6 @@ h6 {
 
 /* Reduced motion: kill expensive stuff */
 @media (prefers-reduced-motion: reduce) {
-    .cursor-dot,
-    .cursor-ring {
-        display: none;
-    }
-
     *,
     *::before,
     *::after {
