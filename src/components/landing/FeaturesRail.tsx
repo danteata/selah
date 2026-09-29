@@ -9,12 +9,12 @@ const ACCENT = {
 } as const;
 
 const FEATURES = [
-  { title: "Song & Hymn Library", tag: "Core", accent: "teal" as const, y: "lg:mt-0" },
-  { title: "Bible on Screen", tag: "Core", accent: "amber" as const, y: "lg:mt-16" },
-  { title: "Media & Video", tag: "Core", accent: "rose" as const, y: "lg:mt-4" },
-  { title: "Countdown Timers", tag: "Live", accent: "indigo" as const, y: "lg:mt-20" },
-  { title: "Live Announcements", tag: "Live", accent: "teal" as const, y: "lg:mt-8" },
-  { title: "Projection Output", tag: "Core", accent: "amber" as const, y: "lg:mt-12" },
+  { title: "Song & Hymn Library", tag: "Core", accent: "teal" as const, body: "Your church's songs and a built-in hymnal, a verse to a slide, ready to queue or put live." },
+  { title: "Bible on Screen", tag: "Core", accent: "amber" as const, body: "Any reference in seconds, in the translation you choose, with the reference shown under the verse." },
+  { title: "Media & Video", tag: "Core", accent: "rose" as const, body: "Images, videos and YouTube or Vimeo clips, played on the projector and controlled from your laptop." },
+  { title: "Countdown Timers", tag: "Live", accent: "indigo" as const, body: "A countdown before the service, on one clock the operator can pause for everyone." },
+  { title: "Live Announcements", tag: "Live", accent: "teal" as const, body: "Notices and alerts over whatever is on screen, without taking the slide down." },
+  { title: "Projection Output", tag: "Core", accent: "amber" as const, body: "A projector or second screen, and NDI for your stream on the Pro plan." },
 ];
 
 const ICONS: Record<string, string> = {
@@ -26,65 +26,53 @@ const ICONS: Record<string, string> = {
   "Projection Output": "M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
 };
 
+// A grid, not a pinned sideways rail: the rail held the page for about three
+// screens to show six cards with a title each. Cards fade up once as they
+// arrive, and not at all for reduced motion.
 export function FeaturesRail() {
   const section = useRef<HTMLElement>(null);
-  const track = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const mm = gsap.matchMedia();
-    mm.add("(min-width: 1024px)", () => {
-      const getX = () => -(track.current!.scrollWidth - window.innerWidth);
-      const tween = gsap.to(track.current, {
-        x: getX,
-        ease: "none",
-        scrollTrigger: {
-          trigger: section.current,
-          start: "top top",
-          end: () => `+=${-getX()}`,
-          pin: true,
-          scrub: 1,
-          invalidateOnRefresh: true,
-        },
-      });
-      gsap.utils.toArray<HTMLElement>(".feat-icon").forEach((icon) => {
-        gsap.to(icon, {
-          x: -40,
-          ease: "none",
-          scrollTrigger: { containerAnimation: tween, trigger: icon, scrub: true },
-        });
+    mm.add("(prefers-reduced-motion: no-preference)", () => {
+      gsap.from(".feat-card", {
+        y: 28,
+        opacity: 0,
+        duration: 0.7,
+        ease: "power3.out",
+        stagger: 0.08,
+        scrollTrigger: { trigger: section.current, start: "top 75%", once: true },
       });
     });
     return () => mm.revert();
   }, []);
 
   return (
-    <section ref={section} id="features" className="relative overflow-hidden">
-      <div
-        ref={track}
-        className="flex flex-col gap-6 px-6 py-24 lg:h-screen lg:flex-row lg:items-center lg:gap-10 lg:px-[12vw] lg:py-0"
-      >
-        <div className="lg:min-w-[28vw]">
-          <h2 className="text-4xl sm:text-5xl text-white" style={{ fontFamily: "Crimson Pro, serif" }}>
-            Everything Sunday needs.
-          </h2>
-          <p className="mt-4 text-zinc-400">One tool, zero tab-switching.</p>
+    <section ref={section} id="features" className="relative px-6 py-24 lg:py-32">
+      <div className="mx-auto max-w-6xl">
+        <h2 className="text-4xl sm:text-5xl text-white" style={{ fontFamily: "Crimson Pro, serif" }}>
+          Everything Sunday needs.
+        </h2>
+        <p className="mt-4 text-zinc-400">One tool, zero tab-switching.</p>
+        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURES.map((f) => (
+            <article
+              key={f.title}
+              className={`feat-card group rounded-3xl border border-zinc-800 bg-zinc-950/60 p-7 transition-colors ${ACCENT[f.accent].card}`}
+            >
+              <div className={`h-12 w-12 rounded-xl ${ACCENT[f.accent].icon}`}>
+                <svg className="h-6 w-6 text-white/70 m-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d={ICONS[f.title] ?? ""} />
+                </svg>
+              </div>
+              <span className="mt-6 inline-block text-xs uppercase tracking-widest text-zinc-500">{f.tag}</span>
+              <h3 className="mt-2 text-2xl text-white" style={{ fontFamily: "Crimson Pro, serif" }}>
+                {f.title}
+              </h3>
+              <p className="mt-3 text-sm leading-relaxed text-zinc-400">{f.body}</p>
+            </article>
+          ))}
         </div>
-        {FEATURES.map((f) => (
-          <article
-            key={f.title}
-            className={`group rounded-3xl border border-zinc-800 bg-zinc-950/60 p-8 transition-colors ${ACCENT[f.accent].card} lg:min-w-[24rem] ${f.y}`}
-          >
-            <div className={`feat-icon h-12 w-12 rounded-xl ${ACCENT[f.accent].icon}`}>
-              <svg className="h-6 w-6 text-white/70 m-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d={ICONS[f.title] ?? ""} />
-              </svg>
-            </div>
-            <span className="mt-6 inline-block text-xs uppercase tracking-widest text-zinc-500">{f.tag}</span>
-            <h3 className="mt-2 text-2xl text-white" style={{ fontFamily: "Crimson Pro, serif" }}>
-              {f.title}
-            </h3>
-          </article>
-        ))}
       </div>
     </section>
   );
