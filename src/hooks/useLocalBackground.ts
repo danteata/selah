@@ -70,6 +70,34 @@ export function stripEphemeralBackground<T>(slide: T): T {
     return slide
 }
 
+/**
+ * Whether a background URL is plainly a still image: an image data URL, a
+ * stock-photo URL, or a path ending in an image extension. Used to catch a
+ * slide marked "video" whose background is a picture, which a <video>
+ * element renders black.
+ */
+export function isImageUrl(url: string | null | undefined): boolean {
+    if (!url) return false
+    if (url.startsWith('data:image/')) return true
+    if (/^https?:\/\/images\.unsplash\.com\//i.test(url)) return true
+    return /\.(jpe?g|png|webp|gif|svg|bmp|avif)(\?|#|$)/i.test(decodeURIComponent(url.split('?')[0]))
+}
+
+/**
+ * The background type a slide made from `template` should have: the
+ * template's, except that a "video" template with no video (no uploaded file,
+ * no local file, just a picture) is shown as the picture.
+ */
+export function templateBackgroundType(
+    template: { backgroundStorageId?: string | null },
+    templateSlide: { backgroundType?: string; backgroundStorageId?: string | null; localFilePath?: string } | null,
+    background: string,
+): string {
+    const type = templateSlide?.backgroundType || 'gradient'
+    const hasVideo = !!(template.backgroundStorageId || templateSlide?.backgroundStorageId || templateSlide?.localFilePath)
+    return type === 'video' && !hasVideo && isImageUrl(background) ? 'image' : type
+}
+
 export function isLocalFilePath(url: string): boolean {
     if (!url) return false
     if (ASSET_PROTOCOL_RE.test(url)) return true

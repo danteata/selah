@@ -3,13 +3,14 @@ import { renderHook, waitFor } from '@testing-library/react'
 
 const server = vi.hoisted(() => ({ list: [] as unknown[] }))
 const locals = vi.hoisted(() => ({ rows: [] as unknown[] }))
+const connection = vi.hoisted(() => ({ isOffline: false }))
 
 vi.mock('convex/react', () => ({
     useQuery: () => server.list,
     useMutation: () => vi.fn(async () => 'x'),
     useConvex: () => ({}),
 }))
-vi.mock('../../providers/ConvexConnectionProvider', () => ({ useConvexConnection: () => ({ isOffline: false }) }))
+vi.mock('../../providers/ConvexConnectionProvider', () => ({ useConvexConnection: () => connection }))
 vi.mock('../useIndexedDB', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../useIndexedDB')>()),
     getLocalTemplates: vi.fn(async () => locals.rows),
@@ -31,6 +32,8 @@ describe('useTemplates merge', () => {
     beforeEach(() => {
         server.list = [serverTemplate('a', 'Server A')]
         locals.rows = []
+        connection.isOffline = false
+        localStorage.clear()
     })
 
     it('does not bring back a template deleted elsewhere', async () => {
@@ -50,5 +53,18 @@ describe('useTemplates merge', () => {
         locals.rows = [cached('a', 'Edited offline', false), cached('local_1', 'Made offline', false)]
         const { result } = renderHook(() => useTemplates())
         await waitFor(() => expect(result.current.templates?.map((t) => t.name).sort()).toEqual(['Edited offline', 'Made offline']))
+    })
+
+    it("keeps the church's templates when going offline", async () => {
+        // Offline used to list only templates made on this device: every
+        // shared template vanished from the picker mid-service.
+        const online = renderHook(() => useTemplates())
+        await waitFor(() => expect(online.result.current.templates?.map((t) => t._id)).toEqual(['a']))
+        online.unmount()
+
+        connection.isOffline = true
+        locals.rows = [cached('local_1', 'Made offline', false)]
+        const { result } = renderHook(() => useTemplates())
+        await waitFor(() => expect(result.current.templates?.map((t) => t.name).sort()).toEqual(['Made offline', 'Server A']))
     })
 })

@@ -13,6 +13,7 @@ import type { AnalyticsProviderType as AnalyticsType } from './services/analytic
 import { AnalyticsEventType } from './services/analytics/types'
 import { useAppStore } from './store/appStore'
 import { useSongLibrarySync } from './hooks/useSongLibrarySync'
+import { useTemplateMediaSync } from './hooks/useTemplateMediaSync'
 import { useOAuthCallback } from './hooks/useOAuthCallback'
 import { useSyncCurrentUser } from './hooks/useSyncCurrentUser'
 import { removeBundledNonSongs } from './services/songLibrary/bundledSongCleanup'
@@ -123,6 +124,8 @@ function AppRoutes() {
     useSyncCurrentUser()
     // Fetch the church's songs and upload ones saved on this device.
     useSongLibrarySync()
+    // Upload template backgrounds this computer has; download the church's.
+    useTemplateMediaSync()
 
     // Desktop OAuth callback handling.
     //

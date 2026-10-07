@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useAppStore } from '../store/appStore'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
-import { resolveLocalUrl, stripEphemeralBackground } from './useLocalBackground'
+import { isImageUrl, resolveLocalUrl, stripEphemeralBackground } from './useLocalBackground'
 import type {
     Slide,
     Scripture,
@@ -46,8 +46,16 @@ function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, d
 
     if (templateSlide) {
         tempSlide.background = resolveLocalUrl(templateSlide.background || defaultBg, templateSlide.localFilePath) || defaultBg
-        tempSlide.backgroundType = templateSlide.backgroundType || defaultBgType
-        tempSlide.backgroundStorageId = templateSlide.backgroundStorageId || null
+        // The template-level id is the one kept current (attachBackground,
+        // edits); the snapshot's copy can be missing or stale. Reading only the
+        // snapshot dropped uploaded video backgrounds when applying templates
+        // to songs and scripture.
+        tempSlide.backgroundStorageId = template.backgroundStorageId || templateSlide.backgroundStorageId || null
+        // A "video" template whose only background is a picture (Video chosen
+        // but no video added) plays as a black <video>; show the picture.
+        const videoWithoutVideo = templateSlide.backgroundType === 'video'
+            && !tempSlide.backgroundStorageId && !templateSlide.localFilePath && isImageUrl(tempSlide.background)
+        tempSlide.backgroundType = videoWithoutVideo ? 'image' : templateSlide.backgroundType || defaultBgType
         tempSlide.backgroundVideoKey = templateSlide.backgroundVideoKey || null
         tempSlide.localFilePath = templateSlide.localFilePath || undefined
         // Layout determines fundamental rendering (e.g. lower-third vs full-text). A template that

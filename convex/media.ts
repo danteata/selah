@@ -110,12 +110,15 @@ export const deleteMediaLibraryItem = mutation({
 
         await ctx.db.delete(item._id);
 
-        // Remove the file only once nothing else in any library points at it.
+        // Remove the file only once nothing else in any library points at it,
+        // and no template uses it as its background: deleting it out from under
+        // a template turned that template black on every other device.
         if (item.storageId) {
             const stillUsed = await ctx.db
                 .query("mediaLibrary")
                 .withIndex("by_storage", (q) => q.eq("storageId", item.storageId))
-                .first();
+                .first()
+                ?? (await ctx.db.query("templates").take(2000)).find((t) => t.backgroundStorageId === item.storageId);
             const storageId = ctx.db.system.normalizeId("_storage", item.storageId);
             if (!stillUsed && storageId) {
                 await ctx.storage.delete(storageId);

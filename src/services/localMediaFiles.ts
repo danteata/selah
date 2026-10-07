@@ -38,6 +38,24 @@ export async function saveFileToLocalMediaLibrary(file: File, id: string): Promi
     return path
 }
 
+/**
+ * Copy a file the user picked from anywhere on disk into the app's media
+ * directory and return the copy's path. Templates keep the copy, so moving or
+ * deleting the original from Downloads no longer turns their background black.
+ *
+ * Read through the asset protocol (scoped to every path, see tauri.conf.json):
+ * the fs plugin may only read Selah's own directories.
+ */
+export async function copyIntoMediaLibrary(sourcePath: string, idPrefix = 'template-bg'): Promise<string> {
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    const response = await fetch(convertFileSrc(sourcePath))
+    if (!response.ok) throw new Error(`Could not read ${sourcePath}`)
+    const blob = await response.blob()
+    const name = sourcePath.split(/[\\/]/).pop() || 'background'
+    const id = `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    return saveFileToLocalMediaLibrary(new File([blob], name, { type: blob.type }), id)
+}
+
 /** Reads a previously-saved local media file's bytes back (e.g. to sync it to Convex). */
 export async function readLocalMediaFile(path: string, contentType: string): Promise<Blob> {
     if (!isDesktop()) {

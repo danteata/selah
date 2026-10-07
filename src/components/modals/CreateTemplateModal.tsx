@@ -9,7 +9,8 @@ import { openFileDialog } from '../../utils/fileDialog'
 import { isDesktop } from '../../platform'
 import { generateThumbnail } from '../../utils/templateThumbnail'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
-import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { isImageUrl, useLocalBackground } from '../../hooks/useLocalBackground'
+import { copyIntoMediaLibrary } from '../../services/localMediaFiles'
 import type { SlideStyle } from '../../types'
 import { Modal } from './Modal'
 
@@ -119,6 +120,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     contents?: string[]
                     background?: string
                     backgroundType?: 'image' | 'gradient' | 'color' | 'video'
+                    backgroundStorageId?: string | null
                     localFilePath?: string
                     layout?: TemplateLayout
                     slideStyle?: SlideStyle
@@ -139,6 +141,9 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
                 setLocalFilePath(slideData?.localFilePath || null)
+                // Kept, or saving the edit wrote `null` over the uploaded
+                // background and the template lost it.
+                setBackgroundStorageId(editingTemplate.backgroundStorageId || slideData?.backgroundStorageId || null)
 
                 // Layout & lower-third options
                 setLayout(slideData?.layout === 'lower-third' ? 'lower-third' : 'full-text')
@@ -158,6 +163,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
                 setLocalFilePath(null)
+                setBackgroundStorageId(null)
 
                 setLayout('full-text')
                 setLowerThirdStyle('standard')
@@ -215,9 +221,11 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     return
                 }
 
-                const assetUrl = convertFileSrc(filePath)
-                setBackground(assetUrl)
-                setLocalFilePath(filePath)
+                setIsUploading(true)
+                const copied = await copyIntoMediaLibrary(filePath).catch(() => filePath)
+                setIsUploading(false)
+                setBackground(convertFileSrc(copied))
+                setLocalFilePath(copied)
                 setCustomImageUrl('')
                 setBackgroundStorageId(null)
             } else {
@@ -284,10 +292,15 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     return
                 }
 
-                const assetUrl = convertFileSrc(filePath)
+                // A copy in Selah's media folder: the template keeps working if
+                // the original is moved, and it uploads from there (see
+                // templateMediaSync.ts).
+                setIsUploading(true)
+                const copied = await copyIntoMediaLibrary(filePath).catch(() => filePath)
+                setIsUploading(false)
                 setBackgroundType('video')
-                setBackground(assetUrl)
-                setLocalFilePath(filePath)
+                setBackground(convertFileSrc(copied))
+                setLocalFilePath(copied)
                 setBackgroundStorageId(null)
                 setCustomImageUrl('')
             } else {
@@ -358,9 +371,18 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
         }
     }
 
+    // A video template needs a video: picking "Video" left the stock picture
+    // in place, and the saved template played it as a black <video>.
+    const missingVideo = backgroundType === 'video' && !backgroundStorageId && !localFilePath
+        && (!background || isImageUrl(background) || background.startsWith('linear-gradient') || background.startsWith('#'))
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!name.trim()) return
+        if (missingVideo) {
+            alert('Choose a video for this template, or pick another background type.')
+            return
+        }
 
         setIsSaving(true)
         try {
@@ -733,7 +755,14 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setBackgroundType('video')}
+                                onClick={() => {
+                                    // Switching to Video drops a picture background, so the
+                                    // template can't be saved as a "video" that is really a picture.
+                                    if (backgroundType !== 'video') {
+                                        setBackgroundType('video')
+                                        if (!localFilePath && !backgroundStorageId) setBackground('')
+                                    }
+                                }}
                                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${backgroundType === 'video'
                                     ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] ring-2 ring-[var(--accent-teal)]'
                                     : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -1019,7 +1048,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     </button>
                     <button
                         type="submit"
-                        disabled={isSaving || !name.trim()}
+                        disabled={isSaving || !name.trim() || missingVideo}
+                        title={missingVideo ? 'Choose a video first' : undefined}
                         className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                     >
                         {isSaving ? (

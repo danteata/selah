@@ -24,7 +24,8 @@ vi.mock('../../../providers/ConvexConnectionProvider', () => ({
     useConvexConnection: () => ({ isOffline: false }),
 }))
 
-vi.mock('../../../hooks/useLocalBackground', () => ({
+vi.mock('../../../hooks/useLocalBackground', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../hooks/useLocalBackground')>()),
     useLocalBackground: vi.fn().mockImplementation((bg: string) => bg || ''),
 }))
 
@@ -261,6 +262,33 @@ describe('CreateTemplateModal', () => {
             }))
         })
         expect(mockCreateTemplate).not.toHaveBeenCalled()
+    })
+
+    it('keeps the uploaded background when an edit is saved', async () => {
+        // Editing never loaded the storage id, so saving wrote null over it and
+        // the template's video background was gone.
+        const template: Partial<TemplateItem> = {
+            _id: 'tpl-1',
+            name: 'Motion 101',
+            category: 'general',
+            backgroundStorageId: 'kg2a8s',
+            slideId: JSON.stringify({ backgroundType: 'video', background: '' }),
+        }
+        render(<CreateTemplateModal {...baseProps} editingTemplate={template as TemplateItem} />)
+        fireEvent.click(screen.getByText('Update Template').closest('button')!)
+        await waitFor(() => {
+            expect(mockUpdateTemplate).toHaveBeenCalledWith('tpl-1', expect.objectContaining({ backgroundStorageId: 'kg2a8s' }))
+        })
+        const slide = JSON.parse(mockUpdateTemplate.mock.calls[0][1].slideId)
+        expect(slide.backgroundStorageId).toBe('kg2a8s')
+    })
+
+    it("won't save a video template that has no video", () => {
+        // Choosing Video kept the stock picture, which then played as a black <video>.
+        render(<CreateTemplateModal {...baseProps} />)
+        fireEvent.change(screen.getByPlaceholderText('My Template'), { target: { value: 'Motion' } })
+        fireEvent.click(screen.getByText('Video'))
+        expect(screen.getByText('Create Template').closest('button')).toBeDisabled()
     })
 
     it('shows image upload section when image type is selected', () => {

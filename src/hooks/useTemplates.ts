@@ -291,6 +291,20 @@ function getTemplateObjectUrl(storageId: string, blob: Blob): string {
     return objectUrl
 }
 
+/**
+ * Download a template background into this device's cache if it isn't there
+ * yet, so the template works offline and never waits on the network mid-
+ * service. Resolves to whether the background is now cached.
+ */
+export async function prefetchTemplateBackground(convex: ConvexReactClient, storageId: string): Promise<boolean> {
+    if (await getCachedTemplateBlob(storageId)) return true
+    const signedUrl = await fetchSignedUrlFromConvex(convex, storageId).catch(() => null)
+    if (!signedUrl) return false
+    setCachedSignedUrl(storageId, signedUrl)
+    await backgroundCacheBlob(storageId, signedUrl)
+    return !!(await getCachedTemplateBlob(storageId))
+}
+
 export function useFileUrl(storageId: string | null) {
     const convex = useConvex()
     // Remembered with the id it resolves, and only returned for that id: a
@@ -438,6 +452,30 @@ function syncOfflineTemplates(server: {
     return templateSync
 }
 
+/**
+ * The church's templates as last fetched, kept so the list survives going
+ * offline. Offline, only templates made on this device used to be listed:
+ * every shared template disappeared from the picker mid-service.
+ */
+const SERVER_TEMPLATES_KEY = 'selah:server-templates'
+
+function readCachedServerTemplates(): TemplateItem[] {
+    try {
+        const raw = localStorage.getItem(SERVER_TEMPLATES_KEY)
+        return raw ? (JSON.parse(raw) as TemplateItem[]) : []
+    } catch {
+        return []
+    }
+}
+
+function cacheServerTemplates(templates: TemplateItem[]): void {
+    try {
+        localStorage.setItem(SERVER_TEMPLATES_KEY, JSON.stringify(templates))
+    } catch {
+        // Storage full or unavailable: offline, the list falls back to local templates.
+    }
+}
+
 export function useTemplates(): UseTemplatesReturn {
     const { isOffline } = useConvexConnection()
     const templates = useQuery(api.templates.getTemplates)
@@ -473,6 +511,10 @@ export function useTemplates(): UseTemplatesReturn {
         })
     }, [isOffline, createTemplateMutation, updateTemplateMutation, refreshLocalTemplates])
 
+    useEffect(() => {
+        if (templates) cacheServerTemplates(templates as TemplateItem[])
+    }, [templates])
+
     const effectiveTemplates: TemplateItem[] | undefined = useMemo(() => {
         const localList = localTemplates.map(localTemplateToTemplateItem)
         const serverList = (templates || []) as TemplateItem[]
@@ -480,8 +522,14 @@ export function useTemplates(): UseTemplatesReturn {
         // Preserve loading state when online and templates haven't loaded yet
         if (!isOffline && templates === undefined) return undefined
 
-        // Offline, the cache is all there is.
-        if (isOffline) return localList
+        // Offline: the church's templates as last fetched, plus this device's
+        // own, which override them while they hold unsent changes.
+        if (isOffline) {
+            const offline = new Map<string, TemplateItem>()
+            for (const t of readCachedServerTemplates()) offline.set(t._id, t)
+            for (const t of localList) offline.set(t._id, t)
+            return Array.from(offline.values())
+        }
 
         // Online, the server's list is the truth, and a cached copy only
         // adds to it or overrides it while it holds a change the server

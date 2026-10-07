@@ -1,4 +1,4 @@
-import { query, mutation, type QueryCtx } from "./_generated/server";
+import { query, mutation, type QueryCtx, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { appliesToValidator } from "./schema";
@@ -24,6 +24,113 @@ async function templateVisibility(ctx: QueryCtx, user: User | null) {
     }
     return (template: Doc<"templates">) => !template.createdBy || creators.has(template.createdBy);
 }
+
+/**
+ * Template backgrounds a church may keep on the server, in total. Desktop
+ * template backgrounds upload automatically (see templateMediaSync.ts); this
+ * bounds what that costs. Past it, a background stays on the computer that
+ * has it and the template says so.
+ */
+export const TEMPLATE_MEDIA_LIMIT_BYTES = 100 * 1024 * 1024;
+
+/** The church's own templates (not the system ones), as `user` sees them. */
+async function churchTemplates(ctx: QueryCtx, user: User) {
+    const visible = await templateVisibility(ctx, user);
+    const templates = await ctx.db.query("templates").take(2000);
+    return templates.filter((t) => !!t.createdBy && visible(t));
+}
+
+async function storageSize(ctx: QueryCtx, storageId: string): Promise<number | null> {
+    const id = ctx.db.system.normalizeId("_storage", storageId);
+    if (!id) return null;
+    const meta = await ctx.db.system.get(id);
+    return meta ? meta.size : null;
+}
+
+/** Bytes of background files the church's templates use, each file counted once. */
+async function backgroundBytes(ctx: QueryCtx, user: User, excludingTemplateId?: string): Promise<number> {
+    const ids = new Set<string>();
+    for (const t of await churchTemplates(ctx, user)) {
+        if (t._id !== excludingTemplateId && t.backgroundStorageId) ids.add(t.backgroundStorageId);
+    }
+    let total = 0;
+    for (const id of ids) total += (await storageSize(ctx, id)) ?? 0;
+    return total;
+}
+
+/**
+ * Refuse a background that would take the church past its limit, deleting the
+ * uploaded file so a refused upload doesn't count against storage either.
+ */
+async function requireRoomFor(ctx: MutationCtx, user: User, storageId: string, excludingTemplateId?: string) {
+    const size = await storageSize(ctx, storageId);
+    if (size === null) throw new Error("Uploaded file not found");
+    const used = await backgroundBytes(ctx, user, excludingTemplateId);
+    if (used + size > TEMPLATE_MEDIA_LIMIT_BYTES) {
+        const id = ctx.db.system.normalizeId("_storage", storageId);
+        if (id) await ctx.storage.delete(id);
+        return { ok: false as const, usedBytes: used, limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
+    }
+    return { ok: true as const, usedBytes: used + size, limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
+}
+
+/** Delete a background file once no template or media library item uses it. */
+async function deleteBackgroundIfUnused(ctx: MutationCtx, user: User, storageId: string) {
+    const inTemplates = (await churchTemplates(ctx, user)).some((t) => t.backgroundStorageId === storageId);
+    const inLibrary = await ctx.db
+        .query("mediaLibrary")
+        .withIndex("by_storage", (q) => q.eq("storageId", storageId))
+        .first();
+    const id = ctx.db.system.normalizeId("_storage", storageId);
+    if (!inTemplates && !inLibrary && id) await ctx.storage.delete(id);
+}
+
+/** The church's template background usage against its limit. */
+export const backgroundUsage = query({
+    args: {},
+    handler: async (ctx) => {
+        const user = await getCurrentUser(ctx);
+        if (!user) return { usedBytes: 0, limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
+        return { usedBytes: await backgroundBytes(ctx, user), limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
+    },
+});
+
+/**
+ * Give a template the background file a device just uploaded. Any member of
+ * the church may, since the file is often on a teammate's computer rather than
+ * the creator's. Refused (and the upload deleted) past the church's limit.
+ * The template-level `backgroundStorageId` is the one source of truth; a JSON
+ * slide snapshot gets it too, for clients that read it there.
+ */
+export const attachBackground = mutation({
+    args: { templateId: v.string(), storageId: v.string() },
+    handler: async (ctx, args) => {
+        const user = await requireUser(ctx);
+        const template = await getById(ctx, "templates", args.templateId);
+        const visible = await templateVisibility(ctx, user);
+        if (!template || !template.createdBy || !visible(template)) throw new Error("Template not found");
+
+        const room = await requireRoomFor(ctx, user, args.storageId, template._id);
+        if (!room.ok) return room;
+
+        const previous = template.backgroundStorageId;
+        let slideId = template.slideId;
+        if (typeof slideId === "string") {
+            try {
+                slideId = JSON.stringify({ ...JSON.parse(slideId), backgroundStorageId: args.storageId });
+            } catch {
+                // Not JSON: leave the snapshot; the template-level id is enough.
+            }
+        }
+        await ctx.db.patch(template._id, {
+            backgroundStorageId: args.storageId,
+            slideId,
+            updatedAt: new Date().toISOString(),
+        });
+        if (previous && previous !== args.storageId) await deleteBackgroundIfUnused(ctx, user, previous);
+        return room;
+    },
+});
 
 // Generate upload URL for file storage
 export const generateUploadUrl = mutation({
@@ -149,6 +256,10 @@ export const createTemplate = mutation({
     },
     handler: async (ctx, args) => {
         const user = await requireUser(ctx);
+        if (args.backgroundStorageId) {
+            const room = await requireRoomFor(ctx, user, args.backgroundStorageId);
+            if (!room.ok) throw new Error("Your church's template backgrounds are over the 100 MB limit");
+        }
 
         const now = new Date().toISOString();
         const templateId = await ctx.db.insert("templates", {
@@ -196,6 +307,11 @@ export const updateTemplate = mutation({
         }
         if (template.createdBy !== user._id) {
             throw new Error("Unauthorized");
+        }
+        const newStorageId = args.updates.backgroundStorageId;
+        if (newStorageId && newStorageId !== template.backgroundStorageId) {
+            const room = await requireRoomFor(ctx, user, newStorageId, template._id);
+            if (!room.ok) throw new Error("Your church's template backgrounds are over the 100 MB limit");
         }
 
         await ctx.db.patch(template._id, {

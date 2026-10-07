@@ -1,3 +1,4 @@
+import { useTemplateMediaState } from '../../hooks/useTemplateMediaSync'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video } from 'lucide-react'
@@ -106,7 +107,10 @@ function TemplateCard({
         isVideoBackground ? (slideData?.background || '') : '',
         isVideoBackground ? (slideData?.localFilePath || '') : '',
     )
-    const videoUrl = fileUrl || localBg
+    const mediaState = useTemplateMediaState(template._id)
+    // A background known to be on another computer would play as black; the
+    // thumbnail below stands in for it.
+    const videoUrl = mediaState === 'missing' && !fileUrl ? '' : fileUrl || localBg
     const videoRef = useRef<HTMLVideoElement>(null)
 
     useEffect(() => {
@@ -167,6 +171,14 @@ function TemplateCard({
         >
             <div className={`relative ${isCompact ? 'aspect-[4/3]' : 'aspect-video'}`}>
                 {renderThumbnail()}
+
+                {mediaState && mediaState !== 'uploaded' && mediaState !== 'failed' && (
+                    <div className="absolute bottom-1.5 left-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded bg-black/70 text-white text-[9px] font-medium truncate">
+                        {mediaState === 'uploading' && 'Uploading background…'}
+                        {mediaState === 'missing' && 'Background is on another computer'}
+                        {mediaState === 'over-limit' && "Over your church's 100 MB limit: this computer only"}
+                    </div>
+                )}
 
                 {/* Category badge — top left */}
                 <div className="absolute top-1.5 left-1.5 z-10">

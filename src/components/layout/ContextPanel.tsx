@@ -11,7 +11,7 @@ import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
 import { isInlineNavSection, type NavSection } from '../../types/studio'
 import type { Slide, ExternalVideo, Song, Hymn } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
-import { resolveLocalUrl } from '../../hooks/useLocalBackground'
+import { templateBackgroundType, resolveLocalUrl } from '../../hooks/useLocalBackground'
 import { generateObjectId } from '../../hooks/useSlideCreation'
 
 import { BibleList } from '../bible/BibleList'
@@ -278,8 +278,9 @@ export function ContextSectionContent({
             churchId: '',
             scheduleId: activeSchedule?._id || '',
             background: resolvedBg,
-            backgroundType: templateSlide?.backgroundType || 'gradient',
-            backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId || null,
+            backgroundType: templateBackgroundType(template, templateSlide, resolvedBg),
+            // The template-level id is the one kept current; see applyTemplateToSlide.
+            backgroundStorageId: template.backgroundStorageId || templateSlide?.backgroundStorageId || null,
             localFilePath: templateSlide?.localFilePath || undefined,
         }
         appendActiveSlide(slide)

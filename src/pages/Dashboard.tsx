@@ -10,7 +10,7 @@ import {
 } from '../services/sermon-listener/sessionRecordings'
 import { useDictation, useKeyboardShortcuts, isLiveNavigationClaimed, initGlobalEmitter, useQuickActionHandlers, useLiveSync, useLiveSession, usePresence, useCollaborationToasts, useTemplates, useAnalytics, useSlideCreation, generateObjectId } from '../hooks'
 import { AnalyticsEventType } from '../services/analytics/types'
-import { resolveLocalUrl } from '../hooks/useLocalBackground'
+import { templateBackgroundType, resolveLocalUrl } from '../hooks/useLocalBackground'
 import type { MediaItem } from '../components/media/MediaPicker'
 import type { CountdownData } from '../components/countdown/AddCountdownModal'
 import { Modal } from '../components/modals/Modal'
@@ -388,8 +388,9 @@ export default function Dashboard() {
             churchId: '',
             scheduleId: activeSchedule?._id || '',
             background: resolveLocalUrl(templateSlide?.background || template.thumbnail || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', templateSlide?.localFilePath),
-            backgroundType: templateSlide?.backgroundType || 'gradient',
-            backgroundStorageId: templateSlide?.backgroundStorageId || template.backgroundStorageId,
+            backgroundType: templateBackgroundType(template, templateSlide, resolveLocalUrl(templateSlide?.background || template.thumbnail || '', templateSlide?.localFilePath)),
+            // The template-level id is the one kept current; see applyTemplateToSlide.
+            backgroundStorageId: template.backgroundStorageId || templateSlide?.backgroundStorageId,
             localFilePath: templateSlide?.localFilePath || undefined,
         };
         appendActiveSlide(slide)
