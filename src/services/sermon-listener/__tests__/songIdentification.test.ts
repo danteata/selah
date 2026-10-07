@@ -302,6 +302,14 @@ describe('identifySong', () => {
             expect(m?.songId).toBe('song-x')
         })
 
+        it('names the song on screen when it is one of the copies', () => {
+            const copy: Song = { ...SONG_X, id: 'song-x-copy', title: 'SONG X (COPY)' }
+            const idx = buildSongIndex([SONG_X, copy])
+            const sung = 'worthy is the lamb that was slain for us glory and honour and power belong to you'
+            expect(identifySong(sung, idx, { preferSongId: 'song-x-copy' })?.songId).toBe('song-x-copy')
+            expect(identifySong(sung, idx, { preferSongId: 'song-x' })?.songId).toBe('song-x')
+        })
+
         it('identifies the correct song once a distinctive line breaks the tie', () => {
             const idx = buildSongIndex([SONG_X, SONG_Y])
             const m = identifySong(

@@ -71,6 +71,15 @@ async function ensureIndex(): Promise<void> {
 }
 
 const MATCH_WINDOW_WORDS = 14
+/**
+ * Below this tracker confidence the song on screen is barely matching what is
+ * sung, and a different song may have started, so auto-detect looks too.
+ * Waiting for the tracker to be fully lost wasn't enough: a new song shares
+ * enough words with the old one that a scrap of it ("all things… all things",
+ * 0.50) kept re-locking the old song, and "Goodness of God" stayed up three
+ * minutes into "You're Worthy of It All".
+ */
+const STRUGGLING_CONFIDENCE = 0.6
 // Consecutive full unmatched windows of singing before trying an online lookup.
 const EXTERNAL_UNMATCHED_THRESHOLD = 3
 
@@ -172,11 +181,14 @@ export function useSongAutoDetect() {
             bufferRef.current = bufferRef.current.slice(-MATCH_WINDOW_WORDS * 2)
         }
 
-        // Only (re)search for a song when nothing is displayed, or when the
-        // tracker has *lost* the displayed one (a new song likely started). While
-        // the current song is tracking fine, stay quiet — the tracker is busy
-        // finding the right verse within it, and we must not fight that.
-        const shouldSearch = !liveSongKey || trackerPhase === 'lost'
+        // (Re)search for a song when nothing is displayed, when the tracker
+        // has lost the displayed one, or when it is barely holding on to it —
+        // a new song has most likely started. While the current song is
+        // tracking well, stay quiet: the tracker is busy finding the right
+        // verse within it, and we must not fight that.
+        const { confidence: trackerConfidence } = useAppStore.getState().songTracking.status
+        const struggling = trackerPhase === 'tracking' && trackerConfidence < STRUGGLING_CONFIDENCE
+        const shouldSearch = !liveSongKey || trackerPhase === 'lost' || struggling
         if (!shouldSearch) {
             confirmationRef.current.reset()
             unmatchedRef.current = 0
@@ -256,9 +268,11 @@ export function useSongAutoDetect() {
                         .filter((s): s is Song => !!s)
                     scopedIndexRef.current = { key: scopedSongIdsKey, index: buildSongIndex(scopedSongs) }
                 }
-                match = identifySong(query, scopedIndexRef.current.index)
+                match = identifySong(query, scopedIndexRef.current.index, { preferSongId: liveSongKey })
             }
-            if (!match) match = identifySong(query, cachedIndex)
+            // A copy of the song on screen (imported twice under two titles)
+            // is the song on screen, not a new one.
+            if (!match) match = identifySong(query, cachedIndex, { preferSongId: liveSongKey })
 
             if (match) {
                 unmatchedRef.current = 0

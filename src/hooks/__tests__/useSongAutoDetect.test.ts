@@ -185,3 +185,68 @@ describe('useSongAutoDetect (library index freshness)', () => {
         expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1')
     })
 })
+
+describe('useSongAutoDetect (moving on from the song on screen)', () => {
+    const GRACE_SLIDE = {
+        id: 'slide-grace-v1', index: 0, name: 'Amazing Grace - Verse 1', type: 'song', layout: 'default',
+        userId: 'u', churchId: 'c', scheduleId: 's', contents: [''], songId: 'grace', verseIndex: 0, data: GRACE,
+    } as unknown as Slide
+
+    beforeEach(() => {
+        seq = 0
+        h.listener = { isListening: true, transcriptSegments: [] }
+        h.library = [
+            { id: GRACE.id, type: 'song', content: GRACE },
+            { id: CORNERSTONE.id, type: 'song', content: CORNERSTONE },
+        ]
+        vi.resetModules()
+    })
+
+    async function withGraceLive(confidence: number) {
+        const { useAppStore, DEFAULT_SONG_TRACKING } = await import('../../store/appStore')
+        const { useSongAutoDetect } = await import('../useSongAutoDetect')
+        useAppStore.setState({
+            activeSlides: [GRACE_SLIDE],
+            liveSlideId: GRACE_SLIDE.id,
+            songTracking: {
+                ...DEFAULT_SONG_TRACKING,
+                autoDetect: true,
+                status: { ...DEFAULT_SONG_TRACKING.status, songId: 'grace', phase: 'tracking', confidence },
+            },
+        })
+        const { rerender } = renderHook(() => useSongAutoDetect())
+        return { useAppStore, rerender }
+    }
+
+    const CORNERSTONE_LINES = [
+        'My hope is built on nothing less',
+        'Than Jesus blood and righteousness',
+        'I dare not trust the sweetest frame',
+    ]
+
+    it('switches to a new song while the tracker is barely holding the old one', async () => {
+        // A new song shares enough words with the old that scraps of it keep
+        // the old song "tracking" at low confidence; waiting for Lost left
+        // the old song on screen for minutes.
+        const { useAppStore, rerender } = await withGraceLive(0.4)
+        await singUntilDetected(rerender, CORNERSTONE_LINES)
+        expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1')
+    })
+
+    it('leaves a song the tracker is following well alone', async () => {
+        const { useAppStore, rerender } = await withGraceLive(0.9)
+        await singUntilDetected(rerender, CORNERSTONE_LINES)
+        expect(useAppStore.getState().liveSlideId).toBe(GRACE_SLIDE.id)
+    })
+
+    it("doesn't take a copy of the song on screen for a new song", async () => {
+        h.library.push({
+            id: 'grace-copy',
+            type: 'song',
+            content: { ...GRACE, id: 'grace-copy', _id: 'grace-copy', title: 'AMAZING GRACE (OLD IMPORT)' },
+        })
+        const { useAppStore, rerender } = await withGraceLive(0.4)
+        await singUntilDetected(rerender, GRACE.sections![0].lines)
+        expect(useAppStore.getState().liveSlideId).toBe(GRACE_SLIDE.id)
+    })
+})

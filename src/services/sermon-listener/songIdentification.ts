@@ -179,6 +179,10 @@ export interface IdentifyOptions {
     corroborationSecond?: number
     /** Require at least this many corroborating lines (default 1). */
     minMatchedLines?: number
+    /** Song to name when it is one of the copies that matched — the song
+     *  already on screen, so a copy of it under another title isn't taken for
+     *  a new song. */
+    preferSongId?: string | null
 }
 
 const EMPTY_INDEX: SongIndex = { entries: [], token: new Map(), songCount: 0, words: new Map() }
@@ -402,6 +406,8 @@ export function identifySong(
     // the best structured (most sections), then the lowest id — so the
     // confirmation tracker's evidence accumulates on one song instead of
     // splitting between copies window by window and confirming neither.
+    const preferred = opts.preferSongId ? copies.find((q) => q.match.songId === opts.preferSongId) : undefined
+    if (preferred) return preferred.match
     copies.sort(
         (a, b) =>
             sectionCount(index, b.match.songId) - sectionCount(index, a.match.songId) ||
