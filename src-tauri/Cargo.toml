@@ -48,7 +48,7 @@ libloading = { version = "0.8", optional = true }
 # unaffected until cutover. Per-platform GPU backends are added in the target
 # tables below.
 transcribe-rs = { version = "0.3.8", features = ["onnx"], optional = true }
-transcribe-cpp = { version = "0.1", optional = true }
+transcribe-cpp = { version = "0.3", optional = true }
 
 # Platform-specific dependencies for system audio capture
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -56,7 +56,7 @@ screencapturekit = "0.3"  # macOS 12.3+ system audio capture
 core-foundation = "0.10"  # CFError type from screencapturekit
 core-media-rs = "0.3"    # RetainedAudioBufferList from screencapturekit
 core-audio-types-rs = "0.3"  # AudioBuffer type
-transcribe-cpp = { version = "0.1", features = ["metal"], optional = true }  # Metal GPU on macOS
+transcribe-cpp = { version = "0.3", features = ["metal"], optional = true }  # Metal GPU on macOS
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.22"  # WASAPI loopback for system audio capture
@@ -103,7 +103,7 @@ windows = { version = "0.58", features = [
 # dispatch, so it runs everywhere and still uses AVX2/AVX-512 kernels when the
 # CPU has them. Base `transcribe-rs` (features = ["onnx"]) is inherited from
 # [dependencies], so the ONNX engines still run on CPU.
-transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Windows
+transcribe-cpp = { version = "0.3", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Windows
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # NDI output captures the live output window with XComposite + MIT-SHM
@@ -113,7 +113,7 @@ transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], o
 # MIT-SHM needs.
 x11-dl = "2.21"
 libc = "0.2"
-transcribe-cpp = { version = "0.1", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Linux
+transcribe-cpp = { version = "0.3", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Linux
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2.0"

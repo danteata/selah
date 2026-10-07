@@ -231,11 +231,13 @@ fn stage_linux_transcribe_runtime() {
                 continue;
             };
             // Match on the name, not the extension: the files that matter are
-            // soname-versioned (libtranscribe.so.0), so `extension()` is "0".
+            // soname-versioned, so `extension()` is a number. The SONAME carries
+            // the 0.x minor since transcribe-cpp 0.2 (libtranscribe.so.0.3, not
+            // .so.0), which is why every name is staged rather than one picked.
             if !name.contains(".so") {
                 continue;
             }
-            // fs::copy follows symlinks, so a `libtranscribe.so -> .so.0` pair
+            // fs::copy follows symlinks, so a `libtranscribe.so -> .so.0.3` pair
             // lands as two real files. That costs a few MB and keeps both names
             // resolvable without relying on the bundler preserving symlinks.
             if std::fs::copy(&path, dest.join(name)).is_ok() {
@@ -249,7 +251,7 @@ fn stage_linux_transcribe_runtime() {
             "cargo:warning=selah build.rs: staged no transcribe-cpp shared libraries for \
              the Linux bundle (DEP_TRANSCRIBE_CPP_RUNTIME_DIR unset or empty) — the \
              AppImage bundle will fail with 'Could not find dependency: \
-             libtranscribe.so.0' and the deb/rpm will fail at launch"
+             libtranscribe.so.0.N' and the deb/rpm will fail at launch"
         );
     }
 }

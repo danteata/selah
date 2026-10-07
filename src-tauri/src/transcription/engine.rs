@@ -860,9 +860,26 @@ impl TranscriptionManager {
                     // so only attach it when the loaded model is whisper-family.
                     let is_whisper = session.model().arch() == "whisper";
                     let run_options = transcribe_cpp_run_options(&config, is_whisper);
-                    let res = session
-                        .run(&audio, &run_options)
-                        .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
+                    let res = match session.run(&audio, &run_options) {
+                        Ok(res) => res,
+                        // A decode stopped at its token budget, or because it
+                        // started looping on one phrase, still hands back
+                        // everything it heard before that — with a loop's
+                        // repeats already dropped. In a sermon that is most
+                        // of the segment; failing the whole run would throw it
+                        // away over its tail.
+                        Err(
+                            e @ (transcribe_cpp::Error::OutputTruncated { .. }
+                            | transcribe_cpp::Error::OutputRepetition { .. }),
+                        ) => match e.partial() {
+                            Some(partial) => {
+                                warn!("[transcription] keeping the partial transcript: {}", e);
+                                partial.clone()
+                            }
+                            None => return Err(anyhow::anyhow!("Transcription failed: {}", e)),
+                        },
+                        Err(e) => return Err(anyhow::anyhow!("Transcription failed: {}", e)),
+                    };
                     // `RunOptions.timestamps` defaults to `TimestampKind::Auto`
                     // ("richest the family supports"), so these rows were
                     // already being produced and discarded. Whisper yields
