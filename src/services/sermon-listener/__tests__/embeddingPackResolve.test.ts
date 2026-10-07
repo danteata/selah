@@ -10,8 +10,11 @@ vi.mock('@tauri-apps/api/path', () => ({ resourceDir }))
 vi.mock('@tauri-apps/api/core', () => ({ convertFileSrc }))
 
 import { hasEmbeddingPack, resetPackBaseUrlCache } from '../embeddingPackLoader'
+import { EMBEDDING_MODEL } from '../embeddingModel'
 
 const BUNDLED_MANIFEST = '/embedding-packs/WEB/manifest.json'
+const modelName = EMBEDDING_MODEL.id
+const dim = EMBEDDING_MODEL.dimensions
 
 function manifestResponse(body: unknown) {
     return { ok: true, json: async () => body } as unknown as Response
@@ -44,7 +47,7 @@ describe('embedding pack base URL resolution', () => {
         // user look like they had no pack, so Bible settings offered "Enable
         // Search" on versions the shared index already covered.
         const fetchMock = vi.fn(async (url: string) =>
-            url === BUNDLED_MANIFEST ? manifestResponse({ version: 'WEB', dim: 384, count: 31100 }) : missing,
+            url === BUNDLED_MANIFEST ? manifestResponse({ version: 'WEB', dim, count: 31100, modelName }) : missing,
         )
         vi.stubGlobal('fetch', fetchMock)
 
@@ -53,7 +56,7 @@ describe('embedding pack base URL resolution', () => {
     })
 
     it('prefers the bundled pack over a side-loaded resource pack', async () => {
-        const fetchMock = vi.fn(async () => manifestResponse({ version: 'WEB', dim: 384, count: 31100 }))
+        const fetchMock = vi.fn(async () => manifestResponse({ version: 'WEB', dim, count: 31100, modelName }))
         vi.stubGlobal('fetch', fetchMock)
 
         expect(await hasEmbeddingPack('WEB')).toBe(true)
@@ -64,7 +67,7 @@ describe('embedding pack base URL resolution', () => {
 
     it('falls back to a side-loaded resource pack when nothing is bundled', async () => {
         const fetchMock = vi.fn(async (url: string) =>
-            url.startsWith('asset://') ? manifestResponse({ version: 'WEB', dim: 384, count: 90000 }) : missing,
+            url.startsWith('asset://') ? manifestResponse({ version: 'WEB', dim, count: 90000, modelName }) : missing,
         )
         vi.stubGlobal('fetch', fetchMock)
 
@@ -73,6 +76,27 @@ describe('embedding pack base URL resolution', () => {
         expect(convertFileSrc).toHaveBeenCalledWith(
             '/Applications/Selah.app/Contents/Resources/assets/embedding-packs/WEB/',
         )
+    })
+
+    it('passes over a pack built with another model for one that matches', async () => {
+        // A MiniLM pack left in the resource dir (or anywhere) would rank
+        // verses at random against today's queries, so it must not win.
+        const fetchMock = vi.fn(async (url: string) =>
+            url === BUNDLED_MANIFEST
+                ? manifestResponse({ version: 'WEB', dim: 384, count: 31100, modelName: 'Xenova/all-MiniLM-L6-v2' })
+                : manifestResponse({ version: 'WEB', dim, count: 31100, modelName }),
+        )
+        vi.stubGlobal('fetch', fetchMock)
+
+        expect(await hasEmbeddingPack('WEB')).toBe(true)
+        expect(convertFileSrc).toHaveBeenCalled()
+    })
+
+    it('reports absence when the only pack was built with another model', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () =>
+            manifestResponse({ version: 'WEB', dim: 384, count: 31100, modelName: 'Xenova/all-MiniLM-L6-v2' }),
+        ))
+        expect(await hasEmbeddingPack('WEB')).toBe(false)
     })
 
     it('reports absence when no candidate serves a matching manifest', async () => {

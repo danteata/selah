@@ -1,11 +1,11 @@
 {
   "version": "WEB",
-  "dim": 384,
+  "dim": 768,
   "count": 31100,
   "quantization": "int8",
-  "scale": 127,
+  "scale": 360.32537111989114,
   "hasFragments": false,
-  "modelName": "Xenova/all-MiniLM-L6-v2",
-  "builtAt": "2026-07-27T10:10:34.076Z",
+  "modelName": "onnx-community/embeddinggemma-300m-ONNX",
+  "builtAt": "2026-10-07T07:02:24.184Z",
   "source": "build-web-embedding-pack"
 }

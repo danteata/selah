@@ -26,11 +26,17 @@
  * we keep the CDN/Hub fallback so the experience is identical.
  */
 
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1'
-const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2'
+import { EMBEDDING_MODEL, withTaskPrefix, type EmbeddingKind } from './embeddingModel'
+
+// Transformers.js 4: the first line with EmbeddingGemma (gemma3_text). The
+// `transformers.min.js` build is self-contained — no bare `onnxruntime-web`
+// import to resolve — which is what makes a runtime CDN import work at all.
+const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let embedder: any = null
+let tokenizer: any = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let model: any = null
 let loadPromise: Promise<void> | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let transformersModule: any = null
@@ -46,13 +52,13 @@ async function loadTransformers() {
 /**
  * Point ORT-WASM at every core we're allowed to use.
  *
- * The default is a single thread, and MiniLM inference is the whole cost of
- * the semantic path — sentence pass and sliding-window fallback both. Threads
- * require SharedArrayBuffer, which the browser only exposes when the document
- * is cross-origin isolated (COOP: same-origin + COEP: require-corp). We set
- * those headers for the desktop webview; where they're absent the check below
- * simply leaves the single-threaded default in place, so this is safe to run
- * unconditionally.
+ * Embedding is the whole cost of the semantic path — sentence pass and
+ * sliding-window fallback both — and EmbeddingGemma is far heavier than the
+ * MiniLM it replaced, so threads matter more than they did. Threads require
+ * SharedArrayBuffer, which the browser only exposes when the document is
+ * cross-origin isolated (COOP: same-origin + COEP: require-corp). Where that
+ * is absent the check below leaves the single-threaded default in place, so
+ * this is safe to run unconditionally.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function configureWasmBackend(transformers: any): void {
@@ -63,8 +69,7 @@ function configureWasmBackend(transformers: any): void {
   const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined
 
   if (isolated && cores && cores > 1) {
-    // Leave a core for the UI thread and the similarity worker; ORT gains
-    // little past ~4 threads on a model this small.
+    // Leave a core for the UI thread and the similarity worker.
     wasm.numThreads = Math.max(1, Math.min(4, cores - 1))
   } else {
     wasm.numThreads = 1
@@ -72,34 +77,86 @@ function configureWasmBackend(transformers: any): void {
   wasm.simd = true
 }
 
+/**
+ * WebGPU when the webview offers it, else WASM. On WebGPU a live batch of
+ * sentences embeds about 4x faster (133 ms vs 576 ms for four, measured), and
+ * the vectors are identical to WASM's, so the choice never changes a result.
+ * WebView2 ships WebGPU on most hardware; WKWebView has it from macOS 26, so
+ * older Macs and GPUs without an adapter take the WASM path. A WebGPU device
+ * that exists but fails to start a session also falls back rather than
+ * leaving the detector without a model.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadModel(transformers: any) {
+  const options = { dtype: EMBEDDING_MODEL.dtype }
+  const hasWebGpu = typeof navigator !== 'undefined' && 'gpu' in navigator && !!(navigator as { gpu?: unknown }).gpu
+  if (hasWebGpu) {
+    try {
+      const gpuModel = await transformers.AutoModel.from_pretrained(EMBEDDING_MODEL.id, { ...options, device: 'webgpu' })
+      console.info('[EmbeddingWorker] embedding model ready on WebGPU')
+      return gpuModel
+    } catch (err) {
+      console.warn('[EmbeddingWorker] WebGPU unavailable, using WASM:', err instanceof Error ? err.message : err)
+    }
+  }
+  const wasmModel = await transformers.AutoModel.from_pretrained(EMBEDDING_MODEL.id, { ...options, device: 'wasm' })
+  console.info('[EmbeddingWorker] embedding model ready on WASM')
+  return wasmModel
+}
+
 async function loadEmbedder(): Promise<void> {
-  if (embedder) return
+  if (model) return
   if (loadPromise) return loadPromise
 
   loadPromise = (async () => {
     const transformers = await loadTransformers()
     configureWasmBackend(transformers)
     if (localModelPath) {
-      // Desktop: read the quantized ONNX + tokenizer from the bundled Tauri
-      // resource via the asset protocol. No network round-trip at any point.
+      // Desktop: read the 8-bit ONNX (and its external weights file) plus the
+      // tokenizer from the bundled Tauri resource via the asset protocol. No
+      // network round-trip for the model at any point.
       transformers.env.allowLocalModels = true
       transformers.env.localModelPath = localModelPath
       transformers.env.allowRemoteModels = false
       transformers.env.useBrowserCache = false
     } else {
-      // Web / dev fallback: let transformers.js fetch from HuggingFace Hub
-      // and cache the weights in the browser's storage.
+      // Web / dev fallback: fetch from the Hugging Face Hub and cache the
+      // weights in the browser's storage.
       transformers.env.allowLocalModels = false
       transformers.env.allowRemoteModels = true
       transformers.env.useBrowserCache = true
     }
-    embedder = await transformers.pipeline('feature-extraction', MODEL_NAME, {
-      quantized: true,
-    })
+    tokenizer = await transformers.AutoTokenizer.from_pretrained(EMBEDDING_MODEL.id)
+    model = await loadModel(transformers)
   })()
 
-  await loadPromise
-  loadPromise = null
+  try {
+    await loadPromise
+  } finally {
+    loadPromise = null
+  }
+}
+
+/**
+ * Embed one batch. EmbeddingGemma's ONNX graph does the pooling and the
+ * projection itself and returns `sentence_embedding`, already L2-normalised —
+ * so this is not the `pooling: 'mean'` pipeline MiniLM used, which would skip
+ * the projection layers and produce the wrong vectors without any error.
+ */
+async function embedBatch(texts: string[], kind: EmbeddingKind): Promise<{ vectors: number[][]; dim: number }> {
+  const inputs = await tokenizer(texts.map((t) => withTaskPrefix(t, kind)), {
+    padding: true,
+    truncation: true,
+    max_length: EMBEDDING_MODEL.maxTokens,
+  })
+  const { sentence_embedding } = await model(inputs)
+  const tensor = sentence_embedding as { data: Float32Array; dims: number[] }
+  const dim = tensor.dims[tensor.dims.length - 1]
+  const vectors: number[][] = []
+  for (let j = 0; j < texts.length; j++) {
+    vectors.push(Array.from(tensor.data.subarray(j * dim, (j + 1) * dim)))
+  }
+  return { vectors, dim }
 }
 
 interface WorkerSetupRequest {
@@ -110,6 +167,7 @@ interface WorkerSetupRequest {
 interface WorkerEmbedRequest {
   id: number
   texts: string[]
+  kind: EmbeddingKind
 }
 
 type WorkerRequest = WorkerSetupRequest | WorkerEmbedRequest
@@ -147,29 +205,16 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     const texts = req.texts
     await loadEmbedder()
 
-    const INFERENCE_BATCH = 32
+    // Small batches: padding makes a batch as slow as its longest member, and
+    // a long batch blocks the next live query behind it.
+    const INFERENCE_BATCH = 16
     const embeddings: number[][] = []
     let dimensions = 0
 
     for (let i = 0; i < texts.length; i += INFERENCE_BATCH) {
-      const batch = texts.slice(i, i + INFERENCE_BATCH)
-
-      if (batch.length === 1) {
-        const result = await embedder(batch[0], { pooling: 'mean', normalize: true })
-        const tensor = result as unknown as { data: Float32Array; dims: number[] }
-        embeddings.push(Array.from(tensor.data))
-        dimensions = tensor.data.length
-      } else {
-        const results = await embedder(batch, { pooling: 'mean', normalize: true })
-        const batchTensor = results as unknown as { data: Float32Array; dims: number[] }
-        const dim = batchTensor.dims[batchTensor.dims.length - 1]
-        dimensions = dim
-
-        for (let j = 0; j < batch.length; j++) {
-          const start = j * dim
-          embeddings.push(Array.from(batchTensor.data.slice(start, start + dim)))
-        }
-      }
+      const { vectors, dim } = await embedBatch(texts.slice(i, i + INFERENCE_BATCH), req.kind)
+      embeddings.push(...vectors)
+      dimensions = dim
 
       // Yield back to the event loop every batch so the worker doesn't
       // starve other messages (e.g. heartbeat / abort).

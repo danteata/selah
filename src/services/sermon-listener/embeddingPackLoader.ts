@@ -13,7 +13,7 @@
  *  - `/embedding-packs/<VERSION>/` — `public/embedding-packs`, so it is part of
  *    the frontend bundle and reachable both on the web and inside the Tauri
  *    webview (exactly like `/bibles` and `/dictionaries`). Canonical verses
- *    only, int8-quantized (`embeddings.i8`, ~11 MB) so the browser can download
+ *    only, int8-quantized (`embeddings.i8`, ~23 MB) so the browser can download
  *    it once, cache it in IndexedDB, and search offline. This is the pack that
  *    ships in releases — built by `scripts/build-web-embedding-pack.mjs`.
  *  - `src-tauri/assets/embedding-packs/<VERSION>/` bundled as Tauri resources
@@ -22,12 +22,18 @@
  *    short-phrase / paraphrase hits during live transcription). Absent from
  *    releases, so the bundled path above must work on its own.
  *
- * manifest.json: { version, dim, count, quantization?: 'int8', scale?, ... }
+ * manifest.json: { version, dim, count, modelName, quantization?: 'int8', scale?, ... }
  * Embeddings are L2-normalised so cosine == dot product. int8 packs store
  * round(x*scale); we dequantize with q/scale on load.
+ *
+ * A pack is only usable with the model that built it: queries from one model
+ * scored against another model's verses rank at random without failing. So a
+ * pack whose `modelName` is not `EMBEDDING_MODEL.id` is treated as absent —
+ * fetched, side-loaded or cached in IndexedDB alike.
  */
 
 import { isDesktop } from '../../platform'
+import { EMBEDDING_MODEL } from './embeddingModel'
 import { loadFromPackedBuffer, type VerseMeta } from './verseEmbeddingStore'
 
 interface PackManifest {
@@ -57,6 +63,8 @@ const IDB_STORE = 'packs'
 
 interface CachedPack {
     version: string
+    /** Absent on packs cached before the model was recorded — i.e. MiniLM's. */
+    modelName?: string
     dim: number
     quantization?: 'int8'
     scale?: number
@@ -89,7 +97,12 @@ async function idbGetPack(version: string): Promise<CachedPack | null> {
         try {
             const tx = db.transaction(IDB_STORE, 'readonly')
             const req = tx.objectStore(IDB_STORE).get(version)
-            req.onsuccess = () => resolve((req.result as CachedPack) ?? null)
+            req.onsuccess = () => {
+                const pack = (req.result as CachedPack | undefined) ?? null
+                // A pack cached for another model is as good as none; the next
+                // fetch overwrites it under the same key.
+                resolve(pack && pack.modelName === EMBEDDING_MODEL.id ? pack : null)
+            }
             req.onerror = () => resolve(null)
         } catch {
             resolve(null)
@@ -165,7 +178,7 @@ async function resolvePackBaseUrl(version: string): Promise<string | null> {
     let resolved: string | null = null
     for (const base of await packBaseUrlCandidates(version)) {
         const manifest = await fetchJson<PackManifest>(`${base}manifest.json`)
-        if (manifest && manifest.version === version) {
+        if (manifest && manifest.version === version && manifest.modelName === EMBEDDING_MODEL.id) {
             resolved = base
             break
         }
@@ -254,6 +267,9 @@ export async function tryLoadEmbeddingPack(version: string): Promise<LoadResult>
     if (manifest.version !== version) {
         return { ok: false, error: `manifest version ${manifest.version} != requested ${version}` }
     }
+    if (manifest.modelName !== EMBEDDING_MODEL.id) {
+        return { ok: false, error: `pack built with ${manifest.modelName ?? 'an unknown model'}, not ${EMBEDDING_MODEL.id}` }
+    }
 
     const [metadata, raw] = await Promise.all([
         fetchJson<VerseMeta[]>(`${baseUrl}metadata.json`),
@@ -278,6 +294,7 @@ export async function tryLoadEmbeddingPack(version: string): Promise<LoadResult>
     if (!isDesktop() && manifest.quantization === 'int8') {
         void idbPutPack({
             version: manifest.version,
+            modelName: manifest.modelName,
             dim: manifest.dim,
             quantization: manifest.quantization,
             scale: manifest.scale,

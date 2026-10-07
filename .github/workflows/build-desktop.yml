@@ -375,8 +375,8 @@ jobs:
           }
 
       # Fetch the assets bundled as Tauri resources (the offline GGUF base.en
-      # model and the MiniLM embedding model). Both are plain curl/fetch
-      # downloads. The verse embedding pack is not built here: the int8 pack in
+      # model and the EmbeddingGemma embedding model, ~330 MB, hash-verified).
+      # Both are plain fetch downloads. The verse embedding pack is not built here: the int8 pack in
       # public/embedding-packs is committed and rides along in the Vite output,
       # which is where the app looks for it first.
       - name: Download bundled model assets

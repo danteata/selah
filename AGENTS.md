@@ -4,7 +4,9 @@
 
 ### Local Embeddings (`src/services/sermon-listener/localEmbeddings.ts`)
 - **Web Worker** (`embedding.worker.ts`) runs ONNX inference off the main thread so the UI stays responsive during batch embedding.
-- `embedText()` / `embedBatch()` post messages to the worker; the worker loads `Xenova/all-MiniLM-L6-v2` from the same CDN and returns embeddings.
+- `embedText(text, kind)` / `embedBatch(texts, kind)` post messages to the worker; the worker loads `@huggingface/transformers` from jsdelivr and EmbeddingGemma 300M (`onnx-community/embeddinggemma-300m-ONNX`, 8-bit, 768 dims; WebGPU when available, else WASM) — bundled under `src-tauri/assets/embedding-models` on desktop, the Hub on web. `kind` is `'query'`, `'document'` (verses) or `'clustering'`: the model prefixes each differently, so it is required.
+- `embeddingModel.ts` names the model; the WEB pack (`public/embedding-packs/WEB`) and the score calibration (`embeddingCalibration.ts`) must be built for the same one — a test enforces it. After any model change run `npm run build-semantic-pack` (pack + calibration) and `npx vite-node scripts/eval-semantic-policy.ts -- <dump>` to see what detection would do.
+- Scores leaving `searchVerseEmbeddings` are calibrated onto MiniLM's scale (`scoreCalibration.ts`), which is what every semantic threshold was tuned on. Search is local only; the Convex `verseEmbeddings` table is no longer read.
 - Vite bundles the worker into a separate chunk (`dist/assets/embedding.worker-*.js`).
 - `isEmbedderReady()` checks whether the worker has been instantiated.
 
