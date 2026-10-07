@@ -8,18 +8,19 @@
  * The model, revision and file hashes live in `lib/embeddingModel.mjs`. Every
  * file is verified against its pinned sha256; a mismatch deletes the file and
  * fails the run rather than bundling something unverified. Also writes the
- * Gemma Terms notice the model's licence requires to ship alongside it.
+ * Gemma Terms notice the model's licence requires to ship alongside it, and
+ * installs the rewritten graph the desktop app runs (`EMBEDDING_GRAPH`).
  *
  * Plain Node (fetch + crypto), so the same script runs on every CI platform.
  * Re-running skips files that are already present and verified.
  */
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
-import { EMBEDDING_MODEL, EMBEDDING_MODEL_FILES, EMBEDDING_MODEL_REVISION, GEMMA_NOTICE } from './lib/embeddingModel.mjs'
+import { EMBEDDING_GRAPH, EMBEDDING_MODEL, EMBEDDING_MODEL_FILES, EMBEDDING_MODEL_REVISION, GEMMA_NOTICE } from './lib/embeddingModel.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DEST_DIR = join(REPO_ROOT, 'src-tauri', 'assets', 'embedding-models', ...EMBEDDING_MODEL.id.split('/'))
@@ -62,6 +63,12 @@ async function main() {
             throw new Error(`${file.path}: sha256 ${got} does not match pinned ${file.sha256}`)
         }
     }
+    const graphSource = join(REPO_ROOT, EMBEDDING_GRAPH.source)
+    if ((await sha256Of(graphSource)) !== EMBEDDING_GRAPH.sha256) {
+        throw new Error(`${EMBEDDING_GRAPH.source} does not match its pinned sha256`)
+    }
+    copyFileSync(graphSource, join(DEST_DIR, EMBEDDING_GRAPH.path))
+    console.log(`[graph] installed ${EMBEDDING_GRAPH.path}`)
     writeFileSync(join(DEST_DIR, 'NOTICE.txt'), GEMMA_NOTICE)
     console.log(`\nEmbedding model ready at:\n  ${DEST_DIR}`)
 }

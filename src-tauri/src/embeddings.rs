@@ -29,7 +29,14 @@ use tracing::info;
 
 /// Where the downloader puts the model, relative to the resource dir.
 const MODEL_DIR: &str = "assets/embedding-models/onnx-community/embeddinggemma-300m-ONNX";
-const MODEL_FILE: &str = "onnx/model_quantized.onnx";
+/// `onnx/model_quantized.onnx` rewritten to gather token embeddings before
+/// dequantizing them; the stock graph expands the whole 262144 × 768 table to
+/// float32 (805 MB) on every call. Same weights, bit-identical output. Built by
+/// `scripts/embedding-graph/gather_first.py`, installed by the downloader.
+const MODEL_FILE: &str = "onnx/model_quantized_gather_first.onnx";
+/// The graph as published, which the verse pack was built with.
+#[cfg(test)]
+const STOCK_MODEL_FILE: &str = "onnx/model_quantized.onnx";
 /// EmbeddingGemma's output width.
 pub const DIMENSIONS: usize = 768;
 /// Longest input embedded, in tokens (special tokens included). Sermon
@@ -47,6 +54,10 @@ pub struct Embedder {
 
 impl Embedder {
     pub fn load(model_dir: &Path) -> Result<Self, String> {
+        Self::load_graph(model_dir, MODEL_FILE)
+    }
+
+    fn load_graph(model_dir: &Path, graph: &str) -> Result<Self, String> {
         let started = std::time::Instant::now();
         let tokenizer = Tokenizer::from_file(model_dir.join("tokenizer.json"))
             .map_err(|e| format!("failed to load embedding tokenizer: {e}"))?;
@@ -71,7 +82,7 @@ impl Embedder {
             .map_err(fail)?
             .with_execution_providers([ep::CPU::default().with_arena_allocator(false).build()])
             .map_err(fail)?
-            .commit_from_file(model_dir.join(MODEL_FILE))
+            .commit_from_file(model_dir.join(graph))
             .map_err(|e| format!("failed to load embedding model: {e}"))?;
 
         info!(
@@ -154,7 +165,10 @@ fn model_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("no resource dir: {e}"))?
         .join(MODEL_DIR);
     if !dir.join(MODEL_FILE).exists() {
-        return Err(format!("embedding model not bundled at {}", dir.display()));
+        return Err(format!(
+            "embedding model not bundled at {} (run scripts/download-embedding-model.mjs)",
+            dir.display()
+        ));
     }
     Ok(dir)
 }
@@ -254,6 +268,87 @@ mod tests {
             assert!(sim > 0.995, "verse {i}: cosine {sim} with the pack");
             assert!((cosine(ours, ours) - 1.0).abs() < 1e-3, "not normalised");
         }
+    }
+
+    /// Resident memory of this process, in MB.
+    fn rss_mb() -> f64 {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse::<f64>()
+            .unwrap_or(0.0)
+            / 1024.0
+    }
+
+    /// What 0.1.26 failed in the webview: hours of sermon-sized batches must
+    /// not grow memory. Run with `-- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn memory_stays_flat_over_a_long_service() {
+        let Some(dir) = local_model_dir() else { return };
+        let mut embedder = Embedder::load(&dir).unwrap();
+        let words = "for God so loved the world that he gave his only begotten son and \
+                     whosoever believeth in him should not perish but have everlasting life"
+            .split(' ')
+            .collect::<Vec<_>>();
+        // Batches of 1-12 sentences of 4-30 words, varying every call, as the
+        // live detector sends them.
+        let batch = |n: usize| -> Vec<String> {
+            (0..1 + n % 12)
+                .map(|i| {
+                    let len = 4 + (n * 7 + i * 13) % 27;
+                    let text = (0..len)
+                        .map(|w| words[(n + i + w) % words.len()])
+                        .collect::<Vec<_>>();
+                    format!("task: search result | query: {}", text.join(" "))
+                })
+                .collect()
+        };
+        for n in 0..50 {
+            embedder.embed(&batch(n)).unwrap();
+        }
+        let warm = rss_mb();
+        let started = std::time::Instant::now();
+        let runs = 1500;
+        for n in 0..runs {
+            embedder.embed(&batch(n)).unwrap();
+            if n % 300 == 0 {
+                eprintln!("batch {n}: {:.0} MB", rss_mb());
+            }
+        }
+        let end = rss_mb();
+        eprintln!(
+            "warm {warm:.0} MB -> {end:.0} MB after {runs} batches, {:.1} ms per batch",
+            started.elapsed().as_secs_f64() * 1000.0 / runs as f64
+        );
+        assert!(end - warm < 100.0, "grew {:.0} MB", end - warm);
+        // ~650 MB measured on macOS. The stock graph sat at 1.6 GB, rebuilding
+        // the 805 MB float32 token table on every call.
+        assert!(end < 1000.0, "footprint {end:.0} MB");
+    }
+
+    /// The rewritten graph only reorders the embedding lookup; anything but
+    /// identical output means the rewrite changed the model.
+    #[test]
+    fn rewritten_graph_matches_the_stock_one() {
+        let Some(dir) = local_model_dir() else { return };
+        let texts: Vec<String> = [
+            "task: search result | query: for God so loved the world",
+            "title: none | text: In the beginning God created the heaven and the earth.",
+            "task: clustering | query: turn with me to Romans chapter eight this morning",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let ours = Embedder::load(&dir).unwrap().embed(&texts).unwrap();
+        let stock = Embedder::load_graph(&dir, STOCK_MODEL_FILE)
+            .unwrap()
+            .embed(&texts)
+            .unwrap();
+        assert_eq!(ours, stock);
     }
 
     /// Padding a short text into a batch with a long one must not change it.

@@ -5,6 +5,7 @@ import type { EMBEDDING_GEMMA as APP_MODEL, EmbeddingKind } from '../../src/serv
 export declare const EMBEDDING_MODEL: typeof APP_MODEL
 export declare const EMBEDDING_MODEL_REVISION: string
 export declare const EMBEDDING_MODEL_FILES: ReadonlyArray<{ path: string; size: number; sha256: string }>
+export declare const EMBEDDING_GRAPH: { source: string; path: string; sha256: string }
 export declare const GEMMA_NOTICE: string
 export declare function loadEmbedder(
     repoRoot: string,

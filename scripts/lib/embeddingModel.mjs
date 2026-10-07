@@ -34,6 +34,19 @@ export const EMBEDDING_MODEL_FILES = [
 ]
 
 /**
+ * The graph the desktop app runs: `onnx/model_quantized.onnx` rewritten to look
+ * the token embedding up before dequantizing it, which keeps the 805 MB float32
+ * table from being built on every call (see `scripts/embedding-graph/`). Same
+ * weights file, bit-identical output. The downloader installs it beside the
+ * weights, since the graph finds them by relative path.
+ */
+export const EMBEDDING_GRAPH = {
+    source: 'scripts/embedding-graph/model_quantized_gather_first.onnx',
+    path: 'onnx/model_quantized_gather_first.onnx',
+    sha256: '77d871d020c7a44a330f93fac629f756656e0cba3bbe324230cdbf75df33c316',
+}
+
+/**
  * EmbeddingGemma is distributed under the Gemma Terms of Use, which require
  * this notice to travel with any copy we redistribute (Terms §3.1). The
  * downloader writes it beside the bundled weights.
