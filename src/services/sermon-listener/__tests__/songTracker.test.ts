@@ -257,9 +257,16 @@ describe('SongPositionTracker', () => {
             // is not a line taking four minutes.
             t.ingest({ text: 'I once was lost but now am found', timeMs: 242_000 })
             t.ingest({ text: 'Was blind but now I see', timeMs: 244_000 })
-            // Only the two 2s observations survived — still one short of the
-            // minimum, so no estimate is offered yet.
-            expect(t.getState().estimatedLineMs).toBeNull()
+            // Only the two 2s observations survived; the four-minute gap did
+            // not drag the estimate up.
+            expect(t.getState().estimatedLineMs).toBe(2000)
+        })
+
+        it('trusts measured timing after two lines', () => {
+            const t = newTracker()
+            t.ingest({ text: 'Amazing grace how sweet the sound', timeMs: 0 })
+            expect(t.ingest({ text: 'That saved a wretch like me', timeMs: 3000 }).estimatedLineMs).toBeNull()
+            expect(t.ingest({ text: 'I once was lost but now am found', timeMs: 6000 }).estimatedLineMs).toBe(3000)
         })
 
         it('reports the lines left in the current section', () => {
@@ -398,5 +405,92 @@ describe('SongPositionTracker', () => {
         const u = t.ingest({ text: 'something about chains here' })
         expect(u.phase).toBe('tracking')
         expect(u.singer?.sectionId).toBe('c1')
+    })
+})
+
+describe('leading on the clock, and taking it back', () => {
+    it('takes back a predicted lead the transcript contradicts', () => {
+        const t = newTracker({ defaultLineMs: 4000 })
+        t.ingest({ text: 'Amazing grace how sweet the sound', timeMs: 0 })
+        expect(t.leadDisplay().displaySectionId).toBe('c1')
+        // Three lines still to sing at ~4 s each: the prediction was early.
+        const back = t.reviewLead(0)
+        expect(back?.reason).toBe('lead-retracted')
+        expect(back?.displaySectionId).toBe('v1')
+    })
+
+    it('does not lead the same section on the clock again, so the slides cannot flicker', () => {
+        const t = newTracker({ defaultLineMs: 4000 })
+        t.ingest({ text: 'Amazing grace how sweet the sound', timeMs: 0 })
+        t.leadDisplay()
+        t.reviewLead(0)
+        expect(t.leadDisplay().reason).toBe('lead-blocked')
+        // Nor does reaching the last line: a band looping a section's ending
+        // would otherwise flip the slide on every pass.
+        expect(t.ingest({ text: 'Was blind but now I see', timeMs: 12_000 }).displaySectionId).toBe('v1')
+    })
+
+    it('lifts the bar once the singers move on', () => {
+        const t = newTracker({ defaultLineMs: 4000 })
+        t.ingest({ text: 'Amazing grace how sweet the sound', timeMs: 0 })
+        t.leadDisplay()
+        t.reviewLead(0)
+        const u = t.ingest({ text: 'My chains are gone I have been set free', timeMs: 16_000 })
+        expect(u.displaySectionId).toBe('c1')
+        expect(t.leadDisplay().reason).toBe('lead-predicted')
+    })
+
+    it('keeps a predicted lead when the singers are close to the end', () => {
+        const t = newTracker({ defaultLineMs: 4000 })
+        t.ingest({ text: 'I once was lost but now am found', timeMs: 0 })
+        t.leadDisplay()
+        // One line left, two seconds of transcript lag: under the bar.
+        expect(t.reviewLead(2000)).toBeNull()
+    })
+
+    it('never takes back a lead the transcript itself triggered', () => {
+        const t = newTracker()
+        const u = t.ingest({ text: 'Was blind but now I see', timeMs: 0 })
+        expect(u.displaySectionId).toBe('c1')
+        expect(t.reviewLead(0)).toBeNull()
+    })
+
+    it('times the lead from where the transcript ended, not where it matched best', () => {
+        const t = newTracker()
+        // One segment spanning three lines: the singers are on the third now.
+        const u = t.ingest({
+            text: 'Amazing grace how sweet the sound that saved a wretch like me I once was lost but now am found',
+            timeMs: 0,
+        })
+        expect(u.linesRemaining).toBe(1)
+    })
+})
+
+describe('far jumps need real evidence', () => {
+    // Scores scripted so the test controls exactly how strong each window's
+    // evidence is: a query containing the marker word scores `weight` against
+    // the first line of the song; otherwise only an exact line matches.
+    const MARK = 'zzmarker'
+    const scripted = (weight: number) => (query: string, line: string) =>
+        query.includes(MARK)
+            ? line === 'Amazing grace how sweet the sound' ? weight : 0
+            : normalizeLine(query) === normalizeLine(line) ? 1 : 0
+
+    it('ignores weak windows rather than confirming a jump on them', () => {
+        const t = newTracker({ scorer: scripted(0.5) })
+        t.ingest({ text: 'And like a flood His mercy reigns', timeMs: 0 })
+        const a = t.ingest({ text: MARK, timeMs: 2000 })
+        const b = t.ingest({ text: MARK, timeMs: 3000 })
+        expect([a.reason, b.reason]).toEqual(['jump-weak', 'jump-weak'])
+        expect(b.singer?.sectionId).toBe('c1')
+        expect(b.phase).toBe('tracking')
+    })
+
+    it('still confirms a jump on two solid windows', () => {
+        const t = newTracker({ scorer: scripted(0.7) })
+        t.ingest({ text: 'And like a flood His mercy reigns', timeMs: 0 })
+        t.ingest({ text: MARK, timeMs: 1000 })
+        const u = t.ingest({ text: MARK, timeMs: 2000 })
+        expect(u.singer?.sectionId).toBe('v1')
     })
 })

@@ -3,6 +3,7 @@ import { useAppStore } from '../store/appStore'
 import { DEFAULT_SONG_TRACKING, type SongTrackingStep, type SongTrackingStatus } from '../store/appStore'
 import { useSermonListenerContext } from '../components/sermon-listener/SermonListenerContext'
 import { SongPositionTracker, type TrackerUpdate } from '../services/sermon-listener/songTracker'
+import { TranscriptLagEstimator, leadDelayMs } from '../services/sermon-listener/songLead'
 import type { Slide, Song } from '../types'
 import { sectionsForSong } from '../lib/songSections'
 
@@ -37,12 +38,6 @@ import { sectionsForSong } from '../lib/songSections'
  *    a two-line chorus arrives well after the singers have moved on.
  */
 
-/** Put the next section up this long before the current one is predicted to
- *  end, so it is already on screen when the singers reach it. */
-const LEAD_SAFETY_MS = 600
-/** Sanity bound on the measured transcript lag. */
-const MAX_LAG_MS = 8000
-
 export function useSongTracker() {
     const listener = useSermonListenerContext()
     const isListening = listener?.isListening ?? false
@@ -66,31 +61,15 @@ export function useSongTracker() {
     const lastInterimRef = useRef('')
     const leadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    // Transcript lag estimation. Segment timestamps are sermon-relative (ms
-    // since capture started) while scheduling happens in wall-clock time, so we
-    // need the wall-clock instant that sermon time zero corresponds to.
-    //
-    // The anchor is when the listener started, which is within a few hundred ms
-    // of the capture loop's own zero. It cannot be recovered from the segments
-    // themselves: `received - endMs` equals the origin plus that segment's lag,
-    // and a lag that is *systematic* — which transcription lag is — is exactly
-    // the case where taking the minimum over many segments still leaves the
-    // whole lag folded into the estimate, reporting zero. Segments only refine
-    // the anchor downward, guarding against a start timestamp recorded late.
-    const wallOriginRef = useRef<number | null>(null)
-    const lagMsRef = useRef(0)
-
-    // Anchor on the rising edge of `isListening`. Slightly early if anything
+    // How far behind the audio the transcript runs — see TranscriptLagEstimator.
+    // Anchored on the rising edge of `isListening`: slightly early if anything
     // (device open, model load) sits between this flag and the capture loop's
     // first sample, which biases the lag *up* — the safe direction here, since
     // an overstated lag only means the next section goes up a touch early.
+    const lagRef = useRef(new TranscriptLagEstimator())
     useEffect(() => {
-        if (!isListening) {
-            wallOriginRef.current = null
-            lagMsRef.current = 0
-            return
-        }
-        wallOriginRef.current = Date.now()
+        if (!isListening) lagRef.current.stop()
+        else lagRef.current.start(Date.now())
     }, [isListening])
 
     // Keep the latest segment list in a ref so the rebuild effect can seed its
@@ -227,12 +206,8 @@ export function useSongTracker() {
         clearLeadTimer()
         const tracker = trackerRef.current
         if (!tracker) return
-        if (u.phase !== 'tracking' || u.singer === null) return
-        if (u.estimatedLineMs === null) return
-        // Already led (by the trailing-edge rule or a previous timer) — the
-        // tracker refuses to lead twice, so there's nothing to schedule.
-        if (u.displayStepIndex !== u.singer.stepIndex) return
-        if (u.singer.stepIndex + 1 >= tracker.steps.length) return
+        const delay = leadDelayMs(u, lagRef.current.lagMs, tracker.steps.length)
+        if (delay === null) return
 
         const fire = () => {
             leadTimerRef.current = null
@@ -240,18 +215,11 @@ export function useSongTracker() {
             if (!t) return
             apply(t.leadDisplay())
         }
-
-        // Time until the section ends, from now: what's left of it on the audio
-        // timeline, minus how far behind that timeline we are, minus the lead.
-        const delay = u.linesRemaining * u.estimatedLineMs - lagMsRef.current - LEAD_SAFETY_MS
-        if (delay <= 0) {
-            // The transcript is already later than the section has left to run —
-            // this is the short-section case the trailing-edge rule can never
-            // win, so lead now rather than at a moment already past.
-            fire()
-            return
-        }
-        leadTimerRef.current = setTimeout(fire, delay)
+        // Zero: the transcript is already later than the section has left to
+        // run — the short-section case the trailing-edge rule can never win —
+        // so lead now rather than at a moment already past.
+        if (delay === 0) fire()
+        else leadTimerRef.current = setTimeout(fire, delay)
     }, [apply, clearLeadTimer])
 
     // (Re)build the tracker when the tracked song changes.
@@ -303,8 +271,7 @@ export function useSongTracker() {
             // A fresh capture session — sermon time restarted, so the origin
             // anchored to the previous one is meaningless.
             processedCountRef.current = 0
-            wallOriginRef.current = Date.now()
-            lagMsRef.current = 0
+            lagRef.current.start(Date.now())
         }
         if (segs.length === processedCountRef.current) return
 
@@ -322,17 +289,10 @@ export function useSongTracker() {
 
         // Update the lag estimate from the newest segment before scheduling.
         const newest = segs[segs.length - 1]
-        if (newest && typeof newest.endMs === 'number') {
-            const receivedAt = Date.now()
-            // A segment can never arrive before the audio it covers, so
-            // `received - endMs` is an upper bound on the origin; use it if the
-            // anchor above turned out to be later than that.
-            const bound = receivedAt - newest.endMs
-            wallOriginRef.current =
-                wallOriginRef.current === null ? bound : Math.min(wallOriginRef.current, bound)
-            const lag = receivedAt - (wallOriginRef.current + newest.endMs)
-            lagMsRef.current = Math.max(0, Math.min(MAX_LAG_MS, lag))
-        }
+        if (newest && typeof newest.endMs === 'number') lagRef.current.observe(Date.now(), newest.endMs)
+        // A lead put up on the clock that this transcript contradicts — the
+        // singers are repeating the section — comes back down.
+        last = tracker.reviewLead(lagRef.current.lagMs) ?? last
 
         apply(last)
         scheduleLead(last)

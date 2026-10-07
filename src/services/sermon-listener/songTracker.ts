@@ -168,6 +168,19 @@ export interface TrackerUpdate {
     estimatedLineMs: number | null
 }
 
+/**
+ * How much of the section must still be left, by the line-timing model, for a
+ * predicted lead to be taken back. A lead made on the clock assumes each line
+ * is sung once, in order; worship repeats lines and whole sections, so the
+ * prediction is often early. When fresher transcript shows the singers this
+ * far from the end, the projector is showing lyrics nobody is singing yet.
+ */
+export const RETRACT_REMAINING_MS = 2500
+
+/** Timings are only trusted once this many have been observed — below it a
+ *  single oddly-segmented utterance would dominate the estimate. */
+const MIN_LINE_TIMING_SAMPLES = 2
+
 export interface TrackerConfig {
     /** Min score to lock onto a song while searching. */
     searchThreshold: number
@@ -181,10 +194,30 @@ export interface TrackerConfig {
     maxMisses: number
     /** Consecutive confirmations required for a backward / far jump. */
     jumpHysteresis: number
+    /** Minimum score for a window to count towards confirming a far jump. A
+     *  weaker match holds position instead — neither confirming the jump nor
+     *  counting as a miss. */
+    jumpMinScore: number
     /** Words of transcript tail to match against. */
     tailWords: number
     /** Pluggable scorer (defaults to {@link lyricSimilarity}). */
     scorer: ScorerFn
+    /** Remaining section time (ms, by the line model) above which a predicted
+     *  lead is taken back — see {@link SongPositionTracker.reviewLead}. */
+    retractRemainingMs: number
+    /** After a retraction, the clock may lead that section again only once the
+     *  singers are within this many lines of its end; -1 never. */
+    rePredictLinesRemaining: number
+    /** After a retraction, also stop the last-line rule from leading that
+     *  section, so a band looping its ending can't flicker the slides. */
+    holdAfterRetract: boolean
+    /** Line duration (ms) assumed until enough lines have been timed, or null
+     *  to make no prediction until then. Off by default: a guess wrong for a
+     *  slow song leads too early, and the retraction that follows then holds
+     *  the section back, so the change ends up later than with no guess. */
+    defaultLineMs: number | null
+    /** Line timings needed before the measured estimate is trusted. */
+    minLineSamples: number
 }
 
 export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
@@ -194,15 +227,24 @@ export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
     lookahead: 2,
     maxMisses: 3,
     jumpHysteresis: 2,
+    jumpMinScore: 0.6,
     tailWords: STOP_TAIL_WORDS,
     scorer: lyricSimilarity,
+    retractRemainingMs: RETRACT_REMAINING_MS,
+    rePredictLinesRemaining: -1,
+    holdAfterRetract: true,
+    defaultLineMs: null,
+    minLineSamples: MIN_LINE_TIMING_SAMPLES,
 }
+
+/** Words at the end of a transcript used to place the singers on a later
+ *  line of the matched section ({@link SongPositionTracker.lineAtTail}). */
+const TAIL_WORDS = 5
+/** Shorter transcripts are a single line or less; there is no tail to read. */
+const TAIL_MIN_QUERY_WORDS = 8
 
 /** Line timings kept for the rolling duration estimate. */
 const LINE_TIMING_HISTORY = 8
-/** Timings are only trusted once this many have been observed — below it a
- *  single oddly-segmented utterance would dominate the estimate. */
-const MIN_LINE_TIMING_SAMPLES = 3
 /** Plausible bounds for one sung line. Outside these the "advance" almost
  *  certainly spans a gap we didn't observe (an instrumental, a missed line, a
  *  pause between songs) rather than a line actually taking that long. */
@@ -239,6 +281,9 @@ export class SongPositionTracker {
     private phase: TrackerPhase = 'idle'
     private singerStep = -1
     private singerLine = -1
+    /** Where the latest transcript *ended* within the singer's section — at or
+     *  after `singerLine`. Used only to time the clock lead; see {@link lineAtTail}. */
+    private tailLine = -1
     /** Arrangement step currently displayed, or -1. Indexed by *step* rather
      *  than section id: a section that repeats in the arrangement occupies
      *  several steps, and keying the display on its id makes those steps
@@ -255,6 +300,13 @@ export class SongPositionTracker {
     private lastMatchMs: number | null = null
     private lastMatchAbsLine: number | null = null
     private lineDurations: number[] = []
+
+    /** Display step put up by {@link leadDisplay} (a prediction), or -1. */
+    private predictedLeadStep = -1
+    /** Step whose predicted lead was taken back. The clock may lead it again
+     *  only once the transcript puts the singers in its last two lines —
+     *  see {@link reviewLead}. */
+    private noPredictStep = -1
 
     // Pending non-adjacent jump target awaiting hysteresis confirmation.
     private pendingJump: { stepIndex: number; lineIndex: number; count: number } | null = null
@@ -279,6 +331,7 @@ export class SongPositionTracker {
         this.phase = 'idle'
         this.singerStep = -1
         this.singerLine = -1
+        this.tailLine = -1
         this.displayStep = -1
         this.confidence = 0
         this.consecutiveMisses = 0
@@ -287,6 +340,8 @@ export class SongPositionTracker {
         this.lineDurations = []
         this.pendingJump = null
         this.buffer = []
+        this.predictedLeadStep = -1
+        this.noPredictStep = -1
     }
 
     getPhase(): TrackerPhase {
@@ -320,6 +375,7 @@ export class SongPositionTracker {
         }
         this.singerStep = stepIndex
         this.singerLine = 0
+        this.tailLine = 0
         this.confidence = 1
         this.consecutiveMisses = 0
         this.pendingJump = null
@@ -368,8 +424,46 @@ export class SongPositionTracker {
         const next = Math.max(this.singerStep, this.displayStep) + 1
         if (next >= this.steps.length) return this.snapshot(false, 'lead-at-end')
         if (next > this.singerStep + 1) return this.snapshot(false, 'lead-already-ahead')
+        if (
+            this.singerStep === this.noPredictStep &&
+            (this.config.rePredictLinesRemaining < 0 || this.linesRemaining() > this.config.rePredictLinesRemaining)
+        ) {
+            return this.snapshot(false, 'lead-blocked')
+        }
         const changed = this.setDisplayStep(next)
+        if (changed) this.predictedLeadStep = next
         return this.snapshot(changed, 'lead-predicted')
+    }
+
+    /**
+     * Take back a predicted lead the transcript has since contradicted.
+     *
+     * Called after each finalized transcript, with how far behind the audio
+     * that transcript runs. If the display was led on the clock and the singer
+     * is still at least {@link RETRACT_REMAINING_MS} from the end of their
+     * section — they repeated a line, or the whole section — the slide goes
+     * back to the one being sung. The clock may not lead that section again
+     * until the transcript places the singers in its last two lines: they have
+     * shown it doesn't follow the timing model, and re-predicting from the same
+     * stale position would only flicker the slides. Seeing its last line still
+     * leads it normally.
+     */
+    reviewLead(lagMs: number): TrackerUpdate | null {
+        if (this.phase !== 'tracking' || this.singerStep < 0) return null
+        if (this.displayStep !== this.singerStep + 1 || this.displayStep !== this.predictedLeadStep) return null
+        const lineMs = this.estimatedLineMs()
+        if (lineMs === null) return null
+        // Judged from the best-matching line, not the tail: retracting is a claim
+        // that the singers are still well inside the section, so it should rest
+        // on the line the transcript most clearly placed them on.
+        const step = this.steps[this.singerStep]
+        const remainingLines = Math.max(0, step.lines.length - 1 - this.singerLine)
+        const remainingMs = remainingLines * lineMs - lagMs
+        if (remainingMs < this.config.retractRemainingMs) return null
+        this.predictedLeadStep = -1
+        this.noPredictStep = this.singerStep
+        this.setDisplayStep(this.singerStep)
+        return this.snapshot(true, 'lead-retracted')
     }
 
     /** Feed a transcript chunk; returns the resulting display decision. */
@@ -426,6 +520,7 @@ export class SongPositionTracker {
         if (best && best.score >= this.config.searchThreshold) {
             this.singerStep = best.stepIndex
             this.singerLine = best.lineIndex
+            this.tailLine = this.lineAtTail(query, best.stepIndex, best.lineIndex)
             this.confidence = best.score
             this.consecutiveMisses = 0
             this.noteMatchTime(chunk, best.stepIndex, best.lineIndex, false)
@@ -459,6 +554,15 @@ export class SongPositionTracker {
             // independent evidence — would be satisfied by a single phrase.
             if (interim) return this.snapshot(false, 'interim-jump-ignored')
 
+            // A far jump needs real evidence. Speech over a vamp — a leader
+            // exhorting the congregation while the band keeps playing — scores
+            // around 0.5 against *some* line by sharing a few words, and two
+            // such windows used to confirm a jump to an unrelated section and
+            // hold it on screen for twenty seconds. Weak windows neither confirm
+            // the jump nor count as a miss: the singers are most likely still
+            // where they were.
+            if (best.score < this.config.jumpMinScore) return this.snapshot(false, 'jump-weak')
+
             // Guard against transient noise causing a wild jump.
             if (
                 this.pendingJump &&
@@ -479,6 +583,7 @@ export class SongPositionTracker {
         if (!interim) this.pendingJump = null
         this.singerStep = best.stepIndex
         this.singerLine = best.lineIndex
+        this.tailLine = this.lineAtTail(query, best.stepIndex, best.lineIndex)
         this.confidence = best.score
         if (!interim) this.consecutiveMisses = 0
         this.noteMatchTime(chunk, best.stepIndex, best.lineIndex, interim)
@@ -487,6 +592,32 @@ export class SongPositionTracker {
         const changed = this.recomputeDisplay()
         const reason = interim ? (changed ? 'interim-advanced' : 'interim-tracking') : changed ? 'advanced' : 'tracking'
         return this.snapshot(changed, reason)
+    }
+
+    /**
+     * The line the singers are on at the *end* of this transcript.
+     *
+     * A segment often spans several lines — singing rarely pauses long enough
+     * to end one sooner — and the best-matching line is wherever the clearest
+     * words happened to fall, frequently the first. The segment's last words
+     * are the most recent audio, so if they match a later line of the same
+     * section, that is where the singers are now. Placing them earlier made
+     * every lead late: the clock thought lines were left that had been sung.
+     *
+     * Only moves forward within the section, and only on a solid match.
+     * Line timing still uses the best-matching line (see {@link noteMatchTime}),
+     * whose timestamp the segment's start actually describes.
+     */
+    private lineAtTail(query: string, stepIndex: number, lineIndex: number): number {
+        const words = tokenize(query)
+        if (words.length < TAIL_MIN_QUERY_WORDS) return lineIndex
+        const tail = words.slice(-TAIL_WORDS).join(' ')
+        const lines = this.steps[stepIndex]?.lines ?? []
+        let at = lineIndex
+        for (let l = lineIndex + 1; l < lines.length; l++) {
+            if (this.config.scorer(tail, lines[l]) >= this.config.triggerThreshold) at = l
+        }
+        return at
     }
 
     /**
@@ -533,17 +664,18 @@ export class SongPositionTracker {
      * one segment that bundled two lines, shouldn't drag the estimate.
      */
     private estimatedLineMs(): number | null {
-        if (this.lineDurations.length < MIN_LINE_TIMING_SAMPLES) return null
+        if (this.lineDurations.length < this.config.minLineSamples) return this.config.defaultLineMs
         const sorted = this.lineDurations.slice().sort((a, b) => a - b)
         const mid = sorted.length >> 1
         return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
     }
 
-    /** Lines left in the singer's section after the one they're on. */
+    /** Lines left in the singer's section after the latest transcript ended —
+     *  what the clock lead counts down. */
     private linesRemaining(): number {
         const step = this.steps[this.singerStep]
         if (!step) return 0
-        return Math.max(0, step.lines.length - 1 - this.singerLine)
+        return Math.max(0, step.lines.length - 1 - Math.max(this.singerLine, this.tailLine))
     }
 
     private handleMiss(): TrackerUpdate {
@@ -579,11 +711,14 @@ export class SongPositionTracker {
     private recomputeDisplay(): boolean {
         const step = this.steps[this.singerStep]
         if (!step) return false
+        // The bar on re-predicting a section lasts only while it is being sung.
+        if (this.noPredictStep !== -1 && this.singerStep !== this.noPredictStep) this.noPredictStep = -1
 
         const onLastLine = this.singerLine >= step.lines.length - 1
         const hasNext = this.singerStep + 1 < this.steps.length
+        const blocked = this.config.holdAfterRetract && this.singerStep === this.noPredictStep
         const leadAhead =
-            onLastLine && hasNext && this.confidence >= this.config.triggerThreshold
+            onLastLine && hasNext && !blocked && this.confidence >= this.config.triggerThreshold
 
         let target = leadAhead ? this.singerStep + 1 : this.singerStep
 
@@ -604,6 +739,9 @@ export class SongPositionTracker {
     private setDisplayStep(stepIndex: number): boolean {
         if (stepIndex === this.displayStep) return false
         this.displayStep = stepIndex
+        // Any move made other than by `leadDisplay` (which re-marks it) is
+        // evidence-driven, not a prediction.
+        this.predictedLeadStep = -1
         return true
     }
 
