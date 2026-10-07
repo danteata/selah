@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { applyThemeClass, readStoredTheme } from './utils/theme'
+import { persistClerkDevBrowser } from './lib/clerkSessionPersistence'
 
 /**
  * Fold a path-style route into the hash, before the router reads the URL.
@@ -22,6 +23,9 @@ function adoptPathRoute() {
     window.history.replaceState(null, '', `/${search}#${pathname.replace(/\/$/, '')}`)
 }
 adoptPathRoute()
+
+// Before <ClerkProvider> loads clerk-js, which reads the restored sign-in.
+persistClerkDevBrowser(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY)
 
 // Before React mounts, so the first paint is already in the right theme. The
 // store initialises from the same function, so the two can't disagree.
