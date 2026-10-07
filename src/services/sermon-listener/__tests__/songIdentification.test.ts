@@ -281,6 +281,27 @@ describe('identifySong', () => {
             expect(m).toBeNull()
         })
 
+        it('names one copy when the library holds the same song twice', () => {
+            // Imported once as verses and once as a single block, in capitals:
+            // the same song, so matching both is not ambiguity.
+            const copy: Song = {
+                id: 'song-x-copy', title: 'SONG X (COPY)', artist: 'x', lyrics: '',
+                sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: [
+                    'WORTHY IS THE LAMB THAT WAS SLAIN',
+                    'FOR US HOLY HOLY HOLY IS THE LORD GOD ALMIGHTY',
+                    'GLORY AND HONOUR AND POWER BELONG TO YOU',
+                ] }],
+            }
+            const verses: Song = { ...SONG_X, sections: [
+                { id: 'v1', type: 'verse', label: 'Verse 1', lines: SONG_X.sections![0].lines.slice(0, 2) },
+                { id: 'v2', type: 'verse', label: 'Verse 2', lines: SONG_X.sections![0].lines.slice(2) },
+            ] }
+            const idx = buildSongIndex([copy, verses])
+            const m = identifySong('worthy is the lamb that was slain for us holy holy holy is the lord god almighty', idx)
+            // The better structured copy, every time.
+            expect(m?.songId).toBe('song-x')
+        })
+
         it('identifies the correct song once a distinctive line breaks the tie', () => {
             const idx = buildSongIndex([SONG_X, SONG_Y])
             const m = identifySong(

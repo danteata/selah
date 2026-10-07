@@ -47,6 +47,9 @@ export interface SongLineEntry {
     title: string
     sectionId: string
     lineIndex: number
+    /** Last line this entry covers: `lineIndex` for a single line, the next
+     *  line for a phrase entry (see {@link buildSongIndex}). */
+    lastLineIndex: number
     text: string
     /** Distinctive (stopword-filtered, stemmed) words of the line, DEDUPED.
      *  Used to reject matches that only overlap on filler words — which means
@@ -74,6 +77,52 @@ const MIN_SHARED_CONTENT = 2
  *  distinctive also guards against two unrelated real songs coincidentally
  *  sharing one distinctive word plus one generic one. */
 const MIN_DISTINCTIVE_SHARED = 2
+/**
+ * What a worship leader calls out between lines, in any song: "everybody put
+ * your hands together", "come on, lift your hands", "make some noise" — and
+ * the fillers of ordinary talk ("okay", "all right", "gonna"). Some
+ * songs carry such a call as a lyric, so a leader saying it four times named
+ * that song (Enyo, from the intro of an unrelated recording). Like the generic
+ * theological words, these don't count towards {@link MIN_DISTINCTIVE_SHARED}:
+ * a match has to rest on words particular to the song. Content-word forms, as
+ * `getContentWords` returns them.
+ */
+const CROWD_CALL_WORDS = new Set([
+    'everybody', 'everyone', 'somebody', 'put', 'hand', 'hands', 'together', 'come', 'clap',
+    'lift', 'raise', 'shout', 'scream', 'make', 'noise', 'stand', 'feet', 'jump', 'dance',
+    'wave', 'say', 'says', 'yeah', 'right', 'now', 'let', 'go',
+    'okay', 'alright', 'hey', 'oh', 'ooh', 'whoa', 'la', 'na', 'hallelujah', 'good',
+    'gonna', 'wanna', 'gotta',
+    // Counting in ("one, two, three, four") is a lyric in some songs and
+    // ordinary speech everywhere else.
+    'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+])
+
+function isGenericWord(word: string): boolean {
+    // Under three letters is a contraction's leftover ("m" of "I'm", "ll",
+    // "re") or a syllable; neither tells songs apart.
+    return word.length < 3 || isTheologicalCommon(word) || CROWD_CALL_WORDS.has(word)
+}
+
+/** Stems `getContentWords` leaves of a negative contraction ("don't" → "don"). */
+const CONTRACTION_STEMS = new Set(['don', 'won', 'can', 'isn', 'aren', 'didn', 'doesn', 'wasn', 'ain', 'couldn', 'wouldn', 'shouldn'])
+
+/**
+ * A line's distinct content words, without contraction leftovers. Counting
+ * "m" (of "I'm") or "don" and "t" (of "don't") as words let "(I'm going, I'm
+ * going)" and "DON'T YOU KNOW" past {@link MIN_LINE_DISTINCT_CONTENT}, and
+ * each then matched any sentence with "going" or "know" in it.
+ */
+function lineContentWords(line: string): string[] {
+    return Array.from(new Set(getContentWords(spellOutNumbers(line)))).filter(
+        (w) => w.length >= 3 && !CONTRACTION_STEMS.has(w),
+    )
+}
+
+/** Whether a lyric line has a content word that isn't generic. */
+function hasOwnWord(line: string): boolean {
+    return lineContentWords(line).some((w) => !isGenericWord(w))
+}
 /** Minimum fraction of the *query's* distinctive words that a candidate line
  *  must explain (shared words / query's content-word count). Every gate above
  *  measures overlap from the line's side only, so a short, ubiquitous worship
@@ -99,6 +148,10 @@ export interface SongIndex {
     token: Map<string, number[]>
     /** number of songs indexed */
     songCount: number
+    /** Every word of each indexed song, in order — short lines included —
+     *  for telling two copies of one song apart from two songs that share a
+     *  passage (see `sameLyrics`). */
+    words: Map<string, string[]>
 }
 
 export interface SongMatch {
@@ -128,12 +181,13 @@ export interface IdentifyOptions {
     minMatchedLines?: number
 }
 
-const EMPTY_INDEX: SongIndex = { entries: [], token: new Map(), songCount: 0 }
+const EMPTY_INDEX: SongIndex = { entries: [], token: new Map(), songCount: 0, words: new Map() }
 
 /** Build a searchable index from the song library. */
 export function buildSongIndex(songs: Song[]): SongIndex {
     const entries: SongLineEntry[] = []
     const token = new Map<string, number[]>()
+    const words = new Map<string, string[]>()
 
     for (const song of songs) {
         const songId = song._id || song.id
@@ -146,18 +200,38 @@ export function buildSongIndex(songs: Song[]): SongIndex {
         // are the entries ordinary preaching matches near-verbatim. They stay
         // in the library to project by hand; they are just never auto-detected.
         if (!isLikelySong({ title: song.title, sections })) continue
+        words.set(songId, sections.flatMap((section) => section.lines.flatMap((line) => tokenize(line))))
         for (const section of sections) {
-            section.lines.forEach((line, lineIndex) => {
+            // Each line, and each pair of adjacent lines as one phrase.
+            // Projection software splits a sung line across short display
+            // lines ("And these are the days" / "of your servant, Moses"); on
+            // its own each half was too short to index or too small a share
+            // of a 14-word window to pass the coverage gate, so a song sung
+            // word for word went unrecognised.
+            //
+            // Only lines that each carry a word of their own are paired: a
+            // filler line ("Yeah yeah yeah yeah") joined to its neighbour made
+            // a phrase that ordinary "all right… yeah… good" talk matched.
+            const spans: Array<[number, number]> = []
+            section.lines.forEach((_, l) => {
+                spans.push([l, l])
+                if (l + 1 < section.lines.length && hasOwnWord(section.lines[l]) && hasOwnWord(section.lines[l + 1])) {
+                    spans.push([l, l + 1])
+                }
+            })
+            for (const [lineIndex, lastLineIndex] of spans) {
+                const line = section.lines.slice(lineIndex, lastLineIndex + 1).join(' ')
                 const toks = tokenize(line)
-                if (toks.length < MIN_LINE_WORDS) return
-                const content = Array.from(new Set(getContentWords(spellOutNumbers(line))))
-                if (content.length < MIN_LINE_DISTINCT_CONTENT) return
+                if (toks.length < MIN_LINE_WORDS) continue
+                const content = lineContentWords(line)
+                if (content.length < MIN_LINE_DISTINCT_CONTENT) continue
                 const idx = entries.length
                 entries.push({
                     songId,
                     title: song.title,
                     sectionId: section.id,
                     lineIndex,
+                    lastLineIndex,
                     text: line,
                     content,
                 })
@@ -172,11 +246,11 @@ export function buildSongIndex(songs: Song[]): SongIndex {
                     }
                     arr.push(idx)
                 }
-            })
+            }
         }
     }
 
-    return { entries, token, songCount: songs.length }
+    return { entries, token, songCount: songs.length, words }
 }
 
 /**
@@ -219,9 +293,7 @@ export function identifySong(
 
     interface Agg {
         title: string
-        scores: number[]
-        bestEntry: SongLineEntry
-        bestScore: number
+        hits: Array<{ entry: SongLineEntry; score: number }>
     }
     const perSong = new Map<string, Agg>()
     for (const i of candidates) {
@@ -236,7 +308,7 @@ export function identifySong(
         for (const w of e.content) {
             if (!qContent.has(w)) continue
             sharedContent++
-            if (!isTheologicalCommon(w)) distinctiveShared++
+            if (!isGenericWord(w)) distinctiveShared++
         }
         if (sharedContent < MIN_SHARED_CONTENT) continue
         if (qContent.size >= MIN_QUERY_SIZE_FOR_COVERAGE_CHECK && sharedContent / qContent.size < MIN_QUERY_COVERAGE) continue
@@ -259,20 +331,24 @@ export function identifySong(
             || (distinctiveShared >= 1 && score >= strong)
         if (!distinctiveOk) continue
         const agg = perSong.get(e.songId)
-        if (!agg) {
-            perSong.set(e.songId, { title: e.title, scores: [score], bestEntry: e, bestScore: score })
-        } else {
-            agg.scores.push(score)
-            if (score > agg.bestScore) {
-                agg.bestScore = score
-                agg.bestEntry = e
-            }
-        }
+        if (!agg) perSong.set(e.songId, { title: e.title, hits: [{ entry: e, score }] })
+        else agg.hits.push({ entry: e, score })
     }
 
     const qualifying: Array<{ match: SongMatch; cand: ScoredVerseCandidate }> = []
     for (const [songId, agg] of perSong) {
-        const sorted = agg.scores.slice().sort((a, b) => b - a)
+        // Corroboration has to come from different lines saying different
+        // things: a phrase entry and the single line inside it are one piece
+        // of evidence, and so is a line the song repeats ("I'm getting
+        // stronger" five times over). Take the best hit, then greedily the
+        // best hits that share no line with any taken and aren't a repeat.
+        const taken: Array<{ entry: SongLineEntry; score: number }> = []
+        for (const hit of agg.hits.slice().sort((a, b) => b.score - a.score)) {
+            if (taken.some((t) => overlaps(t.entry, hit.entry) || sameWords(t.entry, hit.entry))) continue
+            taken.push(hit)
+        }
+        const sorted = taken.map((t) => t.score)
+        const bestEntry = taken[0].entry
         const b0 = sorted[0] ?? 0
         const b1 = sorted[1] ?? 0
         // Qualify on a near-exact single line OR two corroborating lines.
@@ -291,8 +367,8 @@ export function identifySong(
             match: {
                 songId,
                 title: agg.title,
-                sectionId: agg.bestEntry.sectionId,
-                lineIndex: agg.bestEntry.lineIndex,
+                sectionId: bestEntry.sectionId,
+                lineIndex: bestEntry.lineIndex,
                 confidence,
                 matchedLines,
             },
@@ -305,13 +381,81 @@ export function identifySong(
     qualifying.sort((a, b) => b.cand.score - a.cand.score)
     const top = qualifying[0]
 
+    // A library can hold one song twice (imported under two titles, or once
+    // as verses and once as a single block). Matching both isn't ambiguity
+    // about *what* is being sung, so a runner-up that is the same lyrics
+    // doesn't count against the top; refusing to choose meant such a song was
+    // never detected at all. Sharing the matched line isn't enough to call
+    // them the same song — "Everybody put your hands together" is a line of
+    // several — so most of their lyrics have to agree.
+    const copies = qualifying.filter((q) => q === top || sameLyrics(index, top.match.songId, q.match.songId))
+    const rivals = qualifying.filter((q) => !copies.includes(q) || q === top)
+
     // Inter-song ambiguity guard: if the top song doesn't clearly beat a
     // DIFFERENT runner-up song, we can't tell which is being sung — return
     // nothing rather than commit the wrong one. Songs that share
     // "holy/worthy/hallelujah/your love" phrasing are the classic trap. This
     // reuses the exact guard the Bible-verse detector already uses.
-    if (isAmbiguousMatch(top.cand, qualifying.map((q) => q.cand))) return null
-    return top.match
+    if (isAmbiguousMatch(top.cand, rivals.map((q) => q.cand))) return null
+
+    // Of the copies of this song that matched, always name the same one —
+    // the best structured (most sections), then the lowest id — so the
+    // confirmation tracker's evidence accumulates on one song instead of
+    // splitting between copies window by window and confirming neither.
+    copies.sort(
+        (a, b) =>
+            sectionCount(index, b.match.songId) - sectionCount(index, a.match.songId) ||
+            a.match.songId.localeCompare(b.match.songId),
+    )
+    return copies[0].match
+}
+
+/** Share of word pairs two songs have in common for them to count as one
+ *  song held twice. Different line breaks don't matter: pairs are taken
+ *  across the whole song's words. Real copies in an imported library measured
+ *  0.89 and 0.97; two different songs sharing a chorus stay well below. */
+const SAME_LYRICS_OVERLAP = 0.85
+
+const songBigramsCache = new WeakMap<SongIndex, Map<string, Set<string>>>()
+
+/** Every adjacent word pair in a song's lyrics. */
+function songBigrams(index: SongIndex, songId: string): Set<string> {
+    let bySong = songBigramsCache.get(index)
+    if (!bySong) {
+        bySong = new Map()
+        songBigramsCache.set(index, bySong)
+    }
+    let pairs = bySong.get(songId)
+    if (!pairs) {
+        const words = index.words.get(songId) ?? []
+        pairs = new Set(words.slice(1).map((w, i) => `${words[i]} ${w}`))
+        bySong.set(songId, pairs)
+    }
+    return pairs
+}
+
+function sectionCount(index: SongIndex, songId: string): number {
+    return new Set(index.entries.filter((e) => e.songId === songId).map((e) => e.sectionId)).size
+}
+
+function sameLyrics(index: SongIndex, a: string, b: string): boolean {
+    const pa = songBigrams(index, a)
+    const pb = songBigrams(index, b)
+    const smaller = pa.size <= pb.size ? pa : pb
+    const larger = smaller === pa ? pb : pa
+    if (smaller.size === 0) return false
+    let shared = 0
+    for (const p of smaller) if (larger.has(p)) shared++
+    return shared / smaller.size >= SAME_LYRICS_OVERLAP
+}
+
+/** Whether two entries have the same content words: a repeated line. */
+function sameWords(a: SongLineEntry, b: SongLineEntry): boolean {
+    return a.content.length === b.content.length && a.content.every((w) => b.content.includes(w))
+}
+
+function overlaps(a: SongLineEntry, b: SongLineEntry): boolean {
+    return a.sectionId === b.sectionId && a.lineIndex <= b.lastLineIndex && b.lineIndex <= a.lastLineIndex
 }
 
 export { EMPTY_INDEX }
