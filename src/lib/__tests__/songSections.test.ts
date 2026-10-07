@@ -140,6 +140,33 @@ describe('songSections', () => {
             const { sections } = deriveSongStructure('', blocks)
             expect(sections.map((s) => s.id)).toEqual(['v1', 'c1', 'v2'])
         })
+
+        it('keeps a labelled block whole across its slide breaks', () => {
+            // EasyWorship leaves a blank line at each slide break inside a
+            // verse. Splitting on it broke verses apart, mislabelled the
+            // pieces and gave two sections the same id; a piece repeating a
+            // line from elsewhere (a closing "declaring the word") vanished.
+            const blocks = [
+                { label: 'Verse 1', content: 'These are the days\n\nDeclaring the word' },
+                { label: 'Verse 2', content: 'And these are the days\nof your servant\n\nBeing restored' },
+                { label: 'Verse 3', content: 'Still we are the labourers\n\ndeclaring the word' },
+            ]
+            const { sections, defaultArrangement } = deriveSongStructure('', blocks)
+            expect(sections.map((s) => s.id)).toEqual(['v1', 'v2', 'v3'])
+            expect(sections[0].lines).toEqual(['These are the days', 'Declaring the word'])
+            expect(sections[2].lines).toEqual(['Still we are the labourers', 'declaring the word'])
+            expect(defaultArrangement).toEqual(['v1', 'v2', 'v3'])
+        })
+
+        it('never gives two sections the same id', () => {
+            const blocks = [
+                { label: 'Verse 1', content: 'one' },
+                { label: 'Verse 1', content: 'two' },
+                { label: '', content: 'three' },
+            ]
+            const ids = deriveSongStructure('', blocks).sections.map((s) => s.id)
+            expect(new Set(ids).size).toBe(ids.length)
+        })
     })
 
     describe('buildDefaultArrangement', () => {

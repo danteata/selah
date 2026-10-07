@@ -102,6 +102,13 @@ export function parseRTF(rtf: string): string {
     // we need to consume everything up to the next whitespace boundary so
     // the value doesn't leak into the output as garbage text.
     let skipUntilWhitespace = false;
+    // Whether the value being skipped has started. Several words in that set
+    // are flags that never carry a value — `\sdfsauto` precedes nearly every
+    // lyric line in EasyWorship 6/7 exports — so a run is only treated as a
+    // value if it starts like a number. Skipping whatever came next deleted
+    // the first word of most lines ("These are the days of Elijah" became
+    // "are the days of Elijah").
+    let skipValueStarted = false;
 
     while (i < len) {
         const char = rtf[i];
@@ -157,6 +164,7 @@ export function parseRTF(rtf: string): string {
                 // sequence (e.g. `\sdasbaseline 48.5999984741211TITLE`).
                 if (!parsed.hadNumericParam) {
                     skipUntilWhitespace = true;
+                    skipValueStarted = false;
                 }
             }
             // Check if we should skip this destination
@@ -204,7 +212,13 @@ export function parseRTF(rtf: string): string {
             i++
         } else if (skipDepth === -1 && !inHiddenParagraph && isPrintable(char)) {
             // Regular text character (not in skipped destination or hidden paragraph)
-            if (skipUntilWhitespace) {
+            if (skipUntilWhitespace && !skipValueStarted && !/[0-9.-]/.test(char)) {
+                // Not a value: the control word was a flag and this is text.
+                skipUntilWhitespace = false;
+                result += char;
+                i++;
+            } else if (skipUntilWhitespace) {
+                skipValueStarted = true;
                 // Consume the space-prefixed value of a data-bearing
                 // control word, stopping at the next whitespace or
                 // control sequence. Stopping at whitespace (rather than

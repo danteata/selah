@@ -184,7 +184,12 @@ export function parseLyricsIntoSections(lyrics: string): SongSection[] {
         }
 
         typeCount[type] = (typeCount[type] ?? 0) + 1
-        const number = explicitNumber ?? typeCount[type]!
+        let number = explicitNumber ?? typeCount[type]!
+        // Ids must be unique: an arrangement and the live tracker address
+        // sections by id. A source can label two blocks "Verse 3", and an
+        // auto-numbered block can land on a number an explicit label already
+        // took; either way, move to the next free number.
+        while (sections.some((s) => s.id === `${TYPE_PREFIX[type]}${number}`)) number++
         const id = `${TYPE_PREFIX[type]}${number}`
 
         sections.push({
@@ -234,8 +239,13 @@ export function deriveSongStructure(
 
     let sections: SongSection[]
     if (usableBlocks && usableBlocks.length > 0) {
+        // One labelled block is one section. Its content can hold blank
+        // lines (EasyWorship puts one at every slide break within a verse),
+        // which the re-parse below would split on — breaking each verse into
+        // pieces, mislabelling the pieces, and dropping any piece that
+        // happened to repeat a line elsewhere in the song.
         const synthetic = usableBlocks
-            .map((b) => (b.label.trim() ? `${b.label.trim()}\n` : '') + b.content.trim())
+            .map((b) => (b.label.trim() ? `${b.label.trim()}\n` : '') + b.content.trim().replace(/\n\s*\n/g, '\n'))
             .join('\n\n')
         sections = parseLyricsIntoSections(synthetic)
     } else {

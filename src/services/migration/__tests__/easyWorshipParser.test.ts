@@ -283,6 +283,24 @@ Tag content\\par
             expect(text).toContain('Amazing grace how sweet the sound')
         });
 
+        it('keeps the first word after a flag-style EasyWorship control word', () => {
+            // EasyWorship 6/7 write \\sdfsauto (a flag, no value) right before
+            // nearly every lyric line. Treating it as data-bearing dropped the
+            // first word of most lines in the whole imported library.
+            const rtf =
+                '{\\rtf1\\ansi\\deff0\\sdeasyworship2\n' +
+                '{\\pard\\qc\\qdef\\sdewparatemplatestyle101\\plain\\sdewtemplatestyle101\\fs126' +
+                '{\\*\\sdfsreal 62.5}{\\*\\sdfsdef 62.5}\\sdfsauto These are the days of Elijah\\par}\n' +
+                '{\\pard\\sdslidemarker\\qc\\qdef\\sdewparatemplatestyle101\\plain\\sdfsauto\\par}\n' +
+                '{\\pard\\qc\\qdef\\sdewparatemplatestyle101\\plain\\sdfsauto Declaring the word of the Lord\\par}\n' +
+                '}'
+
+            const text = parseRTF(rtf)
+            expect(text).toContain('These are the days of Elijah')
+            expect(text).toContain('Declaring the word of the Lord')
+            expect(text).not.toContain('62.5')
+        });
+
         it('should preserve lyrics after a data-bearing control word that has a numeric parameter', () => {
             // When the value is in a numeric parameter, the lyrics that
             // follow on the same line must NOT be consumed.
