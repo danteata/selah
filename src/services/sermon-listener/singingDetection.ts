@@ -12,9 +12,12 @@
  *
  * The two signals below are chosen because they're close to unique to spoken
  * narrative and essentially absent from song lyrics:
- *  - Real numbers (money, ages, dates, counts) — sermons cite figures
- *    constantly ("$450,000", "12 years old"); worship lyrics essentially
- *    never do.
+ *  - Numbers in the forms only speech uses — money, percentages, calendar
+ *    years, clock times and verse references, phone numbers, ages ("$450,000",
+ *    "12 years old", "John 3:16"). Not numbers as such: lyrics have them
+ *    ("ten thousand reasons", "a thousand tongues") and recognisers write
+ *    them as digits, so a bare count is spelled out and judged as words. Any
+ *    digit used to disqualify a window, which made those songs undetectable.
  *  - Reporting-speech verbs in reported/past form ("he said", "I told him") —
  *    the connective tissue of storytelling, which lyrics don't need because
  *    they aren't narrating.
@@ -24,6 +27,8 @@
  * lyrics ("Because He Lives", "Go Tell It on the Mountain", "say that You are
  * my God") and are not reliably narrative on their own.
  */
+
+import { isSpokenNumberContext, spellOutNumbers } from '../../lib/spokenNumbers'
 
 /** Reporting-speech verbs in a form (past tense, or otherwise decisively
  *  narrative) that's close to unique to storytelling — a single occurrence is
@@ -64,11 +69,10 @@ export function looksLikeSinging(text: string): boolean {
     const trimmed = text.trim()
     if (!trimmed) return false
 
-    // Real digits (money, ages, dates, counts) are essentially unique to
-    // narrated speech — hymn/worship lyrics don't cite figures.
-    if (/\d/.test(trimmed)) return false
+    // Money, years, times, references, ages — figures only narration cites.
+    if (isSpokenNumberContext(trimmed)) return false
 
-    const words = trimmed
+    const words = spellOutNumbers(trimmed)
         .toLowerCase()
         .replace(/[^\p{L}\p{N}\s]/gu, ' ')
         .split(/\s+/)

@@ -67,3 +67,18 @@ describe('looksLikeSinging', () => {
         expect(looksLikeSinging('let no man say when he is tempted')).toBe(true)
     })
 })
+
+describe('numbers in sung lyrics', () => {
+    // Recognisers write the numbers in a lyric as digits. Rejecting every
+    // digit made these songs undetectable however clearly they were sung.
+    it('lets a counted lyric through once spelled out', () => {
+        expect(looksLikeSinging('and on that day when my strength is failing 10,000 reasons for my heart to find')).toBe(true)
+        expect(looksLikeSinging('oh for a 1000 tongues to sing my great redeemers praise')).toBe(true)
+    })
+
+    it('still rejects the numbers only speech carries', () => {
+        expect(looksLikeSinging('give 10% of everything you earn to the house of God')).toBe(false)
+        expect(looksLikeSinging('in 2024 the Lord did great things for us')).toBe(false)
+        expect(looksLikeSinging('turn with me to John 3:16 for God so loved the world')).toBe(false)
+    })
+})

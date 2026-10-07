@@ -1,6 +1,7 @@
 import type { Song, SongSection } from '../../types'
 import { phoneticSimilarity } from './phoneticMatch'
 import { sectionsForSong } from '../../lib/songSections'
+import { spellOutNumbers } from '../../lib/spokenNumbers'
 
 /**
  * Predictive song-lyric position tracker (Phase 2).
@@ -30,9 +31,10 @@ import { sectionsForSong } from '../../lib/songSections'
 
 const STOP_TAIL_WORDS = 14
 
-/** Normalize a line/phrase for comparison: lowercase, strip punctuation. */
+/** Normalize a line/phrase for comparison: numbers as words (transcripts
+ *  write "10,000", lyrics "ten thousand"), lowercase, strip punctuation. */
 export function normalizeLine(text: string): string {
-    return text
+    return spellOutNumbers(text)
         .toLowerCase()
         .replace(/[^\p{L}\p{N}\s]/gu, ' ')
         .replace(/\s+/g, ' ')

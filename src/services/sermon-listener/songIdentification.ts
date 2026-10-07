@@ -3,6 +3,7 @@ import { lyricSimilarity, tokenize } from './songTracker'
 import { getContentWords, isTheologicalCommon, isAmbiguousMatch, type ScoredVerseCandidate } from '../../lib/semanticRetrievalPolicy'
 import { sectionsForSong } from '../../lib/songSections'
 import { isLikelySong } from '../../lib/songLibraryFilter'
+import { spellOutNumbers } from '../../lib/spokenNumbers'
 
 /**
  * Song identification from a live transcript (Phase 2 "Searching").
@@ -149,7 +150,7 @@ export function buildSongIndex(songs: Song[]): SongIndex {
             section.lines.forEach((line, lineIndex) => {
                 const toks = tokenize(line)
                 if (toks.length < MIN_LINE_WORDS) return
-                const content = Array.from(new Set(getContentWords(line)))
+                const content = Array.from(new Set(getContentWords(spellOutNumbers(line))))
                 if (content.length < MIN_LINE_DISTINCT_CONTENT) return
                 const idx = entries.length
                 entries.push({
@@ -196,6 +197,8 @@ export function identifySong(
     const minMatched = opts.minMatchedLines ?? 1
     const FLOOR = 0.5
 
+    // Transcripts write numbers as digits, lyrics as words; compare as words.
+    query = spellOutNumbers(query)
     const qTokens = tokenize(query)
     if (qTokens.length < MIN_LINE_WORDS || index.entries.length === 0) return null
 

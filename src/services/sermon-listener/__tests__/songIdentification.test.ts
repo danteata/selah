@@ -354,7 +354,29 @@ describe('identifySong', () => {
     })
 })
 
-describe('non-songs', () => {
+describe('numbers and non-songs', () => {
+    // Public domain (Charles Wesley, 1739).
+    const THOUSAND_TONGUES: Song = {
+        id: 'thousand-tongues',
+        title: 'O For a Thousand Tongues to Sing',
+        artist: 'Charles Wesley',
+        lyrics: '',
+        sections: [
+            { id: 'v1', type: 'verse', number: 1, label: 'Verse 1', lines: [
+                'O for a thousand tongues to sing',
+                'My great Redeemer\'s praise',
+                'The glories of my God and King',
+                'The triumphs of His grace',
+            ] },
+        ],
+    }
+
+    it('identifies a lyric the recogniser wrote with digits', () => {
+        const index = buildSongIndex([THOUSAND_TONGUES, AMAZING_GRACE])
+        const match = identifySong('oh for a 1000 tongues to sing my great redeemers praise', index)
+        expect(match?.songId).toBe('thousand-tongues')
+    })
+
     it('keeps sermon notes stored as songs out of auto-detect', () => {
         const notes: Song = {
             id: 'notes',

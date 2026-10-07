@@ -30,6 +30,8 @@
  * for how a single filler line beat a real one on the strict scorer alone.
  */
 
+import { spellOutNumbers } from '../../lib/spokenNumbers'
+
 /** Vowels are dropped after the first character, as in Metaphone. */
 const VOWELS = new Set(['a', 'e', 'i', 'o', 'u'])
 
@@ -180,7 +182,7 @@ export function codeSimilarity(a: string, b: string): number {
 export const TOKEN_MATCH_FLOOR = 0.75
 
 function words(text: string): string[] {
-    return text
+    return spellOutNumbers(text)
         .toLowerCase()
         .replace(/[^\p{L}\p{N}\s']/gu, ' ')
         .split(/\s+/)
