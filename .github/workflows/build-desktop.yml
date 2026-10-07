@@ -186,9 +186,18 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $ver = '1.3.290.0'
+          # LunarG drops old SDKs from its download server without notice:
+          # 1.3.290.0 started returning a 99-byte "Not Found" body, which then
+          # failed as "not a valid application". 1.3.296.0 is the oldest still
+          # published (see vulkan.lunarg.com/sdk/versions/windows.json). Keep
+          # this in step with the SPIRV-Headers tag below.
+          $ver = '1.3.296.0'
           $installer = "$env:RUNNER_TEMP\VulkanSDK-Installer.exe"
-          curl.exe -L -o $installer "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe"
+          curl.exe -fL -o $installer "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe"
+          if ((Get-Item $installer).Length -lt 10MB) {
+            Write-Error "Vulkan SDK $ver download is not an installer ($((Get-Item $installer).Length) bytes) - has LunarG withdrawn this version?"
+            exit 1
+          }
           Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
           "VULKAN_SDK=C:\VulkanSDK\$ver" | Out-File -FilePath $env:GITHUB_ENV -Append
           "C:\VulkanSDK\$ver\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
@@ -204,11 +213,11 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $ver = '1.3.290.0'
+          $ver = '1.3.296.0'
           $sdk = "C:\VulkanSDK\$ver"
           $tmp = "$env:RUNNER_TEMP\spirv-headers"
           New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-          # Tag matches the Vulkan SDK version (1.3.290.0).
+          # Tag matches the Vulkan SDK version above.
           curl.exe -L -o "$tmp\src.tar.gz" "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-$ver.tar.gz"
           tar -xzf "$tmp\src.tar.gz" -C $tmp
           $src = Get-ChildItem -Directory "$tmp\SPIRV-Headers-*" | Select-Object -First 1
