@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
-import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, Database, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
+import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, Mic, Users, Upload, Zap, RefreshCw, Radio, RadioTower, Shield, ChevronDown, Cast, Bold, Italic, Underline, ZoomIn, ZoomOut, CreditCard, Layers } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { AppSettings, SlideStyle, SettingsTab } from '../../types'
 import { useTemplates } from '../../hooks/useTemplates'
@@ -17,7 +17,7 @@ import { BibleVersionSettings } from './BibleVersionSettings'
 import { SermonListenerSettings } from '../sermon-listener'
 import { TeamManagementPanel } from '../team/TeamManagementPanel'
 import { SongMigrationWizard } from '../admin/SongMigrationWizard'
-import { BibleVersionUploader, VerseEmbeddingUploader, GlobalSermonListenerSettingsPanel } from '../admin'
+import { BibleVersionUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { isDesktop } from '../../platform'
@@ -107,7 +107,6 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
     const adminTabs = isSuperadmin
         ? [
             { id: 'admin-bible' as const, label: 'Bible Versions', icon: Book },
-            { id: 'admin-embeddings' as const, label: 'Verse Embeddings', icon: Database },
             { id: 'admin-sermon' as const, label: 'Sermon Settings', icon: Mic },
         ]
         : []
@@ -228,7 +227,6 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                         {activeTab === 'updates' && <UpdatesSettings />}
                         {activeTab === 'shortcuts' && <ShortcutsSettings />}
                         {activeTab === 'admin-bible' && isSuperadmin && <BibleVersionUploader onClose={onClose} />}
-                        {activeTab === 'admin-embeddings' && isSuperadmin && <VerseEmbeddingUploader onClose={onClose} />}
                         {activeTab === 'admin-sermon' && isSuperadmin && <GlobalSermonListenerSettingsPanel onClose={onClose} />}
                     </div>
                 </div>

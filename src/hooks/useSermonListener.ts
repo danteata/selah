@@ -1058,15 +1058,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     ])
 
     // Initialize semantic detector lazily — only when the user starts listening.
-    // This avoids blocking the UI on mount with Convex queries and embedder loading.
+    // This avoids blocking the UI on mount with embedder loading.
     const initSemanticDetector = useCallback(async () => {
         if (!enableSemanticDetection) return
-
-        const convexUrl = import.meta.env.VITE_CONVEX_URL
-        if (!convexUrl) {
-            console.warn('[SemanticDetector] No Convex URL found, semantic detection disabled')
-            return
-        }
 
         const versions = bibleVersions as BibleVersion[]
         const versionEntry = versions?.find(
@@ -1081,7 +1075,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             version: versionId,
         })
 
-        const result = await detector.initialize(convexUrl)
+        const result = await detector.initialize()
 
         if (result.ready) {
             semanticDetectorRef.current = detector

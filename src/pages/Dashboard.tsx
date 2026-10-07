@@ -1,6 +1,6 @@
 import { useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react'
-import { Shield, Database, Book, X, Mic, Ticket } from 'lucide-react'
+import { Shield, Book, X, Mic, Ticket } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { getStarredRecordingIds } from '../hooks/useIndexedDB'
 import {
@@ -43,7 +43,6 @@ const AddCountdownModal = lazy(() => import('../components/countdown/AddCountdow
 const LibraryPanel = lazy(() => import('../components/library/LibraryPanel').then((m) => ({ default: m.LibraryPanel })))
 const ScheduleModal = lazy(() => import('../components/schedules/ScheduleModal').then((m) => ({ default: m.ScheduleModal })))
 const BibleVersionUploader = lazy(() => import('../components/admin').then((m) => ({ default: m.BibleVersionUploader })))
-const VerseEmbeddingUploader = lazy(() => import('../components/admin').then((m) => ({ default: m.VerseEmbeddingUploader })))
 const GlobalSermonListenerSettingsPanel = lazy(() => import('../components/admin').then((m) => ({ default: m.GlobalSermonListenerSettingsPanel })))
 const PromoCodeManager = lazy(() => import('../components/admin').then((m) => ({ default: m.PromoCodeManager })))
 
@@ -141,7 +140,7 @@ export default function Dashboard() {
 
     // Admin panel state
     const [showAdminPanel, setShowAdminPanel] = useState(false)
-    const [adminTab, setAdminTab] = useState<'bible' | 'embeddings' | 'sermon-settings' | 'promos'>('bible')
+    const [adminTab, setAdminTab] = useState<'bible' | 'sermon-settings' | 'promos'>('bible')
 
     const workspaceMode = useAppStore((s) => s.workspaceMode)
 
@@ -638,16 +637,6 @@ export default function Dashboard() {
                         Bible Versions
                     </button>
                     <button
-                        onClick={() => setAdminTab('embeddings')}
-                        className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'embeddings'
-                            ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
-                            : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
-                            }`}
-                    >
-                        <Database className="w-4 h-4" />
-                        Verse Embeddings
-                    </button>
-                    <button
                         onClick={() => setAdminTab('sermon-settings')}
                         className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${adminTab === 'sermon-settings'
                             ? 'border-[var(--accent-teal)] text-[var(--accent-teal)]'
@@ -676,11 +665,6 @@ export default function Dashboard() {
                     {adminTab === 'bible' && (
                         <Suspense fallback={null}>
                             <BibleVersionUploader onClose={() => setShowAdminPanel(false)} />
-                        </Suspense>
-                    )}
-                    {adminTab === 'embeddings' && (
-                        <Suspense fallback={null}>
-                            <VerseEmbeddingUploader onClose={() => setShowAdminPanel(false)} />
                         </Suspense>
                     )}
                     {adminTab === 'sermon-settings' && (

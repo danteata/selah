@@ -1,18 +1,22 @@
 /**
  * Semantic Verse Detection Service
  *
- * Integrates local embedding generation with Convex vector search
- * to detect Bible verses from paraphrases and quotes.
+ * Detects Bible verses from paraphrases and quotes, entirely on this device.
  *
  * Flow:
  * 1. Collect transcript text over a sliding window
  * 2. Generate embedding locally using Transformers.js
- * 3. Send embedding to Convex for vector search
+ * 3. Search the verse index in the similarity worker — the universal
+ *    prebuilt pack, or embeddings generated on this device for the version
  * 4. Merge results with regex-based detection
+ *
+ * There is no server path. A Convex vector search used to back this up, but
+ * it held vectors from the previous embedding model, so after the model
+ * change it could only return mismatched results — and it cost a query per
+ * session plus an action per search for something the local index already
+ * answers.
  */
 
-import { ConvexHttpClient } from 'convex/browser'
-import { api } from '../../../convex/_generated/api'
 import {
     initializeEmbedder,
     embedBatch,
@@ -186,13 +190,13 @@ const MAX_PROGRESSIVE_RETRIES = 2
 const SHORT_SENTENCE_WORD_LIMIT = 8
 
 export class SemanticVerseDetector {
-    private convexClient: ConvexHttpClient | null = null
     private config: SemanticDetectionConfig
     private lastSearchTime = 0
     private pendingSearch: Promise<SemanticVerseMatch[]> | null = null
     private textBuffer = ''
     private initialized = false
-    private useLocalFallback = false
+    /** Whether a local verse index (pack or generated rows) was found at init. */
+    private hasEmbeddings = false
     /** Version we've already announced the pack fallback for, so the message
      *  appears once instead of once per candidate window. */
     private loggedPackFallbackFor: string | null = null
@@ -216,9 +220,9 @@ export class SemanticVerseDetector {
     }
 
     /**
-     * Initialize the detector with Convex client and embedding model.
+     * Initialize the embedding model and find the local verse index.
      */
-    async initialize(convexUrl: string): Promise<{
+    async initialize(): Promise<{
         ready: boolean
         modelLoaded: boolean
         hasEmbeddings: boolean
@@ -228,7 +232,7 @@ export class SemanticVerseDetector {
             return {
                 ready: true,
                 modelLoaded: isEmbedderReady(),
-                hasEmbeddings: !this.useLocalFallback,
+                hasEmbeddings: this.hasEmbeddings,
             }
         }
 
@@ -243,20 +247,6 @@ export class SemanticVerseDetector {
 
         this.initializingPromise = (async () => {
             try {
-                this.convexClient = new ConvexHttpClient(convexUrl)
-
-                let hasEmbeddings = false
-                let convexError = false
-                try {
-                    hasEmbeddings = await this.convexClient.query(api.verseEmbeddings.hasEmbeddings, {
-                        version: this.config.version,
-                    })
-                } catch {
-                    console.warn('[SemanticDetector] Could not check embedding stats, using local fallback')
-                    convexError = true
-                    hasEmbeddings = false
-                }
-
                 const embedderStatus = await initializeEmbedder()
                 this.initialized = embedderStatus.ready
 
@@ -284,34 +274,15 @@ export class SemanticVerseDetector {
                     hasLocalCache = (await getLocalCachedVersions()).length > 0
                 }
 
-                // Convex having no embeddings is only worth mentioning if
-                // nothing local can serve search either — with a prebuilt pack
-                // loaded (the normal case) it's expected, not a problem.
-                if (!hasEmbeddings && !convexError && !hasLocalCache) {
-                    console.warn(
-                        '[SemanticDetector] No verse embeddings in Convex and no local pack. ' +
-                            'Semantic detection will be unavailable.',
-                    )
+                if (!hasLocalCache) {
+                    console.warn('[SemanticDetector] No local verse index (no pack, no generated rows). Semantic detection will be unavailable.')
                 }
-
-                // Prefer local embeddings when available — avoids sending every
-                // embedding vector to Convex during live transcription (~8-15
-                // action calls per search cycle = significant bandwidth).
-                if (hasLocalCache) {
-                    this.useLocalFallback = true
-                } else if (!hasEmbeddings || convexError) {
-                    this.useLocalFallback = true
-                }
-
-                // Only mark as "no embeddings" if both remote and local are empty
-                if (!hasEmbeddings && !hasLocalCache) {
-                    console.warn('[SemanticDetector] No embeddings available (remote or local). Semantic detection will be limited.')
-                }
+                this.hasEmbeddings = hasLocalCache
 
                 return {
                     ready: this.initialized,
                     modelLoaded: embedderStatus.ready,
-                    hasEmbeddings: hasEmbeddings || hasLocalCache,
+                    hasEmbeddings: hasLocalCache,
                 }
             } catch (error) {
                 console.error('[SemanticDetector] Initialization failed:', error)
@@ -532,11 +503,7 @@ export class SemanticVerseDetector {
 
                 const thresholds = searchItems.map((item) => getDynamicThreshold(item.wordCount))
 
-                const searchMethod = this.useLocalFallback
-                    ? (emb: number[], t: number) => this.searchLocally(emb, t)
-                    : this.convexClient
-                      ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
-                      : () => Promise.resolve([])
+                const searchMethod = (emb: number[], t: number) => this.searchLocally(emb, t)
 
                 const searchPromises = embeddingResults.map((res, idx) =>
                     searchMethod(res.embedding, thresholds[idx]),
@@ -635,11 +602,7 @@ export class SemanticVerseDetector {
         try {
             const windowEmbeddings = await embedBatch(windows)
             const windowThresholds = windows.map((w) => getDynamicThreshold(w.split(/\s+/).length, 'window'))
-            const searchMethod = this.useLocalFallback
-                ? (emb: number[], t: number) => this.searchLocally(emb, t)
-                : this.convexClient
-                  ? (emb: number[], t: number) => this.searchWithConvex(emb, t)
-                  : () => Promise.resolve([])
+            const searchMethod = (emb: number[], t: number) => this.searchLocally(emb, t)
 
             const windowSearchPromises = windowEmbeddings.map((res, idx) =>
                 searchMethod(res.embedding, windowThresholds[idx]),
@@ -762,38 +725,6 @@ export class SemanticVerseDetector {
                 return b.score - a.score
             })
             .slice(0, this.config.limit)
-    }
-
-    /**
-     * Search using Convex vector search.
-     */
-    private async searchWithConvex(embedding: number[], threshold?: number): Promise<SemanticVerseMatch[]> {
-        if (!this.convexClient) {
-            return []
-        }
-
-        try {
-            const results = await this.convexClient.action(api.verseEmbeddings.findSimilarVerses, {
-                queryEmbedding: embedding,
-                threshold: threshold ?? 0.32,
-                limit: this.config.limit,
-                version: this.config.version,
-            })
-
-            return results.map((r) => ({
-                reference: r.reference,
-                book: r.book,
-                chapter: r.chapter,
-                verse: r.verse,
-                text: r.text,
-                score: r.score,
-                detectionType: 'semantic' as const,
-            }))
-        } catch (error) {
-            console.error('[SemanticDetector] Convex search failed, switching to local:', error)
-            this.useLocalFallback = true
-            return this.searchLocally(embedding, threshold)
-        }
     }
 
     /**

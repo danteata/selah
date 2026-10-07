@@ -1016,4 +1016,4 @@ export const quickActionsArr: QuickAction[] = [
 ]
 
 /** A page of the settings modal. */
-export type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'billing' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-embeddings' | 'admin-sermon'
+export type SettingsTab = 'display' | 'live' | 'templates' | 'bible' | 'profile' | 'billing' | 'storage' | 'updates' | 'shortcuts' | 'sermon-listener' | 'team' | 'migration' | 'admin-bible' | 'admin-sermon'

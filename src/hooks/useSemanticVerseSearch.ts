@@ -6,16 +6,19 @@
  * semantic verse search when embeddings are available.
  * 
  * Features:
- * - Checks both IndexedDB (local) and Convex (remote) for embeddings
- * - Prefers local embeddings for faster, offline-capable search
- * - Generates embeddings locally using Transformers.js
- * - Falls back to Convex vector search if no local embeddings
+ * - Searches the universal prebuilt pack, or embeddings generated on this
+ *   device for the version, entirely in the browser — there is no server path
+ * - Generates query embeddings locally using Transformers.js
  * - Returns verse results with similarity scores
+ *
+ * A Convex vector search used to be the fallback when nothing local was
+ * available. It held vectors from the previous embedding model, so it was
+ * removed with the model change rather than migrated: every install has the
+ * bundled pack, and the fallback cost a query on mount plus an action per
+ * search.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { useConvex } from 'convex/react'
-import { api } from '../../convex/_generated/api'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import {
@@ -61,8 +64,6 @@ interface UseSemanticVerseSearchOptions {
     version?: string
     /** Debounce delay in ms (default 200) */
     debounceMs?: number
-    /** Prefer local embeddings over remote (default true) */
-    preferLocal?: boolean
     /** Minimum query length for semantic search (default 2) */
     minQueryLength?: number
 }
@@ -92,11 +93,6 @@ interface UseSemanticVerseSearchReturn {
 
 const embeddingsAvailabilityCache = new Map<string, boolean>()
 
-// Max candidates requested from the Convex vector-search fallback (web /
-// versions without a local embedding index). Kept small on purpose: the
-// action reads one document per hit, so this bounds Convex cost per query.
-const REMOTE_DENSE_LIMIT = 12
-
 // Which prebuilt pack powers SEMANTIC search for every Bible version is
 // decided by `semanticPack` (WEB, else KJV). Meaning is ~translation-
 // independent, so one pack finds the right verse references and we re-render
@@ -113,11 +109,9 @@ export function useSemanticVerseSearch(
         limit = 5,
         version,
         debounceMs = 200,
-        preferLocal = true,
         minQueryLength = 2,
     } = options
 
-    const convex = useConvex()
     const { trackEvent } = useAnalytics()
     const { downloadBibleVersion } = useScripture()
     const [results, setResults] = useState<SemanticVerseResult[]>([])
@@ -196,34 +190,15 @@ export function useSemanticVerseSearch(
 
             effectiveVersionRef.current = workingVersion
 
-            if (hasLocal || packVersion) {
-                // Either way search runs in-browser and Convex stays a fallback
-                // only. Don't load anything into memory here — the heavy load
-                // is deferred to the first actual search.
-                setHasLocalEmbeddings(true)
-                setHasEmbeddings(true)
-                embeddingsAvailabilityCache.set(cacheKey, true)
-            } else {
-                setHasLocalEmbeddings(false)
-                // Fall back to checking Convex
-                try {
-                    const result = await convex.query(api.verseEmbeddings.hasEmbeddings, {
-                        version,
-                    })
-                    setHasEmbeddings(result)
-                    embeddingsAvailabilityCache.set(cacheKey, result)
-                    if (result) {
-                        effectiveVersionRef.current = version
-                    }
-                } catch (err) {
-                    console.error('[useSemanticVerseSearch] Failed to check remote embeddings:', err)
-                    setHasEmbeddings(false)
-                    embeddingsAvailabilityCache.set(cacheKey, false)
-                }
-            }
+            // Search runs in-browser either way. Don't load anything into
+            // memory here — the heavy load is deferred to the first search.
+            const available = hasLocal || !!packVersion
+            setHasLocalEmbeddings(available)
+            setHasEmbeddings(available)
+            embeddingsAvailabilityCache.set(cacheKey, available)
         }
         checkEmbeddings()
-    }, [convex, version, cacheKey])
+    }, [version, cacheKey])
 
     // Initialize the embedder
     const initEmbedder = useCallback(async () => {
@@ -327,7 +302,7 @@ export function useSemanticVerseSearch(
                             }
                             embeddingCache.current.set(ck, emb)
                         }
-                        if (preferLocal && hasLocalEmbeddings) {
+                        if (hasLocalEmbeddings) {
                             const loaded = getLoadedIndex()
                             if (!loaded || loaded.version !== embeddingVersion) {
                                 let rows = getPrewarmedEmbeddings(embeddingVersion)
@@ -353,23 +328,11 @@ export function useSemanticVerseSearch(
                         }
                         // Local worker (in-browser, zero Convex cost): a large
                         // candidate pool is free, so use the full topK.
-                        if (preferLocal && hasLocalEmbeddings && loadedIdx) {
+                        if (hasLocalEmbeddings && loadedIdx) {
                             return (await searchVerseEmbeddings(emb, floor, topK)).map(toCand)
                         }
-                        // Remote (Convex) path costs real money: findSimilarVerses
-                        // runs vectorSearch(limit×4) AND one getVerseById read per
-                        // hit above the threshold. So keep the limit small and the
-                        // floor cost-reasonable — a big topK / low floor here would
-                        // mean hundreds of Convex reads per keystroke-settled query.
-                        // The free local BM25 pass is the backbone on web; dense is
-                        // just an enhancer, so ~a dozen candidates is plenty.
-                        const remote = await convex.action(api.verseEmbeddings.findSimilarVerses, {
-                            queryEmbedding: emb,
-                            threshold: Math.max(floor, 0.55),
-                            limit: REMOTE_DENSE_LIMIT,
-                            version: embeddingVersion,
-                        })
-                        return (remote as Array<Parameters<typeof toCand>[0]>).map(toCand)
+                        // No local index: the lexical pass carries the search.
+                        return []
                     }
 
                     const v2 = await searchVerses(query, corpus, denseRetriever, {
@@ -386,7 +349,7 @@ export function useSemanticVerseSearch(
                     trackEvent(AnalyticsEventType.BIBLE_SEMANTIC_SEARCH, {
                         query_length: query.length,
                         result_count: v2.length,
-                        used_local: preferLocal && hasLocalEmbeddings && !!getLoadedIndex(),
+                        used_local: hasLocalEmbeddings && !!getLoadedIndex(),
                         version: activeVersion,
                     })
                     return
@@ -440,7 +403,7 @@ export function useSemanticVerseSearch(
                     // Lazy-load embeddings into the packed-Float32Array worker
                     // store on the first local search. The worker keeps the
                     // index; the main thread retains only metadata-light state.
-                    if (preferLocal && hasLocalEmbeddings) {
+                    if (hasLocalEmbeddings) {
                         const indexVersion = packVersionRef.current ?? workingVersion
                         const loaded = getLoadedIndex()
                         if (!loaded || loaded.version !== indexVersion) {
@@ -463,7 +426,7 @@ export function useSemanticVerseSearch(
 
                     // Prefer local search if available
                     const loadedIdx = getLoadedIndex()
-                    usedLocal = preferLocal && hasLocalEmbeddings && !!loadedIdx
+                    usedLocal = hasLocalEmbeddings && !!loadedIdx
                     let rawResults: SemanticVerseResult[] = []
                     if (usedLocal) {
                         const localResults = await searchVerseEmbeddings(
@@ -488,22 +451,9 @@ export function useSemanticVerseSearch(
                                 reference: `${bookName} ${r.chapter}:${r.verse}`,
                             }
                         })
-                    } else {
-                        const convexResults = await convex.action(api.verseEmbeddings.findSimilarVerses, {
-                            queryEmbedding,
-                            threshold: dynamicThreshold,
-                            limit,
-                            version: effectiveVersionRef.current || version,
-                        })
-                        rawResults = (convexResults as SemanticVerseResult[]).map(r => {
-                            const bookName = NUMBER_TO_BOOK[r.bookNumber] || r.book || 'Unknown'
-                            return {
-                                ...r,
-                                book: bookName,
-                                reference: `${bookName} ${r.chapter}:${r.verse}`,
-                            }
-                        })
                     }
+                    // No local index leaves `rawResults` empty; the lexical
+                    // results below stand on their own.
 
                     if (abortController.signal.aborted) return
 
@@ -549,7 +499,7 @@ export function useSemanticVerseSearch(
                 }
             }
         }, debounceMs)
-    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, convex, threshold, limit, version, debounceMs, preferLocal, minQueryLength, trackEvent, downloadBibleVersion])
+    }, [hasEmbeddings, hasLocalEmbeddings, isEmbedderReady, initEmbedder, threshold, limit, version, debounceMs, minQueryLength, trackEvent, downloadBibleVersion])
 
     // Clear results
     const clearResults = useCallback(() => {
