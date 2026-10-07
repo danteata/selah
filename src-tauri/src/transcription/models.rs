@@ -190,8 +190,12 @@ struct DownloadProgress {
 /// of its exact artifact (read from Hugging Face's LFS metadata, which stores the
 /// file's sha256 as the blob oid), so downloads are integrity-verified.
 ///
-/// `accuracy`/`speed` are Handy's measured benchmark scores rather than
-/// hand-guessed values, normalised 0.0–1.0. They drive the comparison bars in
+/// `accuracy`/`speed` are measured, not hand-guessed: Handy's formula applied to
+/// transcribe.cpp's published benchmarks — accuracy `e^(−WER/15)` on LibriSpeech
+/// test-clean, speed `1 − e^(−xRT/8)` on its reference AMD Ryzen 7 4750U laptop
+/// (Vulkan, Q8_0, the 35 s sample), normalised 0.0–1.0. One source for every
+/// entry keeps them comparable, which matters beyond the bars: the sermon archive
+/// re-transcribes with the most accurate model on disk. They drive the comparison bars in
 /// the model picker, so several previous estimates were materially misleading
 /// (`whisper-base.en` was rated 0.50 against a measured 0.76; `gigaam-v3` 0.85
 /// against a measured 0.69).
@@ -201,7 +205,9 @@ struct DownloadProgress {
 /// who already downloaded one keeps working — `list_models` hides any legacy
 /// entry that is not present on disk, which retires them without breaking
 /// anyone. Nothing new should be added there, and the third-party CDN is no
-/// longer on the path for a fresh install.
+/// longer on the path for a fresh install. A GGUF entry that a newer model beats
+/// on both accuracy and speed is retired the same way, in place, with a note
+/// naming what replaced it.
 pub fn catalog() -> Vec<ModelInfo> {
     const MB: u64 = 1024 * 1024;
     let blob = |f: &str| Some(format!("https://blob.handy.computer/{}", f));
@@ -236,7 +242,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 198506848,
             languages: langs(&["en"]),
             accuracy: 0.84,
-            speed: 0.95,
+            speed: 0.83,
             supports_streaming: true,
             timestamps: TimestampSupport::None,
             recommended: true,
@@ -255,7 +261,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 731357568,
             languages: langs(&["en"]),
             accuracy: 0.90,
-            speed: 0.79,
+            speed: 0.96,
             supports_streaming: true,
             timestamps: TimestampSupport::Token,
             recommended: true,
@@ -290,9 +296,11 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 729650176,
             languages: langs(&["en"]),
             accuracy: 0.86,
-            speed: 0.80,
+            speed: 0.97,
             supports_streaming: true,
             timestamps: TimestampSupport::Token,
+            // Superseded by Parakeet Unified: more accurate at the same speed, and also streams.
+            legacy: true,
             ..Default::default()
         },
         ModelInfo {
@@ -307,8 +315,44 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 751094240,
             languages: langs(&["en", "es", "fr", "it", "pt", "nl", "de", "tr", "ru", "ar", "hi", "ja", "ko", "vi", "uk", "pl", "sv", "cs", "nb", "da", "bg", "fi", "hr", "sk", "zh", "hu", "ro", "et"]),
             accuracy: 0.82,
-            speed: 0.84,
+            speed: 0.88,
             supports_streaming: true,
+            timestamps: TimestampSupport::Token,
+            ..Default::default()
+        },
+        ModelInfo {
+            id: "granite-speech-5.0-470m-turboctc".into(),
+            name: "Granite Speech 5.0 (English)".into(),
+            // Not recommended despite leading both scores: it writes plain
+            // lowercase with no punctuation (its WER is scored on normalised
+            // text), which reads poorly in the live transcript and the archive.
+            // Verse detection is case-insensitive, so references still land.
+            description: "Most accurate English model, and one of the fastest — but writes lowercase with no punctuation. Batch only.".into(),
+            engine_type: EngineType::TranscribeCpp,
+            format: ModelFormat::File,
+            filename: "granite-speech-5.0-470m-turboctc-Q8_0.gguf".into(),
+            url: hf("handy-computer/granite-speech-5.0-470m-turboctc-gguf", "granite-speech-5.0-470m-turboctc-Q8_0.gguf"),
+            sha256: Some("0408fe0b33be19af5be423d8ba6b43768608b6f065e1ac97b78c84b55c140738".into()),
+            size_bytes: 505606496,
+            languages: langs(&["en"]),
+            accuracy: 0.92,
+            speed: 0.97,
+            timestamps: TimestampSupport::None,
+            ..Default::default()
+        },
+        ModelInfo {
+            id: "parakeet-tdt-0.6b-v2-gguf".into(),
+            name: "Parakeet TDT v2 (English)".into(),
+            description: "Near the top for English accuracy at the same speed, with token-level timing for verse alignment. Batch only.".into(),
+            engine_type: EngineType::TranscribeCpp,
+            format: ModelFormat::File,
+            filename: "parakeet-tdt-0.6b-v2-Q8_0.gguf".into(),
+            url: hf("handy-computer/parakeet-tdt-0.6b-v2-gguf", "parakeet-tdt-0.6b-v2-Q8_0.gguf"),
+            sha256: Some("f0d0e99cebb6d3b83f1f7069b82b5d3c2e39a54545b0da039cb4bafd9c4e5caa".into()),
+            size_bytes: 729574912,
+            languages: langs(&["en"]),
+            accuracy: 0.89,
+            speed: 0.97,
             timestamps: TimestampSupport::Token,
             ..Default::default()
         },
@@ -324,8 +368,10 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 722271424,
             languages: langs(&["en"]),
             accuracy: 0.88,
-            speed: 0.94,
+            speed: 0.98,
             timestamps: TimestampSupport::Token,
+            // Superseded by Parakeet TDT v2 and Granite Speech 5.0: both more accurate at the same speed.
+            legacy: true,
             ..Default::default()
         },
         ModelInfo {
@@ -340,7 +386,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 135373280,
             languages: langs(&["en"]),
             accuracy: 0.85,
-            speed: 0.98,
+            speed: 1.00,
             timestamps: TimestampSupport::Token,
             ..Default::default()
         },
@@ -356,7 +402,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 739508576,
             languages: langs(&eu25),
             accuracy: 0.88,
-            speed: 0.79,
+            speed: 0.96,
             supports_language_selection: true,
             timestamps: TimestampSupport::Token,
             ..Default::default()
@@ -373,9 +419,11 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 295793568,
             languages: langs(&["en"]),
             accuracy: 0.87,
-            speed: 0.83,
+            speed: 0.67,
             supports_streaming: true,
             timestamps: TimestampSupport::None,
+            // Superseded by Parakeet Unified: more accurate and faster, and also streams.
+            legacy: true,
             ..Default::default()
         },
         ModelInfo {
@@ -390,8 +438,10 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 77476480,
             languages: langs(&["en"]),
             accuracy: 0.80,
-            speed: 0.99,
+            speed: 0.92,
             timestamps: TimestampSupport::None,
+            // Superseded by Granite Speech 5.0: far more accurate and faster.
+            legacy: true,
             ..Default::default()
         },
         ModelInfo {
@@ -424,7 +474,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 769563424,
             languages: langs(&["en", "de", "es", "fr"]),
             accuracy: 0.90,
-            speed: 0.83,
+            speed: 0.85,
             supports_translation: true,
             supports_language_selection: true,
             timestamps: TimestampSupport::None,
@@ -442,7 +492,24 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 850423456,
             languages: langs(&["zh", "en", "yue", "ar", "de", "fr", "es", "pt", "id", "it", "ko", "ru", "th", "vi", "ja", "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "ro", "hu", "mk"]),
             accuracy: 0.87,
-            speed: 0.63,
+            speed: 0.66,
+            supports_language_selection: true,
+            timestamps: TimestampSupport::None,
+            ..Default::default()
+        },
+        ModelInfo {
+            id: "qwen3-asr-1.7b".into(),
+            name: "Qwen3 ASR 1.7B (30 languages)".into(),
+            description: "Best multilingual accuracy, 30 languages. Large, and slow without a GPU — suited to re-transcribing a recorded service.".into(),
+            engine_type: EngineType::TranscribeCpp,
+            format: ModelFormat::File,
+            filename: "Qwen3-ASR-1.7B-Q8_0.gguf".into(),
+            url: hf("handy-computer/Qwen3-ASR-1.7B-gguf", "Qwen3-ASR-1.7B-Q8_0.gguf"),
+            sha256: Some("9a0d81792dfea2d5f278b8a63deb3ea6e02139ce42c2301f32ea19c4f77526b7".into()),
+            size_bytes: 2185030624,
+            languages: langs(&["zh", "en", "yue", "ar", "de", "fr", "es", "pt", "id", "it", "ko", "ru", "th", "vi", "ja", "tr", "hi", "ms", "nl", "sv", "da", "fi", "pl", "cs", "fil", "fa", "el", "ro", "hu", "mk"]),
+            accuracy: 0.90,
+            speed: 0.37,
             supports_language_selection: true,
             timestamps: TimestampSupport::None,
             ..Default::default()
@@ -450,7 +517,7 @@ pub fn catalog() -> Vec<ModelInfo> {
         ModelInfo {
             id: "cohere-transcribe-2026".into(),
             name: "Cohere Transcribe".into(),
-            description: "Highest accuracy in the catalog. 14 languages, large and slower.".into(),
+            description: "Top-tier accuracy across 14 languages. Large and slower.".into(),
             engine_type: EngineType::TranscribeCpp,
             format: ModelFormat::File,
             filename: "cohere-transcribe-03-2026-Q5_K_M.gguf".into(),
@@ -459,7 +526,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 1770270208,
             languages: langs(&["en", "fr", "de", "es", "it", "pt", "nl", "pl", "el", "ar", "ja", "zh", "vi", "ko"]),
             accuracy: 0.92,
-            speed: 0.63,
+            speed: 0.66,
             supports_language_selection: true,
             timestamps: TimestampSupport::None,
             ..Default::default()
@@ -476,7 +543,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 269751136,
             languages: whisper_langs.clone(),
             accuracy: 0.80,
-            speed: 0.78,
+            speed: 0.79,
             supports_translation: true,
             supports_language_selection: true,
             timestamps: TimestampSupport::Segment,
@@ -494,7 +561,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 831538144,
             languages: whisper_langs.clone(),
             accuracy: 0.84,
-            speed: 0.42,
+            speed: 0.43,
             supports_translation: true,
             supports_language_selection: true,
             timestamps: TimestampSupport::Segment,
@@ -512,7 +579,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 886381760,
             languages: whisper_langs.clone(),
             accuracy: 0.87,
-            speed: 0.35,
+            speed: 0.37,
             supports_language_selection: true,
             timestamps: TimestampSupport::Segment,
             ..Default::default()
@@ -529,7 +596,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 986899616,
             languages: langs(&["en", "zh"]),
             accuracy: 0.88,
-            speed: 0.31,
+            speed: 0.33,
             timestamps: TimestampSupport::Segment,
             ..Default::default()
         },
@@ -545,7 +612,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 252684608,
             languages: langs(&["zh", "yue", "en", "ja", "ko"]),
             accuracy: 0.81,
-            speed: 0.98,
+            speed: 0.97,
             supports_language_selection: true,
             timestamps: TimestampSupport::None,
             ..Default::default()
@@ -578,7 +645,7 @@ pub fn catalog() -> Vec<ModelInfo> {
             size_bytes: 1160366080,
             languages: langs(&["zh", "en"]),
             accuracy: 0.86,
-            speed: 0.23,
+            speed: 0.25,
             supports_translation: true,
             supports_language_selection: true,
             timestamps: TimestampSupport::Segment,
