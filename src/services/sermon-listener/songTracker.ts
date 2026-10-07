@@ -1,5 +1,6 @@
 import type { Song, SongSection } from '../../types'
-import { phoneticSimilarity } from './phoneticMatch'
+import { codeSimilarity, phoneticCode, phoneticSimilarity, TOKEN_MATCH_FLOOR } from './phoneticMatch'
+import { getContentWords } from '../../lib/semanticRetrievalPolicy'
 import { sectionsForSong } from '../../lib/songSections'
 import { spellOutNumbers } from '../../lib/spokenNumbers'
 
@@ -88,6 +89,48 @@ export function lineSimilarity(query: string, line: string): number {
 
     return Math.min(1, score)
 }
+
+/** A line's content words (stopwords dropped), as spoken tokens. Cached:
+ *  the same few hundred lines are scored against every window. */
+const contentTokenCache = new Map<string, string[]>()
+function contentTokens(line: string): string[] {
+    let cached = contentTokenCache.get(line)
+    if (!cached) {
+        cached = Array.from(new Set(tokenize(line).filter((w) => getContentWords(w).length > 0)))
+        if (contentTokenCache.size > 5000) contentTokenCache.clear()
+        contentTokenCache.set(line, cached)
+    }
+    return cached
+}
+
+/**
+ * Whether `query` contains at least one of `line`'s content words, spelled the
+ * same or sounding the same. A line with no content words passes.
+ *
+ * Coverage-based scoring rewards a short line for being present in the
+ * window, and for a three-word line two function words are most of it: a
+ * leader's "put your hands in there" scored 0.67 against "in your vineyard"
+ * and put a song's last verse on screen before anyone sang. Requiring one
+ * shared content word stops that while keeping misheard lyrics ("the splendor
+ * of a key" still shares "splendour").
+ */
+export function sharesContentWord(query: string, line: string): boolean {
+    const wanted = contentTokens(line)
+    if (wanted.length === 0) return true
+    const heard = tokenize(query)
+    for (const w of wanted) {
+        const code = phoneticCode(w)
+        for (const q of heard) {
+            if (q === w) return true
+            if (code && codeSimilarity(code, phoneticCode(q)) >= TOKEN_MATCH_FLOOR) return true
+        }
+    }
+    return false
+}
+
+/** Score given to a line that shares no content word with the query: below
+ *  every threshold, so it can neither acquire, track nor jump. */
+const NO_CONTENT_SCORE = 0.2
 
 /**
  * Similarity between a transcript fragment and a lyric line, taking the kinder
@@ -516,7 +559,7 @@ export class SongPositionTracker {
 
     /** Searching / Lost: scan every step's lines to (re)acquire position. */
     private handleAcquire(query: string, chunk: TrackerChunk): TrackerUpdate {
-        const best = this.bestCandidate(query, this.allCandidateCoords())
+        const best = this.bestCandidate(query, this.allCandidateCoords(), this.phase === 'searching')
         if (best && best.score >= this.config.searchThreshold) {
             this.singerStep = best.stepIndex
             this.singerLine = best.lineIndex
@@ -563,13 +606,15 @@ export class SongPositionTracker {
             // where they were.
             if (best.score < this.config.jumpMinScore) return this.snapshot(false, 'jump-weak')
 
-            // Guard against transient noise causing a wild jump.
-            if (
-                this.pendingJump &&
-                this.pendingJump.stepIndex === best.stepIndex &&
-                this.pendingJump.lineIndex === best.lineIndex
-            ) {
-                this.pendingJump.count++
+            // Guard against transient noise causing a wild jump. A second window
+            // corroborates the pending target if it lands on it again *or
+            // carries on from it* — the next line or two, or the next section.
+            // Requiring the identical line meant singers who kept moving never
+            // confirmed anything: after a wrong lock, each window matched the
+            // verse they had reached by then, and the display sat on the wrong
+            // verse for three verses.
+            if (this.pendingJump && this.continuesFrom(this.pendingJump, best.stepIndex, best.lineIndex)) {
+                this.pendingJump = { stepIndex: best.stepIndex, lineIndex: best.lineIndex, count: this.pendingJump.count + 1 }
             } else {
                 this.pendingJump = { stepIndex: best.stepIndex, lineIndex: best.lineIndex, count: 1 }
             }
@@ -745,6 +790,14 @@ export class SongPositionTracker {
         return true
     }
 
+    /** Whether (stepIndex, lineIndex) is where singing that was at `from`
+     *  could plausibly be one window later: the same line, a line or two on,
+     *  or the next section. */
+    private continuesFrom(from: { stepIndex: number; lineIndex: number }, stepIndex: number, lineIndex: number): boolean {
+        if (stepIndex === from.stepIndex) return lineIndex >= from.lineIndex && lineIndex <= from.lineIndex + 2
+        return stepIndex === from.stepIndex + 1 && lineIndex <= 1
+    }
+
     private isNearby(stepIndex: number, lineIndex: number): boolean {
         if (stepIndex === this.singerStep) {
             // Same section: forward within a couple of lines, or a small back-step.
@@ -794,14 +847,23 @@ export class SongPositionTracker {
         return coords
     }
 
-    private bestCandidate(query: string, coords: Array<[number, number]>): Candidate | null {
+    /**
+     * Best-scoring line among `coords`. With `requireContent`, a line sharing
+     * no content word with the query (see {@link sharesContentWord}) can't
+     * win: used when acquiring, where nothing else stands between a leader's
+     * "put your hands in there" and a lock on "in your vineyard". Not applied
+     * while tracking, where the cursor's neighbourhood already constrains the
+     * match, and where it cost real misheard lines on the reference recording.
+     */
+    private bestCandidate(query: string, coords: Array<[number, number]>, requireContent = false): Candidate | null {
         const EPS = 1e-6
         let best: Candidate | null = null
         for (const [s, l] of coords) {
             const step = this.steps[s]
             const line = step.lines[l]
             if (!line) continue
-            const score = this.config.scorer(query, line)
+            const raw = this.config.scorer(query, line)
+            const score = requireContent && raw > NO_CONTENT_SCORE && !sharesContentWord(query, line) ? NO_CONTENT_SCORE : raw
             if (!best || score > best.score + EPS) {
                 best = { stepIndex: s, lineIndex: l, sectionId: step.sectionId, score }
             } else if (Math.abs(score - best.score) <= EPS) {

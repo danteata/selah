@@ -494,3 +494,46 @@ describe('far jumps need real evidence', () => {
         expect(u.singer?.sectionId).toBe('v1')
     })
 })
+
+// A song in short display lines, as EasyWorship slides split them, with a line
+// that appears in its first and last verse. Invented lyrics.
+const SHORT_LINES: Song = {
+    id: 'short-lines',
+    title: 'Short Lines',
+    artist: 'Test',
+    lyrics: '',
+    sections: [
+        { id: 'v1', type: 'verse', number: 1, label: 'Verse 1', lines: ['Morning bells are ringing out', 'Singing of the river road'] },
+        { id: 'v2', type: 'verse', number: 2, label: 'Verse 2', lines: ['Over mountains tall and wide', 'Lanterns burning in the night'] },
+        { id: 'v3', type: 'verse', number: 3, label: 'Verse 3', lines: ['Harvest fields of golden grain', 'Gathered in before the rain'] },
+        { id: 'v4', type: 'verse', number: 4, label: 'Verse 4', lines: ['Workers in your vineyard', 'Singing of the river road'] },
+        { id: 'v5', type: 'verse', number: 5, label: 'Verse 5', lines: ['Resting under olive trees', 'Carried home upon the breeze'] },
+    ],
+    defaultArrangement: ['v1', 'v2', 'v3', 'v4', 'v5'],
+}
+
+describe('acquiring on short display lines', () => {
+    it("doesn't lock on from function words alone", () => {
+        // "in", "your" are most of "in your vineyard"; a leader's hype shares
+        // nothing else with the song.
+        const t = new SongPositionTracker(SHORT_LINES)
+        t.start()
+        const u = t.ingest({ text: 'Come on everybody put your hands in there', timeMs: 0 })
+        expect(u.phase).toBe('searching')
+        expect(u.displaySectionId).toBeNull()
+    })
+
+    it('follows singers who keep moving after a far match', () => {
+        // Locked on the first verse, the next windows land past the lookahead
+        // and then a section further on. Each is a far jump on its own, but
+        // together they are one path, which must confirm the move rather than
+        // freeze the display waiting for the same line twice.
+        const t = new SongPositionTracker(SHORT_LINES)
+        t.start()
+        t.ingest({ text: 'morning bells are ringing out', timeMs: 0 })
+        const a = t.ingest({ text: 'workers in your vineyard', timeMs: 3000 })
+        expect(a.reason).toBe('jump-pending')
+        const b = t.ingest({ text: 'resting under olive trees', timeMs: 6000 })
+        expect(b.singer?.sectionId).toBe('v5')
+    })
+})
