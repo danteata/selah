@@ -227,8 +227,26 @@ class AudioFeatureBus {
      * worse, collapses the onset detector's baseline so the next real frame
      * reads as a huge transient and fires a phantom beat.
      */
-    publishFeatures(features: AudioFeatures, opts?: { silent?: boolean }): void {
-        this.lastPublishMs = now()
+    publishFeatures(features: AudioFeatures, opts?: { silent?: boolean; onsetAgoMs?: number | null }): void {
+        const t = now()
+        this.lastPublishMs = t
+        // Native beats: the capture loop detects kicks itself, on 4 ms steps of
+        // properly isolated bass, and says how long ago the latest one was. That
+        // dates the beat to within a few ms; re-detecting it here from these
+        // band levels could only place it somewhere in the frame's window. A
+        // frame that carries the field (null = no onset) means the native
+        // detector is running, so the local one stays out of it.
+        if (opts?.onsetAgoMs !== undefined) {
+            if (opts.onsetAgoMs !== null) this.registerBeat(t - Math.max(0, opts.onsetAgoMs))
+            if (opts.silent) return
+            this.current = {
+                rms: clamp01(features.rms),
+                bass: clamp01(features.bass),
+                mid: clamp01(features.mid),
+                treble: clamp01(features.treble),
+            }
+            return
+        }
         if (opts?.silent) return
         this.current = {
             rms: clamp01(features.rms),
@@ -273,9 +291,14 @@ class AudioFeatureBus {
             flux > BEAT_MIN_FLUX &&
             t - this.lastBeatMs > BEAT_REFRACTORY_MS
         if (!isOnset) return
+        this.registerBeat(t)
+    }
 
-        if (this.lastBeatMs > 0) this.recordInterval(t - this.lastBeatMs)
-        this.lastBeatMs = t
+    /** A beat happened at `atMs` (this module's clock). */
+    private registerBeat(atMs: number): void {
+        if (this.lastBeatMs > 0 && atMs - this.lastBeatMs < BEAT_REFRACTORY_MS) return
+        if (this.lastBeatMs > 0) this.recordInterval(atMs - this.lastBeatMs)
+        this.lastBeatMs = atMs
         this.beatCount++
     }
 

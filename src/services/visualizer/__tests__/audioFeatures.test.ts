@@ -257,3 +257,47 @@ describe('beat detection', () => {
         expect(audioFeatures.beatPulse).toBeGreaterThan(0.3)
     })
 })
+
+describe('native beats', () => {
+    let t = 0
+    let spy: ReturnType<typeof vi.spyOn>
+    const native = (onsetAgoMs: number | null, bass = 0.2, advanceMs = 16) => {
+        t += advanceMs
+        audioFeatures.publishFeatures({ rms: bass, bass, mid: 0, treble: 0 }, { onsetAgoMs })
+    }
+
+    beforeEach(() => {
+        t = 1000
+        spy = vi.spyOn(performance, 'now').mockImplementation(() => t)
+        audioFeatures.reset()
+        audioFeatures.setPipelineLatency(0)
+    })
+    afterEach(() => {
+        spy.mockRestore()
+        audioFeatures.reset()
+    })
+
+    it('dates a beat from when the capture loop says it happened', () => {
+        native(null)
+        native(12) // the kick landed 12 ms before this frame
+        expect(audioFeatures.beatCount).toBe(1)
+        // The pulse has already decayed for those 12 ms.
+        expect(audioFeatures.beatPulse).toBeCloseTo(Math.exp(-12 / 130), 3)
+    })
+
+    it('does not re-detect beats from band levels while native beats are reported', () => {
+        // A jump in bass that the local detector would call a beat.
+        native(null, 0.05)
+        native(null, 0.05)
+        native(null, 0.9)
+        expect(audioFeatures.beatCount).toBe(0)
+    })
+
+    it('locks a tempo from native beats', () => {
+        native(null)
+        for (let i = 0; i < 6; i++) {
+            native(5, 0.2, 500) // a kick every 500 ms
+        }
+        expect(audioFeatures.bpm).toBeCloseTo(120, 0)
+    })
+})

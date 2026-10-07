@@ -15,6 +15,7 @@
 // --no-default-features` fails to build the whole test binary.
 #[cfg(all(test, feature = "native-transcription"))]
 mod offline_probe;
+mod beat;
 mod microphone;
 // Every build: it backs the operator-facing sermon recordings, not only the
 // dev auto-recording (which stays debug-only, below).
@@ -693,6 +694,13 @@ struct AudioFeaturesEvent {
     /// the visualizer's onset detector, which would collapse its baseline and
     /// make the next real frame fire a phantom beat.
     silent: bool,
+    /// How long ago (ms, to the end of the audio this event covers) the most
+    /// recent kick onset happened, if one was detected since the last event —
+    /// see `beat::BeatDetector`. The webview dates the beat from this rather
+    /// than detecting it from these coarse band levels, which could only place
+    /// it somewhere in the event's window. Always present (null when no onset),
+    /// which is also how the webview knows the native detector is running.
+    onset_ago_ms: Option<f32>,
 }
 
 /// Running filter state for {@link AudioFeatureFilters::compute}.
@@ -733,6 +741,7 @@ impl AudioFeatureFilters {
                 mid: 0.0,
                 treble: 0.0,
                 silent: true,
+                onset_ago_ms: None,
             };
         }
 
@@ -771,6 +780,7 @@ impl AudioFeatureFilters {
             mid: g(mid, 6.0),
             treble: g(treble, 8.0),
             silent: false,
+            onset_ago_ms: None,
         }
     }
 }
@@ -1068,9 +1078,13 @@ pub fn start_capture_with_vad(
         let check_interval_ms = 10; // Check every 10ms for low latency
         // Record session start time for sermon-relative offset calculation
         let session_start = std::time::Instant::now();
-        // Throttle continuous audio-feature emission to ~30fps for the visualizer.
+        // Throttle continuous audio-feature emission to ~60fps for the visualizer.
+        // Beats carry their own timestamps (`onset_ago_ms`), so the rate no
+        // longer limits their precision; it bounds how soon the webview hears
+        // of one, which is what an unpredicted pulse waits on.
         let mut last_features_emit = std::time::Instant::now();
-        let features_interval_ms = 33u128;
+        let features_interval_ms = 16u128;
+        let mut beat_detector = beat::BeatDetector::new(TARGET_SAMPLE_RATE as f32);
         // Running filter state + the accumulation window for the visualizer's
         // features.
         //
@@ -1137,17 +1151,19 @@ pub fn start_capture_with_vad(
                 // dropping to zero — see `publishFeatures`). If anything did
                 // accumulate before the gap, emit that instead of discarding it.
                 if last_features_emit.elapsed().as_millis() >= features_interval_ms {
-                    let event = if feature_window.is_empty() {
+                    let mut event = if feature_window.is_empty() {
                         AudioFeaturesEvent {
                             rms: 0.0,
                             bass: 0.0,
                             mid: 0.0,
                             treble: 0.0,
                             silent: true,
+                            onset_ago_ms: None,
                         }
                     } else {
                         feature_filters.compute(&feature_window, TARGET_SAMPLE_RATE as f32)
                     };
+                    event.onset_ago_ms = beat_detector.take_onset_age_ms();
                     feature_window.clear();
                     let _ = app.emit("audio-features", event);
                     last_features_emit = std::time::Instant::now();
@@ -1180,6 +1196,8 @@ pub fn start_capture_with_vad(
             // the whole interval since the last one rather than only the tick it
             // happened to land on.
             feature_window.extend_from_slice(&samples);
+            // Every drained sample, in order, as soon as it is drained.
+            beat_detector.process(&samples);
             // Belt-and-braces bound: the emit below clears this every 33 ms, so
             // it should never approach a second of audio. Cap it anyway so a
             // pathological stall can't grow it without limit over a long service.
@@ -1189,7 +1207,8 @@ pub fn start_capture_with_vad(
                 feature_window.drain(..excess);
             }
             if last_features_emit.elapsed().as_millis() >= features_interval_ms {
-                let event = feature_filters.compute(&feature_window, TARGET_SAMPLE_RATE as f32);
+                let mut event = feature_filters.compute(&feature_window, TARGET_SAMPLE_RATE as f32);
+                event.onset_ago_ms = beat_detector.take_onset_age_ms();
                 feature_window.clear();
                 let _ = app.emit("audio-features", event);
                 last_features_emit = std::time::Instant::now();
