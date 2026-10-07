@@ -295,6 +295,8 @@ pub fn run() {
     memory::init_allocator();
     // Before the engine creates a Metal device — see platform.rs.
     platform::init_metal_backend();
+    // Before the Vulkan loader is first touched — see platform.rs.
+    platform::init_vulkan_layers();
 
     let multi_monitor_state: Arc<MultiMonitorState> = Arc::new(MultiMonitorState::new());
     let ndi_manager: Arc<NdiManager> = Arc::new(NdiManager::new());

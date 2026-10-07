@@ -38,6 +38,33 @@ pub fn init_metal_backend() {
     }
 }
 
+/// Keep third-party Vulkan implicit layers out of this process.
+///
+/// Overlay and capture tools — OBS's game-capture hook, the Steam overlay,
+/// RTSS, Overwolf — register system-wide Vulkan *implicit* layers that the
+/// loader injects into every Vulkan app. One of them colliding with
+/// ggml-vulkan's compute dispatch crashed Handy with an access violation inside
+/// the GPU driver the moment a model loaded, with nothing in the log (Handy
+/// #2049). Selah runs the same ggml Vulkan backend on Windows, and OBS is on
+/// nearly every church AV machine, so the failure would read as Selah vanishing
+/// mid-service. The layers do nothing for compute, and disabling them keeps
+/// full GPU acceleration.
+///
+/// An operator's own `VK_LOADER_LAYERS_DISABLE` wins, and
+/// `SELAH_KEEP_VULKAN_IMPLICIT_LAYERS=1` opts out entirely. Must run before the
+/// Vulkan loader is first touched — called at the top of `run()`.
+pub fn init_vulkan_layers() {
+    #[cfg(target_os = "windows")]
+    {
+        let keep = std::env::var("SELAH_KEEP_VULKAN_IMPLICIT_LAYERS").as_deref() == Ok("1");
+        if !keep && std::env::var_os("VK_LOADER_LAYERS_DISABLE").is_none() {
+            // SAFETY: called from `run()` before any other thread is spawned, so
+            // there is no concurrent getenv/setenv to race with.
+            unsafe { std::env::set_var("VK_LOADER_LAYERS_DISABLE", "~implicit~") };
+        }
+    }
+}
+
 /// Whether this is an x86_64 Windows process running under emulation on an
 /// ARM64 host (Windows-on-ARM's x64 emulation layer).
 ///
