@@ -158,6 +158,16 @@ describe('songSections', () => {
             expect(defaultArrangement).toEqual(['v1', 'v2', 'v3'])
         })
 
+        it('splits a song that came as one block at its slide breaks', () => {
+            // No "Slide N" grouping in the source, only a break after each
+            // slide: those breaks are the structure. Keeping the block whole
+            // made 1,577 of 2,791 imported songs a single slide.
+            const { sections } = deriveSongStructure('', [
+                { label: '', content: 'First slide line\n\nSecond slide line\n\nThird slide line' },
+            ])
+            expect(sections.map((s) => s.lines)).toEqual([['First slide line'], ['Second slide line'], ['Third slide line']])
+        })
+
         it('never gives two sections the same id', () => {
             const blocks = [
                 { label: 'Verse 1', content: 'one' },

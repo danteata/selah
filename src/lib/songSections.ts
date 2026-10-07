@@ -239,13 +239,22 @@ export function deriveSongStructure(
 
     let sections: SongSection[]
     if (usableBlocks && usableBlocks.length > 0) {
-        // One labelled block is one section. Its content can hold blank
-        // lines (EasyWorship puts one at every slide break within a verse),
-        // which the re-parse below would split on — breaking each verse into
-        // pieces, mislabelling the pieces, and dropping any piece that
-        // happened to repeat a line elsewhere in the song.
+        // When the source grouped the song into several blocks (EasyWorship's
+        // "Slide 1", "Slide 2"… or labelled verses), each block is one
+        // section. Its content can hold blank lines — EasyWorship leaves one at
+        // every slide break inside a verse — which the re-parse below would
+        // split on, breaking each verse into pieces, mislabelling them and
+        // dropping any piece that repeated a line elsewhere.
+        //
+        // A single block means the source had no grouping at all, only slide
+        // breaks. Those breaks are then the only structure there is, so they
+        // are kept: joining them made 1,577 of 2,791 imported songs one slide.
+        const keepBlocksWhole = usableBlocks.length > 1
         const synthetic = usableBlocks
-            .map((b) => (b.label.trim() ? `${b.label.trim()}\n` : '') + b.content.trim().replace(/\n\s*\n/g, '\n'))
+            .map((b) => {
+                const content = b.content.trim()
+                return (b.label.trim() ? `${b.label.trim()}\n` : '') + (keepBlocksWhole ? content.replace(/\n\s*\n/g, '\n') : content)
+            })
             .join('\n\n')
         sections = parseLyricsIntoSections(synthetic)
     } else {
