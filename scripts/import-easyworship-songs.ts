@@ -18,6 +18,7 @@
 import { Database } from 'bun:sqlite'
 import { extractVerseStructureFromRTF, parseRTF } from '../src/services/migration/rtfParser'
 import { deriveSongStructure } from '../src/lib/songSections'
+import { nonSongReason } from '../src/lib/songLibraryFilter'
 import type { SongSection } from '../src/types'
 
 interface Args {
@@ -115,6 +116,7 @@ function main() {
     const stats = {
         total: 0,
         empty: 0,
+        notSongs: 0,
         multiSection: 0,
         singleSection: 0,
         withChorus: 0,
@@ -140,13 +142,22 @@ function main() {
             continue
         }
 
+        // Sermon outlines, prayer points and announcements stored as "songs"
+        // are not lyrics; leave them out (see songLibraryFilter.ts).
+        const title = meta?.title ?? `Song ${row.song_id}`
+        const skipReason = nonSongReason({ title, sections })
+        if (skipReason) {
+            stats.notSongs++
+            continue
+        }
+
         // Flatten sections back into a canonical lyrics string so the freeform
         // representation and the structured one always agree.
         const lyrics = sections.map((s) => s.lines.join('\n')).join('\n\n')
 
         songs.push({
             sourceId: row.song_id,
-            title: meta?.title ?? `Song ${row.song_id}`,
+            title,
             artist: meta?.author ?? 'Unknown',
             author: meta?.author ?? 'Unknown',
             lyrics,
@@ -190,6 +201,7 @@ function main() {
     console.log(`Songs processed:      ${stats.total}`)
     console.log(`Structured songs:     ${songs.length}`)
     console.log(`Empty / unparseable:  ${stats.empty}`)
+    console.log(`Not songs (skipped):  ${stats.notSongs}`)
     console.log(`Multi-section:        ${stats.multiSection}`)
     console.log(`Single-section:       ${stats.singleSection}`)
     console.log(`With a chorus:        ${stats.withChorus}`)

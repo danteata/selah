@@ -353,3 +353,21 @@ describe('identifySong', () => {
         })
     })
 })
+
+describe('non-songs', () => {
+    it('keeps sermon notes stored as songs out of auto-detect', () => {
+        const notes: Song = {
+            id: 'notes',
+            title: '10 reasons why you must tithe',
+            artist: '',
+            lyrics: '',
+            sections: [{ id: 'v1', type: 'verse', number: 1, label: 'Verse 1', lines: [
+                'God established the tithe as a covenant of blessing',
+                'The tithe opens the windows of heaven over your house',
+            ] }],
+        }
+        const index = buildSongIndex([notes, AMAZING_GRACE])
+        expect(index.entries.some((e) => e.songId === 'notes')).toBe(false)
+        expect(identifySong('the tithe opens the windows of heaven over your house', index)).toBeNull()
+    })
+})

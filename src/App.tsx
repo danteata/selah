@@ -14,7 +14,7 @@ import { AnalyticsEventType } from './services/analytics/types'
 import { useAppStore } from './store/appStore'
 import { useOAuthCallback } from './hooks/useOAuthCallback'
 import { useSyncCurrentUser } from './hooks/useSyncCurrentUser'
-import { seedLocalSongs } from './services/songLibrary/localSongSeeder'
+import { removeBundledNonSongs } from './services/songLibrary/bundledSongCleanup'
 import { notifySongsChanged } from './hooks/useSongs'
 import { applyThemeClass } from './utils/theme'
 import { AppLoading } from './components/common/AppLoading'
@@ -236,19 +236,16 @@ function AppRoutes() {
 
 function App() {
     useEffect(() => {
-        // Seed the structured EasyWorship song corpus into the local library
-        // for now (Convex bulk load comes later). Idempotent + version-guarded.
-        // Gated to dev and desktop so web-prod visitors don't download the
-        // bundled asset while this feature is still in development.
+        // The song library is no longer bundled. Installs that were seeded
+        // with it get its non-song entries (another church's notes and
+        // announcements) removed, once — see bundledSongCleanup.ts.
         if (!import.meta.env.DEV && !isDesktop()) return
-        const ac = new AbortController()
-        seedLocalSongs({ signal: ac.signal }).then((r) => {
-            if (r.seeded > 0) {
-                console.info(`[songs] Seeded ${r.seeded} songs into local library.`)
+        void removeBundledNonSongs().then((removed) => {
+            if (removed > 0) {
+                console.info(`[songs] Removed ${removed} bundled non-song entries from the library.`)
                 notifySongsChanged()
             }
         })
-        return () => ac.abort()
     }, [])
 
     // Deep-link listener for Tauri OAuth callbacks is mounted inside

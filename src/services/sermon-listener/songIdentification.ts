@@ -2,6 +2,7 @@ import type { Song } from '../../types'
 import { lyricSimilarity, tokenize } from './songTracker'
 import { getContentWords, isTheologicalCommon, isAmbiguousMatch, type ScoredVerseCandidate } from '../../lib/semanticRetrievalPolicy'
 import { sectionsForSong } from '../../lib/songSections'
+import { isLikelySong } from '../../lib/songLibraryFilter'
 
 /**
  * Song identification from a live transcript (Phase 2 "Searching").
@@ -139,6 +140,11 @@ export function buildSongIndex(songs: Song[]): SongIndex {
         // lyrics was previously indexed as zero lines, so auto-detect could
         // never name it however clearly it was sung.
         const sections = sectionsForSong(song)
+        // Sermon outlines, prayer points and announcements kept in the song
+        // library are written in exactly the words a preacher speaks, so they
+        // are the entries ordinary preaching matches near-verbatim. They stay
+        // in the library to project by hand; they are just never auto-detected.
+        if (!isLikelySong({ title: song.title, sections })) continue
         for (const section of sections) {
             section.lines.forEach((line, lineIndex) => {
                 const toks = tokenize(line)
