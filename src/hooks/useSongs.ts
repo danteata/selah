@@ -278,7 +278,11 @@ export function useSongs(): UseSongsReturn {
                 updatedAt: new Date().toISOString(),
             })
 
-            const isLocal = songId.startsWith('local_')
+            // `ew_` songs were seeded into local storage from the old bundled
+            // library and never existed on the server, so an update has
+            // nothing to sync to (re-importing an EasyWorship library with
+            // "replace existing" updates thousands of them).
+            const isLocal = songId.startsWith('local_') || songId.startsWith('ew_')
 
             if (!isOffline && !isLocal) {
                 try {
@@ -328,7 +332,8 @@ export function useSongs(): UseSongsReturn {
             const db = getIndexedDB()
             await db.library.delete(songId)
 
-            const isLocal = songId.startsWith('local_')
+            // As in updateSong: `ew_` songs exist only on this device.
+            const isLocal = songId.startsWith('local_') || songId.startsWith('ew_')
 
             if (!isOffline && !isLocal) {
                 try {
