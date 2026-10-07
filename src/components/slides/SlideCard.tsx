@@ -1,3 +1,4 @@
+import { motionBackgroundFor } from '../motion/motionBackgrounds'
 import { forwardRef } from 'react'
 import { Trash2, Copy, Bookmark, Pencil, Zap, Lightbulb, Layers } from 'lucide-react'
 import type { Slide } from '../../types'
@@ -79,7 +80,10 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     const slideFont = slide.slideStyle?.font || defaultFont || 'Inter'
 
     // Check if this is a video background
-    const isVideoBackground = slide.backgroundType === 'video' && backgroundUrl
+    // A motion background shows its still poster here: dozens of animating
+    // cards in a long queue would be distracting and costly.
+    const motion = motionBackgroundFor(slide.background)
+    const isVideoBackground = !motion && slide.backgroundType === 'video' && backgroundUrl
 
     // Bible and dictionary slides have a separate caption (contents[1]) that can sit above or below the body.
     const previewRefHtml = slideCaptionHtml(slide)
@@ -153,7 +157,7 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
             <div
                 className="aspect-video relative overflow-hidden"
                 style={{
-                    backgroundImage: !isVideoBackground && backgroundUrl ? `url(${backgroundUrl})` : undefined,
+                    backgroundImage: motion ? motion.poster : !isVideoBackground && backgroundUrl ? `url(${backgroundUrl})` : undefined,
                     backgroundSize: isMediaSlide ? getBackgroundSize(fillType) : 'cover',
                     backgroundPosition: 'center',
                     backgroundRepeat: 'no-repeat',

@@ -1,3 +1,5 @@
+import { MotionCanvas } from '../motion/MotionCanvas'
+import { motionBackgroundFor } from '../motion/motionBackgrounds'
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Slide, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
@@ -168,7 +170,8 @@ export function SlideView({
     )
 
     const isMedia = slide.type === slideTypes.media
-    const isVideoBackground = slide.backgroundType === 'video' && !!backgroundUrl
+    const motion = motionBackgroundFor(slide.background)
+    const isVideoBackground = !motion && slide.backgroundType === 'video' && !!backgroundUrl
     // Per-slide setting wins, then the global default, then bottom.
     const refPosition = slide.slideStyle?.verseRefPosition ?? settings.verseRefPosition ?? 'bottom'
 
@@ -355,6 +358,12 @@ export function SlideView({
                     {isMedia ? (
                         // Media is the content itself, not a backdrop for text: no dimming.
                         <div className="absolute inset-0 bg-black" />
+                    ) : motion ? (
+                        <MotionCanvas
+                            background={motion}
+                            className="absolute inset-0"
+                            style={{ filter: slideBackgroundFilter(slide) }}
+                        />
                     ) : isVideoBackground && backgroundUrl ? (
                         <VideoBackground
                             src={backgroundUrl}

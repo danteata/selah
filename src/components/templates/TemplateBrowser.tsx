@@ -1,3 +1,5 @@
+import { MotionCanvas } from '../motion/MotionCanvas'
+import { motionBackgroundFor } from '../motion/motionBackgrounds'
 import { useTemplateMediaState } from '../../hooks/useTemplateMediaSync'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
@@ -119,7 +121,22 @@ function TemplateCard({
         }
     }, [videoUrl])
 
+    const motion = motionBackgroundFor(slideData?.background)
+
     const renderThumbnail = () => {
+        // Motion templates animate in the picker, as video templates do.
+        if (motion) {
+            return (
+                <div className="absolute inset-0">
+                    <MotionCanvas background={motion} className="absolute inset-0" />
+                    <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-1.5 py-0.5 bg-black/50 backdrop-blur-sm rounded text-white text-[9px] font-medium">
+                        <Sparkles className="w-2.5 h-2.5" />
+                        Motion
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                </div>
+            )
+        }
         if (isVideoBackground && videoUrl) {
             return (
                 <div className="absolute inset-0">
@@ -278,11 +295,17 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     // may reset them (the server enforces this too).
     const { isSuperadmin } = useUserRole()
 
+    // Add any built-in templates this deployment is missing, once a session:
+    // the server adds only what's absent (the motion backgrounds came in a
+    // later release than the first seed).
+    const seededRef = useRef(false)
     useEffect(() => {
-        if ((isOpen || isInline) && !isLoading && templates?.length === 0) {
-            seedDefaultTemplates()
-        }
-    }, [isOpen, isInline, isLoading, templates, seedDefaultTemplates])
+        if (seededRef.current || !(isOpen || isInline) || isLoading || !templates || !isAuthenticated) return
+        const hasMotionBuiltins = templates.some((t) => !t.createdBy && typeof t.slideId === 'string' && t.slideId.includes('"motion:'))
+        if (templates.length > 0 && hasMotionBuiltins) return
+        seededRef.current = true
+        void Promise.resolve(seedDefaultTemplates()).catch(() => { seededRef.current = false })
+    }, [isOpen, isInline, isLoading, templates, seedDefaultTemplates, isAuthenticated])
 
     const handleResetDefaults = async () => {
         if (!await askConfirm({

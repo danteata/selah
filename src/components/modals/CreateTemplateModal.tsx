@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
     X, Save, Upload, Image, Palette, Type, Loader2, Video,
-    LayoutTemplate, PanelBottom, AlignLeft, AlignCenter, AlignRight,
+    LayoutTemplate, PanelBottom, AlignLeft, AlignCenter, AlignRight, Sparkles, ExternalLink,
 } from 'lucide-react'
 import { useTemplates, TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
 import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
@@ -11,6 +11,9 @@ import { generateThumbnail } from '../../utils/templateThumbnail'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { isImageUrl, useLocalBackground } from '../../hooks/useLocalBackground'
 import { copyIntoMediaLibrary } from '../../services/localMediaFiles'
+import { MotionCanvas } from '../motion/MotionCanvas'
+import { MOTION_BACKGROUNDS, MOTION_PREFIX } from '../motion/motionBackgrounds'
+import { openExternalUrl } from '../../utils/openExternalUrl'
 import type { SlideStyle } from '../../types'
 import { Modal } from './Modal'
 
@@ -67,6 +70,31 @@ const PRESET_IMAGES = [
     { name: 'Prayer', url: DEFAULT_BACKGROUNDS.prayer.background },
 ]
 
+/**
+ * Where to get more backgrounds. Church Media Drop's packs are free for every
+ * church, but licensed to the church that downloads them: Selah may link to
+ * their download pages, not ship or re-host the files (their terms forbid
+ * redistribution and direct links to media files).
+ */
+const FREE_BACKGROUNDS_URL = 'https://live.churchmediadrop.com/'
+
+function FindFreeBackgrounds() {
+    return (
+        <p className="text-xs text-[var(--text-muted)]">
+            Need more?{' '}
+            <button
+                type="button"
+                onClick={() => void openExternalUrl(FREE_BACKGROUNDS_URL)}
+                className="inline-flex items-center gap-1 text-[var(--accent-teal)] hover:underline"
+            >
+                Find free backgrounds for churches
+                <ExternalLink className="w-3 h-3" />
+            </button>
+            {' '}then upload the one you download here.
+        </p>
+    )
+}
+
 export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: CreateTemplateModalProps) {
     const { createTemplate, updateTemplate, generateUploadUrl } = useTemplates()
     const { isOffline } = useConvexConnection()
@@ -75,7 +103,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const [appliesTo, setAppliesTo] = useState<SlideType[]>(['any'])
     const [description, setDescription] = useState('')
     const [content, setContent] = useState('')
-    const [backgroundType, setBackgroundType] = useState<'image' | 'gradient' | 'color' | 'video'>('image')
+    const [backgroundType, setBackgroundType] = useState<'image' | 'gradient' | 'color' | 'video' | 'motion'>('image')
     const [background, setBackground] = useState(DEFAULT_BACKGROUNDS.general.background)
     const [customImageUrl, setCustomImageUrl] = useState('')
     const [customColor, setCustomColor] = useState('#667eea')
@@ -119,7 +147,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 let slideData: {
                     contents?: string[]
                     background?: string
-                    backgroundType?: 'image' | 'gradient' | 'color' | 'video'
+                    backgroundType?: 'image' | 'gradient' | 'color' | 'video' | 'motion'
                     backgroundStorageId?: string | null
                     localFilePath?: string
                     layout?: TemplateLayout
@@ -400,6 +428,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
             } else if (backgroundType === 'video' && background) {
                 thumbnail = await generateThumbnail(background, 'video', content || name, resolvedBackground || undefined)
             }
+            // A motion template needs no picture: the picker draws it live.
 
             const slideStyle: SlideStyle | undefined = layout === 'lower-third'
                 ? {
@@ -490,7 +519,9 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 <div className="p-4 space-y-4">
                     {/* Preview */}
                     <div className="aspect-video bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden flex items-center justify-center text-gray-400 relative">
-                        {backgroundType === 'video' && resolvedBackground ? (
+                        {backgroundType === 'motion' ? (
+                            <MotionCanvas background={background} className="absolute inset-0" />
+                        ) : backgroundType === 'video' && resolvedBackground ? (
                             <video
                                 src={resolvedBackground}
                                 className="absolute inset-0 w-full h-full object-cover"
@@ -773,6 +804,23 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                             </button>
                             <button
                                 type="button"
+                                onClick={() => {
+                                    if (backgroundType === 'motion') return
+                                    setBackgroundType('motion')
+                                    setBackground(`${MOTION_PREFIX}${MOTION_BACKGROUNDS[0].id}`)
+                                    setLocalFilePath(null)
+                                    setBackgroundStorageId(null)
+                                }}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${backgroundType === 'motion'
+                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] ring-2 ring-[var(--accent-teal)]'
+                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700'
+                                    }`}
+                            >
+                                <Sparkles className="w-4 h-4" />
+                                Motion
+                            </button>
+                            <button
+                                type="button"
                                 onClick={() => chooseBackgroundType('gradient')}
                                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${backgroundType === 'gradient'
                                     ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] ring-2 ring-[var(--accent-teal)]'
@@ -803,6 +851,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 <Image className="w-4 h-4" />
                                 Background Image
                             </label>
+
+                            <FindFreeBackgrounds />
 
                             {/* Preset Images */}
                             <div className="grid grid-cols-4 gap-2">
@@ -856,12 +906,45 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                         </div>
                     )}
 
+                    {backgroundType === 'motion' && (
+                        <div className="space-y-3">
+                            <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
+                                <Sparkles className="w-4 h-4" />
+                                Motion Background
+                            </label>
+                            <p className="text-xs text-[var(--text-muted)]">
+                                Drawn by Selah, so they look the same on every computer and need no download.
+                            </p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {MOTION_BACKGROUNDS.map((m) => {
+                                    const value = `${MOTION_PREFIX}${m.id}`
+                                    return (
+                                        <button
+                                            key={m.id}
+                                            type="button"
+                                            onClick={() => setBackground(value)}
+                                            title={m.description}
+                                            className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${background === value
+                                                ? 'border-[var(--accent-teal)] ring-2 ring-[var(--accent-teal)]/20'
+                                                : 'border-[var(--border-subtle)] hover:border-gray-300 dark:hover:border-gray-600'
+                                                }`}
+                                        >
+                                            <MotionCanvas background={m} still className="absolute inset-0" />
+                                            <span className="absolute bottom-1 left-1.5 text-[10px] font-medium text-white drop-shadow">{m.name}</span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     {backgroundType === 'video' && (
                         <div className="space-y-3">
                             <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
                                 <Video className="w-4 h-4" />
                                 Background Video
                             </label>
+                            <FindFreeBackgrounds />
 
                             {/* Video Upload */}
                             <div className="flex flex-col gap-3">

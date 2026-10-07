@@ -477,8 +477,37 @@ function defaultTemplates(now: string) {
             createdAt: now,
             updatedAt: now,
         },
+        ...MOTION_TEMPLATES.map(([name, description, motionId, category, contents]) => ({
+            name,
+            description,
+            slideId: JSON.stringify({
+                type: "text",
+                layout: "full-text",
+                contents,
+                background: `motion:${motionId}`,
+                backgroundType: "motion",
+            }),
+            category,
+            createdAt: now,
+            updatedAt: now,
+        })),
     ];
 }
+
+/**
+ * Built-in motion backgrounds, drawn by the app itself (see
+ * src/components/motion/motionBackgrounds.ts; the ids must match). Every church
+ * gets them with nothing to upload, download or license. No thumbnail: the
+ * template picker draws them live.
+ */
+const MOTION_TEMPLATES: Array<[string, string, string, "worship" | "general" | "prayer" | "sermon" | "announcement", string[]]> = [
+    ["Galaxy", "Drifting stars and a slow-turning nebula", "galaxy", "worship", ["Your content here"]],
+    ["Aurora", "Soft green and violet light", "aurora", "worship", ["Your content here"]],
+    ["Warm Glow", "Gold and rose light leaks", "warm-glow", "worship", ["Your content here"]],
+    ["Embers", "Rising sparks over a dark fire", "embers", "prayer", ["Your content here"]],
+    ["Ocean", "Slow waves under a blue sky", "ocean", "general", ["Your content here"]],
+    ["Light Rays", "Beams of light from above", "light-rays", "sermon", ["Your content here"]],
+];
 
 // Seed default templates (only if none exist)
 export const seedDefaultTemplates = mutation({
@@ -486,20 +515,22 @@ export const seedDefaultTemplates = mutation({
     handler: async (ctx) => {
         await requireUser(ctx);
 
+        // Adds whichever system templates are missing, by name, so built-ins
+        // added in a later release (the motion backgrounds) reach deployments
+        // seeded before them. It used to stop at the first system template.
         const existingSystem = await ctx.db
             .query("templates")
             .withIndex("by_creator", (q) => q.eq("createdBy", undefined))
-            .first();
-        if (existingSystem) {
-            return { seeded: false, message: "Templates already exist" };
-        }
-
-        const templates = defaultTemplates(new Date().toISOString());
-        for (const template of templates) {
+            .take(500);
+        const have = new Set(existingSystem.map((t) => t.name));
+        const missing = defaultTemplates(new Date().toISOString()).filter((t) => !have.has(t.name));
+        for (const template of missing) {
             await ctx.db.insert("templates", template);
         }
 
-        return { seeded: true, count: templates.length };
+        return missing.length > 0
+            ? { seeded: true, count: missing.length }
+            : { seeded: false, message: "Templates already exist" };
     },
 });
 

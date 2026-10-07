@@ -101,3 +101,22 @@ describe('deleting a media library item', () => {
         expect(await t.run((ctx) => ctx.db.system.get(file))).not.toBeNull()
     })
 })
+
+describe('built-in templates', () => {
+    it('adds the motion templates to a deployment seeded before them, once', async () => {
+        const { t, asAlice } = await setup()
+        // An older seed: one system template, no motion ones.
+        await t.run((ctx) => ctx.db.insert('templates', {
+            name: 'Welcome Slide', slideId: '{}', category: 'general', createdAt: '', updatedAt: '',
+        }))
+        await asAlice.mutation(api.templates.seedDefaultTemplates, {})
+        const names = (await asAlice.query(api.templates.getTemplates, {})).filter((t) => !t.createdBy).map((t) => t.name)
+        expect(names).toEqual(expect.arrayContaining(['Welcome Slide', 'Galaxy', 'Aurora', 'Light Rays']))
+        expect(names.filter((n) => n === 'Welcome Slide')).toHaveLength(1)
+
+        const again = await asAlice.mutation(api.templates.seedDefaultTemplates, {})
+        expect(again.seeded).toBe(false)
+        const galaxy = (await asAlice.query(api.templates.getTemplates, {})).find((t) => t.name === 'Galaxy')!
+        expect(JSON.parse(galaxy.slideId as string)).toMatchObject({ background: 'motion:galaxy', backgroundType: 'motion' })
+    })
+})
