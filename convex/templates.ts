@@ -494,6 +494,10 @@ function defaultTemplates(now: string) {
     ];
 }
 
+/** Built-in templates since withdrawn: seeding removes them. ("Ocean" was
+ *  replaced by "Silk"; slides already using its background still draw.) */
+const RETIRED_SYSTEM_TEMPLATES = new Set(["Ocean"]);
+
 /**
  * Built-in motion backgrounds, drawn by the app itself (see
  * src/components/motion/motionBackgrounds.ts; the ids must match). Every church
@@ -505,7 +509,7 @@ const MOTION_TEMPLATES: Array<[string, string, string, "worship" | "general" | "
     ["Aurora", "Soft green and violet light", "aurora", "worship", ["Your content here"]],
     ["Warm Glow", "Gold and rose light leaks", "warm-glow", "worship", ["Your content here"]],
     ["Embers", "Rising sparks over a dark fire", "embers", "prayer", ["Your content here"]],
-    ["Ocean", "Slow waves under a blue sky", "ocean", "general", ["Your content here"]],
+    ["Silk", "Ribbons of colour flowing across the screen", "silk", "general", ["Your content here"]],
     ["Light Rays", "Beams of light from above", "light-rays", "sermon", ["Your content here"]],
 ];
 
@@ -522,13 +526,20 @@ export const seedDefaultTemplates = mutation({
             .query("templates")
             .withIndex("by_creator", (q) => q.eq("createdBy", undefined))
             .take(500);
+        let removed = 0;
+        for (const t of existingSystem) {
+            if (RETIRED_SYSTEM_TEMPLATES.has(t.name)) {
+                await ctx.db.delete(t._id);
+                removed++;
+            }
+        }
         const have = new Set(existingSystem.map((t) => t.name));
         const missing = defaultTemplates(new Date().toISOString()).filter((t) => !have.has(t.name));
         for (const template of missing) {
             await ctx.db.insert("templates", template);
         }
 
-        return missing.length > 0
+        return missing.length > 0 || removed > 0
             ? { seeded: true, count: missing.length }
             : { seeded: false, message: "Templates already exist" };
     },

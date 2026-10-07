@@ -34,6 +34,9 @@ export interface MotionBackground {
     /** A CSS background that stands in for it when not animating. */
     poster: string
     scene: MotionScene
+    /** No longer offered for new templates; still drawn for templates that
+     *  already use it. */
+    retired?: boolean
 }
 
 /** Deterministic random numbers, so every instance draws the same scene. */
@@ -241,40 +244,54 @@ const waves: MotionScene = {
     },
 }
 
+interface Beam { angle: number; width: number; phase: number; swing: number; speed: number }
+interface Dust { x: number; y: number; r: number; vx: number; vy: number; phase: number }
+
 const rays: MotionScene = {
     renderScale: 0.5,
-    setup(_w, _h, random) {
-        return {
-            beams: Array.from({ length: 6 }, (_, i) => ({
-                angle: 0.25 + i * 0.16 + random() * 0.08,
-                width: 0.035 + random() * 0.05,
-                phase: random() * Math.PI * 2,
-            })),
-        }
+    setup(w, h, random) {
+        const beams: Beam[] = Array.from({ length: 7 }, (_, i) => ({
+            angle: 0.2 + i * 0.15 + random() * 0.06,
+            width: 0.03 + random() * 0.045,
+            phase: random() * Math.PI * 2,
+            swing: 0.06 + random() * 0.08,
+            speed: 0.18 + random() * 0.22,
+        }))
+        const dust: Dust[] = Array.from({ length: Math.round((w * h) / 2600) }, () => ({
+            x: random() * w,
+            y: random() * h,
+            r: 0.5 + random() * 1.4,
+            vx: 4 + random() * 10,
+            vy: -2 + random() * 6,
+            phase: random() * Math.PI * 2,
+        }))
+        return { beams, dust }
     },
     draw(ctx, w, h, t, state) {
-        const { beams } = state as { beams: Array<{ angle: number; width: number; phase: number }> }
+        const { beams, dust } = state as { beams: Beam[]; dust: Dust[] }
         const bg = ctx.createLinearGradient(0, 0, w, h)
-        bg.addColorStop(0, '#13234a')
-        bg.addColorStop(0.6, '#070d22')
-        bg.addColorStop(1, '#03050d')
+        bg.addColorStop(0, '#16285a')
+        bg.addColorStop(0.55, '#080f28')
+        bg.addColorStop(1, '#03050e')
         ctx.fillStyle = bg
         ctx.fillRect(0, 0, w, h)
         ctx.globalCompositeOperation = 'lighter'
-        // Light from beyond the top-left corner, fanning across the frame.
-        const ox = -w * 0.12
-        const oy = -h * 0.25
+        // Light from beyond the top-left corner, fanning across the frame;
+        // each beam swings and brightens on its own rhythm.
+        const ox = -w * 0.1
+        const oy = -h * 0.22
         const len = Math.hypot(w, h) * 1.4
+        const lit: Array<[number, number, number]> = []
         for (const b of beams) {
-            const a = b.angle + Math.sin(t * 0.07 + b.phase) * 0.05
-            const strength = 0.05 + 0.03 * Math.sin(t * 0.22 + b.phase)
-            // Three passes, widening and fading, for soft edges.
+            const a = b.angle + Math.sin(t * b.speed + b.phase) * b.swing
+            const strength = 0.045 + 0.05 * (0.5 + 0.5 * Math.sin(t * b.speed * 1.7 + b.phase * 2))
+            lit.push([a, b.width * 2.2, strength])
             for (const [widen, fade] of [[1, 1], [1.9, 0.55], [2.9, 0.3]] as const) {
                 const spread = b.width * widen
                 const g = ctx.createLinearGradient(ox, oy, ox + Math.cos(a) * len, oy + Math.sin(a) * len)
-                g.addColorStop(0, `rgba(210, 225, 255, ${strength * fade})`)
-                g.addColorStop(0.7, `rgba(210, 225, 255, ${strength * fade * 0.25})`)
-                g.addColorStop(1, 'rgba(210, 225, 255, 0)')
+                g.addColorStop(0, `rgba(215, 228, 255, ${strength * fade * 1.6})`)
+                g.addColorStop(0.65, `rgba(215, 228, 255, ${strength * fade * 0.35})`)
+                g.addColorStop(1, 'rgba(215, 228, 255, 0)')
                 ctx.fillStyle = g
                 ctx.beginPath()
                 ctx.moveTo(ox, oy)
@@ -284,7 +301,89 @@ const rays: MotionScene = {
                 ctx.fill()
             }
         }
-        glow(ctx, 0, 0, Math.max(w, h) * 0.45, 'rgba(255, 238, 210, ALPHA)', 0.16)
+        // Dust drifting through the room, catching the light where a beam is.
+        for (const d of dust) {
+            const x = (d.x + t * d.vx) % w
+            const y = (((d.y + t * d.vy + Math.sin(t * 0.6 + d.phase) * 6) % h) + h) % h
+            const angle = Math.atan2(y - oy, x - ox)
+            let light = 0.08
+            for (const [a, half, strength] of lit) {
+                const off = Math.abs(angle - a)
+                if (off < half) light = Math.max(light, (1 - off / half) * strength * 14)
+            }
+            const twinkle = 0.6 + 0.4 * Math.sin(t * 2 + d.phase)
+            ctx.fillStyle = `rgba(255, 245, 225, ${Math.min(0.9, light * twinkle)})`
+            ctx.beginPath()
+            ctx.arc(x, y, d.r, 0, Math.PI * 2)
+            ctx.fill()
+        }
+        glow(ctx, 0, 0, Math.max(w, h) * 0.5, 'rgba(255, 238, 210, ALPHA)', 0.14 + 0.05 * Math.sin(t * 0.5))
+        ctx.globalCompositeOperation = 'source-over'
+    },
+}
+
+interface Ribbon { base: number; amp: number; freq: number; speed: number; phase: number; thickness: number; color: [number, number, number] }
+
+/** Layered ribbons of colour flowing across the whole frame. */
+const silk: MotionScene = {
+    renderScale: 0.5,
+    setup(_w, _h, random) {
+        const palette: Array<[number, number, number]> = [
+            [120, 70, 230], [70, 120, 240], [40, 180, 220], [190, 80, 210], [90, 60, 200],
+        ]
+        const ribbons: Ribbon[] = palette.map((color, i) => ({
+            base: 0.3 + i * 0.1,
+            amp: 0.08 + random() * 0.1,
+            freq: 0.8 + random() * 1.2,
+            speed: 0.15 + random() * 0.2,
+            phase: random() * Math.PI * 2,
+            thickness: 0.12 + random() * 0.14,
+            color,
+        }))
+        return { ribbons }
+    },
+    draw(ctx, w, h, t, state) {
+        const { ribbons } = state as { ribbons: Ribbon[] }
+        const bg = ctx.createLinearGradient(0, 0, w, h)
+        bg.addColorStop(0, '#0a0620')
+        bg.addColorStop(1, '#03020c')
+        ctx.fillStyle = bg
+        ctx.fillRect(0, 0, w, h)
+        ctx.globalCompositeOperation = 'lighter'
+        const step = Math.max(4, Math.round(w / 160))
+        for (const r of ribbons) {
+            const [cr, cg, cb] = r.color
+            const curve = (x: number, shift: number) => {
+                const u = x / w
+                return h * (r.base
+                    + r.amp * Math.sin(u * r.freq * Math.PI * 2 + t * r.speed + r.phase + shift)
+                    + r.amp * 0.4 * Math.sin(u * r.freq * 4.7 - t * r.speed * 1.3 + r.phase))
+            }
+            const twist = Math.sin(t * r.speed * 0.8 + r.phase) * 0.8
+            // The ribbon is the band between two curves that drift apart and
+            // together, so it seems to fold as it flows.
+            ctx.beginPath()
+            for (let x = 0; x <= w + step; x += step) ctx.lineTo(x, curve(x, 0))
+            for (let x = w + step; x >= 0; x -= step) {
+                const u = x / w
+                const width = h * r.thickness * (0.35 + 0.65 * Math.abs(Math.sin(u * Math.PI * 1.3 + twist + t * 0.1)))
+                ctx.lineTo(x, curve(x, 0.35) + width)
+            }
+            ctx.closePath()
+            const top = h * (r.base - r.amp * 1.4)
+            const g = ctx.createLinearGradient(0, top, 0, top + h * (r.thickness + r.amp * 2.8))
+            g.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, 0)`)
+            g.addColorStop(0.45, `rgba(${cr}, ${cg}, ${cb}, 0.22)`)
+            g.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, 0)`)
+            ctx.fillStyle = g
+            ctx.fill()
+            // A bright edge, as light catches the fold.
+            ctx.strokeStyle = `rgba(${Math.min(255, cr + 80)}, ${Math.min(255, cg + 80)}, ${Math.min(255, cb + 40)}, 0.18)`
+            ctx.lineWidth = Math.max(1, h / 500)
+            ctx.beginPath()
+            for (let x = 0; x <= w + step; x += step) ctx.lineTo(x, curve(x, 0))
+            ctx.stroke()
+        }
         ctx.globalCompositeOperation = 'source-over'
     },
 }
@@ -372,6 +471,14 @@ export const MOTION_BACKGROUNDS: MotionBackground[] = [
         description: 'Slow waves under a blue sky',
         poster: 'linear-gradient(#020a1c, #06203d 55%, #0a2c4c 70%, #020812)',
         scene: waves,
+        retired: true,
+    },
+    {
+        id: 'silk',
+        name: 'Silk',
+        description: 'Ribbons of colour flowing across the screen',
+        poster: 'radial-gradient(ellipse 80% 18% at 45% 45%, rgba(120,70,230,.35), transparent 70%), radial-gradient(ellipse 70% 16% at 55% 62%, rgba(40,180,220,.3), transparent 70%), linear-gradient(135deg, #0a0620, #03020c)',
+        scene: silk,
     },
     {
         id: 'light-rays',
@@ -383,6 +490,9 @@ export const MOTION_BACKGROUNDS: MotionBackground[] = [
 ]
 
 const byId = new Map(MOTION_BACKGROUNDS.map((m) => [m.id, m]))
+
+/** The ones to offer when choosing a background. */
+export const OFFERED_MOTION_BACKGROUNDS = MOTION_BACKGROUNDS.filter((m) => !m.retired)
 
 export const MOTION_PREFIX = 'motion:'
 

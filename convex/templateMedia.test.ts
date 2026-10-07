@@ -109,8 +109,14 @@ describe('built-in templates', () => {
         await t.run((ctx) => ctx.db.insert('templates', {
             name: 'Welcome Slide', slideId: '{}', category: 'general', createdAt: '', updatedAt: '',
         }))
+        // And a built-in since withdrawn.
+        await t.run((ctx) => ctx.db.insert('templates', {
+            name: 'Ocean', slideId: '{"background":"motion:ocean"}', category: 'general', createdAt: '', updatedAt: '',
+        }))
         await asAlice.mutation(api.templates.seedDefaultTemplates, {})
         const names = (await asAlice.query(api.templates.getTemplates, {})).filter((t) => !t.createdBy).map((t) => t.name)
+        expect(names).not.toContain('Ocean')
+        expect(names).toContain('Silk')
         expect(names).toEqual(expect.arrayContaining(['Welcome Slide', 'Galaxy', 'Aurora', 'Light Rays']))
         expect(names.filter((n) => n === 'Welcome Slide')).toHaveLength(1)
 

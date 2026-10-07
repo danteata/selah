@@ -301,8 +301,10 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     const seededRef = useRef(false)
     useEffect(() => {
         if (seededRef.current || !(isOpen || isInline) || isLoading || !templates || !isAuthenticated) return
-        const hasMotionBuiltins = templates.some((t) => !t.createdBy && typeof t.slideId === 'string' && t.slideId.includes('"motion:'))
-        if (templates.length > 0 && hasMotionBuiltins) return
+        const builtins = templates.filter((t) => !t.createdBy).map((t) => t.name)
+        // Silk is the newest built-in and Ocean the retired one.
+        const upToDate = builtins.includes('Silk') && !builtins.includes('Ocean')
+        if (templates.length > 0 && upToDate) return
         seededRef.current = true
         void Promise.resolve(seedDefaultTemplates()).catch(() => { seededRef.current = false })
     }, [isOpen, isInline, isLoading, templates, seedDefaultTemplates, isAuthenticated])

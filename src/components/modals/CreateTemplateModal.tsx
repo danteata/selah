@@ -12,7 +12,7 @@ import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { isImageUrl, useLocalBackground } from '../../hooks/useLocalBackground'
 import { copyIntoMediaLibrary } from '../../services/localMediaFiles'
 import { MotionCanvas } from '../motion/MotionCanvas'
-import { MOTION_BACKGROUNDS, MOTION_PREFIX } from '../motion/motionBackgrounds'
+import { OFFERED_MOTION_BACKGROUNDS, MOTION_PREFIX } from '../motion/motionBackgrounds'
 import { openExternalUrl } from '../../utils/openExternalUrl'
 import type { SlideStyle } from '../../types'
 import { Modal } from './Modal'
@@ -807,7 +807,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 onClick={() => {
                                     if (backgroundType === 'motion') return
                                     setBackgroundType('motion')
-                                    setBackground(`${MOTION_PREFIX}${MOTION_BACKGROUNDS[0].id}`)
+                                    setBackground(`${MOTION_PREFIX}${OFFERED_MOTION_BACKGROUNDS[0].id}`)
                                     setLocalFilePath(null)
                                     setBackgroundStorageId(null)
                                 }}
@@ -916,7 +916,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                 Drawn by Selah, so they look the same on every computer and need no download.
                             </p>
                             <div className="grid grid-cols-3 gap-2">
-                                {MOTION_BACKGROUNDS.map((m) => {
+                                {OFFERED_MOTION_BACKGROUNDS.map((m) => {
                                     const value = `${MOTION_PREFIX}${m.id}`
                                     return (
                                         <button
