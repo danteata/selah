@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "stream", "gzip", "brotli", "deflate", "zstd"] }
 cpal = "0.15"
 rubato = "0.15"  # For audio resampling
+rtrb = "0.4"  # Wait-free SPSC ring between the cpal callback and the capture thread
 parking_lot = "0.12"  # For thread-safe mutex
 lazy_static = "1.4"
 base64 = "0.22"  # For encoding audio to base64 + decoding signed license files
