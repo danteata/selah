@@ -12,6 +12,7 @@ import { AnalyticsProvider, useAnalyticsContext } from './providers/AnalyticsPro
 import type { AnalyticsProviderType as AnalyticsType } from './services/analytics/types'
 import { AnalyticsEventType } from './services/analytics/types'
 import { useAppStore } from './store/appStore'
+import { useSongLibrarySync } from './hooks/useSongLibrarySync'
 import { useOAuthCallback } from './hooks/useOAuthCallback'
 import { useSyncCurrentUser } from './hooks/useSyncCurrentUser'
 import { removeBundledNonSongs } from './services/songLibrary/bundledSongCleanup'
@@ -120,6 +121,8 @@ function AppRoutes() {
     // doesn't affect the fly deployment.
     useOAuthCallback()
     useSyncCurrentUser()
+    // Fetch the church's songs and upload ones saved on this device.
+    useSongLibrarySync()
 
     // Desktop OAuth callback handling.
     //

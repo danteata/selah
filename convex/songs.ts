@@ -160,6 +160,67 @@ export const updateSong = mutation({
     },
 });
 
+/** Most songs one `syncSongs` call takes. */
+export const SYNC_BATCH_LIMIT = 50;
+
+const syncedSongValidator = v.object({
+    /** The id the song has on the device, echoed back to pair the result. */
+    clientId: v.string(),
+    /** The server song this one is (or was matched by title to), if any. */
+    serverId: v.optional(v.string()),
+    title: v.string(),
+    artist: v.string(),
+    lyrics: v.string(),
+    author: v.optional(v.string()),
+    verses: v.optional(v.array(v.string())),
+    sections: v.optional(v.array(songSectionValidator)),
+    defaultArrangement: v.optional(v.array(v.string())),
+    copyright: v.optional(v.string()),
+    ccli: v.optional(v.string()),
+});
+
+/**
+ * Upload songs saved on a device (an import, or offline edits) in one
+ * transaction. A song with a `serverId` the caller can access is updated in
+ * place; any other is created in the caller's church. Returns each song's
+ * server id, so the device can link its copy to it.
+ *
+ * Batched because the per-song path cost a write and, worse, a re-run of every
+ * subscriber to the song list per song: one import of a few hundred songs
+ * re-sent the whole library hundreds of times.
+ */
+export const syncSongs = mutation({
+    args: { songs: v.array(syncedSongValidator) },
+    handler: async (ctx, args) => {
+        const user = await requireUser(ctx);
+        if (args.songs.length > SYNC_BATCH_LIMIT) {
+            throw new Error(`At most ${SYNC_BATCH_LIMIT} songs per sync`);
+        }
+
+        const now = new Date().toISOString();
+        const results: Array<{ clientId: string; serverId: string }> = [];
+        for (const { clientId, serverId, ...fields } of args.songs) {
+            const existing = serverId ? await getById(ctx, "songs", serverId) : null;
+            if (existing && canAccessSong(user, existing)) {
+                await ctx.db.patch(existing._id, { ...fields, updatedAt: now });
+                results.push({ clientId, serverId: existing._id });
+                continue;
+            }
+            const id = await ctx.db.insert("songs", {
+                id: `song_${Date.now()}`,
+                ...fields,
+                isPublic: false,
+                createdBy: user._id!,
+                churchId: user.churchId,
+                createdAt: now,
+                updatedAt: now,
+            });
+            results.push({ clientId, serverId: id });
+        }
+        return results;
+    },
+});
+
 // Delete song
 export const deleteSong = mutation({
     args: {

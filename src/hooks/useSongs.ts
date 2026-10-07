@@ -1,10 +1,11 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
-import { useQuery, useMutation } from 'convex/react'
+import { useState, useCallback, useMemo, useEffect, useSyncExternalStore } from 'react'
+import { useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useAppStore } from '../store/appStore'
 import type { Song } from '../types'
 import { getIndexedDB } from './useIndexedDB'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
+import { getServerSongs, shadowedServerIds, subscribeServerSongs } from '../services/songs/serverSongs'
 
 // Per-call timeout for Convex mutations. If the websocket dies, useMutation
 // promises can hang indefinitely — bounded timeout lets the wizard move on
@@ -50,10 +51,34 @@ export interface UseSongsReturn {
     getAllSongs: () => Song[]
     getSongById: (songId: string) => Song | null
     createSong: (songData: Partial<Song>, isPublic?: boolean) => Promise<Song | null>
+    /** Save many songs on this device in one write; they sync in the background. */
+    importSongs: (items: ImportedSong[]) => Promise<{ created: number; updated: number }>
     updateSong: (songId: string, updateData: Partial<Song>) => Promise<Song | null>
     deleteSong: (songId: string) => Promise<boolean>
     parseSongLyrics: (lyrics: string, linesPerVerse?: number) => string[]
     isOfflineData: boolean
+}
+
+/** A song to import: new, or replacing the song with id `replaceId`. */
+export interface ImportedSong {
+    data: Partial<Song>
+    replaceId?: string
+}
+
+/** A row for the device library, marked for upload. */
+function pendingRow(id: string, song: Song, createdAt: string) {
+    const now = new Date().toISOString()
+    return {
+        id,
+        type: 'song',
+        content: { ...song, id, _id: id, updatedAt: now, syncState: 'pending' as const },
+        createdAt,
+        updatedAt: now,
+    }
+}
+
+function newLocalId(): string {
+    return `local_song_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
 export function useSongs(): UseSongsReturn {
@@ -63,29 +88,11 @@ export function useSongs(): UseSongsReturn {
     const { isOffline } = useConvexConnection()
     const [localSongs, setLocalSongs] = useState<Song[]>([])
 
-    const createSongMutation = useMutation(api.songs.createSong)
-    const updateSongMutation = useMutation(api.songs.updateSong)
     const deleteSongMutation = useMutation(api.songs.deleteSong)
 
-    const allSongsQuery = useQuery(
-        api.songs.searchSongs,
-        { churchId: churchId || undefined, query: '', limit: 1000 }
-    )
-
-    useEffect(() => {
-        if (allSongsQuery && allSongsQuery.length > 0) {
-            const db = getIndexedDB()
-            for (const song of allSongsQuery) {
-                db.library.put({
-                    id: song._id || song.id,
-                    type: 'song',
-                    content: song,
-                    createdAt: song.createdAt || new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                }).catch(() => {})
-            }
-        }
-    }, [allSongsQuery])
+    // The server's list, fetched and refreshed by useSongLibrarySync and shared
+    // by every instance (see serverSongs.ts). Undefined until first fetched.
+    const allSongsQuery = useSyncExternalStore(subscribeServerSongs, getServerSongs)
 
     // Always load local IndexedDB songs and merge with server results so that
     // imported / locally-created songs (e.g. from EasyWorship import in offline
@@ -114,7 +121,9 @@ export function useSongs(): UseSongsReturn {
 
     // Merge local + server, deduplicating by id (prefer most-recently-updated copy).
     const effectiveSongs = useMemo(() => {
-        const serverList = (allSongsQuery || []) as Song[]
+        // A server song this device keeps its own copy of shows once, as that copy.
+        const shadowed = shadowedServerIds(localSongs)
+        const serverList = ((allSongsQuery || []) as Song[]).filter((s) => !shadowed.has(s._id || s.id))
         if (localSongs.length === 0) return serverList
         const map = new Map<string, Song>()
         for (const s of serverList) {
@@ -164,6 +173,11 @@ export function useSongs(): UseSongsReturn {
         return song || null
     }, [effectiveSongs])
 
+    // Creating, editing and importing all save to this device and mark the
+    // song for upload; useSongLibrarySync sends what is pending a few seconds
+    // later, in batches (songSync.ts). Offline edits used to stay on the device
+    // for good, and each online edit cost a server write that made every
+    // device re-download the whole song list.
     const createSong = useCallback(async (
         songData: Partial<Song>,
         isPublic: boolean = false
@@ -175,10 +189,10 @@ export function useSongs(): UseSongsReturn {
                 throw new Error('Title, artist, and lyrics are required')
             }
 
-            const localId = `local_song_${Date.now()}_${Math.random().toString(36).slice(2)}`
-            const localSong: Song = {
-                id: localId,
-                _id: localId,
+            const id = newLocalId()
+            const now = new Date().toISOString()
+            const row = pendingRow(id, {
+                id,
                 title: songData.title,
                 artist: songData.artist,
                 lyrics: songData.lyrics,
@@ -190,68 +204,20 @@ export function useSongs(): UseSongsReturn {
                 defaultArrangement: songData.defaultArrangement,
                 isPublic,
                 churchId,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            }
+                createdAt: now,
+            }, now)
+            await getIndexedDB().library.put(row)
 
-            const db = getIndexedDB()
-            await db.library.put({
-                id: localId,
-                type: 'song',
-                content: localSong,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            })
-
-            let result = localSong
-
-            if (!isOffline) {
-                try {
-                    const serverId = await withTimeout(
-                        createSongMutation({
-                            title: songData.title,
-                            artist: songData.artist,
-                            lyrics: songData.lyrics,
-                            album: songData.album,
-                            cover: songData.cover,
-                            author: songData.author,
-                            verses: songData.verses,
-                            sections: songData.sections,
-                            defaultArrangement: songData.defaultArrangement,
-                            isPublic,
-                            churchId,
-                        }),
-                        MUTATION_TIMEOUT_MS,
-                        'createSong',
-                    )
-
-                    const serverSong: Song = { ...localSong, _id: serverId, id: serverId }
-                    await db.library.delete(localId)
-                    await db.library.put({
-                        id: serverId,
-                        type: 'song',
-                        content: serverSong,
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString(),
-                    })
-                    result = serverSong
-                } catch (err) {
-                    console.warn('[useSongs] Server create failed, keeping local:', err)
-                }
-            }
-
-            // Refresh local cache (this instance) and notify other instances.
             await loadLocalSongs()
             notifySongsChanged()
-
-            return result
+            return row.content
         } catch (error) {
             console.error('Error creating song:', error)
             return null
         } finally {
             setLoading(false)
         }
-    }, [createSongMutation, churchId, isOffline, loadLocalSongs])
+    }, [churchId, loadLocalSongs])
 
     const updateSong = useCallback(async (
         songId: string,
@@ -262,83 +228,70 @@ export function useSongs(): UseSongsReturn {
 
             const db = getIndexedDB()
             const existing = await db.library.get(songId)
-            const updatedLocal: Song = {
-                ...(existing?.content as Song || {}),
-                ...updateData,
-                id: songId,
-                _id: songId,
-                updatedAt: new Date().toISOString(),
-            }
-
-            await db.library.put({
-                ...existing,
-                id: songId,
-                type: 'song',
-                content: updatedLocal,
-                updatedAt: new Date().toISOString(),
-            })
-
-            // `ew_` songs were seeded into local storage from the old bundled
-            // library and never existed on the server, so an update has
-            // nothing to sync to (re-importing an EasyWorship library with
-            // "replace existing" updates thousands of them).
-            const isLocal = songId.startsWith('local_') || songId.startsWith('ew_')
-
-            if (!isOffline && !isLocal) {
-                try {
-                    await withTimeout(
-                        updateSongMutation({
-                            songId,
-                            updates: {
-                                title: updateData.title,
-                                artist: updateData.artist,
-                                lyrics: updateData.lyrics,
-                                album: updateData.album,
-                                cover: updateData.cover,
-                                author: updateData.author,
-                                verses: updateData.verses,
-                                sections: updateData.sections,
-                                defaultArrangement: updateData.defaultArrangement,
-                                isPublic: updateData.isPublic,
-                            },
-                        }),
-                        MUTATION_TIMEOUT_MS,
-                        'updateSong',
-                    )
-                } catch (err) {
-                    console.warn('[useSongs] Server update failed, local update kept:', err)
-                }
-            } else if (isLocal) {
-                // Song hasn't been synced to server yet — local-only update is sufficient.
-                // It will be synced when createSong eventually succeeds.
-                console.debug('[useSongs] Skipping server update for local-only song:', songId)
-            }
+            const current = (existing?.content as Song | undefined) ?? getServerSongs()?.find((s) => (s._id || s.id) === songId)
+            const row = pendingRow(
+                songId,
+                { ...(current ?? { id: songId, title: '', artist: '', lyrics: '' }), ...updateData },
+                existing?.createdAt ?? new Date().toISOString(),
+            )
+            await db.library.put(row)
 
             await loadLocalSongs()
             notifySongsChanged()
-            return updatedLocal
+            return row.content
         } catch (error) {
             console.error('Error updating song:', error)
             return null
         } finally {
             setLoading(false)
         }
-    }, [updateSongMutation, isOffline, loadLocalSongs])
+    }, [loadLocalSongs])
+
+    const importSongs = useCallback(async (items: ImportedSong[]) => {
+        const db = getIndexedDB()
+        const now = new Date().toISOString()
+        const existing = new Map(
+            (await db.library.bulkGet(items.map((i) => i.replaceId).filter((id): id is string => !!id)))
+                .filter((row): row is NonNullable<typeof row> => !!row)
+                .map((row) => [row.id, row]),
+        )
+        const server = new Map((getServerSongs() ?? []).map((s) => [s._id || s.id, s]))
+        let created = 0
+        let updated = 0
+        const rows = items.map(({ data, replaceId }) => {
+            if (replaceId) {
+                updated++
+                const prior = existing.get(replaceId)
+                const base = (prior?.content as Song | undefined) ?? server.get(replaceId)
+                return pendingRow(replaceId, { ...(base ?? { id: replaceId, title: '', artist: '', lyrics: '' }), ...data }, prior?.createdAt ?? now)
+            }
+            created++
+            const id = newLocalId()
+            return pendingRow(id, { id, title: '', artist: '', lyrics: '', churchId, createdAt: now, ...data }, now)
+        })
+        await db.library.bulkPut(rows)
+        await loadLocalSongs()
+        notifySongsChanged()
+        return { created, updated }
+    }, [churchId, loadLocalSongs])
 
     const deleteSong = useCallback(async (songId: string): Promise<boolean> => {
         try {
             setLoading(true)
 
             const db = getIndexedDB()
+            const removed = await db.library.get(songId)
             await db.library.delete(songId)
 
-            // As in updateSong: `ew_` songs exist only on this device.
-            const isLocal = songId.startsWith('local_') || songId.startsWith('ew_')
+            // A device song may stand for a server song (its serverId); a
+            // server-id row is one. Either way the server copy goes too.
+            const serverId = (removed?.content as Song | undefined)?.serverId
+                ?? (songId.startsWith('local_') || songId.startsWith('ew_') ? undefined : songId)
 
-            if (!isOffline && !isLocal) {
+            if (!isOffline && serverId) {
                 try {
                     await withTimeout(
-                        deleteSongMutation({ songId }),
+                        deleteSongMutation({ songId: serverId }),
                         MUTATION_TIMEOUT_MS,
                         'deleteSong',
                     )
@@ -426,6 +379,7 @@ export function useSongs(): UseSongsReturn {
         getAllSongs,
         getSongById,
         createSong,
+        importSongs,
         updateSong,
         deleteSong,
         parseSongLyrics,

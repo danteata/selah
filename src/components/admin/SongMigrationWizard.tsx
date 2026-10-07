@@ -15,11 +15,52 @@ import { Upload, FileText, Music, AlertCircle, CheckCircle, XCircle, ChevronRigh
 import { parseEasyWorshipFile, parseEasyWorshipDatabases, toSelahSong } from '../../services/migration/easyWorshipParser';
 import type { ParsedSong } from '../../services/migration/types';
 import { openFileDialog, filePathsToFiles } from '../../utils/fileDialog';
-import { useSongs } from '../../hooks/useSongs';
+import { useSongs, type ImportedSong } from '../../hooks/useSongs';
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider';
 import { isDesktop } from '../../platform';
+import { nonSongReason } from '../../lib/songLibraryFilter';
+import { useSongSyncStatus } from '../../hooks/useSongLibrarySync';
+import { requestSongSync } from '../../services/songs/songSync';
 
 type WizardStep = 'upload' | 'preview' | 'importing' | 'complete';
+
+/**
+ * Whether a parsed entry reads as a song. EasyWorship libraries also hold
+ * sermon outlines, prayer points and announcements; those start unticked so
+ * they don't go to the church's shared library unless someone ticks them.
+ */
+function looksLikeSong(song: ParsedSong): boolean {
+    return nonSongReason(toSelahSong(song)) === null;
+}
+
+/** "Saved here; N waiting to sync" with a Sync now button. */
+export function SongSyncStatusLine() {
+    const { pending, syncing, lastError } = useSongSyncStatus();
+    const { isOffline } = useConvexConnection();
+    let text: string;
+    if (syncing) text = `Syncing to your church library… ${pending} left`;
+    else if (pending === 0) text = 'Everything is in your church library.';
+    else if (isOffline) text = `${pending} song${pending === 1 ? '' : 's'} will sync to your church library when you're back online.`;
+    else if (lastError) text = `${pending} song${pending === 1 ? '' : 's'} couldn't sync yet (${lastError}).`;
+    else text = `${pending} song${pending === 1 ? '' : 's'} waiting to sync to your church library.`;
+    return (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 text-sm">
+            <span className="text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                {syncing && <Loader2 className="w-4 h-4 animate-spin" />}
+                {text}
+            </span>
+            {pending > 0 && !syncing && !isOffline && (
+                <button
+                    type="button"
+                    onClick={requestSongSync}
+                    className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 whitespace-nowrap"
+                >
+                    Sync now
+                </button>
+            )}
+        </div>
+    );
+}
 
 interface MigrationWizardProps {
     onClose?: () => void;
@@ -41,7 +82,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     const [replaceExisting, setReplaceExisting] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
 
-    const { createSong, updateSong, songs: existingSongs } = useSongs();
+    const { importSongs, songs: existingSongs } = useSongs();
     const { isOffline } = useConvexConnection();
 
     // Local duplicate detection — works fully offline. We need the song's
@@ -72,7 +113,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
 
             // Select all valid songs by default
             const validIndices = result.songs
-                .map((s, i) => s.isValid ? i : -1)
+                .map((s, i) => s.isValid && looksLikeSong(s) ? i : -1)
                 .filter(i => i >= 0);
             setSelectedSongs(new Set(validIndices));
 
@@ -140,7 +181,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
 
             // Select all valid songs by default
             const validIndices = songs
-                .map((s, i) => s.isValid ? i : -1)
+                .map((s, i) => s.isValid && looksLikeSong(s) ? i : -1)
                 .filter(i => i >= 0);
             setSelectedSongs(new Set(validIndices));
 
@@ -200,14 +241,14 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         if (files.songWordsDb) void handleSingleFileUpload(files.songWordsDb);
     }, [files.songWordsDb, handleSingleFileUpload]);
 
-    // Handle import — offline-first via useSongs.createSong (which writes to
-    // IndexedDB locally and syncs to Convex when online). Each song is imported
-    // independently so a single failure doesn't abort the whole batch.
+    // Import to this device in one write. Songs are marked for upload and
+    // useSongLibrarySync sends them to the church library in batches whenever
+    // the app is online — instead of one server call per song, which also
+    // made every device re-download the whole library after each one.
     //
-    // When `replaceExisting` is on, a song that already exists by title is
-    // updated in place (lyrics/verses/artist replaced, id preserved) rather
-    // than skipped. This is the recovery path for re-parsing after fixing
-    // the RTF parser, and prevents duplicate rows for the same song.
+    // With "Replace existing", a song whose title is already in the library
+    // is updated in place (its id kept, so service orders that use it stay
+    // valid); otherwise it is skipped.
     const handleImport = useCallback(async () => {
         if (selectedSongs.size === 0) return;
 
@@ -220,121 +261,46 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
             .filter(Boolean)
             .map(toSelahSong);
 
-        const allErrors: string[] = [];
-        let imported = 0;
-        let updated = 0;
+        const items: ImportedSong[] = [];
+        const seenTitles = new Set<string>();
         let skipped = 0;
-
-        // Process with bounded concurrency (8 parallel) so import feels fast on
-        // large libraries while not overwhelming IndexedDB / Convex.
-        const CONCURRENCY = 8;
-        // Per-song timeout. A dead Convex websocket can leave useMutation
-        // promises unresolved forever; without this, a single bad song would
-        // freeze the import. Picked to be larger than the 15s mutation
-        // timeout in useSongs.ts so genuine slow paths can still complete.
-        const SONG_TIMEOUT_MS = 45_000;
-        let cursor = 0;
-
-        const withSongTimeout = <T,>(p: Promise<T>, _title: string): Promise<T> =>
-            new Promise<T>((resolve, reject) => {
-                const timer = setTimeout(
-                    () => reject(new Error(`Timed out after ${SONG_TIMEOUT_MS}ms`)),
-                    SONG_TIMEOUT_MS,
-                );
-                p.then(
-                    (v) => { clearTimeout(timer); resolve(v); },
-                    (e) => { clearTimeout(timer); reject(e); },
-                );
-            });
-
-        const worker = async () => {
-            while (cursor < songsToImport.length) {
-                const idx = cursor++;
-                const song = songsToImport[idx];
-                if (!song) continue;
-
-                // Duplicates by title (case-insensitive) — skip or replace
-                const titleKey = song.title.toLowerCase().trim();
-                const existingId = existingByTitle.get(titleKey);
-                if (existingId && !replaceExisting) {
-                    skipped++;
-                    setImportProgress(p => ({ current: p.current + 1, total: p.total }));
-                    continue;
-                }
-
-                try {
-                    if (existingId && replaceExisting) {
-                        const ok = await withSongTimeout(
-                            updateSong(existingId, {
-                                title: song.title,
-                                artist: song.artist || song.author || 'Unknown',
-                                lyrics: song.lyrics,
-                                verses: song.verses,
-                                sections: song.sections,
-                                defaultArrangement: song.defaultArrangement,
-                                author: song.author,
-                            }),
-                            song.title,
-                        );
-                        if (ok) {
-                            updated++;
-                        } else {
-                            allErrors.push(`Failed to update "${song.title}"`);
-                        }
-                    } else {
-                        const created = await withSongTimeout(
-                            createSong({
-                                title: song.title,
-                                artist: song.artist || song.author || 'Unknown',
-                                lyrics: song.lyrics,
-                                verses: song.verses,
-                                sections: song.sections,
-                                defaultArrangement: song.defaultArrangement,
-                                author: song.author,
-                            }),
-                            song.title,
-                        );
-                        if (created) {
-                            const newId = created._id || created.id || '';
-                            existingByTitle.set(titleKey, newId);
-                            imported++;
-                        } else {
-                            allErrors.push(`Failed to import "${song.title}"`);
-                        }
-                    }
-                } catch (error) {
-                    const msg = error instanceof Error ? error.message : 'Unknown error';
-                    allErrors.push(`Failed to import "${song.title}": ${msg}`);
-                    // If Convex is dead, abort the rest of the import to avoid
-                    // hammering a broken connection. Local IndexedDB writes
-                    // already succeeded, so data isn't lost.
-                    if (msg.toLowerCase().includes('timed out') || msg.toLowerCase().includes('websocket')) {
-                        allErrors.unshift(
-                            'Import aborted: Convex connection lost. ' +
-                            `${imported + updated} song${imported + updated === 1 ? '' : 's'} saved locally and will sync when you reconnect.`,
-                        );
-                        cursor = songsToImport.length;
-                    }
-                }
-                setImportProgress(p => ({ current: p.current + 1, total: p.total }));
+        for (const song of songsToImport) {
+            const titleKey = song.title.toLowerCase().trim();
+            const existingId = existingByTitle.get(titleKey);
+            // A library can list one title twice; import it once.
+            if ((existingId && !replaceExisting) || seenTitles.has(titleKey)) {
+                skipped++;
+                continue;
             }
-        };
+            seenTitles.add(titleKey);
+            items.push({
+                replaceId: existingId,
+                data: {
+                    title: song.title,
+                    artist: song.artist || song.author || 'Unknown',
+                    lyrics: song.lyrics,
+                    verses: song.verses,
+                    sections: song.sections,
+                    defaultArrangement: song.defaultArrangement,
+                    author: song.author,
+                },
+            });
+        }
 
-        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-
+        const messages: string[] = [];
+        try {
+            const { created, updated } = await importSongs(items);
+            setImportProgress({ current: created + updated, total: selectedSongs.size });
+            if (updated > 0) messages.push(`${updated} song${updated === 1 ? '' : 's'} replaced in place.`);
+        } catch (error) {
+            messages.push(`Import failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+        }
         if (skipped > 0) {
-            allErrors.unshift(`${skipped} song${skipped === 1 ? '' : 's'} skipped (already exist by title).`);
+            messages.push(`${skipped} song${skipped === 1 ? '' : 's'} skipped (already in your library).`);
         }
-        if (updated > 0) {
-            allErrors.unshift(`${updated} song${updated === 1 ? '' : 's'} replaced (lyrics/verses updated in place).`);
-        }
-        if (isOffline && imported > 0) {
-            allErrors.unshift(`Imported ${imported} song${imported === 1 ? '' : 's'} locally — they will sync to the server when you reconnect.`);
-        }
-
-        setImportErrors(allErrors);
+        setImportErrors(messages);
         setStep('complete');
-    }, [selectedSongs, parsedSongs, createSong, updateSong, existingByTitle, replaceExisting, isOffline]);
+    }, [selectedSongs, parsedSongs, importSongs, existingByTitle, replaceExisting]);
 
     // Toggle song selection
     const toggleSong = useCallback((index: number) => {
@@ -434,6 +400,8 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                 {/* Step 1: Upload */}
                 {step === 'upload' && (
                     <div className="space-y-6">
+                        <SongSyncStatusLine />
+
                         {/* One drop zone for everything: both database files at
                             once, one at a time, or a single .xml / .csv export. */}
                         <div
@@ -710,38 +678,25 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg text-center">
-                                <p className="text-3xl font-bold text-green-600">
-                                    {importProgress.current}
-                                </p>
-                                <p className="text-sm text-green-700 dark:text-green-400">
-                                    Songs Imported
-                                </p>
-                            </div>
-                            {importErrors.length > 0 && (
-                                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg text-center">
-                                    <p className="text-3xl font-bold text-red-600">
-                                        {importErrors.length}
-                                    </p>
-                                    <p className="text-sm text-red-700 dark:text-red-400">
-                                        Errors
-                                    </p>
-                                </div>
-                            )}
+                        <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg text-center">
+                            <p className="text-3xl font-bold text-green-600">
+                                {importProgress.current}
+                            </p>
+                            <p className="text-sm text-green-700 dark:text-green-400">
+                                Songs saved on this computer
+                            </p>
                         </div>
 
+                        <SongSyncStatusLine />
+
                         {importErrors.length > 0 && (
-                            <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                                <p className="font-medium text-red-700 dark:text-red-400">
-                                    Some errors occurred:
-                                </p>
-                                <ul className="mt-2 text-sm text-red-600 dark:text-red-300 list-disc list-inside max-h-32 overflow-y-auto">
-                                    {importErrors.slice(0, 10).map((err, i) => (
-                                        <li key={i}>{err}</li>
-                                    ))}
-                                </ul>
-                            </div>
+                            <ul className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-600 dark:text-gray-300 list-disc list-inside space-y-1">
+                                {importErrors.map((note, i) => (
+                                    <li key={i} className={note.startsWith('Import failed') ? 'text-red-600 dark:text-red-400' : undefined}>
+                                        {note}
+                                    </li>
+                                ))}
+                            </ul>
                         )}
 
                         <div className="flex justify-center gap-3">

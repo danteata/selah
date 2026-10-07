@@ -346,6 +346,15 @@ export interface Song {
     churchId?: string
     createdAt?: string
     updatedAt?: string
+    /**
+     * For a song saved on this device (id `local_…` or `ew_…`): the server song
+     * it is uploaded to, once linked. The device keeps its own id so service
+     * orders that reference the song keep working; the server copy is hidden
+     * from this device's list in its favour. See `songSync.ts`.
+     */
+    serverId?: string
+    /** 'pending' while this device has changes the server hasn't received. */
+    syncState?: 'pending' | 'synced'
 }
 
 export interface ExternalVideo {
