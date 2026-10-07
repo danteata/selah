@@ -95,8 +95,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
     // drop zone (src/components/media/MediaUpload.tsx) so behaviour is
     // consistent across the app. The HTML5 handlers below early-return on
     // desktop to avoid double-processing.
-    const handleSingleFileUploadRef = useRef(handleSingleFileUpload);
-    handleSingleFileUploadRef.current = handleSingleFileUpload;
+    const addFilesRef = useRef<(incoming: File[]) => void>(() => {});
 
     useEffect(() => {
         if (!isDesktop()) return;
@@ -112,11 +111,7 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                 } else if (event.payload.type === 'drop') {
                     setIsDragging(false);
                     filePathsToFiles(event.payload.paths)
-                        .then((droppedFiles) => {
-                            if (droppedFiles.length > 0) {
-                                handleSingleFileUploadRef.current(droppedFiles[0]);
-                            }
-                        })
+                        .then((droppedFiles) => addFilesRef.current(droppedFiles))
                         .catch((error) => console.error('Failed to read dropped file:', error));
                 } else {
                     setIsDragging(false);
@@ -161,57 +156,49 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
         }
     }, []);
 
-    // Handle file input change for single file
-    const handleSingleFileClick = useCallback(async () => {
+    // Route whatever arrives — dropped together or chosen one at a time — to
+    // the right slot by name (EasyWorship always names them Songs.db and
+    // SongWords.db). An .xml or .csv export is a whole library on its own.
+    // Reading starts as soon as SongWords.db is here alongside Songs.db.
+    const addFiles = useCallback((incoming: File[]) => {
+        if (incoming.length === 0) return;
+        const single = incoming.find((f) => /\.(xml|csv)$/i.test(f.name));
+        if (single) {
+            handleSingleFileUpload(single);
+            return;
+        }
+        const next = { songsDb: files.songsDb, songWordsDb: files.songWordsDb };
+        const unknown: string[] = [];
+        for (const file of incoming) {
+            const name = file.name.toLowerCase();
+            if (name.includes('songwords')) next.songWordsDb = file;
+            else if (/^songs?\b/.test(name) && /\.(db|sqlite3?)$/.test(name)) next.songsDb = file;
+            else unknown.push(file.name);
+        }
+        setFiles(next);
+        setParseErrors(unknown.length > 0
+            ? [`Not an EasyWorship song file: ${unknown.join(', ')}. Expected Songs.db and SongWords.db.`]
+            : []);
+        if (next.songsDb && next.songWordsDb) {
+            void handleMultipleFilesUpload(next.songsDb, next.songWordsDb);
+        }
+    }, [files.songsDb, files.songWordsDb, handleSingleFileUpload, handleMultipleFilesUpload]);
+    addFilesRef.current = addFiles;
+
+    const chooseFiles = useCallback(async (accept: string, multiple: boolean) => {
         try {
-            const resultFiles = await openFileDialog({
-                multiple: false,
-                accept: '.db,.sqlite,.sqlite3,.xml,.csv',
-            });
-            if (resultFiles && resultFiles.length > 0) {
-                handleSingleFileUpload(resultFiles[0]);
-            }
+            const chosen = await openFileDialog({ multiple, accept });
+            if (chosen && chosen.length > 0) addFiles(chosen);
         } catch (error) {
             console.error('Error selecting file:', error);
         }
-    }, [handleSingleFileUpload]);
+    }, [addFiles]);
 
-    // Handle file input change for Songs.db
-    const handleSongsDbClick = useCallback(async () => {
-        try {
-            const resultFiles = await openFileDialog({
-                multiple: false,
-                accept: '.db,.sqlite,.sqlite3',
-            });
-            if (resultFiles && resultFiles.length > 0) {
-                setFiles(prev => ({ ...prev, songsDb: resultFiles[0] }));
-            }
-        } catch (error) {
-            console.error('Error selecting file:', error);
-        }
-    }, []);
-
-    // Handle file input change for SongWords.db
-    const handleSongWordsDbClick = useCallback(async () => {
-        try {
-            const resultFiles = await openFileDialog({
-                multiple: false,
-                accept: '.db,.sqlite,.sqlite3',
-            });
-            if (resultFiles && resultFiles.length > 0) {
-                setFiles(prev => ({ ...prev, songWordsDb: resultFiles[0] }));
-            }
-        } catch (error) {
-            console.error('Error selecting file:', error);
-        }
-    }, []);
-
-    // Process multiple files when both are selected
-    const processMultipleFiles = useCallback(() => {
-        if (files.songsDb && files.songWordsDb) {
-            handleMultipleFilesUpload(files.songsDb, files.songWordsDb);
-        }
-    }, [files, handleMultipleFilesUpload]);
+    // SongWords.db alone still has every lyric; only the titles come from
+    // Songs.db, so allow importing without it (titles read "Song 123").
+    const importLyricsOnly = useCallback(() => {
+        if (files.songWordsDb) void handleSingleFileUpload(files.songWordsDb);
+    }, [files.songWordsDb, handleSingleFileUpload]);
 
     // Handle import — offline-first via useSongs.createSong (which writes to
     // IndexedDB locally and syncs to Convex when online). Each song is imported
@@ -447,136 +434,95 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                 {/* Step 1: Upload */}
                 {step === 'upload' && (
                     <div className="space-y-6">
-                        {/* Single file upload */}
-                        <div>
-                            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">
-                                Quick Import (Single File)
-                            </h3>
-                            <div
-                                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragging
-                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                                    : 'border-gray-300 dark:border-gray-700 hover:border-blue-500'
-                                    }`}
-                                onClick={handleSingleFileClick}
-                                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); if (!isDesktop()) setIsDragging(true); }}
-                                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!isDesktop()) setIsDragging(true); }}
-                                onDragLeave={(e) => { e.stopPropagation(); if (!isDesktop()) setIsDragging(false); }}
-                                onDrop={(e) => {
+                        {/* One drop zone for everything: both database files at
+                            once, one at a time, or a single .xml / .csv export. */}
+                        <div
+                            role="button"
+                            tabIndex={0}
+                            className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragging
+                                ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10'
+                                : 'border-gray-300 dark:border-gray-700 hover:border-[var(--accent-teal)]'
+                                }`}
+                            onClick={() => void chooseFiles('.db,.sqlite,.sqlite3,.xml,.csv', true)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();
-                                    e.stopPropagation();
-                                    if (isDesktop()) return; // handled by Tauri onDragDropEvent listener above
-                                    setIsDragging(false);
-                                    const file = e.dataTransfer.files?.[0];
-                                    if (file) {
-                                        handleSingleFileUpload(file);
-                                    }
-                                }}
+                                    void chooseFiles('.db,.sqlite,.sqlite3,.xml,.csv', true);
+                                }
+                            }}
+                            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); if (!isDesktop()) setIsDragging(true); }}
+                            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!isDesktop()) setIsDragging(true); }}
+                            onDragLeave={(e) => { e.stopPropagation(); if (!isDesktop()) setIsDragging(false); }}
+                            onDrop={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (isDesktop()) return; // handled by the Tauri onDragDropEvent listener above
+                                setIsDragging(false);
+                                addFiles(Array.from(e.dataTransfer.files ?? []));
+                            }}
+                        >
+                            <Upload className={`w-10 h-10 mx-auto mb-3 ${isDragging ? 'text-[var(--accent-teal)]' : 'text-gray-400'}`} />
+                            <p className="text-base font-medium text-gray-700 dark:text-gray-300">
+                                {isDragging ? 'Drop to add' : 'Drop Songs.db and SongWords.db here'}
+                            </p>
+                            <p className="text-sm text-gray-500 mt-1">
+                                or click to choose them — both at once, or one at a time
+                            </p>
+                            <p className="text-xs text-gray-400 mt-3">
+                                An EasyWorship .xml or .csv export works too
+                            </p>
+                        </div>
+
+                        {/* What has been added so far */}
+                        <div className="divide-y divide-gray-200 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg">
+                            {([
+                                { key: 'songWordsDb', name: 'SongWords.db', what: 'The lyrics', icon: FileStack },
+                                { key: 'songsDb', name: 'Songs.db', what: 'Titles, authors and copyright', icon: Database },
+                            ] as const).map(({ key, name, what, icon: Icon }) => {
+                                const file = files[key];
+                                return (
+                                    <div key={key} className="flex items-center gap-3 px-4 py-3">
+                                        <Icon className="w-5 h-5 text-[var(--accent-teal)] flex-shrink-0" />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{name}</p>
+                                            <p className="text-xs text-gray-500 truncate">
+                                                {file ? <span className="text-green-600 dark:text-green-400">✓ {file.name}</span> : what}
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => void chooseFiles('.db,.sqlite,.sqlite3', false)}
+                                            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800"
+                                        >
+                                            {file ? 'Change' : 'Choose…'}
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {files.songWordsDb && !files.songsDb && !isParsing && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Add Songs.db for song titles, or{' '}
+                                <button type="button" onClick={importLyricsOnly} className="text-[var(--accent-teal)] hover:underline">
+                                    import the lyrics without titles
+                                </button>.
+                            </p>
+                        )}
+                        {files.songsDb && !files.songWordsDb && (
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Now add SongWords.db — it holds the lyrics.
+                            </p>
+                        )}
+                        {files.songsDb && files.songWordsDb && !isParsing && parseErrors.length > 0 && (
+                            <button
+                                onClick={() => void handleMultipleFilesUpload(files.songsDb!, files.songWordsDb!)}
+                                className="w-full px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 flex items-center justify-center gap-2"
                             >
-                                <Upload className={`w-10 h-10 mx-auto mb-3 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`} />
-                                <p className="text-base font-medium text-gray-700 dark:text-gray-300">
-                                    {isDragging ? 'Drop file to import' : 'Drop EasyWorship export file here'}
-                                </p>
-                                <p className="text-sm text-gray-500 mt-1">
-                                    or click to browse
-                                </p>
-                                <p className="text-xs text-gray-400 mt-3">
-                                    Supports: Songs.db, SongWords.db, .xml, .csv
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Divider */}
-                        <div className="relative">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-gray-300 dark:border-gray-700" />
-                            </div>
-                            <div className="relative flex justify-center text-sm">
-                                <span className="px-2 bg-white dark:bg-gray-900 text-gray-500">
-                                    OR - For complete data, upload both files
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Multiple file upload */}
-                        <div>
-                            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-3">
-                                Complete Import (Multiple Files)
-                            </h3>
-                            <div className="grid grid-cols-2 gap-4">
-                                {/* Songs.db */}
-                                <div className="border border-gray-300 dark:border-gray-700 rounded-lg p-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <Database className="w-5 h-5 text-[var(--accent-teal)]" />
-                                        <span className="font-medium text-gray-700 dark:text-gray-300">
-                                            Songs.db
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mb-3">
-                                        Contains song titles, authors, copyright info
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={handleSongsDbClick}
-                                        className="block w-full px-3 py-2 text-center text-sm border border-gray-300 dark:border-gray-600 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-                                    >
-                                        {files.songsDb ? (
-                                            <span className="text-green-600 dark:text-green-400">
-                                                ✓ {files.songsDb.name}
-                                            </span>
-                                        ) : (
-                                            'Select Songs.db'
-                                        )}
-                                    </button>
-                                </div>
-
-                                {/* SongWords.db */}
-                                <div className="border border-gray-300 dark:border-gray-700 rounded-lg p-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <FileStack className="w-5 h-5 text-[var(--accent-teal)]" />
-                                        <span className="font-medium text-gray-700 dark:text-gray-300">
-                                            SongWords.db
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mb-3">
-                                        Contains lyrics in RTF format
-                                    </p>
-                                    <button
-                                        type="button"
-                                        onClick={handleSongWordsDbClick}
-                                        className="block w-full px-3 py-2 text-center text-sm border border-gray-300 dark:border-gray-600 rounded cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
-                                    >
-                                        {files.songWordsDb ? (
-                                            <span className="text-green-600 dark:text-green-400">
-                                                ✓ {files.songWordsDb.name}
-                                            </span>
-                                        ) : (
-                                            'Select SongWords.db'
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Process button */}
-                            {files.songsDb && files.songWordsDb && (
-                                <button
-                                    onClick={processMultipleFiles}
-                                    disabled={isParsing}
-                                    className="mt-4 w-full px-4 py-2 bg-[var(--accent-teal)] text-white rounded-lg hover:brightness-110 disabled:opacity-50 flex items-center justify-center gap-2 transition-all shadow-sm"
-                                >
-                                    {isParsing ? (
-                                        <>
-                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                            Processing...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <FileText className="w-4 h-4" />
-                                            Process Both Files
-                                        </>
-                                    )}
-                                </button>
-                            )}
-                        </div>
+                                <FileText className="w-4 h-4" />
+                                Try again
+                            </button>
+                        )}
 
                         {/* Parsing indicator */}
                         {isParsing && (
@@ -604,23 +550,21 @@ export function SongMigrationWizard({ onClose }: MigrationWizardProps) {
                         {/* Instructions */}
                         <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
                             <h3 className="font-medium text-gray-900 dark:text-white mb-2">
-                                How to find EasyWorship database files:
+                                Where EasyWorship keeps them
                             </h3>
-                            <ol className="list-decimal list-inside space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                                <li>Open EasyWorship data folder:
-                                    <ul className="list-disc list-inside ml-4 mt-1">
-                                        <li>Windows: <code className="text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">%DOCUMENTS%\EasyWorship\</code></li>
-                                        <li>Or: <code className="text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">%APPDATA%\EasyWorship\</code></li>
-                                    </ul>
+                            <ol className="list-decimal list-inside space-y-1.5 text-sm text-gray-600 dark:text-gray-400">
+                                <li>Close EasyWorship on the computer that runs it.</li>
+                                <li>
+                                    Open this folder (EasyWorship 6 and 7):
+                                    <code className="block mt-1 ml-4 text-xs bg-gray-200 dark:bg-gray-700 px-1.5 py-1 rounded break-all">
+                                        C:\Users\Public\Documents\Softouch\EasyWorship\Default\v6.1\Databases\Data
+                                    </code>
+                                    <span className="block ml-4 mt-1 text-xs">
+                                        If you use a profile other than Default, replace <code>Default</code> with its name.
+                                    </span>
                                 </li>
-                                <li>Look for these files:
-                                    <ul className="list-disc list-inside ml-4 mt-1">
-                                        <li><strong>Songs.db</strong> - Song metadata</li>
-                                        <li><strong>SongWords.db</strong> - Lyrics</li>
-                                    </ul>
-                                </li>
-                                <li>Copy both files to your computer</li>
-                                <li>Upload them using the form above</li>
+                                <li>Copy <strong>Songs.db</strong> and <strong>SongWords.db</strong> (a USB stick or cloud folder is fine if Selah is on another computer).</li>
+                                <li>Drop both here. Songs you already have can be replaced on the next step.</li>
                             </ol>
                         </div>
                     </div>
