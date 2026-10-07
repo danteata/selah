@@ -1,6 +1,6 @@
 [package]
 name = "selah"
-version = "0.1.26"
+version = "0.1.27"
 description = "Selah - Church Presentation Software"
 authors = ["Selah Team"]
 license = "MIT"
