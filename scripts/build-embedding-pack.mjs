@@ -45,7 +45,6 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync, copyFil
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { EMBEDDING_MODEL, loadEmbedder } from './lib/embeddingModel.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -61,14 +60,15 @@ const { values: args } = parseArgs({
         url: { type: 'string' },
         file: { type: 'string' },
         out: { type: 'string' },
-        batch: { type: 'string', default: '16' },
+        batch: { type: 'string', default: '64' },
+        model: { type: 'string', default: 'Xenova/all-MiniLM-L6-v2' },
         fragments: { type: 'boolean', default: false },
     },
 })
 
 const VERSION = args.version
 const BATCH = parseInt(args.batch, 10) || 128
-const MODEL_NAME = EMBEDDING_MODEL.id
+const MODEL_NAME = args.model
 const OUT_DIR = args.out
     ? (args.out.startsWith('/') ? args.out : join(REPO_ROOT, args.out))
     : join(REPO_ROOT, 'src-tauri', 'assets', 'embedding-packs', VERSION)
@@ -185,11 +185,27 @@ async function fetchVerses(versionId, explicitUrl, localFile) {
 // Embedding model
 // ---------------------------------------------------------------------------
 
-async function loadPackEmbedder() {
-    console.log(`[model] loading ${MODEL_NAME} (~330 MB on first run)…`)
-    // Verses are the documents side of EmbeddingGemma's asymmetric prompts.
-    const { embed, dimensions } = await loadEmbedder(REPO_ROOT)
-    return { embedDocuments: (texts) => embed(texts, 'document'), dimensions }
+async function loadEmbedder() {
+    console.log(`[model] loading ${MODEL_NAME} (this downloads ~22 MB on first run)…`)
+    // @xenova/transformers is already a dependency of the app for runtime
+    // use in the browser. Node 20+ ships fetch + URL globals which the
+    // package needs.
+    const { pipeline, env } = await import('@xenova/transformers')
+
+    // Prefer the locally-bundled model files if available — the desktop
+    // prebuild step downloads them into `src-tauri/assets/embedding-models/`.
+    const localDir = join(REPO_ROOT, 'src-tauri', 'assets', 'embedding-models')
+    if (existsSync(join(localDir, MODEL_NAME))) {
+        env.allowLocalModels = true
+        env.localModelPath = localDir
+        env.allowRemoteModels = false
+        console.log(`  using local model dir: ${localDir}`)
+    } else {
+        env.allowLocalModels = false
+        env.allowRemoteModels = true
+        console.log('  using remote model (HuggingFace Hub)')
+    }
+    return pipeline('feature-extraction', MODEL_NAME, { quantized: true })
 }
 
 // ---------------------------------------------------------------------------
@@ -338,18 +354,14 @@ async function main() {
         const size = (await fs.stat(embeddingsPath)).size
         if (size > 0) {
             let existingHasFragments = false
-            let existingModel
             try {
                 const manifestRaw = await fs.readFile(manifestPath, 'utf8')
                 const existingManifest = JSON.parse(manifestRaw)
                 existingHasFragments = existingManifest.hasFragments === true
-                existingModel = existingManifest.modelName
             } catch {
                 // ignore parse errors, just rebuild
             }
-            if (existingModel !== MODEL_NAME) {
-                console.log(`[rebuild] ${VERSION} pack was built with ${existingModel ?? 'an unknown model'}, rebuilding with ${MODEL_NAME}...`)
-            } else if (args.fragments && !existingHasFragments) {
+            if (args.fragments && !existingHasFragments) {
                 console.log(`[rebuild] ${VERSION} pack exists but lacks fragments, rebuilding...`)
             } else {
                 console.log(`[skip] ${VERSION} embedding pack already built (${(size / (1024 * 1024)).toFixed(1)} MB)`)
@@ -364,8 +376,6 @@ async function main() {
     if (args.fragments && existsSync(embeddingsPath) && existsSync(metadataPath)) {
         try {
             const fs = await import('node:fs/promises')
-            const existingManifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'))
-            if (existingManifest.modelName !== MODEL_NAME) throw new Error('built with another model')
             const existingMeta = JSON.parse(await fs.readFile(metadataPath, 'utf8'))
             const existingBuf = Buffer.from(await fs.readFile(embeddingsPath))
             reuseDim = existingMeta.length > 0 ? Math.round(existingBuf.byteLength / (existingMeta.length * 4)) : 0
@@ -382,8 +392,9 @@ async function main() {
     const verses = await fetchVerses(VERSION, args.url, args.file)
     console.log(`[fetch] got ${verses.length} verses`)
 
-    const embedder = await loadPackEmbedder()
-    const dim = embedder.dimensions
+    const embedder = await loadEmbedder()
+    const probe = await embedder('hello', { pooling: 'mean', normalize: true })
+    const dim = probe.data.length
     console.log(`[model] ready, dim=${dim}`)
 
     const embedItems = buildEmbedItems(verses, args.fragments)
@@ -409,7 +420,7 @@ async function main() {
     if (existsSync(checkpointPath) && existsSync(partialEmbPath) && existsSync(partialMetaPath)) {
         try {
             const cp = JSON.parse(readFileSync(checkpointPath, 'utf8'))
-            if (cp.count === count && cp.dim === dim && cp.batch === BATCH && cp.model === MODEL_NAME) {
+            if (cp.count === count && cp.dim === dim && cp.batch === BATCH) {
                 const partialBuf = Buffer.from(readFileSync(partialEmbPath))
                 const partialMeta = JSON.parse(readFileSync(partialMetaPath, 'utf8'))
                 if (partialBuf.byteLength === cp.done * dim * 4 && partialMeta.length === cp.done) {
@@ -475,12 +486,16 @@ async function main() {
         if (embedIndices.length > 0) {
             const embedSlice = embedIndices.map(b => slice[b])
             const texts = embedSlice.map(item => item.text)
-            const vectors = await embedder.embedDocuments(texts)
+            const tensor = await embedder(texts, { pooling: 'mean', normalize: true })
 
+            const flat = tensor.data
             for (let ei = 0; ei < embedSlice.length; ei++) {
                 const b = embedIndices[ei]
                 const item = slice[b]
-                packed.set(vectors[ei], (i + b) * dim)
+                const off = (i + b) * dim
+                for (let d = 0; d < dim; d++) {
+                    packed[off + d] = flat[ei * dim + d]
+                }
                 metadata[i + b] = {
                     reference: item.reference,
                     book: item.book,
@@ -504,7 +519,7 @@ async function main() {
         // Write checkpoint after each batch
         writeFileSync(partialEmbPath, Buffer.from(packed.buffer, 0, done * dim * 4))
         writeFileSync(partialMetaPath, JSON.stringify(metadata.slice(0, done)))
-        writeFileSync(checkpointPath, JSON.stringify({ done, count, dim, batch: BATCH, model: MODEL_NAME }))
+        writeFileSync(checkpointPath, JSON.stringify({ done, count, dim, batch: BATCH }))
     }
 
     if (reusedCount > 0) {

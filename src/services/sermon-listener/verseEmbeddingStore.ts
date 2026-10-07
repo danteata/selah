@@ -22,7 +22,6 @@
  */
 
 import type { CachedVerseEmbedding } from './localEmbeddings'
-import { calibrateScore, rawScoreFor } from './scoreCalibration'
 
 // ---------------------------------------------------------------------------
 // Types mirroring the worker's wire protocol
@@ -228,11 +227,6 @@ export function loadFromPackedBuffer(opts: {
 /**
  * Top-K cosine similarity search against the currently-loaded index.
  *
- * `threshold` and the returned scores are on the calibrated scale (see
- * `scoreCalibration`), which is the scale every caller's cutoffs were tuned
- * on. The worker compares raw cosines, so the threshold goes in translated and
- * the scores come out translated; this is the one place either happens.
- *
  * Falls back to an empty result set (with a warning) if nothing is loaded.
  * The query vector is converted to Float32Array on the way in so the worker
  * can run the tight inner loop on aligned floats.
@@ -261,9 +255,9 @@ export async function searchVerseEmbeddings(
     return new Promise<VerseMatch[]>((resolve) => {
         pending.set(id, (data) => {
             const res = data as SearchResponse
-            resolve((res.results || []).map((m) => ({ ...m, score: calibrateScore(m.score) })))
+            resolve(res.results || [])
         })
-        worker.postMessage({ id, kind: 'search', queryEmbedding: query, threshold: rawScoreFor(threshold), limit })
+        worker.postMessage({ id, kind: 'search', queryEmbedding: query, threshold, limit })
     })
 }
 

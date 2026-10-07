@@ -295,7 +295,7 @@ export function useSemanticVerseSearch(
                         const ck = q.raw.toLowerCase()
                         let emb = embeddingCache.current.get(ck)
                         if (!emb) {
-                            emb = (await embedText(q.raw, 'query')).embedding
+                            emb = (await embedText(q.raw)).embedding
                             if (embeddingCache.current.size > 50) {
                                 const first = embeddingCache.current.keys().next().value
                                 if (first) embeddingCache.current.delete(first)
@@ -389,7 +389,7 @@ export function useSemanticVerseSearch(
                     const cacheKey = query.trim().toLowerCase()
                     let queryEmbedding = embeddingCache.current.get(cacheKey)
                     if (!queryEmbedding) {
-                        const embeddingResult = await embedText(query, 'query')
+                        const embeddingResult = await embedText(query)
                         queryEmbedding = embeddingResult.embedding
                         if (embeddingCache.current.size > 50) {
                             const firstKey = embeddingCache.current.keys().next().value

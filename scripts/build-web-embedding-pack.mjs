@@ -29,7 +29,7 @@
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
-import { dirname, isAbsolute, join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
@@ -45,15 +45,10 @@ const { values } = parseArgs({
 })
 
 const version = values.version
-const fromRepo = (p) => (isAbsolute(p) ? p : join(REPO_ROOT, p))
-const inDir = values.in ? fromRepo(values.in) : join(REPO_ROOT, 'src-tauri/assets/embedding-packs', version)
-const outDir = values.out ? fromRepo(values.out) : join(REPO_ROOT, 'public/embedding-packs', version)
+const inDir = values.in ? join(REPO_ROOT, values.in) : join(REPO_ROOT, 'src-tauri/assets/embedding-packs', version)
+const outDir = values.out ? join(REPO_ROOT, values.out) : join(REPO_ROOT, 'public/embedding-packs', version)
 
-// The int8 scale is chosen from the data: the largest |component| maps to 127.
-// A fixed 127 assumes components span [-1, 1], but a unit vector spreads its
-// length over every dimension — at 768 dims a typical component is ~0.04, so a
-// fixed scale left about five levels per component. The loader reads `scale`
-// from the manifest, so any pack built either way loads correctly.
+const SCALE = 127
 
 function main() {
     const manifestPath = join(inDir, 'manifest.json')
@@ -97,14 +92,6 @@ function main() {
     const outMeta = new Array(count)
     const out = new Int8Array(count * dim)
     let clamped = 0
-    let maxAbs = 0
-    for (let n = 0; n < count; n++) {
-        const srcOff = canonicalIdx[n] * dim
-        for (let d = 0; d < dim; d++) maxAbs = Math.max(maxAbs, Math.abs(f32[srcOff + d]))
-    }
-    const SCALE = maxAbs > 0 ? 127 / maxAbs : 127
-    console.log(`[web-pack] Largest component ${maxAbs.toFixed(4)} → int8 scale ${SCALE.toFixed(1)}`)
-
     for (let n = 0; n < count; n++) {
         const srcRow = canonicalIdx[n]
         outMeta[n] = metadata[srcRow]

@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { EMBEDDING_MODEL } from '../embeddingModel'
 import { SEMANTIC_PACK_PREFERENCE } from '../semanticPack'
 
 // Validates the browser-servable packs produced by
@@ -33,7 +32,7 @@ describe.skipIf(packVersions.length === 0)('browser embedding packs', () => {
             expect(manifest.version).toBe(version)
             expect(manifest.quantization).toBe('int8')
             expect(manifest.hasFragments).toBe(false)
-            expect(manifest.dim).toBe(EMBEDDING_MODEL.dimensions)
+            expect(manifest.dim).toBe(384)
 
             const i8 = readFileSync(join(packDir, 'embeddings.i8'))
             expect(i8.byteLength).toBe(manifest.count * manifest.dim)

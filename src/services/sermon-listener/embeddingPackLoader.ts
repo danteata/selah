@@ -13,7 +13,7 @@
  *  - `/embedding-packs/<VERSION>/` — `public/embedding-packs`, so it is part of
  *    the frontend bundle and reachable both on the web and inside the Tauri
  *    webview (exactly like `/bibles` and `/dictionaries`). Canonical verses
- *    only, int8-quantized (`embeddings.i8`, ~23 MB) so the browser can download
+ *    only, int8-quantized (`embeddings.i8`, ~11 MB) so the browser can download
  *    it once, cache it in IndexedDB, and search offline. This is the pack that
  *    ships in releases — built by `scripts/build-web-embedding-pack.mjs`.
  *  - `src-tauri/assets/embedding-packs/<VERSION>/` bundled as Tauri resources
@@ -22,18 +22,12 @@
  *    short-phrase / paraphrase hits during live transcription). Absent from
  *    releases, so the bundled path above must work on its own.
  *
- * manifest.json: { version, dim, count, modelName, quantization?: 'int8', scale?, ... }
+ * manifest.json: { version, dim, count, quantization?: 'int8', scale?, ... }
  * Embeddings are L2-normalised so cosine == dot product. int8 packs store
  * round(x*scale); we dequantize with q/scale on load.
- *
- * A pack is only usable with the model that built it: queries from one model
- * scored against another model's verses rank at random without failing. So a
- * pack whose `modelName` is not `EMBEDDING_MODEL.id` is treated as absent —
- * fetched, side-loaded or cached in IndexedDB alike.
  */
 
 import { isDesktop } from '../../platform'
-import { EMBEDDING_MODEL } from './embeddingModel'
 import { loadFromPackedBuffer, type VerseMeta } from './verseEmbeddingStore'
 
 interface PackManifest {
@@ -61,9 +55,12 @@ interface LoadResult {
 const IDB_NAME = 'selah-embedding-packs'
 const IDB_STORE = 'packs'
 
+/** The model every pack this build reads was built with. */
+const PACK_MODEL = 'Xenova/all-MiniLM-L6-v2'
+
 interface CachedPack {
     version: string
-    /** Absent on packs cached before the model was recorded — i.e. MiniLM's. */
+    /** Absent on packs cached before 0.1.26; EmbeddingGemma's on 0.1.26 itself. */
     modelName?: string
     dim: number
     quantization?: 'int8'
@@ -99,9 +96,12 @@ async function idbGetPack(version: string): Promise<CachedPack | null> {
             const req = tx.objectStore(IDB_STORE).get(version)
             req.onsuccess = () => {
                 const pack = (req.result as CachedPack | undefined) ?? null
-                // A pack cached for another model is as good as none; the next
-                // fetch overwrites it under the same key.
-                resolve(pack && pack.modelName === EMBEDDING_MODEL.id ? pack : null)
+                // 0.1.26 cached an EmbeddingGemma pack under the same key. Its
+                // 768-dim vectors can't be scored against MiniLM queries, so
+                // only a pack recorded as MiniLM's (or one cached before the
+                // model was recorded, which can only be MiniLM's) is used; the
+                // next fetch overwrites anything else.
+                resolve(pack && (pack.modelName ?? PACK_MODEL) === PACK_MODEL && pack.dim === 384 ? pack : null)
             }
             req.onerror = () => resolve(null)
         } catch {
@@ -178,7 +178,7 @@ async function resolvePackBaseUrl(version: string): Promise<string | null> {
     let resolved: string | null = null
     for (const base of await packBaseUrlCandidates(version)) {
         const manifest = await fetchJson<PackManifest>(`${base}manifest.json`)
-        if (manifest && manifest.version === version && manifest.modelName === EMBEDDING_MODEL.id) {
+        if (manifest && manifest.version === version) {
             resolved = base
             break
         }
@@ -266,9 +266,6 @@ export async function tryLoadEmbeddingPack(version: string): Promise<LoadResult>
     if (!manifest) return { ok: false, error: 'manifest missing' }
     if (manifest.version !== version) {
         return { ok: false, error: `manifest version ${manifest.version} != requested ${version}` }
-    }
-    if (manifest.modelName !== EMBEDDING_MODEL.id) {
-        return { ok: false, error: `pack built with ${manifest.modelName ?? 'an unknown model'}, not ${EMBEDDING_MODEL.id}` }
     }
 
     const [metadata, raw] = await Promise.all([

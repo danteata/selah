@@ -288,7 +288,7 @@ The Convex backend defines the following tables:
 | Table | Purpose | Key Features |
 |-------|---------|--------------|
 | `bibleVersions` | Bible translation metadata | File storage reference |
-| `verseEmbeddings` | Legacy MiniLM vectors; the client no longer reads them (search is local) | Vector index (384 dimensions) |
+| `verseEmbeddings` | Vector embeddings for semantic search | Vector index (384 dimensions) |
 | `transcripts` | Sermon transcripts | Detected verses array |
 | `invitations` | Team invitation management | Status tracking |
 | `globalAppSettings` | System-wide configuration | Singleton document |
@@ -753,9 +753,9 @@ Two-tier verse detection system:
    - Numbered books: "1 John 4:8"
 
 2. **Semantic Detection**: ML-based paraphrase matching
-   - EmbeddingGemma 300M (8-bit ONNX) via @huggingface/transformers in a worker
-   - 768-dimensional vectors, searched locally against the prebuilt WEB pack
-   - Cosine similarity, calibrated onto the scale the thresholds were tuned on
+   - Uses @xenova/transformers for embeddings
+   - 384-dimensional vectors (all-MiniLM-L6-v2)
+   - Cosine similarity matching
 
 ### Voice Activity Detection (VAD)
 

@@ -5,17 +5,11 @@
  * This keeps ONNX inference off the main thread so the UI stays responsive.
  *
  * Architecture:
- * - Worker loads EmbeddingGemma 300M, 8-bit (see `embeddingModel.ts`)
- * - Generates 768-dimensional embeddings; callers say whether each text is a
- *   query, a document (a verse) or a clustering input, because the model
- *   prefixes each kind differently
- * - Desktop reads the model from the bundled resources; web caches it in
- *   browser storage after the first download
+ * - Worker loads Xenova/all-MiniLM-L6-v2 model (22MB, quantized)
+ * - Generates 384-dimensional embeddings
+ * - Works offline after initial model download
+ * - Model is cached in browser storage
  */
-
-import { EMBEDDING_MODEL, type EmbeddingKind } from './embeddingModel'
-
-export type { EmbeddingKind }
 
 export interface EmbeddingResult {
     embedding: number[]
@@ -32,8 +26,8 @@ export interface VerseMatch {
     score: number
 }
 
-const MODEL_NAME = EMBEDDING_MODEL.id
-const EMBEDDING_DIMENSIONS = EMBEDDING_MODEL.dimensions
+const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2'
+const EMBEDDING_DIMENSIONS = 384
 
 // ---------------------------------------------------------------------------
 // Web Worker singleton
@@ -62,7 +56,7 @@ let setupPromise: Promise<void> | null = null
 const pending = new Map<number, { resolve: (v: WorkerSuccessResponse) => void; reject: (e: Error) => void }>()
 
 /**
- * On desktop, resolve the bundled embedding model directory to an asset:// URL
+ * On desktop, resolve the bundled MiniLM model directory to an asset:// URL
  * the worker can fetch from. The Tauri asset protocol is already enabled
  * (see tauri.conf.json) and scoped to `**`. Returns null on web/dev contexts
  * so the worker keeps using the HuggingFace Hub.
@@ -161,13 +155,13 @@ function withTimeout<T>(request: Promise<T>, id: number): Promise<T> {
     return Promise.race([request, timeout]).finally(() => clearTimeout(timer))
 }
 
-function postToWorker(texts: string[], kind: EmbeddingKind): Promise<WorkerSuccessResponse> {
+function postToWorker(texts: string[]): Promise<WorkerSuccessResponse> {
     return ensureWorkerSetup().then(() => {
         const worker = getWorker()
         const id = ++nextRequestId
         return withTimeout(new Promise<WorkerSuccessResponse>((resolve, reject) => {
             pending.set(id, { resolve, reject })
-            worker.postMessage({ id, texts, kind })
+            worker.postMessage({ id, texts })
         }), id)
     })
 }
@@ -214,7 +208,7 @@ export async function initializeEmbedder(): Promise<{
     modelName: string
 }> {
     try {
-        await postToWorker([], 'query') // empty batch just warms up the model
+        await postToWorker([]) // empty batch just warms up the model
         return { ready: true, dimensions: EMBEDDING_DIMENSIONS, modelName: MODEL_NAME }
     } catch (error) {
         console.error('[Embeddings] Failed to initialize worker:', error)
@@ -223,11 +217,10 @@ export async function initializeEmbedder(): Promise<{
 }
 
 /**
- * Generate an embedding for a single text. `kind` is required: a query and a
- * verse embedded the same way land measurably further apart.
+ * Generate an embedding for a single text.
  */
-export async function embedText(text: string, kind: EmbeddingKind): Promise<EmbeddingResult> {
-    const res = await postToWorker([text], kind)
+export async function embedText(text: string): Promise<EmbeddingResult> {
+    const res = await postToWorker([text])
     const embedding = res.embeddings[0]
     if (!embedding) throw new Error('Worker returned empty embedding')
     return { embedding, dimensions: res.dimensions }
@@ -236,9 +229,9 @@ export async function embedText(text: string, kind: EmbeddingKind): Promise<Embe
 /**
  * Generate embeddings for multiple texts in batch.
  */
-export async function embedBatch(texts: string[], kind: EmbeddingKind): Promise<EmbeddingResult[]> {
+export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
     if (texts.length === 0) return []
-    const res = await postToWorker(texts, kind)
+    const res = await postToWorker(texts)
     return res.embeddings.map((emb) => ({ embedding: emb, dimensions: res.dimensions }))
 }
 
@@ -317,13 +310,14 @@ const VERSE_CACHE_DB_NAME = 'selah-verse-embeddings'
 const VERSE_CACHE_STORE_NAME = 'embeddings'
 const SYNC_PROGRESS_STORE_NAME = 'sync-progress'
 /**
- * 3: embeddings generated on this device by the previous model (MiniLM, 384
- * dimensions) live in another embedding space; scoring today's queries against
- * them returns nonsense rather than an error. The upgrade below drops them and
- * their resume points, so a version that had them reverts to the universal
- * pack until it is generated again.
+ * 4: release 0.1.26 embedded with EmbeddingGemma and moved this database to
+ * version 3; 0.1.27 went back to MiniLM, because EmbeddingGemma grew the
+ * webview past macOS's 8 GB limit within minutes. A database can't be reopened
+ * at a lower version, so this moves forward to 4 — and clears the rows only a
+ * version-3 database can hold: EmbeddingGemma vectors, which MiniLM queries
+ * can't be compared with. Rows from before 0.1.26 (version 2) are kept.
  */
-const VERSE_CACHE_VERSION = 3
+const VERSE_CACHE_VERSION = 4
 
 export interface CachedVerseEmbedding {
     reference: string
@@ -356,7 +350,7 @@ async function openVerseCache(): Promise<IDBDatabase> {
         request.onsuccess = () => resolve(request.result)
         request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result
-            if (event.oldVersion > 0 && event.oldVersion < 3) {
+            if (event.oldVersion === 3) {
                 for (const name of [VERSE_CACHE_STORE_NAME, SYNC_PROGRESS_STORE_NAME]) {
                     if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name)
                 }
