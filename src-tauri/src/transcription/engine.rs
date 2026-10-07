@@ -1167,16 +1167,29 @@ pub fn init_transcribe_cpp_backend() {
                      ARM64 host; disabling transcribe-cpp GPU acceleration and using CPU"
                 );
             }
-            let devices = transcribe_compute_devices();
-            info!(
-                "[transcription] transcribe-cpp initialized with {} compute device(s): [{}]",
-                devices.len(),
-                devices
-                    .iter()
-                    .map(|d| format!("{} ({})", d.name, d.kind))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
+            // Listing the devices is only for the log, but it opens the GPU:
+            // on macOS that loads ggml's Metal library and compiles it from
+            // source when the system shader cache lacks it — the first launch
+            // after every install or update. On the setup thread that froze the
+            // window until the compile finished (Handy #2160). Registration
+            // above stays here; only the report moves off the startup path.
+            let spawned = std::thread::Builder::new()
+                .name("transcribe-devices".into())
+                .spawn(|| {
+                    let devices = transcribe_compute_devices();
+                    info!(
+                        "[transcription] transcribe-cpp initialized with {} compute device(s): [{}]",
+                        devices.len(),
+                        devices
+                            .iter()
+                            .map(|d| format!("{} ({})", d.name, d.kind))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                });
+            if let Err(e) = spawned {
+                warn!("[transcription] could not spawn the compute-device report: {}", e);
+            }
         }
         Err(e) => warn!("[transcription] failed to initialize transcribe-cpp backends: {}", e),
     }
