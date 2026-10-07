@@ -310,6 +310,22 @@ describe('identifySong', () => {
             expect(identifySong(sung, idx, { preferSongId: 'song-x' })?.songId).toBe('song-x')
         })
 
+        it('prefers the song that accounts for more of what was sung', () => {
+            // Several songs carry the same line word for word; the one that also
+            // goes on to the rest of the window is the one being sung.
+            const shared = 'Before the Lamb of God and sing'
+            const song = (id: string, next: string): Song => ({
+                id, title: id, artist: 'x', lyrics: '',
+                sections: [{ id: 'v1', type: 'verse', label: 'Verse 1', lines: ['All the elders gather round', shared, next] }],
+            })
+            const idx = buildSongIndex([
+                song('other-a', 'Holy holy is the Lord'),
+                song('sung', 'You are worthy of it all'),
+                song('other-b', 'Glory to the risen King'),
+            ])
+            expect(identifySong('crowns before the lamb of god and sing you are worthy of it all', idx)?.songId).toBe('sung')
+        })
+
         it('identifies the correct song once a distinctive line breaks the tie', () => {
             const idx = buildSongIndex([SONG_X, SONG_Y])
             const m = identifySong(
