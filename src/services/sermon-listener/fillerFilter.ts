@@ -27,7 +27,9 @@ function getFillerWordsForLanguage(lang: string): string[] {
 
     switch (baseLang) {
         case 'en':
-            return ['uh', 'um', 'uhm', 'umm', 'uhh', 'uhhh', 'ah', 'hmm', 'hm', 'mmm', 'mm', 'mh', 'eh', 'ehh', 'ha']
+            // No "ha": it deletes real words ("Ha Long Bay" → "Long Bay") and a
+            // preacher's "Ha!" (Handy #2156).
+            return ['uh', 'um', 'uhm', 'umm', 'uhh', 'uhhh', 'ah', 'hmm', 'hm', 'mmm', 'mm', 'mh', 'eh', 'ehh']
         case 'es':
             return ['ehm', 'mmm', 'hmm', 'hm']
         case 'pt':
@@ -67,6 +69,49 @@ function getFillerWordsForLanguage(lang: string): string[] {
 /** Escape a string for safe use inside a RegExp. */
 function escapeRegExp(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Whether a word appended to `kept` would open a sentence: nothing but
+ * whitespace so far, or the last visible character ends one.
+ */
+function opensSentence(kept: string): boolean {
+    const last = kept.trimEnd().slice(-1)
+    return last === '' || '.!?…'.includes(last)
+}
+
+/**
+ * Deletes every match of one filler pattern. A capitalized filler that opened a
+ * sentence hands its capital to the word that takes its place, so "Um, so I
+ * think" becomes "So I think" rather than "so I think" (Handy #2157).
+ */
+function removeFillerMatches(text: string, pattern: RegExp): string {
+    let kept = ''
+    let resume = 0
+    let capitalOwed = false
+
+    const push = (segment: string) => {
+        if (capitalOwed) {
+            const first = segment.search(/[\p{L}\p{N}]/u)
+            if (first !== -1) {
+                capitalOwed = false
+                kept += segment.slice(0, first) + segment[first].toUpperCase() + segment.slice(first + 1)
+                return
+            }
+        }
+        kept += segment
+    }
+
+    for (const match of text.matchAll(pattern)) {
+        const start = match.index ?? 0
+        push(text.slice(resume, start))
+        const filler = match[0]
+        if (filler[0] !== filler[0].toLowerCase() && opensSentence(kept)) capitalOwed = true
+        resume = start + filler.length
+    }
+    push(text.slice(resume))
+
+    return kept
 }
 
 /**
@@ -130,11 +175,13 @@ export function filterFillers(text: string, options: FillerFilterOptions = {}): 
 
     let filtered = text
 
-    // Remove filler words (case-insensitive, with optional trailing , or .)
+    // Remove filler words (case-insensitive, with optional trailing , or .).
+    // Word edges are spelled out rather than `\\b`, which only knows ASCII
+    // letters even under the `u` flag — so "äh" and "хм" never matched.
     for (const word of fillerWords) {
         if (!word) continue
-        const pattern = new RegExp(`\\b${escapeRegExp(word)}\\b[,.]?`, 'giu')
-        filtered = filtered.replace(pattern, '')
+        const pattern = new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegExp(word)}(?![\\p{L}\\p{N}_])[,.]?`, 'giu')
+        filtered = removeFillerMatches(filtered, pattern)
     }
 
     // Collapse stutter runs

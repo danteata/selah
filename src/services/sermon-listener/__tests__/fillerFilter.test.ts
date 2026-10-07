@@ -12,8 +12,9 @@ describe('filterFillers — filler words', () => {
     })
 
     it('is case-insensitive', () => {
+        // The capital the leading "UHM" carried passes to "this".
         expect(filterFillers('UHM this is UH a test', { lang: 'en' }))
-            .toBe('this is a test')
+            .toBe('This is a test')
     })
 
     it('strips trailing punctuation attached to fillers', () => {
@@ -41,6 +42,34 @@ describe('filterFillers — filler words', () => {
     it('unknown language uses conservative fallback', () => {
         expect(filterFillers('uh I think uhm this works', { lang: 'xx' }))
             .toBe('I think this works')
+    })
+
+    it('keeps English "Ha" — a real word, not a filler', () => {
+        expect(filterFillers('Ha Long Bay is beautiful.', { lang: 'en' }))
+            .toBe('Ha Long Bay is beautiful.')
+        expect(filterFillers('Ha! He thought he could hide.', { lang: 'en' }))
+            .toBe('Ha! He thought he could hide.')
+    })
+
+    it('hands a sentence-opening filler\'s capital to the next word', () => {
+        expect(filterFillers('Um, so I think', { lang: 'en' })).toBe('So I think')
+        expect(filterFillers('That works. Um, let me check.', { lang: 'en' }))
+            .toBe('That works. Let me check.')
+    })
+
+    it('leaves the next word alone for a lowercase or mid-sentence filler', () => {
+        expect(filterFillers('um, so I think', { lang: 'en' })).toBe('so I think')
+        expect(filterFillers('And Um, the grace of God', { lang: 'en' }))
+            .toBe('And the grace of God')
+    })
+
+    it('matches fillers outside ASCII (German, Russian)', () => {
+        expect(filterFillers('Ich äh denke ähm schon', { lang: 'de' })).toBe('Ich denke schon')
+        expect(filterFillers('Я хм думаю', { lang: 'ru' })).toBe('Я думаю')
+    })
+
+    it('does not match a filler inside a longer non-ASCII word', () => {
+        expect(filterFillers('Ähnlich ist es', { lang: 'de' })).toBe('Ähnlich ist es')
     })
 
     it('fallback does NOT remove "um"', () => {
@@ -101,7 +130,7 @@ describe('filterFillers — whitespace & passthrough', () => {
 
     it('handles a combined case', () => {
         expect(filterFillers('  Uhm, so I was, uh, thinking about this  ', { lang: 'en' }))
-            .toBe('so I was, thinking about this')
+            .toBe('So I was, thinking about this')
     })
 
     it('leaves clean text untouched', () => {
