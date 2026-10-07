@@ -22,7 +22,47 @@ permissions:
   actions: read
 
 jobs:
+  # Create the draft release once, before any build finishes. Left to the
+  # build jobs, each one that found no release created it, and two legs
+  # finishing within a minute of each other (both macOS builds share a runner
+  # type) both tried. The loser failed after bundling, which is how 0.1.31's
+  # Apple Silicon leg was lost. tauri-action finds this draft by tag and only
+  # uploads to it.
+  prepare-release:
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    name: Create draft release
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: RELEASE_NOTES.md
+          sparse-checkout-cone-mode: false
+      - name: Create the draft if it doesn't exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          if [ -f RELEASE_NOTES.md ]; then
+            notes=RELEASE_NOTES.md
+          else
+            notes=$(mktemp)
+            echo 'See the assets to download and install this version.' > "$notes"
+          fi
+          # Same title tauri-action would give it (releaseName below).
+          gh release create "$TAG" --repo "$REPO" --draft --verify-tag \
+            --title "Selah $TAG" --notes-file "$notes"
+
   build:
+    needs: prepare-release
+    # Manual runs have no tag and skip prepare-release; they must still build.
+    if: ${{ !cancelled() && (needs.prepare-release.result == 'success' || needs.prepare-release.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
