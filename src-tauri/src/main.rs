@@ -475,6 +475,7 @@ pub fn run() {
             // after the user "quit" by closing the main window — the classic
             // stuck-live-output-after-quit symptom.
             if let Some(main_window) = app.get_webview_window("main") {
+                platform::disable_browser_accelerators(&main_window);
                 let app_handle = app.handle().clone();
                 main_window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { .. } = event {

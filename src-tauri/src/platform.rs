@@ -65,6 +65,42 @@ pub fn init_vulkan_layers() {
     }
 }
 
+/// Turn off WebView2's built-in browser shortcuts for one window.
+///
+/// WebView2 handles F5 / Ctrl+R (reload), Ctrl+F, F6, F12 and friends itself,
+/// before page script can see or `preventDefault()` them. In Selah a stray F5
+/// reloads the whole app — or a live output on the projector — in the middle
+/// of a service. None of those shortcuts serve an app, so every window drops
+/// them (Handy did the same for its F6 white-window reports, #1940). DevTools
+/// stays reachable from the context menu; only the F12 shortcut goes.
+///
+/// No-op off Windows, where WKWebView and WebKitGTK have no such layer.
+pub fn disable_browser_accelerators<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    #[cfg(target_os = "windows")]
+    {
+        let result = window.with_webview(|webview| unsafe {
+            use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+            use windows_core::Interface;
+
+            let applied = webview
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.Settings())
+                .and_then(|settings| settings.cast::<ICoreWebView2Settings3>())
+                .and_then(|settings| settings.SetAreBrowserAcceleratorKeysEnabled(false));
+            if let Err(e) = applied {
+                tracing::warn!("[webview] could not disable browser accelerator keys: {e}");
+            }
+        });
+        if let Err(e) = result {
+            tracing::warn!("[webview] could not reach the webview to disable accelerators: {e}");
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+}
+
 /// Whether this is an x86_64 Windows process running under emulation on an
 /// ARM64 host (Windows-on-ARM's x64 emulation layer).
 ///

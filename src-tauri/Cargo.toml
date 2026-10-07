@@ -60,6 +60,11 @@ transcribe-cpp = { version = "0.1", features = ["metal"], optional = true }  # M
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wasapi = "0.22"  # WASAPI loopback for system audio capture
+# Reach WebView2's settings to turn off its browser shortcuts (F5 reload, F12,
+# ...) — see `platform::disable_browser_accelerators`. Both pinned to the
+# versions wry already links, so the controller it hands us is the same type.
+webview2-com = "0.38"
+windows-core = "0.61"
 windows = { version = "0.58", features = [
     "Win32_System_Com",
     "Win32_Foundation",

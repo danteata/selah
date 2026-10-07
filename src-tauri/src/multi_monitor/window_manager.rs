@@ -525,6 +525,8 @@ impl MultiMonitorState {
             code: "WINDOW_CREATE_FAILED".to_string(),
             message: format!("Failed to create {} window: {}", label, e),
         })?;
+        // An output is a window too: F5 on it would reload the projector.
+        crate::platform::disable_browser_accelerators(&window);
 
         // Physical coordinates throughout: the Monitor API reports physical
         // pixels, and logical values land on the wrong display on HiDPI setups.
