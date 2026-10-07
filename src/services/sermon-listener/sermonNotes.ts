@@ -214,7 +214,7 @@ async function extractiveSummarizeWithEmbeddings(
         : rawSentences
 
     try {
-        const results = await embedBatch(sentences)
+        const results = await embedBatch(sentences, 'clustering')
 
         if (!results || results.length === 0) {
             return heuristicKeyPoints(text).slice(0, sentenceCount)

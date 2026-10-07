@@ -3,10 +3,14 @@
 ## Client-Side Embedding Architecture
 
 ### Local Embeddings (`src/services/sermon-listener/localEmbeddings.ts`)
-- **Web Worker** (`embedding.worker.ts`) runs ONNX inference off the main thread so the UI stays responsive during batch embedding.
-- `embedText()` / `embedBatch()` post messages to the worker; the worker loads `Xenova/all-MiniLM-L6-v2` from the same CDN and returns embeddings.
+- Two models, chosen by platform in `embeddingModel.ts`:
+  - **Desktop**: EmbeddingGemma 300M (`onnx-community/embeddinggemma-300m-ONNX`, 8-bit, 768 dims), run natively by ONNX Runtime in `src-tauri/src/embeddings.rs` (`embed_texts` / `embeddings_unload` commands), from the model bundled under `src-tauri/assets/embedding-models`. Do not move it back into the webview: on macOS it grew WebKit's content process past its 8 GB limit and the window went black.
+  - **Web**: `Xenova/all-MiniLM-L6-v2` (384 dims) in a **Web Worker** (`embedding.worker.ts`) through `@xenova/transformers` from jsdelivr.
+- `embedText(text, kind)` / `embedBatch(texts, kind)`: `kind` is `'query'`, `'document'` (verses) or `'clustering'`. EmbeddingGemma prefixes each differently (added in `localEmbeddings.ts`); MiniLM takes no prefix.
+- Each model has its own verse pack — desktop `src-tauri/semantic-packs/WEB` (EmbeddingGemma), web `public/embedding-packs/WEB` (MiniLM, frozen) — and the loader passes over a pack built with the other model. The EmbeddingGemma pack, the score calibration (`embeddingCalibration.ts`), the build scripts and the Rust embedder must agree — tests enforce it, and `cargo test --release --bin selah embeddings` checks the Rust embedder reproduces the pack's vectors. After a model change run `npm run build-semantic-pack` (pack + calibration) and `npx vite-node scripts/eval-semantic-policy.ts -- <dump>`.
+- Scores leaving `searchVerseEmbeddings` are calibrated onto MiniLM's scale (`scoreCalibration.ts`), which is what every semantic threshold was tuned on; MiniLM's pass through. Search is local only; the Convex `verseEmbeddings` table is no longer read.
 - Vite bundles the worker into a separate chunk (`dist/assets/embedding.worker-*.js`).
-- `isEmbedderReady()` checks whether the worker has been instantiated.
+- `isEmbedderReady()` checks whether the model is loaded (desktop) or the worker exists (web).
 
 ### Text Preparation Worker (`src/services/sermon-listener/textPreparation.worker.ts`)
 - Offloads sentence splitting, deduplication (`O(n²)` char-similarity), and sliding-window generation from `semanticVerseDetection.ts`.

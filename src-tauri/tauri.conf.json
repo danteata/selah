@@ -24,6 +24,7 @@
             "assets/whisper-models-gguf/**/*",
             "assets/embedding-models/**/*",
             "assets/embedding-packs/**/*",
+            "semantic-packs/**/*",
             "linux-runtime/**/*"
         ],
         "icon": [

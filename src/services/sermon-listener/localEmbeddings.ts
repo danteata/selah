@@ -1,15 +1,21 @@
 /**
  * Local Embeddings Service
  *
- * Provides client-side text embeddings using Transformers.js via a Web Worker.
- * This keeps ONNX inference off the main thread so the UI stays responsive.
+ * Text embeddings for semantic verse search, off the UI thread. Which model
+ * runs depends on the platform (see `embeddingModel.ts`):
+ * - Desktop: EmbeddingGemma 300M (768 dimensions) in the Rust backend, via
+ *   the `embed_texts` command, from the model bundled with the app.
+ * - Web: all-MiniLM-L6-v2 (384 dimensions) in a Web Worker through
+ *   Transformers.js, cached in browser storage after the first download.
  *
- * Architecture:
- * - Worker loads Xenova/all-MiniLM-L6-v2 model (22MB, quantized)
- * - Generates 384-dimensional embeddings
- * - Works offline after initial model download
- * - Model is cached in browser storage
+ * Callers say whether each text is a query, a document (a verse) or a
+ * clustering input; EmbeddingGemma prefixes each kind differently, and the
+ * prefix is added here so neither backend has to know about it.
  */
+
+import { activeEmbeddingModel, EMBEDDING_GEMMA, withTaskPrefix, type EmbeddingKind } from './embeddingModel'
+
+export type { EmbeddingKind }
 
 export interface EmbeddingResult {
     embedding: number[]
@@ -26,8 +32,10 @@ export interface VerseMatch {
     score: number
 }
 
-const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2'
-const EMBEDDING_DIMENSIONS = 384
+/** Desktop embeds natively; see `embedNative`. */
+function usesNativeEmbedder(): boolean {
+    return activeEmbeddingModel().id === EMBEDDING_GEMMA.id
+}
 
 // ---------------------------------------------------------------------------
 // Web Worker singleton
@@ -54,29 +62,6 @@ let workerInstance: Worker | null = null
 let nextRequestId = 0
 let setupPromise: Promise<void> | null = null
 const pending = new Map<number, { resolve: (v: WorkerSuccessResponse) => void; reject: (e: Error) => void }>()
-
-/**
- * On desktop, resolve the bundled MiniLM model directory to an asset:// URL
- * the worker can fetch from. The Tauri asset protocol is already enabled
- * (see tauri.conf.json) and scoped to `**`. Returns null on web/dev contexts
- * so the worker keeps using the HuggingFace Hub.
- */
-async function resolveLocalModelPath(): Promise<string | null> {
-    try {
-        // Lazy-load Tauri APIs so the worker bundle stays usable on web.
-        if (typeof window === 'undefined' || !('__TAURI__' in window)) return null
-        const [{ resourceDir }, { convertFileSrc }] = await Promise.all([
-            import('@tauri-apps/api/path'),
-            import('@tauri-apps/api/core'),
-        ])
-        const root = await resourceDir()
-        const sep = root.endsWith('/') || root.endsWith('\\') ? '' : '/'
-        const modelsDir = `${root}${sep}assets/embedding-models/`
-        return convertFileSrc(modelsDir)
-    } catch {
-        return null
-    }
-}
 
 function getWorker(): Worker {
     if (workerInstance) return workerInstance
@@ -108,17 +93,17 @@ function getWorker(): Worker {
 }
 
 /**
- * Send the one-time setup message to the worker, configuring it to load the
- * model from the bundled Tauri resource on desktop. The promise is cached so
- * concurrent embed calls don't race the configuration.
+ * Send the one-time setup message to the worker. The worker only runs on the
+ * web (desktop embeds natively), where it fetches MiniLM from the Hugging Face
+ * Hub and caches it in browser storage. The promise is cached so concurrent
+ * embed calls don't race the configuration.
  */
 function ensureWorkerSetup(): Promise<void> {
     if (setupPromise) return setupPromise
     setupPromise = (async () => {
         const worker = getWorker()
-        const localModelPath = await resolveLocalModelPath()
-        // Even on web we send a setup message so the worker isn't ambiguous
-        // about which mode it's in. Null path => fall back to HF Hub.
+        // No bundled model path: the worker falls back to the Hub.
+        const localModelPath = null
         const id = ++nextRequestId
         await withTimeout(new Promise<void>((resolve, reject) => {
             pending.set(id, {
@@ -167,6 +152,39 @@ function postToWorker(texts: string[]): Promise<WorkerSuccessResponse> {
 }
 
 // ---------------------------------------------------------------------------
+// Native embedder (desktop)
+// ---------------------------------------------------------------------------
+
+let nativeLoaded = false
+
+/**
+ * Embed with EmbeddingGemma in the Rust backend. The vectors come back as raw
+ * little-endian f32 bytes (an ArrayBuffer), `texts.length × 768` of them. An
+ * empty list just loads the model.
+ */
+async function embedNative(texts: string[]): Promise<number[][]> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const bytes = await invoke<ArrayBuffer>('embed_texts', { texts })
+    nativeLoaded = true
+    const dim = EMBEDDING_GEMMA.dimensions
+    const flat = new Float32Array(bytes)
+    if (flat.length !== texts.length * dim) {
+        throw new Error(`Native embedder returned ${flat.length} floats for ${texts.length} texts`)
+    }
+    const rows: number[][] = []
+    for (let i = 0; i < texts.length; i++) rows.push(Array.from(flat.subarray(i * dim, (i + 1) * dim)))
+    return rows
+}
+
+/** Embed already-prefixed texts with whichever backend this platform uses. */
+async function embedPrefixed(texts: string[]): Promise<{ embeddings: number[][]; dimensions: number }> {
+    if (usesNativeEmbedder()) {
+        return { embeddings: await embedNative(texts), dimensions: EMBEDDING_GEMMA.dimensions }
+    }
+    return postToWorker(texts)
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -174,7 +192,7 @@ function postToWorker(texts: string[]): Promise<WorkerSuccessResponse> {
  * Check if the embedding worker is alive.
  */
 export function isEmbedderReady(): boolean {
-    return workerInstance !== null
+    return usesNativeEmbedder() ? nativeLoaded : workerInstance !== null
 }
 
 /**
@@ -184,6 +202,14 @@ export function isEmbedderReady(): boolean {
  * unload timer to reclaim memory between syncs (item #3).
  */
 export function disposeEmbedder(): void {
+    if (usesNativeEmbedder()) {
+        if (!nativeLoaded) return
+        nativeLoaded = false
+        void import('@tauri-apps/api/core')
+            .then(({ invoke }) => invoke('embeddings_unload'))
+            .catch(() => { /* unloading is best-effort */ })
+        return
+    }
     if (!workerInstance) return
     try {
         workerInstance.terminate()
@@ -200,38 +226,41 @@ export function disposeEmbedder(): void {
 }
 
 /**
- * Initialise the worker (triggers model download in the worker).
+ * Load the model (on web, the first call downloads it).
  */
 export async function initializeEmbedder(): Promise<{
     ready: boolean
     dimensions: number
     modelName: string
 }> {
+    const model = activeEmbeddingModel()
     try {
-        await postToWorker([]) // empty batch just warms up the model
-        return { ready: true, dimensions: EMBEDDING_DIMENSIONS, modelName: MODEL_NAME }
+        await embedPrefixed([]) // an empty batch just loads the model
+        return { ready: true, dimensions: model.dimensions, modelName: model.id }
     } catch (error) {
-        console.error('[Embeddings] Failed to initialize worker:', error)
-        return { ready: false, dimensions: 0, modelName: MODEL_NAME }
+        console.error('[Embeddings] Failed to load the embedding model:', error)
+        return { ready: false, dimensions: 0, modelName: model.id }
     }
 }
 
 /**
- * Generate an embedding for a single text.
+ * Generate an embedding for a single text. `kind` is required: with
+ * EmbeddingGemma a query and a verse embedded the same way land measurably
+ * further apart.
  */
-export async function embedText(text: string): Promise<EmbeddingResult> {
-    const res = await postToWorker([text])
+export async function embedText(text: string, kind: EmbeddingKind): Promise<EmbeddingResult> {
+    const res = await embedPrefixed([withTaskPrefix(text, kind)])
     const embedding = res.embeddings[0]
-    if (!embedding) throw new Error('Worker returned empty embedding')
+    if (!embedding) throw new Error('Embedder returned no embedding')
     return { embedding, dimensions: res.dimensions }
 }
 
 /**
  * Generate embeddings for multiple texts in batch.
  */
-export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
+export async function embedBatch(texts: string[], kind: EmbeddingKind): Promise<EmbeddingResult[]> {
     if (texts.length === 0) return []
-    const res = await postToWorker(texts)
+    const res = await embedPrefixed(texts.map((t) => withTaskPrefix(t, kind)))
     return res.embeddings.map((emb) => ({ embedding: emb, dimensions: res.dimensions }))
 }
 
@@ -306,11 +335,22 @@ export function findSimilarLocally(
 // Verse Embedding Cache (IndexedDB)
 // ============================================================================
 
-const VERSE_CACHE_DB_NAME = 'selah-verse-embeddings'
+/**
+ * Verse embeddings generated on this device. One database per model, so
+ * vectors from different embedding spaces never meet: MiniLM's (web, and
+ * desktop before 0.1.29) keep the original name, EmbeddingGemma's (desktop)
+ * have their own.
+ */
+const MINILM_VERSE_CACHE_DB_NAME = 'selah-verse-embeddings'
+const GEMMA_VERSE_CACHE_DB_NAME = 'selah-verse-embeddings-embeddinggemma'
+
+function verseCacheDbName(): string {
+    return usesNativeEmbedder() ? GEMMA_VERSE_CACHE_DB_NAME : MINILM_VERSE_CACHE_DB_NAME
+}
 const VERSE_CACHE_STORE_NAME = 'embeddings'
 const SYNC_PROGRESS_STORE_NAME = 'sync-progress'
 /**
- * 4: release 0.1.26 embedded with EmbeddingGemma and moved this database to
+ * For the MiniLM database. 4: release 0.1.26 embedded with EmbeddingGemma and moved it to
  * version 3; 0.1.27 went back to MiniLM, because EmbeddingGemma grew the
  * webview past macOS's 8 GB limit within minutes. A database can't be reopened
  * at a lower version, so this moves forward to 4 — and clears the rows only a
@@ -343,14 +383,30 @@ export interface SyncProgressRecord {
     updatedAt: number
 }
 
+/**
+ * On desktop, the MiniLM database holds vectors today's queries can't be
+ * compared with. Removed once, the first time the EmbeddingGemma one opens.
+ */
+function dropMiniLmCacheOnDesktop(): void {
+    try {
+        indexedDB.deleteDatabase(MINILM_VERSE_CACHE_DB_NAME)
+    } catch {
+        // Best-effort: it is unused on desktop either way.
+    }
+}
+
 async function openVerseCache(): Promise<IDBDatabase> {
+    const name = verseCacheDbName()
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(VERSE_CACHE_DB_NAME, VERSE_CACHE_VERSION)
+        const request = indexedDB.open(name, name === GEMMA_VERSE_CACHE_DB_NAME ? 1 : VERSE_CACHE_VERSION)
         request.onerror = () => reject(request.error)
         request.onsuccess = () => resolve(request.result)
         request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result
-            if (event.oldVersion === 3) {
+            if (name === GEMMA_VERSE_CACHE_DB_NAME && event.oldVersion === 0) {
+                dropMiniLmCacheOnDesktop()
+            }
+            if (name === MINILM_VERSE_CACHE_DB_NAME && event.oldVersion === 3) {
                 for (const name of [VERSE_CACHE_STORE_NAME, SYNC_PROGRESS_STORE_NAME]) {
                     if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name)
                 }

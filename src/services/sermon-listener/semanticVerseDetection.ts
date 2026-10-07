@@ -499,7 +499,7 @@ export class SemanticVerseDetector {
                 }
 
                 const textsToEmbed = searchItems.map((item) => item.text)
-                const embeddingResults = await embedBatch(textsToEmbed)
+                const embeddingResults = await embedBatch(textsToEmbed, 'query')
 
                 const thresholds = searchItems.map((item) => getDynamicThreshold(item.wordCount))
 
@@ -600,7 +600,7 @@ export class SemanticVerseDetector {
         console.log('[SemanticDetector] Trying sliding window fallback (background)...')
         const newMatches: SemanticVerseMatch[] = []
         try {
-            const windowEmbeddings = await embedBatch(windows)
+            const windowEmbeddings = await embedBatch(windows, 'query')
             const windowThresholds = windows.map((w) => getDynamicThreshold(w.split(/\s+/).length, 'window'))
             const searchMethod = (emb: number[], t: number) => this.searchLocally(emb, t)
 

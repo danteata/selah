@@ -9,18 +9,21 @@
  * `semanticPack.ts` decides WHICH pack loads. One pack serves every Bible
  * version the user reads — see that file for why.
  *
- * Two places a pack can live, probed in this order by `resolvePackBaseUrl`:
- *  - `/embedding-packs/<VERSION>/` — `public/embedding-packs`, so it is part of
- *    the frontend bundle and reachable both on the web and inside the Tauri
- *    webview (exactly like `/bibles` and `/dictionaries`). Canonical verses
- *    only, int8-quantized (`embeddings.i8`, ~11 MB) so the browser can download
- *    it once, cache it in IndexedDB, and search offline. This is the pack that
- *    ships in releases — built by `scripts/build-web-embedding-pack.mjs`.
- *  - `src-tauri/assets/embedding-packs/<VERSION>/` bundled as Tauri resources
- *    and read via `asset://`. Optional and desktop-only: a bigger float32
- *    verses+fragments pack for whoever places one there (fragments help
- *    short-phrase / paraphrase hits during live transcription). Absent from
- *    releases, so the bundled path above must work on its own.
+ * A pack is only usable with the model that built it: queries are scored
+ * against its vectors. Web and desktop run different models (see
+ * `embeddingModel.ts`), so each finds its own pack, and a pack whose manifest
+ * names another model is passed over. Places a pack can live, probed in this
+ * order by `resolvePackBaseUrl`:
+ *  - `/embedding-packs/<VERSION>/` — `public/embedding-packs`, part of the
+ *    frontend bundle. The web's MiniLM pack: canonical verses only,
+ *    int8-quantized (`embeddings.i8`, ~11 MB) so the browser can download it
+ *    once, cache it in IndexedDB, and search offline. It also rides along in
+ *    the desktop bundle, where it is passed over.
+ *  - `src-tauri/semantic-packs/<VERSION>/`, bundled as Tauri resources and read
+ *    via `asset://`. Desktop's EmbeddingGemma pack (int8, ~24 MB).
+ *  - `src-tauri/assets/embedding-packs/<VERSION>/`, likewise. For a pack built
+ *    locally with `scripts/build-embedding-pack.mjs` (float32, optionally with
+ *    fragments). Absent from releases.
  *
  * manifest.json: { version, dim, count, quantization?: 'int8', scale?, ... }
  * Embeddings are L2-normalised so cosine == dot product. int8 packs store
@@ -28,6 +31,7 @@
  */
 
 import { isDesktop } from '../../platform'
+import { activeEmbeddingModel, MINILM, type EmbeddingModelSpec } from './embeddingModel'
 import { loadFromPackedBuffer, type VerseMeta } from './verseEmbeddingStore'
 
 interface PackManifest {
@@ -55,8 +59,13 @@ interface LoadResult {
 const IDB_NAME = 'selah-embedding-packs'
 const IDB_STORE = 'packs'
 
-/** The model every pack this build reads was built with. */
-const PACK_MODEL = 'Xenova/all-MiniLM-L6-v2'
+/**
+ * Whether a pack was built with `model`. Packs from before the model was
+ * recorded can only be MiniLM's.
+ */
+function builtWith(pack: { modelName?: string; dim: number }, model: EmbeddingModelSpec): boolean {
+    return (pack.modelName ?? MINILM.id) === model.id && pack.dim === model.dimensions
+}
 
 interface CachedPack {
     version: string
@@ -96,12 +105,10 @@ async function idbGetPack(version: string): Promise<CachedPack | null> {
             const req = tx.objectStore(IDB_STORE).get(version)
             req.onsuccess = () => {
                 const pack = (req.result as CachedPack | undefined) ?? null
-                // 0.1.26 cached an EmbeddingGemma pack under the same key. Its
-                // 768-dim vectors can't be scored against MiniLM queries, so
-                // only a pack recorded as MiniLM's (or one cached before the
-                // model was recorded, which can only be MiniLM's) is used; the
-                // next fetch overwrites anything else.
-                resolve(pack && (pack.modelName ?? PACK_MODEL) === PACK_MODEL && pack.dim === 384 ? pack : null)
+                // 0.1.26 cached an EmbeddingGemma pack under the same key on
+                // the web. Only a pack built with this platform's model is
+                // used; the next fetch overwrites anything else.
+                resolve(pack && builtWith(pack, activeEmbeddingModel()) ? pack : null)
             }
             req.onerror = () => resolve(null)
         } catch {
@@ -132,13 +139,11 @@ async function idbPutPack(pack: CachedPack): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Every place this version's pack might live, best-supported first. The
- * frontend-bundled path comes first because it is the one that actually ships:
- * `public/embedding-packs` lands in the build output, which both the web app and
- * the Tauri webview serve from the app origin. The Tauri resource dir is only a
- * fallback for a side-loaded pack — declaring it in `tauri.conf.json` does not
- * put a pack there, and for a long time nothing did, so desktop reported "no
- * pack" and every version offered "Enable Search" as if search were off.
+ * Every place this version's pack might live, in probe order; the first whose
+ * manifest matches the version and this platform's model wins. Desktop once
+ * probed only the resource dir, where nothing shipped, so it reported "no pack"
+ * and every version offered "Enable Search" as if search were off; a pack in
+ * the frontend bundle is therefore always probed too.
  */
 async function packBaseUrlCandidates(version: string): Promise<string[]> {
     if (typeof window === 'undefined') return []
@@ -153,7 +158,10 @@ async function packBaseUrlCandidates(version: string): Promise<string[]> {
             ])
             const root = await resourceDir()
             const sep = root.endsWith('/') || root.endsWith('\\') ? '' : '/'
-            candidates.push(convertFileSrc(`${root}${sep}assets/embedding-packs/${version}/`))
+            candidates.push(
+                convertFileSrc(`${root}${sep}semantic-packs/${version}/`),
+                convertFileSrc(`${root}${sep}assets/embedding-packs/${version}/`),
+            )
         } catch {
             // No resource dir (or the API is unavailable) — the bundled path stands.
         }
@@ -167,7 +175,8 @@ const baseUrlCache = new Map<string, string | null>()
 
 /**
  * Base URL where this version's pack files live, or null if no candidate serves
- * a matching manifest. Only the universal packs listed in
+ * a manifest for this version built with this platform's model. Only the
+ * universal packs listed in
  * `semanticPack.SEMANTIC_PACK_PREFERENCE` ship; anything else 404s everywhere,
  * which is how `hasEmbeddingPack` reports absence.
  */
@@ -175,10 +184,11 @@ async function resolvePackBaseUrl(version: string): Promise<string | null> {
     const cached = baseUrlCache.get(version)
     if (cached !== undefined) return cached
 
+    const model = activeEmbeddingModel()
     let resolved: string | null = null
     for (const base of await packBaseUrlCandidates(version)) {
         const manifest = await fetchJson<PackManifest>(`${base}manifest.json`)
-        if (manifest && manifest.version === version) {
+        if (manifest && manifest.version === version && builtWith(manifest, model)) {
             resolved = base
             break
         }

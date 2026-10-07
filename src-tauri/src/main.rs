@@ -30,6 +30,7 @@ tauri::embed_plist::embed_info_plist!(concat!(env!("CARGO_MANIFEST_DIR"), "/Info
 
 mod audio_capture;
 mod dictation_pill;
+mod embeddings;
 mod license;
 mod logging;
 mod memory;
@@ -321,6 +322,8 @@ pub fn run() {
         .manage(multi_monitor_state.clone())
         .manage(ndi_manager.clone())
         .invoke_handler(tauri::generate_handler![
+            embeddings::embed_texts,
+            embeddings::embeddings_unload,
             list_audio_devices,
             is_system_audio_supported,
             check_screen_capture_permission,

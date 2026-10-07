@@ -35,6 +35,10 @@ anyhow = "1"  # Ergonomic error handling in the native transcription engine
 tiny_http = "0.12"  # One-shot HTTP listener for the OAuth callback (port 19888)
 ort = "2.0.0-rc.11"  # ONNX Runtime for Silero VAD
 ndarray = "0.17"  # For tensor operations with ort (must match ort's ndarray version)
+# EmbeddingGemma's tokenizer for native embeddings (src/embeddings.rs). No
+# default features: its tokenizer.json needs no regex engine (onig is C code)
+# and nothing here downloads from the Hub.
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"

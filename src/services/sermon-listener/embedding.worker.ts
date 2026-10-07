@@ -20,10 +20,12 @@
  * self-hosting the ORT wasm binaries and a Vite config that keeps ORT out of
  * the UMD path — not as a one-line import swap.
  *
+ * Web only. The desktop app embeds with EmbeddingGemma in its Rust backend
+ * instead (see `embeddingModel.ts`), so this worker always runs MiniLM.
+ *
  * The first message sent to the worker may be a `{ setup }` payload from
- * `localEmbeddings.ts` that tells the worker to use a locally-bundled model
- * (via Tauri's `asset://` protocol) instead of the HuggingFace Hub. On web
- * we keep the CDN/Hub fallback so the experience is identical.
+ * `localEmbeddings.ts` naming a locally-bundled model directory to read
+ * instead of the HuggingFace Hub. Nothing sends one today.
  */
 
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1'

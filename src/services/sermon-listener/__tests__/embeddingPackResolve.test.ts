@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// Desktop is the interesting case: it is the build where the pack was reported
-// missing even though one shipped.
-vi.mock('@/platform', () => ({ isDesktop: () => true, platform: {} }))
+const desktop = vi.hoisted(() => ({ value: true }))
+vi.mock('@/platform', () => ({ isDesktop: () => desktop.value, platform: {} }))
 
 const resourceDir = vi.fn(async () => '/Applications/Selah.app/Contents/Resources')
 const convertFileSrc = vi.fn((path: string) => `asset://localhost/${encodeURIComponent(path)}`)
@@ -10,8 +9,15 @@ vi.mock('@tauri-apps/api/path', () => ({ resourceDir }))
 vi.mock('@tauri-apps/api/core', () => ({ convertFileSrc }))
 
 import { hasEmbeddingPack, resetPackBaseUrlCache } from '../embeddingPackLoader'
+import { EMBEDDING_GEMMA, MINILM } from '../embeddingModel'
 
 const BUNDLED_MANIFEST = '/embedding-packs/WEB/manifest.json'
+const RESOURCES = '/Applications/Selah.app/Contents/Resources'
+const DESKTOP_PACK = `asset://localhost/${encodeURIComponent(`${RESOURCES}/semantic-packs/WEB/`)}manifest.json`
+const SIDE_LOADED_PACK = `asset://localhost/${encodeURIComponent(`${RESOURCES}/assets/embedding-packs/WEB/`)}manifest.json`
+
+const miniLmPack = { version: 'WEB', dim: MINILM.dimensions, count: 31100, modelName: MINILM.id }
+const gemmaPack = { version: 'WEB', dim: EMBEDDING_GEMMA.dimensions, count: 31100, modelName: EMBEDDING_GEMMA.id }
 
 function manifestResponse(body: unknown) {
     return { ok: true, json: async () => body } as unknown as Response
@@ -19,8 +25,16 @@ function manifestResponse(body: unknown) {
 
 const missing = { ok: false, json: async () => ({}) } as unknown as Response
 
+/** Serve `packs` by manifest URL; everything else 404s. */
+function serve(packs: Record<string, unknown>) {
+    const fetchMock = vi.fn(async (url: string) => (url in packs ? manifestResponse(packs[url]) : missing))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+}
+
 describe('embedding pack base URL resolution', () => {
     beforeEach(() => {
+        desktop.value = true
         resetPackBaseUrlCache()
         // No IndexedDB cache, so every check goes through the HTTP probe.
         // happy-dom's indexedDB never completes the initial open, so refuse it
@@ -37,53 +51,63 @@ describe('embedding pack base URL resolution', () => {
         vi.restoreAllMocks()
     })
 
-    it('finds the frontend-bundled pack on desktop', async () => {
-        // The regression this pins: releases ship public/embedding-packs (served
-        // from the app origin inside the Tauri webview) and nothing under the
-        // Tauri resource dir. Resolving only the resource dir made every desktop
-        // user look like they had no pack, so Bible settings offered "Enable
-        // Search" on versions the shared index already covered.
-        const fetchMock = vi.fn(async (url: string) =>
-            url === BUNDLED_MANIFEST ? manifestResponse({ version: 'WEB', dim: 384, count: 31100 }) : missing,
-        )
-        vi.stubGlobal('fetch', fetchMock)
+    describe('desktop (EmbeddingGemma)', () => {
+        it('finds the bundled EmbeddingGemma pack, passing over the MiniLM one', async () => {
+            // A release carries both: the web's MiniLM pack rides along in the
+            // frontend bundle. Scoring EmbeddingGemma queries against it would
+            // rank verses at random, so it must not win for being probed first.
+            const fetchMock = serve({ [BUNDLED_MANIFEST]: miniLmPack, [DESKTOP_PACK]: gemmaPack })
+            expect(await hasEmbeddingPack('WEB')).toBe(true)
+            expect(fetchMock).toHaveBeenCalledWith(DESKTOP_PACK)
+            expect(fetchMock).not.toHaveBeenCalledWith(SIDE_LOADED_PACK)
+        })
 
-        expect(await hasEmbeddingPack('WEB')).toBe(true)
-        expect(fetchMock).toHaveBeenCalledWith(BUNDLED_MANIFEST)
+        it('falls back to a locally built pack', async () => {
+            serve({ [BUNDLED_MANIFEST]: miniLmPack, [SIDE_LOADED_PACK]: { ...gemmaPack, count: 90000 } })
+            expect(await hasEmbeddingPack('WEB')).toBe(true)
+        })
+
+        it('reports absence when only MiniLM packs exist', async () => {
+            // Including one from before packs recorded their model.
+            const { modelName: _unrecorded, ...legacy } = miniLmPack
+            serve({ [BUNDLED_MANIFEST]: miniLmPack, [SIDE_LOADED_PACK]: legacy })
+            expect(await hasEmbeddingPack('WEB')).toBe(false)
+        })
     })
 
-    it('prefers the bundled pack over a side-loaded resource pack', async () => {
-        const fetchMock = vi.fn(async () => manifestResponse({ version: 'WEB', dim: 384, count: 31100 }))
-        vi.stubGlobal('fetch', fetchMock)
+    describe('web (MiniLM)', () => {
+        beforeEach(() => {
+            desktop.value = false
+        })
 
-        expect(await hasEmbeddingPack('WEB')).toBe(true)
-        // First candidate answered, so the asset:// probe never happens.
-        expect(fetchMock).toHaveBeenCalledTimes(1)
-        expect(fetchMock).toHaveBeenCalledWith(BUNDLED_MANIFEST)
+        it('finds the bundled MiniLM pack', async () => {
+            const fetchMock = serve({ [BUNDLED_MANIFEST]: miniLmPack })
+            expect(await hasEmbeddingPack('WEB')).toBe(true)
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+            expect(convertFileSrc).not.toHaveBeenCalled()
+        })
+
+        it('accepts a pack from before packs recorded their model', async () => {
+            const { modelName: _unrecorded, ...legacy } = miniLmPack
+            serve({ [BUNDLED_MANIFEST]: legacy })
+            expect(await hasEmbeddingPack('WEB')).toBe(true)
+        })
+
+        it('refuses an EmbeddingGemma pack', async () => {
+            serve({ [BUNDLED_MANIFEST]: gemmaPack })
+            expect(await hasEmbeddingPack('WEB')).toBe(false)
+        })
     })
 
-    it('falls back to a side-loaded resource pack when nothing is bundled', async () => {
-        const fetchMock = vi.fn(async (url: string) =>
-            url.startsWith('asset://') ? manifestResponse({ version: 'WEB', dim: 384, count: 90000 }) : missing,
-        )
-        vi.stubGlobal('fetch', fetchMock)
-
-        expect(await hasEmbeddingPack('WEB')).toBe(true)
-        expect(fetchMock).toHaveBeenCalledWith(BUNDLED_MANIFEST)
-        expect(convertFileSrc).toHaveBeenCalledWith(
-            '/Applications/Selah.app/Contents/Resources/assets/embedding-packs/WEB/',
-        )
-    })
-
-    it('reports absence when no candidate serves a matching manifest', async () => {
-        vi.stubGlobal('fetch', vi.fn(async () => missing))
+    it('reports absence when no candidate serves a manifest', async () => {
+        serve({})
         expect(await hasEmbeddingPack('WEB')).toBe(false)
     })
 
     it('rejects a manifest built for a different version', async () => {
         // A mismatched manifest means the wrong pack is sitting at that path;
         // loading it would search KJV rows while claiming to be WEB.
-        vi.stubGlobal('fetch', vi.fn(async () => manifestResponse({ version: 'KJV', dim: 384, count: 31100 })))
+        serve({ [BUNDLED_MANIFEST]: { ...gemmaPack, version: 'KJV' }, [DESKTOP_PACK]: { ...gemmaPack, version: 'KJV' } })
         expect(await hasEmbeddingPack('WEB')).toBe(false)
     })
 })

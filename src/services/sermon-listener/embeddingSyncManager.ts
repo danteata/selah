@@ -413,7 +413,7 @@ class EmbeddingSyncManager {
                     }
                 }
 
-                const embeddings = await embedBatch(allTexts)
+                const embeddings = await embedBatch(allTexts, 'document')
 
                 for (let metaIdx = 0; metaIdx < fragmentMeta.length; metaIdx++) {
                     const meta = fragmentMeta[metaIdx]
@@ -599,7 +599,7 @@ class EmbeddingSyncManager {
                 }
 
                 if (nonFullTexts.length > 0) {
-                    const embeddings = await embedBatch(nonFullTexts)
+                    const embeddings = await embedBatch(nonFullTexts, 'document')
 
                     for (let metaIdx = 0; metaIdx < nonFullMeta.length; metaIdx++) {
                         const meta = nonFullMeta[metaIdx]
