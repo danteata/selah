@@ -39,7 +39,7 @@ mod windows;
 mod linux;
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use tauri::Manager;
@@ -49,6 +49,11 @@ pub use microphone::*;
 /// Thread-safe audio capture state (shared between Tauri commands)
 pub struct AudioCaptureState {
     pub is_capturing: Arc<AtomicBool>,
+    /// Bumped by every capture start. A VAD session's transcription worker
+    /// outlives `stop_capture` while it drains, so it compares this against
+    /// the value it started with and stands down once a newer session exists;
+    /// see `start_capture_with_vad`.
+    pub capture_generation: Arc<AtomicU64>,
     pub audio_buffer: Arc<Mutex<Vec<f32>>>,
     pub buffer_size: Arc<AtomicUsize>,
     pub chunk_size_samples: Arc<AtomicUsize>,
@@ -73,6 +78,7 @@ impl AudioCaptureState {
     pub fn new() -> Self {
         Self {
             is_capturing: Arc::new(AtomicBool::new(false)),
+            capture_generation: Arc::new(AtomicU64::new(0)),
             audio_buffer: Arc::new(Mutex::new(Vec::new())),
             buffer_size: Arc::new(AtomicUsize::new(0)),
             chunk_size_samples: Arc::new(AtomicUsize::new(TARGET_SAMPLE_RATE as usize * 3)),
@@ -245,6 +251,7 @@ fn start_audio_capture_internal(
     // Clear the buffer
     state.audio_buffer.lock().clear();
     state.buffer_size.store(0, Ordering::SeqCst);
+    state.capture_generation.fetch_add(1, Ordering::SeqCst);
     state.is_capturing.store(true, Ordering::SeqCst);
 
     // Create a channel for stop signal
@@ -799,6 +806,64 @@ struct TranscriptionJob {
     /// `TranscriptionManager::request_finalize` for why the detach has to
     /// happen there rather than on the worker thread.
     finalize: Option<std::sync::mpsc::Receiver<Option<String>>>,
+    /// When the capture thread queued this job; see `STOP_DRAIN_WINDOW`.
+    queued_at: std::time::Instant,
+}
+
+/// How much of a stopped session's transcription backlog is still worth
+/// transcribing: segments queued within this long of the stop.
+///
+/// The drain on stop exists for the utterance in flight when capture stopped —
+/// dictation's push-to-talk release, which waits two seconds for it. Anything
+/// older has no listener left. On an engine slower than real time the queue
+/// behind it can be hundreds of segments deep, and draining it all kept the
+/// engine busy for the better part of an hour after the session ended, feeding
+/// the last session's words into whichever session started next.
+const STOP_DRAIN_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How far behind the live audio transcription may run before it skips ahead.
+///
+/// A segment waiting longer than this is dropped untranscribed. A transcript is
+/// only useful live while it is close behind the speaker: a verse put up half a
+/// minute after it was read has missed its moment, and an engine slower than
+/// real time never catches up on its own — on one laptop the queue reached 300
+/// segments in 49 minutes. Skipping holds the lag at this bound; the skipped
+/// audio is still in the session recording, which can be re-transcribed.
+const MAX_TRANSCRIPT_LAG: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What the transcription worker does with a queued segment.
+#[derive(Debug, PartialEq)]
+enum JobFate {
+    Transcribe,
+    /// The live transcript is more than `MAX_TRANSCRIPT_LAG` behind.
+    SkipToCatchUp,
+    /// The session has ended, or been superseded by a newer one, and nobody is
+    /// waiting for this segment any more.
+    DropLeftover,
+}
+
+/// Decide a queued segment's fate. `stopped_at` is when this session's capture
+/// stopped, if it has; `is_current` whether it is still the newest session.
+fn job_fate(
+    queued_at: std::time::Instant,
+    now: std::time::Instant,
+    stopped_at: Option<std::time::Instant>,
+    is_current: bool,
+) -> JobFate {
+    if !is_current {
+        return JobFate::DropLeftover;
+    }
+    match stopped_at {
+        // After a stop only the last few seconds still have a listener (see
+        // `STOP_DRAIN_WINDOW`); catching up no longer applies, since there is
+        // no live audio left to catch up with.
+        Some(stopped) if stopped.saturating_duration_since(queued_at) > STOP_DRAIN_WINDOW => {
+            JobFate::DropLeftover
+        }
+        Some(_) => JobFate::Transcribe,
+        None if now.saturating_duration_since(queued_at) > MAX_TRANSCRIPT_LAG => JobFate::SkipToCatchUp,
+        None => JobFate::Transcribe,
+    }
 }
 
 /// Handle a complete VAD speech segment.
@@ -814,6 +879,7 @@ fn handle_speech_segment(
     #[cfg_attr(not(feature = "native-transcription"), allow(unused_variables))] finalize: Option<
         std::sync::mpsc::Receiver<Option<String>>,
     >,
+    is_current: &dyn Fn() -> bool,
 ) {
     use tauri::Emitter;
     let duration_ms = (samples.len() as f64 / TARGET_SAMPLE_RATE as f64 * 1000.0) as u32;
@@ -858,6 +924,12 @@ fn handle_speech_segment(
                     }),
                     None => tm.transcribe(samples),
                 };
+                // A newer session began while this segment was transcribing.
+                // Its listener cannot tell our result from its own, and our
+                // error would count toward its failure limit.
+                if !is_current() {
+                    return;
+                }
                 match result {
                     Ok(out) => {
                         let text = out.text.trim().to_string();
@@ -909,6 +981,10 @@ fn handle_speech_segment(
                 return;
             }
         }
+    }
+
+    if !is_current() {
+        return;
     }
 
     // Sidecar fallback: emit the speech segment as a WAV chunk.
@@ -1025,6 +1101,10 @@ pub fn start_capture_with_vad(
     }
     *state.input_channel.lock() = input_channel;
     start_audio_capture_internal(&app, &state, ct, Some(32))?;
+    let capture_generation = state.capture_generation.clone();
+    let my_generation = capture_generation.load(Ordering::SeqCst);
+    // Set when capture stops; see `STOP_DRAIN_WINDOW`.
+    let stopped_at: Arc<Mutex<Option<std::time::Instant>>> = Arc::new(Mutex::new(None));
 
     // Speech segments are transcribed on a dedicated worker thread, not the
     // VAD-processing thread below. `handle_speech_segment` calls into
@@ -1045,15 +1125,61 @@ pub fn start_capture_with_vad(
     let queue_depth = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let worker_depth = queue_depth.clone();
     let worker_app = app.clone();
+    let worker_generation = capture_generation.clone();
+    let worker_stopped_at = stopped_at.clone();
     let worker_handle = std::thread::spawn(move || {
+        let is_current = || worker_generation.load(Ordering::SeqCst) == my_generation;
+        let mut dropped = 0usize;
+        // Segments skipped to catch up since the last one transcribed, and the
+        // audio they held; reported as one line per catch-up rather than per segment.
+        let mut skipped = 0usize;
+        let mut skipped_ms = 0u64;
         for job in job_rx {
             worker_depth.fetch_sub(1, Ordering::SeqCst);
+            let stopped = *worker_stopped_at.lock();
+            match job_fate(job.queued_at, std::time::Instant::now(), stopped, is_current()) {
+                JobFate::Transcribe => {}
+                JobFate::SkipToCatchUp => {
+                    skipped += 1;
+                    skipped_ms += job.samples.len() as u64 * 1000 / TARGET_SAMPLE_RATE as u64;
+                    continue;
+                }
+                JobFate::DropLeftover => {
+                    dropped += 1;
+                    continue;
+                }
+            }
+            if skipped > 0 {
+                tracing::warn!(
+                    "[VAD] transcription fell more than {}s behind; skipped {} segment(s) ({:.1}s of audio) to catch up",
+                    MAX_TRANSCRIPT_LAG.as_secs(),
+                    skipped,
+                    skipped_ms as f64 / 1000.0,
+                );
+                skipped = 0;
+                skipped_ms = 0;
+            }
             handle_speech_segment(
                 &worker_app,
                 job.samples,
                 job.start_offset_ms,
                 job.is_speaking,
                 job.finalize,
+                &is_current,
+            );
+        }
+        if skipped > 0 {
+            tracing::warn!(
+                "[VAD] transcription fell more than {}s behind; skipped {} segment(s) ({:.1}s of audio) before the session ended",
+                MAX_TRANSCRIPT_LAG.as_secs(),
+                skipped,
+                skipped_ms as f64 / 1000.0,
+            );
+        }
+        if dropped > 0 {
+            tracing::info!(
+                "[VAD] dropped {} untranscribed segment(s) left over when the session ended",
+                dropped
             );
         }
     });
@@ -1329,6 +1455,7 @@ pub fn start_capture_with_vad(
                             start_offset_ms: segment.start_ms,
                             is_speaking: true,
                             finalize,
+                            queued_at: std::time::Instant::now(),
                         });
                     }
                     Ok(None) => {
@@ -1357,6 +1484,8 @@ pub fn start_capture_with_vad(
             std::thread::sleep(std::time::Duration::from_millis(check_interval_ms));
         }
 
+        *stopped_at.lock() = Some(std::time::Instant::now());
+
         // Flush any remaining speech when capture stops. Without this drain the
         // last cpal buffer (the tail of the final utterance — often a verse
         // reference) would be lost on stop.
@@ -1374,6 +1503,7 @@ pub fn start_capture_with_vad(
                     start_offset_ms: segment.start_ms,
                     is_speaking: false,
                     finalize,
+                    queued_at: std::time::Instant::now(),
                 });
             }
             vad.reset();
@@ -1387,6 +1517,12 @@ pub fn start_capture_with_vad(
         // was already removed) the `end_of_stream` marker below.
         drop(job_tx);
         let _ = worker_handle.join();
+
+        // A newer session's listener would take our marker for its own and
+        // tear down before its last utterance arrives.
+        if capture_generation.load(Ordering::SeqCst) != my_generation {
+            return;
+        }
 
         // Terminal marker: tells the JS listener the flush is complete and it is
         // safe to tear down. Emitted last so any flushed segment above is
@@ -1404,4 +1540,49 @@ pub fn start_capture_with_vad(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod job_fate_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_fresh_segment_is_transcribed() {
+        let now = Instant::now();
+        assert_eq!(job_fate(now - Duration::from_secs(2), now, None, true), JobFate::Transcribe);
+    }
+
+    #[test]
+    fn a_segment_further_behind_than_the_lag_bound_is_skipped() {
+        let now = Instant::now();
+        let queued = now - MAX_TRANSCRIPT_LAG - Duration::from_secs(1);
+        assert_eq!(job_fate(queued, now, None, true), JobFate::SkipToCatchUp);
+        let queued = now - MAX_TRANSCRIPT_LAG + Duration::from_secs(1);
+        assert_eq!(job_fate(queued, now, None, true), JobFate::Transcribe);
+    }
+
+    #[test]
+    fn after_a_stop_the_last_utterance_is_kept_however_long_it_waited() {
+        // Dictation's push-to-talk release: queued just before the stop, and
+        // possibly stuck behind a slow segment past the live lag bound.
+        let now = Instant::now();
+        let stopped = now - MAX_TRANSCRIPT_LAG - Duration::from_secs(5);
+        let queued = stopped - Duration::from_secs(1);
+        assert_eq!(job_fate(queued, now, Some(stopped), true), JobFate::Transcribe);
+    }
+
+    #[test]
+    fn after_a_stop_the_backlog_behind_it_is_dropped() {
+        let now = Instant::now();
+        let queued = now - STOP_DRAIN_WINDOW - Duration::from_secs(1);
+        assert_eq!(job_fate(queued, now, Some(now), true), JobFate::DropLeftover);
+    }
+
+    #[test]
+    fn a_superseded_session_transcribes_nothing() {
+        let now = Instant::now();
+        assert_eq!(job_fate(now, now, Some(now), false), JobFate::DropLeftover);
+        assert_eq!(job_fate(now, now, None, false), JobFate::DropLeftover);
+    }
 }
