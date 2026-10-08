@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
@@ -45,6 +45,21 @@ use transcribe_rs::{
 };
 
 use super::models::EngineType;
+
+/// How far behind real time a live stream may fall before it is abandoned.
+///
+/// A stream holds the engine exclusively for the whole utterance, so one that
+/// cannot keep up starves batch transcription as well: its finalize queues
+/// behind every frame it has yet to decode, the segment's batch fallback finds
+/// the engine leased, and every segment after it fails the same way. Seen on an
+/// Intel Arc iGPU over Vulkan, where Parakeet Unified streamed far slower than
+/// speech and the operator got "No transcription model is loaded" for a model
+/// that was loaded the whole time.
+const MAX_STREAM_LAG: Duration = Duration::from_secs(3);
+
+/// How long a batch transcription waits for a live stream to hand the engine
+/// back before giving up on the segment.
+const ENGINE_LEASE_WAIT: Duration = Duration::from_secs(15);
 
 /// Per-session transcription configuration, set from the frontend.
 #[derive(Clone, Debug, Default)]
@@ -153,7 +168,9 @@ pub struct StreamTextEvent {
 /// request travel the same channel so FIFO ordering guarantees every fed
 /// frame is processed before finalize runs.
 enum StreamCmd {
-    Feed(Vec<f32>),
+    /// A frame of audio and the moment the capture loop sent it, so the worker
+    /// can tell how far behind real time it is running.
+    Feed(Vec<f32>, Instant),
     /// Flush the stream and reply with the final text, or `None` if no stream
     /// was ever active (caller should fall back to batch transcription).
     Finalize(mpsc::Sender<Option<String>>),
@@ -212,7 +229,7 @@ impl StreamRouter {
             return;
         }
         if let Some(tx) = self.tx.lock().unwrap().as_ref() {
-            let _ = tx.send(StreamCmd::Feed(frame.to_vec()));
+            let _ = tx.send(StreamCmd::Feed(frame.to_vec(), Instant::now()));
         }
     }
 
@@ -231,6 +248,7 @@ struct StreamWorkerGuard {
     active_stream_worker: Arc<AtomicU64>,
     active_engine_lease: Arc<AtomicU64>,
     stream_active: Arc<AtomicBool>,
+    engine_returned: Arc<Condvar>,
 }
 
 impl Drop for StreamWorkerGuard {
@@ -250,6 +268,9 @@ impl Drop for StreamWorkerGuard {
             Ordering::AcqRel,
             Ordering::Acquire,
         );
+        // A batch transcription may be waiting on the lease; see
+        // `take_engine_for_batch`.
+        self.engine_returned.notify_all();
     }
 }
 
@@ -310,6 +331,16 @@ pub struct TranscriptionManager {
     /// `engine`. `is_model_loaded()` consults this so the model still reports
     /// "loaded" while the worker holds it.
     active_engine_lease: Arc<AtomicU64>,
+    /// Signalled whenever the streaming worker gives the engine back, paired
+    /// with the `engine` mutex. Batch transcription waits on it rather than
+    /// failing a segment because a stream happened to hold the engine.
+    engine_returned: Arc<Condvar>,
+    /// Set when a live stream on the loaded model fell too far behind real
+    /// time (see [`MAX_STREAM_LAG`]). No further streams open until the next
+    /// model load: one that could not keep up once will not keep up on the
+    /// next utterance either, and every attempt holds the engine away from
+    /// batch transcription while it tries.
+    streaming_unusable: Arc<AtomicBool>,
 }
 
 impl TranscriptionManager {
@@ -329,6 +360,8 @@ impl TranscriptionManager {
             next_stream_worker_id: Arc::new(AtomicU64::new(1)),
             active_stream_worker: Arc::new(AtomicU64::new(0)),
             active_engine_lease: Arc::new(AtomicU64::new(0)),
+            engine_returned: Arc::new(Condvar::new()),
+            streaming_unusable: Arc::new(AtomicBool::new(false)),
         };
         manager.spawn_idle_watcher();
         manager
@@ -490,6 +523,7 @@ impl TranscriptionManager {
         if let Ok(mut m) = self.current_model_id.lock() {
             *m = Some(model_id.to_string());
         }
+        self.streaming_unusable.store(false, Ordering::Release);
         self.touch_activity();
         self.emit_state("loading_completed", Some(model_id), None);
         info!(
@@ -550,6 +584,11 @@ impl TranscriptionManager {
     }
 
     pub fn start_stream(&self) {
+        if self.streaming_unusable.load(Ordering::Acquire) {
+            // Every segment goes to batch transcription instead; the capture
+            // loop's `request_finalize` finds no stream and says so.
+            return;
+        }
         if self.router.is_open() || self.active_stream_worker.load(Ordering::Acquire) != 0 {
             warn!("[transcription] start_stream called while a stream worker is already active");
             return;
@@ -576,6 +615,7 @@ impl TranscriptionManager {
             active_stream_worker: Arc::clone(&self.active_stream_worker),
             active_engine_lease: Arc::clone(&self.active_engine_lease),
             stream_active: Arc::clone(&self.stream_active),
+            engine_returned: Arc::clone(&self.engine_returned),
         };
 
         // Wait for any in-progress model load to finish (start_stream races
@@ -641,6 +681,7 @@ impl TranscriptionManager {
 
         let mut finalize_reply: Option<mpsc::Sender<Option<String>>> = None;
         let mut finalize_result: Option<Option<String>> = None;
+        let mut abandoned = false;
         // The Stream borrows the session (and thus the engine) for its
         // lifetime, so the feed/finalize loop lives in a labeled block — when
         // it exits, the borrow is released and the engine can be returned.
@@ -661,6 +702,10 @@ impl TranscriptionManager {
             };
 
             self.stream_active.store(true, Ordering::Release);
+            // Frames sent before this point queued while the worker waited for
+            // a model load or the engine; they are behind through no fault of
+            // the stream, so the lag check only judges frames sent after it.
+            let began = Instant::now();
             self.touch_activity();
             info!("[transcription] live streaming transcription started (model '{:?}')", model_id);
 
@@ -675,7 +720,20 @@ impl TranscriptionManager {
 
             while let Ok(cmd) = rx.recv() {
                 match cmd {
-                    StreamCmd::Feed(pcm) => {
+                    StreamCmd::Feed(pcm, sent_at) => {
+                        let lag = sent_at.elapsed();
+                        if sent_at >= began && lag > MAX_STREAM_LAG {
+                            warn!(
+                                "[transcription] live stream on {:?} fell {:.1}s behind real time; \
+                                 abandoning live streaming for this model and transcribing each \
+                                 segment in one pass instead",
+                                model_id,
+                                lag.as_secs_f32()
+                            );
+                            self.streaming_unusable.store(true, Ordering::Release);
+                            abandoned = true;
+                            break;
+                        }
                         self.touch_activity();
                         fed_frames += 1;
                         fed_samples += pcm.len() as u64;
@@ -733,7 +791,10 @@ impl TranscriptionManager {
         // `stream` + the `&mut engine` borrow are released here.
 
         self.return_engine(engine, model_id.as_deref());
-        if !stream_started {
+        if !stream_started || abandoned {
+            // Discards the frames still queued without decoding them, and
+            // answers this segment's finalize with `None` so it is batch
+            // transcribed on the engine just returned.
             drain_until_finalize(rx);
             return;
         }
@@ -751,6 +812,7 @@ impl TranscriptionManager {
         let still_current = self.get_current_model().as_deref() == expected_model_id;
         if still_current {
             *self.lock_engine() = Some(engine);
+            self.engine_returned.notify_all();
         } else {
             info!(
                 "[transcription] model changed/unloaded during streaming; dropping stale engine (was {:?})",
@@ -826,17 +888,12 @@ impl TranscriptionManager {
         }
 
         // Wait out any in-flight load.
-        {
-            if let Ok(mut is_loading) = self.is_loading.lock() {
-                while *is_loading {
-                    is_loading = match self.loading_condvar.wait(is_loading) {
-                        Ok(g) => g,
-                        Err(_) => break,
-                    };
-                }
-            }
-            if self.lock_engine().is_none() {
-                return Err(anyhow::anyhow!("No transcription model is loaded"));
+        if let Ok(mut is_loading) = self.is_loading.lock() {
+            while *is_loading {
+                is_loading = match self.loading_condvar.wait(is_loading) {
+                    Ok(g) => g,
+                    Err(_) => break,
+                };
             }
         }
 
@@ -844,13 +901,7 @@ impl TranscriptionManager {
 
         // Take the engine out so a panic during the call simply drops it
         // (unload) rather than poisoning the mutex.
-        let mut engine = {
-            let mut guard = self.lock_engine();
-            match guard.take() {
-                Some(e) => e,
-                None => return Err(anyhow::anyhow!("Model unloaded before transcription")),
-            }
-        };
+        let mut engine = self.take_engine_for_batch()?;
 
         let result = catch_unwind(AssertUnwindSafe(|| -> Result<TranscriptionOutput> {
             match &mut engine {
@@ -999,6 +1050,41 @@ impl TranscriptionManager {
                     msg
                 ))
             }
+        }
+    }
+
+    /// Take the engine out of its slot for a batch transcription.
+    ///
+    /// An empty slot does not by itself mean no model is loaded: a live stream
+    /// holds the engine for as long as it runs, and a segment whose stream
+    /// answered with nothing reaches here while the *next* utterance's stream
+    /// may already have it. Wait for it to come back, bounded, rather than fail
+    /// a segment whose audio we still hold.
+    fn take_engine_for_batch(&self) -> Result<LoadedEngine> {
+        let deadline = Instant::now() + ENGINE_LEASE_WAIT;
+        let mut guard = self.lock_engine();
+        loop {
+            if let Some(engine) = guard.take() {
+                return Ok(engine);
+            }
+            if self.active_engine_lease.load(Ordering::Acquire) == 0 {
+                return Err(anyhow::anyhow!("No transcription model is loaded"));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(anyhow::anyhow!(
+                    "The live stream has held the transcription model for {}s without releasing it",
+                    ENGINE_LEASE_WAIT.as_secs()
+                ));
+            }
+            // Sliced, so a lease cleared by a worker that could not hand the
+            // engine back (it was unloaded meanwhile) is noticed promptly even
+            // if its notification raced this wait.
+            let slice = (deadline - now).min(Duration::from_millis(250));
+            guard = match self.engine_returned.wait_timeout(guard, slice) {
+                Ok((g, _)) => g,
+                Err(poisoned) => poisoned.into_inner().0,
+            };
         }
     }
 
