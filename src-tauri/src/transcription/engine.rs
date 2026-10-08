@@ -1208,13 +1208,72 @@ fn transcribe_gpu_disabled_for_host() -> bool {
     crate::platform::is_windows_x64_emulated_on_arm64()
 }
 
+/// Whether transcribe-cpp should run on the CPU even though a GPU is present.
+///
+/// True when every GPU it can see is an integrated one driven over Vulkan.
+/// Measured on an Intel Arc 140T (Core Ultra 7 255H), where Vulkan was the
+/// slower of the two by a wide margin: Whisper Small transcribed at about a
+/// third of real time and Parakeet Unified's live stream fell 30 s behind in
+/// its first 30 s, against 0.63x and 1.9x real time on the same machine's CPU.
+/// A transcript that falls behind the speaker is useless live, so the CPU wins.
+///
+/// Never applied on macOS: Apple silicon's GPU is integrated too, and Metal on
+/// it is the fastest path we have.
+///
+/// `SELAH_TRANSCRIBE_GPU=on` keeps the GPU regardless, and `=off` refuses it
+/// on any host — for comparing the two on a given machine.
+///
+/// Listing devices opens the GPU, so this must stay off the startup thread
+/// (see `init_transcribe_cpp_backend`). The answer is cached after the first
+/// call, which is also the one that logs it.
+fn transcribe_gpu_declined() -> bool {
+    static DECLINED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DECLINED.get_or_init(|| {
+        match std::env::var("SELAH_TRANSCRIBE_GPU").as_deref() {
+            Ok("on") => {
+                info!("[transcription] SELAH_TRANSCRIBE_GPU=on: GPU allowed for transcribe-cpp");
+                return false;
+            }
+            Ok("off") => {
+                info!("[transcription] SELAH_TRANSCRIBE_GPU=off: transcribe-cpp runs on the CPU");
+                return true;
+            }
+            _ => {}
+        }
+        if cfg!(target_os = "macos") {
+            return false;
+        }
+        let gpus: Vec<_> = transcribe_cpp::devices()
+            .into_iter()
+            .filter(|d| d.kind != "cpu" && d.kind != "accel")
+            .collect();
+        let integrated_only = !gpus.is_empty()
+            && gpus
+                .iter()
+                .all(|d| d.kind == "vulkan" && matches!(d.device_type, transcribe_cpp::DeviceType::Igpu));
+        if integrated_only {
+            info!(
+                "[transcription] only integrated GPU(s) found ({}); transcribing on the CPU, which is \
+                 faster on these (SELAH_TRANSCRIBE_GPU=on to override)",
+                gpus.iter().map(|d| d.description.as_str()).collect::<Vec<_>>().join(", ")
+            );
+        }
+        integrated_only
+    })
+}
+
+/// Whether transcribe-cpp loads must be strict CPU, for either reason above.
+fn transcribe_cpu_only() -> bool {
+    transcribe_gpu_disabled_for_host() || transcribe_gpu_declined()
+}
+
 /// The `ModelOptions` every transcribe-cpp load uses.
 ///
 /// `Backend::Auto` (the crate default) picks the best device with CPU fallback;
-/// on an emulated host we downgrade to `Backend::Cpu`, which is strict CPU with
-/// no GPU and no host accelerators.
+/// on an emulated host, or one whose only GPU is integrated, we downgrade to
+/// `Backend::Cpu`, which is strict CPU with no GPU and no host accelerators.
 fn transcribe_cpp_model_options() -> ModelOptions {
-    let backend = if transcribe_gpu_disabled_for_host() {
+    let backend = if transcribe_cpu_only() {
         Backend::Cpu
     } else {
         Backend::Auto
@@ -1230,7 +1289,7 @@ fn transcribe_cpp_model_options() -> ModelOptions {
 /// advertise an accelerator the load path will decline.
 fn transcribe_compute_devices() -> Vec<transcribe_cpp::Device> {
     let devices = transcribe_cpp::devices();
-    if !transcribe_gpu_disabled_for_host() {
+    if !transcribe_cpu_only() {
         return devices;
     }
     devices
