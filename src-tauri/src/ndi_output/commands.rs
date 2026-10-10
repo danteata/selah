@@ -98,7 +98,9 @@ pub async fn ndi_start_output(
         {
             return Err(format!(
                 "{LIVE_WINDOW_MISSING_CODE}: NDI sends what the live output window shows, and it \
-                 isn't open yet. Send the live output to a screen, then turn NDI on."
+                 isn't open yet. Send the live output to a screen, then turn NDI on. For NDI \
+                 without a screen, use Alternate output › NDI › Follow main output, with Alpha \
+                 channel off."
             ));
         }
     }
@@ -205,35 +207,6 @@ pub async fn ndi_stop_output(
     Err("NDI output is not available".to_string())
 }
 
-#[cfg(feature = "ndi")]
-#[tauri::command]
-pub async fn ndi_send_video_frame(
-    state: State<'_, Arc<NdiManager>>,
-    data: Vec<u8>,
-    width: u32,
-    height: u32,
-) -> Result<(), String> {
-    let stride = (width * 4) as i32;
-    state.sender.send_frame(&data, width, height, stride)?;
-
-    state.update_state(|s| {
-        s.frames_sent += 1;
-    });
-
-    Ok(())
-}
-
-#[cfg(not(feature = "ndi"))]
-#[tauri::command]
-pub async fn ndi_send_video_frame(
-    _state: State<'_, Arc<NdiManager>>,
-    _data: Vec<u8>,
-    _width: u32,
-    _height: u32,
-) -> Result<(), String> {
-    Err("NDI output is not available".to_string())
-}
-
 /// Announce an NDI source for a channel the app renders itself (a lower-thirds or
 /// other graphics feed). Idempotent for the same name.
 #[cfg(feature = "ndi")]
@@ -327,8 +300,8 @@ pub async fn ndi_push_stats(
 ///
 /// Deliberately NOT a normal command with a `Vec<u8>` argument: that route
 /// serialises the pixels as a JSON array of numbers, which is around 30 MB of
-/// text per 1080p frame — the reason the old `ndi_send_video_frame` was never
-/// usable. This takes the bytes as a raw IPC body with the frame's metadata in
+/// text per 1080p frame, which made the first frame-push command (removed)
+/// unusable. This takes the bytes as a raw IPC body with the frame's metadata in
 /// headers, and stays synchronous because `Request` borrows the invoke message.
 /// That is safe for the main thread because it only leaves the frame in the
 /// channel's mailbox; the channel's own thread waits on NDI.

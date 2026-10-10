@@ -29,6 +29,13 @@ export interface Canvas2DLike {
     font: string
     textAlign: CanvasTextAlign
     textBaseline: CanvasTextBaseline
+    // Optional: backdrops use them where the context has them (renderBackdrop).
+    createRadialGradient?(x0: number, y0: number, r0: number, x1: number, y1: number, r1: number): {
+        addColorStop(offset: number, color: string): void
+    }
+    drawImage?(image: CanvasImageSource, dx: number, dy: number, dw: number, dh: number): void
+    filter?: string
+    globalAlpha?: number
 }
 
 /** One laid-out line: its runs and the total width, for alignment. */

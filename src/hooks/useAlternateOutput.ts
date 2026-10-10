@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useAppStore } from '../store/appStore'
-import { canRenderOnCanvas, renderSlideToCanvas } from '../lib/graphics/renderSlide'
+import { canRenderOnCanvas } from '../lib/graphics/renderSlide'
+import { CanvasFeed } from '../services/ndi-output/canvasFeed'
+import { useSlideBackgroundUrl } from './useSlideBackgroundUrl'
 import { withTemplateStyle } from '../lib/graphics/templateStyle'
 import { useTemplates } from './useTemplates'
 import { EMPTY_PUSH_STATS, ndiPushChannelService, type PushStats } from '../services/ndi-output/pushChannel'
@@ -17,11 +19,14 @@ import { loadSlideFont } from '../lib/fonts'
  *   - A monitor gets a second window running the same view as the projector, so
  *     it renders everything — backgrounds, media, transitions. Content reaches it
  *     by window label, which is what lets the two outputs differ.
- *   - NDI renders frames here, on a canvas — which is what lets the feed keep its alpha for keying, and means it
- * needs no spare monitor. The trade-off is that the canvas renderer draws text,
- * not image or video backgrounds: such a slide still goes out, as its text alone,
- * with `textOnly` set so the UI can say so. For a keyed feed that is usually the
- * desired result anyway, since the switcher supplies the background.
+ *   - NDI renders frames here, on a canvas — which is what lets the feed keep
+ *     its alpha for keying, and means it needs no spare monitor. With alpha the
+ *     text goes out on transparency, for a switcher to key over its own
+ *     picture. Without it the feed draws the slide's backdrop too — colour,
+ *     gradient, image or motion background — with crossfades and running
+ *     countdowns, so "Follow main output" over NDI is a program feed that needs
+ *     no live window. Video backgrounds aren't drawn: such a slide goes out as
+ *     its text alone, with `textOnly` set so the UI can say so.
  */
 
 /** Channel id for the alternate output's NDI source. */
@@ -96,7 +101,6 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
     const isDriver = useIsFeedDriver()
     const [error, setError] = useState<string | null>(null)
 
-    const canvasRef = useRef<HTMLCanvasElement | null>(null)
     const sendingRef = useRef(false)
 
     // 'follow' tracks whatever is live; 'independent' shows only what was sent
@@ -122,6 +126,10 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
     )
 
     const textOnly = config.destination.kind === 'ndi' && !canRenderOnCanvas(slide)
+    const backgroundUrl = useSlideBackgroundUrl(slide)
+    const animations = useAppStore((state) => state.settings.animations)
+    const transitionInterval = useAppStore((state) => state.settings.transitionInterval)
+    const transitionSeconds = animations === false ? 0 : transitionInterval ?? 0.7
 
     const renderOptions = useMemo(() => ({
         width: config.format.width,
@@ -139,60 +147,48 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         },
     }), [config.format.width, config.format.height, config.alpha, config.layout, defaultFont, slideStyles])
 
-    const getCanvas = useCallback((): HTMLCanvasElement | null => {
-        if (typeof document === 'undefined') return null
-        if (!canvasRef.current) canvasRef.current = document.createElement('canvas')
-        const canvas = canvasRef.current
-        if (canvas.width !== config.format.width || canvas.height !== config.format.height) {
-            canvas.width = config.format.width
-            canvas.height = config.format.height
-        }
-        return canvas
-    }, [config.format.width, config.format.height])
-
-    const paintInto = useCallback((canvas: HTMLCanvasElement) => {
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
-        renderSlideToCanvas(ctx, slide, { ...renderOptions, width: canvas.width, height: canvas.height })
-    }, [slide, renderOptions])
-
-    const pushFrame = useCallback(async () => {
-        if (sendingRef.current) return
-        const canvas = getCanvas()
-        if (!canvas) return
+    // The feed draws the picture: backdrop, crossfades, motion and countdowns
+    // on its own clock (services/ndi-output/canvasFeed). Every instance keeps
+    // one for the in-app preview; only the driver starts it and pushes frames.
+    const feed = useMemo(() => new CanvasFeed(async (canvas) => {
+        if (sendingRef.current) return false
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        if (!ctx) return
-
+        if (!ctx) return false
         sendingRef.current = true
         try {
-            // A canvas doesn't wait for web fonts the way the DOM does: drawn
-            // before the face has loaded, the text is measured and painted in
-            // a fallback and stays that way until the next push. Resolves at
-            // once when the faces are already loaded.
-            await loadSlideFont(slide?.slideStyle?.font || defaultFont)
-
-            // Draw the slide even when its background can't be reproduced. Blanking
-            // the frame instead meant "Follow main output" sent black for any slide
-            // with an image behind it — which is nearly all of them — and looked
-            // broken rather than partial.
-            renderSlideToCanvas(ctx, slide, renderOptions)
-
             // getImageData is RGBA with straight alpha, which is NDI's RGBA format —
             // no swizzle, no premultiply correction.
             const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height)
-
             await ndiPushChannelService.sendFrame(ALTERNATE_CHANNEL, {
                 pixels: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
                 width: canvas.width,
                 height: canvas.height,
             })
             setError(null)
+            return true
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e))
+            return false
         } finally {
             sendingRef.current = false
         }
-    }, [getCanvas, slide, renderOptions, defaultFont])
+    }), [])
+
+    // Draw the slide even when its background can't be reproduced (a video):
+    // blanking the frame instead sent black for such slides and looked broken
+    // rather than partial.
+    useEffect(() => {
+        feed.setScene({ slide, options: renderOptions, backgroundUrl, transitionSeconds })
+        // A canvas doesn't wait for web fonts the way the DOM does: drawn before
+        // the face has loaded, text is measured and painted in a fallback.
+        let live = true
+        void loadSlideFont(slide?.slideStyle?.font || defaultFont).then(() => { if (live) feed.invalidate() })
+        return () => { live = false }
+    }, [feed, slide, renderOptions, backgroundUrl, transitionSeconds, defaultFont])
+
+    const paintInto = useCallback((canvas: HTMLCanvasElement) => {
+        feed.paintInto(canvas)
+    }, [feed])
 
     const enable = useCallback(async (): Promise<string | null> => {
         if (config.destination.kind === 'monitor') {
@@ -228,20 +224,21 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         setStats(EMPTY_PUSH_STATS)
     }, [update])
 
-    // Push when the picture changes; the channel repeats it in between.
+    // The feed's clock runs while this instance drives an enabled NDI output.
     useEffect(() => {
         if (!isDriver || !config.enabled || config.destination.kind !== 'ndi') return
-        void pushFrame()
-    }, [isDriver, config.enabled, config.destination.kind, pushFrame])
+        feed.start(config.format.fps)
+        return () => feed.stop()
+    }, [feed, isDriver, config.enabled, config.destination.kind, config.format.fps])
 
     // A channel opened at another rate (a format change while enabled) is
     // re-announced; the same name and rate is a no-op on the Rust side.
     useEffect(() => {
         if (!isDriver || !config.enabled || config.destination.kind !== 'ndi') return
         void ndiPushChannelService.open(ALTERNATE_CHANNEL, config.sourceName, config.format.fps)
-            .then(() => pushFrame())
+            .then(() => feed.invalidate())
             .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-    }, [isDriver, config.enabled, config.destination.kind, config.sourceName, config.format.fps, pushFrame])
+    }, [feed, isDriver, config.enabled, config.destination.kind, config.sourceName, config.format.fps])
 
     useEffect(() => {
         if (!config.enabled || config.destination.kind !== 'ndi') return
