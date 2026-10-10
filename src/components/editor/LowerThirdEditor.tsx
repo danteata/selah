@@ -6,6 +6,8 @@ import {
 import type { Slide, SlideStyle } from '../../types'
 import { useGuardedClose } from '../../hooks/useGuardedClose'
 import { Modal } from '../modals/Modal'
+import { TextBuildInPicker } from './TextBuildInPicker'
+import type { TextAnimation } from '../../lib/animation/textBuildIn'
 
 interface LowerThirdEditorProps {
     slide: Slide | null
@@ -44,6 +46,7 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
     const [ltStyle, setLtStyle] = useState<NonNullable<SlideStyle['lowerThirdStyle']>>('standard')
     const [position, setPosition] = useState<NonNullable<SlideStyle['lowerThirdPosition']>>('left')
     const [accentColor, setAccentColor] = useState('#0d9488')
+    const [textAnimation, setTextAnimation] = useState<TextAnimation | undefined>(undefined)
 
     // Initialize state when slide changes (adjusted during render)
     const [prevSlide, setPrevSlide] = useState<Slide | null>(null)
@@ -58,6 +61,7 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
             setLtStyle(slide.slideStyle?.lowerThirdStyle || 'standard')
             setPosition(slide.slideStyle?.lowerThirdPosition || 'left')
             setAccentColor(slide.slideStyle?.lowerThirdAccentColor || '#0d9488')
+            setTextAnimation(slide.slideStyle?.textAnimation)
         }
     }
 
@@ -67,7 +71,8 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
         subtitle !== (slide.slideStyle?.lowerThirdSubtitle || '') ||
         ltStyle !== (slide.slideStyle?.lowerThirdStyle || 'standard') ||
         position !== (slide.slideStyle?.lowerThirdPosition || 'left') ||
-        accentColor !== (slide.slideStyle?.lowerThirdAccentColor || '#0d9488')
+        accentColor !== (slide.slideStyle?.lowerThirdAccentColor || '#0d9488') ||
+        textAnimation?.preset !== slide.slideStyle?.textAnimation?.preset
     )
     const requestClose = useGuardedClose(isDirty, onClose)
 
@@ -84,6 +89,7 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
                 lowerThirdPosition: position,
                 lowerThirdAccentColor: accentColor,
                 lowerThirdSubtitle: subtitle,
+                textAnimation,
             },
         }
         onSave(updatedSlide)
@@ -264,6 +270,9 @@ export function LowerThirdEditor({ slide, isOpen, onClose, onSave }: LowerThirdE
                         })}
                     </div>
                 </div>
+
+                {/* Text build-in */}
+                <TextBuildInPicker value={textAnimation} onChange={setTextAnimation} />
 
                 {/* Accent Color */}
                 <div>

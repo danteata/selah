@@ -1,6 +1,6 @@
 name: CI
 
-# Tests, lint and the Rust no-panic lints on every pull request and push to
+# Tests, lint, golden images and the Rust no-panic lints on every pull request and push to
 # main. build-desktop.yml only runs on release tags and only builds, so until
 # this existed nothing ran the test suites or clippy before a change merged.
 
@@ -32,6 +32,31 @@ jobs:
       - run: bun install
       - run: bun run lint
       - run: bun run test
+
+  golden:
+    name: Golden images
+    runs-on: ubuntu-latest
+    # The same image goldens are recorded in (docs/TESTING.md), so text
+    # rasterises identically. Keep its tag equal to the playwright devDependency.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - run: bun install
+      - run: bun run test:golden
+
+      - name: Upload golden diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-diffs
+          path: test-results/golden/
 
   rust:
     name: Rust (clippy, tests)

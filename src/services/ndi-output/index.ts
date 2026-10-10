@@ -114,16 +114,6 @@ class NdiOutputService {
         await invoke('ndi_stop_output')
     }
 
-    async sendVideoFrame(data: Uint8Array, width: number, height: number): Promise<void> {
-        const invoke = await getInvoke()
-        if (!invoke) return
-        await invoke('ndi_send_video_frame', {
-            data: Array.from(data),
-            width,
-            height,
-        })
-    }
-
     async sendAudioFrame(data: Float32Array, sampleRate: number, channels: number, numSamples: number): Promise<void> {
         const invoke = await getInvoke()
         if (!invoke) return

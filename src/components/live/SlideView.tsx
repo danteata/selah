@@ -1,6 +1,6 @@
 import { MotionCanvas } from '../motion/MotionCanvas'
 import { motionBackgroundFor } from '../motion/motionBackgrounds'
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Slide, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
 import { useSlideBackgroundUrl } from '../../hooks/useSlideBackgroundUrl'
@@ -11,6 +11,10 @@ import { countdownDurationSeconds, formatCountdownTime, useCountdownSeconds } fr
 import { slideBackgroundFilter } from '../../utils/slideBackground'
 import { slideBodyHtml } from '../../utils/slideHtml'
 import { cssFontStack } from '../../lib/fonts'
+import { isTextBuildInPreset, wrapUnits, type TextAnimation } from '../../lib/animation/textBuildIn'
+import { prefersReducedMotion, useTextBuildIn } from '../../hooks/useTextBuildIn'
+import { wrapWords } from '../../lib/animation/wordMorph'
+import { useWordMorph } from '../../hooks/useWordMorph'
 import { AutoFitText } from './AutoFitText'
 import { KineticText } from './KineticText'
 import { VideoBackground } from './VideoBackground'
@@ -49,6 +53,8 @@ export interface SlideViewSettings {
     verseRefSizePercent?: number
     animations?: boolean
     transitionInterval?: number
+    /** How text slides change: a fade, or shared words gliding to their new place. */
+    slideTransition?: 'fade' | 'morph'
     visualizerEnabled?: boolean
     /** "Clear": the background stays, the text and media go. */
     liveOutputBlanked?: boolean
@@ -138,6 +144,13 @@ export function SlideView({
 
     // AutoFitText's bounds are pixels, so they scale with the frame too.
     const rootRef = useRef<HTMLDivElement>(null)
+    // Held in state as well, for the morph overlay: its effect has to run once
+    // the frame exists.
+    const [frameEl, setFrameEl] = useState<HTMLDivElement | null>(null)
+    const setRoot = useCallback((el: HTMLDivElement | null) => {
+        rootRef.current = el
+        setFrameEl(el)
+    }, [])
     const [width, setWidth] = useState(0)
     useLayoutEffect(() => {
         const el = rootRef.current
@@ -170,8 +183,42 @@ export function SlideView({
         [slide.id]
     )
 
+    // A lower third's title (and caption) can build in letter by letter or word
+    // by word. Only where the slide animates at all: never in thumbnails, the
+    // Next Up preview, with animations off, or for a viewer who asked for less
+    // motion. Text that won't animate is never wrapped, because the wrapped
+    // units start hidden.
+    const storedAnimation = slide.slideStyle?.textAnimation
+    const textAnimation: TextAnimation | null =
+        slide.layout === 'lower-third' && animate && settings.animations !== false
+            && isTextBuildInPreset(storedAnimation?.preset) && !prefersReducedMotion()
+            ? storedAnimation ?? null
+            : null
+    const buildInPreset = textAnimation?.preset
+    const lowerThirdBodyHtml = useMemo(() => {
+        const html = slideBodyHtml(slide.contents[0])
+        return buildInPreset ? wrapUnits(html, buildInPreset) : html
+    }, [slide.contents, buildInPreset])
+    const [lowerThirdEl, setLowerThirdEl] = useState<HTMLDivElement | null>(null)
+    useTextBuildIn(lowerThirdEl, textAnimation, `${slide.id}:${lowerThirdBodyHtml}`)
+
     const isMedia = slide.type === slideTypes.media
     const motion = motionBackgroundFor(slide.background)
+
+    // Word morph (settings → "Word morph"): a text slide's words glide from
+    // where they were on the previous slide. Only where the slide animates at
+    // all, not under the beat-reactive visualizer (it scales the text, which
+    // throws off the measuring), and only for full-text slides; lower thirds,
+    // countdowns and media keep the fade.
+    const morphMode = settings.slideTransition === 'morph' && transition === '' && !visualizer
+        && !isMedia && slide.layout !== 'lower-third' && slide.type !== 'countdown'
+        && !prefersReducedMotion()
+    const bodyHtml = useMemo(() => {
+        const html = slideBodyHtml(slide.contents[0])
+        return morphMode ? wrapWords(html) : html
+    }, [slide.contents, morphMode])
+    const [morphBody, setMorphBody] = useState<HTMLDivElement | null>(null)
+    useWordMorph(frameEl, morphBody, { enabled: morphMode, slideId: slide.id, seconds: transitionSeconds })
     const isVideoBackground = !motion && slide.backgroundType === 'video' && !!backgroundUrl
     // Per-slide setting wins, then the global default, then bottom.
     const refPosition = slide.slideStyle?.verseRefPosition ?? settings.verseRefPosition ?? 'bottom'
@@ -201,7 +248,9 @@ export function SlideView({
             const alignItems = position === 'center' ? 'center' : position === 'right' ? 'flex-end' : 'flex-start'
             const textAlign = (position as 'left' | 'center' | 'right') || 'left'
 
-            const captionNode = (captionHtml || subtitle) && (
+            // The subtitle is plain text; as markup it can be wrapped for the build-in too.
+            const captionMarkup = captionHtml || (subtitle && escapeHtml(subtitle))
+            const captionNode = captionMarkup && (
                 <div
                     className="shrink-0 drop-shadow-lg"
                     style={{
@@ -212,15 +261,13 @@ export function SlideView({
                         textAlign,
                         ...getVerseRefStyle(slide.slideStyle, settings, scaledBounds(VERSE_REF_BOUNDS.lowerThird, scale, captionFloor)),
                     }}
-                    // The Bible reference is HTML so its <b> book title renders; a subtitle is plain.
-                    {...(captionHtml
-                        ? { dangerouslySetInnerHTML: { __html: captionHtml } }
-                        : { children: subtitle })}
+                    // The Bible reference is HTML so its <b> book title renders.
+                    dangerouslySetInnerHTML={{ __html: buildInPreset ? wrapUnits(captionMarkup, buildInPreset) : captionMarkup }}
                 />
             )
 
             return (
-                <div className="absolute inset-x-0 bottom-0" style={{ height: '30cqh' }}>
+                <div ref={setLowerThirdEl} className="absolute inset-x-0 bottom-0" style={{ height: '30cqh' }}>
                     <div
                         className="w-full h-full flex flex-col"
                         style={{ alignItems, padding: `${u(20)} ${u(48)}`, gap: u(8), ...lowerThirdBar(slide.slideStyle) }}
@@ -228,7 +275,7 @@ export function SlideView({
                         {captionOnTop && captionNode}
                         <KineticText enabled={visualizer} className="w-full flex-1 min-h-0">
                             <AutoFitText
-                                html={slideBodyHtml(slide.contents[0])}
+                                html={lowerThirdBodyHtml}
                                 className="w-full h-full text-white drop-shadow-lg tiptap-preview"
                                 minPx={px(18)}
                                 maxPx={px(160)}
@@ -295,6 +342,8 @@ export function SlideView({
             <div key={i} dangerouslySetInnerHTML={{ __html: ref }} />
         ))
         const padding = slide.slideStyle?.windowPadding
+        // While the body morphs, the layer itself doesn't fade, so the references do.
+        const refTransition = morphMode ? 'studio-slide-transition' : ''
         return (
             <div
                 className="absolute inset-0 flex flex-col"
@@ -306,28 +355,30 @@ export function SlideView({
                 }}
             >
                 {hasRef && refPosition === 'top' && (
-                    <div className="shrink-0 text-center drop-shadow-lg" style={{ ...refStyle, paddingBottom: u(12) }}>
+                    <div className={`shrink-0 text-center drop-shadow-lg ${refTransition}`} style={{ ...refStyle, paddingBottom: u(12) }}>
                         {refs}
                     </div>
                 )}
                 <KineticText enabled={visualizer} className="flex-1 min-h-0">
-                    <AutoFitText
-                        html={slideBodyHtml(slide.contents[0])}
-                        className="w-full h-full text-white drop-shadow-lg tiptap-preview"
-                        minPx={px(24)}
-                        maxPx={px(640)}
-                        style={{
-                            fontFamily: font,
-                            textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
-                            textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
-                            lineHeight: 1.0,
-                            whiteSpace: bodyWhiteSpace,
-                            textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
-                        }}
-                    />
+                    <div ref={setMorphBody} className="w-full h-full">
+                        <AutoFitText
+                            html={bodyHtml}
+                            className="w-full h-full text-white drop-shadow-lg tiptap-preview"
+                            minPx={px(24)}
+                            maxPx={px(640)}
+                            style={{
+                                fontFamily: font,
+                                textAlign: (slide.slideStyle?.alignment as 'left' | 'center' | 'right') || 'center',
+                                textTransform: (slide.slideStyle?.lettercase as 'uppercase' | 'lowercase' | 'capitalize' | 'none') || 'none',
+                                lineHeight: 1.0,
+                                whiteSpace: bodyWhiteSpace,
+                                textShadow: slide.slideStyle?.textOutlined ? '2px 2px 4px rgba(0,0,0,0.8)' : undefined,
+                            }}
+                        />
+                    </div>
                 </KineticText>
                 {hasRef && refPosition !== 'top' && (
-                    <div className="shrink-0 text-center drop-shadow-lg" style={{ ...refStyle, paddingTop: u(12) }}>
+                    <div className={`shrink-0 text-center drop-shadow-lg ${refTransition}`} style={{ ...refStyle, paddingTop: u(12) }}>
                         {refs}
                     </div>
                 )}
@@ -337,7 +388,7 @@ export function SlideView({
 
     return (
         <div
-            ref={rootRef}
+            ref={setRoot}
             // A caller that positions the frame itself (absolute/fixed) must win:
             // with both classes, CSS order made it relative, and a relative
             // size container with no height is 0px tall. That blanked the
@@ -386,7 +437,8 @@ export function SlideView({
 
                 <div
                     key={slide.id}
-                    className={`absolute inset-0 studio-slide-transition ${transition} ${isBeatTransition ? 'beat-punch' : ''}`}
+                    // A morph moves the words itself; the layer doesn't fade on top of it.
+                    className={`absolute inset-0 studio-slide-transition ${morphMode ? 'no-transition' : transition} ${isBeatTransition && !morphMode ? 'beat-punch' : ''}`}
                 >
                     {/* "Clear" hides the text and media but keeps the
                         background, so the room can see the output is live. */}
@@ -405,4 +457,8 @@ export function SlideView({
             </div>
         </div>
     )
+}
+
+function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }

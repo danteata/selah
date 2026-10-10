@@ -207,6 +207,7 @@ const defaultSettings: AppSettings = {
     liveWindowFullscreen: true,
     liveOutputMonitorId: null,
     transitionInterval: 0.7,
+    slideTransition: 'fade',
     alertLimit: 5,
     defaultCollaborationMode: 'moderated',
 }
@@ -396,6 +397,7 @@ interface AppStore extends AppState {
     setFootnotes: (footnotes: boolean) => void
     setSongAndHymnLabelsVisibility: (visibility: boolean) => void
     setTransitionInterval: (interval: number) => void
+    setSlideTransition: (transition: 'fade' | 'morph') => void
     setWindowPadding: (padding: { left?: number; right?: number; top?: number; bottom?: number }) => void
     setActiveAdvert: (advert: Advert | null) => void
     setDefaultSlideBackgrounds: () => void
@@ -1077,6 +1079,15 @@ export const useAppStore = create<AppStore>()(
                     settings: {
                         ...state.settings,
                         transitionInterval: interval
+                    }
+                }))
+            },
+
+            setSlideTransition: (slideTransition) => {
+                set((state) => ({
+                    settings: {
+                        ...state.settings,
+                        slideTransition
                     }
                 }))
             },

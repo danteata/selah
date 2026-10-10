@@ -31,6 +31,23 @@ pub struct NdiSourceInfo {
     pub address: String,
 }
 
+/// What a pushed channel has done, for the UI's health readout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushStats {
+    /// Frames the app handed over.
+    pub submitted: u64,
+    /// Frames sent to NDI, repeats included.
+    pub sent: u64,
+    /// Handed over but replaced by a newer one before a tick sent it: dropped.
+    pub replaced_unsent: u64,
+    /// Ticks with nothing new, which re-sent the last frame.
+    pub repeated: u64,
+    /// Ticks that came round more than half a frame late.
+    pub late_ticks: u64,
+    pub fps: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

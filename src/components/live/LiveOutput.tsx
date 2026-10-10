@@ -5,6 +5,7 @@ import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../../hooks/useNdiOutput'
 import { proGateMessage } from '../../providers/entitlementState'
 import { useAlternateOutput } from '../../hooks/useAlternateOutput'
+import type { PushStats } from '../../services/ndi-output/pushChannel'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { useLiveSession, useVerseNavigationShortcuts, useClaimLiveNavigation, shouldIgnoreShortcut, VERSE_NAV_PRIORITY } from '../../hooks'
@@ -700,11 +701,13 @@ export function LiveOutput() {
                     )}
                     {alternate.config.enabled && (
                         <span
-                            title={alternate.textOnly
-                                ? `Alternate output: text only — this slide's background isn't drawn on this feed (${alternate.framesSent.toLocaleString()} frames sent)`
+                            title={`${alternate.textOnly
+                                ? "Alternate output: text only — this slide's background isn't drawn on this feed"
                                 : alternate.slide
-                                    ? `Alternate output: ${alternate.framesSent.toLocaleString()} frames sent`
-                                    : 'Alternate output is on with nothing on it'}
+                                    ? 'Alternate output'
+                                    : 'Alternate output is on with nothing on it'}${alternate.config.destination.kind === 'ndi'
+                                ? ` (${alternateHealth(alternate.stats)})`
+                                : ''}`}
                             className={`flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border ${
                                 alternate.framesSent > 0
                                     ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)] border-[var(--accent-indigo)]/20'
@@ -1063,4 +1066,12 @@ export function LiveOutput() {
             </Modal>
         </div>
     )
+}
+
+/** "1,234 frames at 30 fps, 2 dropped, 1 late" — the alternate NDI feed's health, for its badge. */
+function alternateHealth(stats: PushStats): string {
+    const parts = [`${stats.sent.toLocaleString()} frames sent${stats.fps ? ` at ${stats.fps} fps` : ''}`]
+    if (stats.replacedUnsent) parts.push(`${stats.replacedUnsent.toLocaleString()} dropped`)
+    if (stats.lateTicks) parts.push(`${stats.lateTicks.toLocaleString()} late`)
+    return parts.join(', ')
 }

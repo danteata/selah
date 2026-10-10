@@ -58,6 +58,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
     const setFootnotes = useAppStore((state) => state.setFootnotes)
     const setLinesPerSlide = useAppStore((state) => state.setLinesPerSlide)
     const setTransitionInterval = useAppStore((state) => state.setTransitionInterval)
+    const setSlideTransition = useAppStore((state) => state.setSlideTransition)
     const setVerseRefPosition = useAppStore((state) => state.setVerseRefPosition)
     const setVerseRefColor = useAppStore((state) => state.setVerseRefColor)
     const setVerseRefBold = useAppStore((state) => state.setVerseRefBold)
@@ -192,6 +193,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                     setAnimations,
                                     setLinesPerSlide,
                                     setTransitionInterval,
+                                    setSlideTransition,
                                 }}
                             />
                         )}
@@ -247,6 +249,7 @@ function DisplaySettings({
         setAnimations: (animations: boolean) => void
         setLinesPerSlide: (lines: number) => void
         setTransitionInterval: (interval: number) => void
+        setSlideTransition: (transition: 'fade' | 'morph') => void
     }
 }) {
     const setLiveOutputMonitorId = useAppStore((state) => state.setLiveOutputMonitorId)
@@ -783,6 +786,20 @@ function DisplaySettings({
                     <span>{settings.slideStyles?.linesPerSlide || 4} lines</span>
                     <span>8</span>
                 </div>
+            </div>
+
+            {/* Slide Transition */}
+            <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Slide Transition
+                </label>
+                <SettingsSelect
+                    value={settings.slideTransition ?? 'fade'}
+                    onChange={(v) => onUpdate.setSlideTransition(v === 'morph' ? 'morph' : 'fade')}
+                >
+                    <option value="fade">Fade</option>
+                    <option value="morph">Word morph: shared words glide to their new place</option>
+                </SettingsSelect>
             </div>
 
             {/* Transition Duration */}
