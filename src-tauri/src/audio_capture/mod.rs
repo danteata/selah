@@ -17,6 +17,7 @@
 mod offline_probe;
 mod beat;
 mod microphone;
+mod ring;
 // Every build: it backs the operator-facing sermon recordings, not only the
 // dev auto-recording (which stays debug-only, below).
 mod session_recorder;

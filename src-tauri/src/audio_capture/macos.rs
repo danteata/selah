@@ -4,8 +4,9 @@
 //! Uses ScreenCaptureKit to capture system audio (what's playing through speakers).
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::Receiver;
+use rtrb::Producer;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 
 use screencapturekit::{
@@ -19,7 +20,15 @@ use screencapturekit::{
 
 use core_foundation::error::CFError;
 
+use super::ring::{
+    capture_ring_for, drain_ring, finish_ring, push_frames, push_planar, DRAIN_INTERVAL,
+    MAX_PLANES,
+};
 use super::types::*;
+
+/// What `build_stream_config` asks ScreenCaptureKit for.
+const SOURCE_RATE: u32 = 48_000;
+const SOURCE_CHANNELS: u16 = 2;
 
 /// Start system audio capture on macOS
 pub fn start_system_audio_capture(
@@ -58,14 +67,15 @@ pub fn start_system_audio_capture(
             }
         };
 
+        /// Runs on ScreenCaptureKit's queue, so it only copies samples into
+        /// the capture ring (see `ring.rs`). It used to resample and then take
+        /// the `audio_buffer` lock the readers also take, on that queue.
         struct AudioHandler {
-            samples: Arc<Mutex<Vec<f32>>>,
-            buffer_size: Arc<AtomicUsize>,
-            /// ScreenCaptureKit hands us `&self`, but the 48 kHz → 16 kHz
-            /// resampler and the highpass are both stateful and must persist
-            /// across callbacks — hence the extra lock. It is uncontended:
-            /// only this callback ever takes it.
-            pre: Mutex<AudioPreprocessor>,
+            /// ScreenCaptureKit hands us `&self`, so the producer needs a
+            /// lock. Only this callback ever takes it, and with `try_lock`, so
+            /// the callback can never wait on it.
+            producer: Mutex<Producer<f32>>,
+            overrun_samples: Arc<AtomicU64>,
         }
 
         impl SCStreamOutputTrait for AudioHandler {
@@ -74,29 +84,29 @@ pub fn start_system_audio_capture(
                 sample: CMSampleBuffer,
                 output_type: SCStreamOutputType,
             ) {
-                if output_type == SCStreamOutputType::Audio {
-                    if let Ok(audio_buffer_list) = sample.get_audio_buffer_list() {
-                        let buffers = audio_buffer_list.buffers();
-                        if let Ok(audio_samples) = extract_audio_from_buffers(buffers) {
-                            let processed = self.pre.lock().process(&audio_samples);
-
-                            let mut samples_guard = self.samples.lock();
-                            samples_guard.extend_from_slice(&processed);
-                            self.buffer_size
-                                .store(samples_guard.len(), Ordering::SeqCst);
-                        }
-                    }
+                if output_type != SCStreamOutputType::Audio {
+                    return;
+                }
+                let Ok(audio_buffer_list) = sample.get_audio_buffer_list() else {
+                    return;
+                };
+                let Some(mut producer) = self.producer.try_lock() else {
+                    return;
+                };
+                let dropped = push_buffers(&mut producer, audio_buffer_list.buffers());
+                if dropped > 0 {
+                    self.overrun_samples.fetch_add(dropped as u64, Ordering::Relaxed);
                 }
             }
         }
 
+        let (producer, mut consumer) = capture_ring_for(SOURCE_RATE, SOURCE_CHANNELS);
+        let overrun_samples = Arc::new(AtomicU64::new(0));
         let handler = AudioHandler {
-            samples: audio_buffer.clone(),
-            buffer_size: buffer_size.clone(),
-            // ScreenCaptureKit is configured for 48 kHz stereo in
-            // `build_stream_config`.
-            pre: Mutex::new(AudioPreprocessor::new(48_000, 2, None)),
+            producer: Mutex::new(producer),
+            overrun_samples: overrun_samples.clone(),
         };
+        let mut pre = AudioPreprocessor::new(SOURCE_RATE, SOURCE_CHANNELS, None);
 
         let mut stream = SCStream::new(&filter, &config);
 
@@ -108,9 +118,27 @@ pub fn start_system_audio_capture(
             return;
         }
 
-        let _ = stop_rx.recv();
+        let mut overrun_reported = false;
+        loop {
+            match stop_rx.recv_timeout(DRAIN_INTERVAL) {
+                Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => {
+                    drain_ring(&mut consumer, &mut pre, &audio_buffer, &buffer_size);
+                    let dropped = overrun_samples.load(Ordering::Relaxed);
+                    if dropped > 0 && !overrun_reported {
+                        overrun_reported = true;
+                        tracing::warn!(
+                            "[audio] system capture fell behind; the ring overflowed and \
+                             {} samples were dropped",
+                            dropped
+                        );
+                    }
+                }
+            }
+        }
 
         let _ = stream.stop_capture();
+        finish_ring(&mut consumer, &mut pre, &audio_buffer, &buffer_size);
         is_capturing.store(false, Ordering::SeqCst);
     });
 
@@ -126,60 +154,41 @@ fn build_stream_config() -> Result<SCStreamConfiguration, CFError> {
     Ok(config)
 }
 
-fn extract_audio_from_buffers(
+/// Queue one ScreenCaptureKit delivery into the ring, interleaving it if it
+/// arrived planar (one buffer per channel), and return how many samples did
+/// not fit. No allocation: the planes are gathered on the stack.
+fn push_buffers(
+    producer: &mut Producer<f32>,
     buffers: &[core_audio_types_rs::audio_buffer::AudioBuffer],
-) -> Result<Vec<f32>, String> {
-    let num_buffers = buffers.len();
-
-    if num_buffers == 0 {
-        return Ok(Vec::new());
+) -> usize {
+    match buffers {
+        [] => 0,
+        // One buffer: already interleaved at the configured channel count.
+        [buffer] => push_frames(producer, as_f32(buffer.data()), SOURCE_CHANNELS as usize, |s| s),
+        planar => {
+            let mut planes: [&[f32]; MAX_PLANES] = [&[]; MAX_PLANES];
+            let count = planar.len().min(MAX_PLANES);
+            for (plane, buffer) in planes.iter_mut().zip(planar) {
+                *plane = as_f32(buffer.data());
+            }
+            // The preprocessor was built for `SOURCE_CHANNELS`; frames of any
+            // other width would misalign it, so extra planes are left out.
+            let used = count.min(SOURCE_CHANNELS as usize);
+            push_planar(producer, &planes[..used])
+        }
     }
+}
 
-    if num_buffers == 1 {
-        let buffer = &buffers[0];
-        let data_bytes: &[u8] = buffer.data();
-        let num_samples = data_bytes.len() / std::mem::size_of::<f32>();
-
-        if num_samples > 0 {
-            let data_ptr = data_bytes.as_ptr() as *const f32;
-            unsafe {
-                let data = std::slice::from_raw_parts(data_ptr, num_samples);
-                return Ok(data.to_vec());
-            }
-        }
-    } else {
-        let mut channel_data: Vec<Vec<f32>> = Vec::new();
-        let mut max_samples = 0;
-
-        for buffer in buffers {
-            let data_bytes: &[u8] = buffer.data();
-            let num_samples = data_bytes.len() / std::mem::size_of::<f32>();
-
-            if num_samples > 0 {
-                let data_ptr = data_bytes.as_ptr() as *const f32;
-                unsafe {
-                    let data = std::slice::from_raw_parts(data_ptr, num_samples);
-                    channel_data.push(data.to_vec());
-                    max_samples = max_samples.max(num_samples);
-                }
-            }
-        }
-
-        let mut interleaved = Vec::with_capacity(max_samples * num_buffers);
-        for i in 0..max_samples {
-            for channel in &channel_data {
-                if i < channel.len() {
-                    interleaved.push(channel[i]);
-                } else {
-                    interleaved.push(0.0);
-                }
-            }
-        }
-
-        return Ok(interleaved);
+/// Reinterpret a Core Audio buffer as the f32 samples ScreenCaptureKit
+/// delivers. A trailing partial sample, if any, is ignored.
+fn as_f32(bytes: &[u8]) -> &[f32] {
+    let len = bytes.len() / std::mem::size_of::<f32>();
+    if len == 0 {
+        return &[];
     }
-
-    Ok(Vec::new())
+    // SAFETY: Core Audio buffers are allocated with at least f32 alignment,
+    // and `len` samples lie within `bytes`. The slice borrows `bytes`.
+    unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const f32, len) }
 }
 
 // Screen Recording (a.k.a. "Screen & System Audio Recording" on macOS 15+) is a
