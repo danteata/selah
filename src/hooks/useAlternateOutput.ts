@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useAppStore } from '../store/appStore'
 import { canRenderOnCanvas, renderSlideToCanvas } from '../lib/graphics/renderSlide'
 import { withTemplateStyle } from '../lib/graphics/templateStyle'
 import { useTemplates } from './useTemplates'
-import { ndiPushChannelService } from '../services/ndi-output/pushChannel'
+import { EMPTY_PUSH_STATS, ndiPushChannelService, type PushStats } from '../services/ndi-output/pushChannel'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import type { AlternateOutputConfig } from '../types/alternateOutput'
 import type { Slide } from '../types'
@@ -27,9 +27,33 @@ import { loadSlideFont } from '../lib/fonts'
 /** Channel id for the alternate output's NDI source. */
 export const ALTERNATE_CHANNEL = 'alternate'
 
-/** Frames are pushed on change plus this heartbeat, so a receiver connecting
- *  between changes still gets a picture without streaming identical frames. */
-const HEARTBEAT_MS = 500
+/*
+ * Frames are pushed only when the picture changes. The NDI channel repeats the
+ * last one at the output's frame rate (see `push.rs`), so a receiver that
+ * connects between changes still gets a picture.
+ *
+ * Several components use this hook at once (the live panel and Settings), and
+ * each used to push its own frames: two of every frame, half of them dropped.
+ * Only the first one mounted drives the feed now.
+ */
+const mounted: symbol[] = []
+const driverListeners = new Set<() => void>()
+function subscribeDriver(listener: () => void) {
+    driverListeners.add(listener)
+    return () => { driverListeners.delete(listener) }
+}
+function useIsFeedDriver(): boolean {
+    const [id] = useState(() => Symbol('alternate-output'))
+    useEffect(() => {
+        mounted.push(id)
+        driverListeners.forEach((listener) => listener())
+        return () => {
+            mounted.splice(mounted.indexOf(id), 1)
+            driverListeners.forEach((listener) => listener())
+        }
+    }, [id])
+    return useSyncExternalStore(subscribeDriver, () => mounted[0] === id, () => false)
+}
 
 interface UseAlternateOutputReturn {
     config: AlternateOutputConfig
@@ -40,6 +64,8 @@ interface UseAlternateOutputReturn {
     setSlide: (slide: Slide | null) => void
     /** Frames NDI has accepted — 0 while announced but silent. */
     framesSent: number
+    /** The channel's health: sent, dropped, repeated, late. */
+    stats: PushStats
     error: string | null
     /** Set when the slide has a background this output can't draw, so the feed
      *  carries its text only. Not a failure — for a keyed feed it's often what
@@ -65,7 +91,9 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
     const slideStyles = useAppStore((state) => state.settings.slideStyles)
     const { templates } = useTemplates()
 
-    const [framesSent, setFramesSent] = useState(0)
+    const [stats, setStats] = useState<PushStats>(EMPTY_PUSH_STATS)
+    const framesSent = stats.sent
+    const isDriver = useIsFeedDriver()
     const [error, setError] = useState<string | null>(null)
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -180,7 +208,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
             }
         }
         try {
-            await ndiPushChannelService.open(ALTERNATE_CHANNEL, config.sourceName)
+            await ndiPushChannelService.open(ALTERNATE_CHANNEL, config.sourceName, config.format.fps)
             update({ enabled: true })
             setError(null)
             return null
@@ -189,7 +217,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
             setError(message)
             return message
         }
-    }, [config.destination, config.sourceName, update])
+    }, [config.destination, config.sourceName, config.format.fps, update])
 
     const disable = useCallback(async () => {
         update({ enabled: false })
@@ -197,20 +225,28 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         // switching destination while enabled must not leave the other running.
         await ndiPushChannelService.close(ALTERNATE_CHANNEL)
         await nativeMultiMonitorService.closeAlternateWindow().catch(() => {})
-        setFramesSent(0)
+        setStats(EMPTY_PUSH_STATS)
     }, [update])
 
+    // Push when the picture changes; the channel repeats it in between.
     useEffect(() => {
-        if (!config.enabled || config.destination.kind !== 'ndi') return
+        if (!isDriver || !config.enabled || config.destination.kind !== 'ndi') return
         void pushFrame()
-        const timer = setInterval(() => { void pushFrame() }, HEARTBEAT_MS)
-        return () => clearInterval(timer)
-    }, [config.enabled, config.destination.kind, pushFrame])
+    }, [isDriver, config.enabled, config.destination.kind, pushFrame])
+
+    // A channel opened at another rate (a format change while enabled) is
+    // re-announced; the same name and rate is a no-op on the Rust side.
+    useEffect(() => {
+        if (!isDriver || !config.enabled || config.destination.kind !== 'ndi') return
+        void ndiPushChannelService.open(ALTERNATE_CHANNEL, config.sourceName, config.format.fps)
+            .then(() => pushFrame())
+            .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+    }, [isDriver, config.enabled, config.destination.kind, config.sourceName, config.format.fps, pushFrame])
 
     useEffect(() => {
         if (!config.enabled || config.destination.kind !== 'ndi') return
         const timer = setInterval(async () => {
-            setFramesSent(await ndiPushChannelService.framesSent(ALTERNATE_CHANNEL))
+            setStats(await ndiPushChannelService.stats(ALTERNATE_CHANNEL))
         }, 2000)
         return () => clearInterval(timer)
     }, [config.enabled, config.destination.kind])
@@ -256,6 +292,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         slide,
         setSlide,
         framesSent,
+        stats,
         error,
         textOnly,
         enable,

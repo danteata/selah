@@ -190,6 +190,42 @@ impl NdiSender {
         Ok(())
     }
 
+    /// Send a tightly packed frame (`width * 4` bytes per row) straight from
+    /// `data`, without copying it, declared at `fps`. Used by the pushed
+    /// channels, which repeat their last frame every tick: a copy per send
+    /// would be 8 MB a frame at 1080p.
+    ///
+    /// The sender is created with `clock_video`, so this blocks until the
+    /// frame's slot, and NDI is finished with `data` by the time it returns.
+    pub fn send_packed(&self, data: &[u8], width: u32, height: u32, four_cc: u32, fps: u32) -> Result<(), String> {
+        let inner = self.inner.read();
+        let sender_inner = inner.as_ref().ok_or("NDI sender not running")?;
+        let stride = width as usize * 4;
+        if data.len() != stride * height as usize {
+            return Err(format!("frame is {} bytes, expected {} for {width}x{height}", data.len(), stride * height as usize));
+        }
+        let frame_num = self.frames.fetch_add(1, Ordering::SeqCst);
+        let frame = VideoFrameV2 {
+            xres: width as i32,
+            yres: height as i32,
+            four_cc,
+            frame_rate_n: fps.max(1) as i32,
+            frame_rate_d: 1,
+            picture_aspect_ratio: 0.0,
+            frame_format_type: FRAME_FORMAT_PROGRESSIVE,
+            timecode: compute_timecode(frame_num),
+            // NDI only reads the pixels; the field is `*mut` because the C
+            // struct is shared with receive, which writes them.
+            p_data: data.as_ptr() as *mut u8,
+            line_stride_in_bytes: stride as i32,
+            p_metadata: std::ptr::null(),
+            timestamp: compute_timestamp(frame_num),
+        };
+        let lib = NdiLib::get().ok_or("NDI runtime unloaded")?;
+        lib.send_video(&sender_inner.sender, &frame);
+        Ok(())
+    }
+
     pub fn send_audio(
         &self,
         data: &[f32],

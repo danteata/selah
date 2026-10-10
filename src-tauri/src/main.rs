@@ -130,6 +130,7 @@ use ndi_output::{
     ndi_push_close,
     ndi_push_frame,
     ndi_push_frames_sent,
+    ndi_push_stats,
     ndi_discover_sources,
 };
 
@@ -384,6 +385,7 @@ pub fn run() {
             ndi_push_close,
             ndi_push_frame,
             ndi_push_frames_sent,
+            ndi_push_stats,
             ndi_discover_sources,
             log_message,
             get_logs,
