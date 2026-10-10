@@ -3,7 +3,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use parking_lot::Mutex;
-use rtrb::{Consumer, Producer, RingBuffer};
+use rtrb::{Consumer, Producer};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+use super::ring::{capture_ring_for, drain_ring, finish_ring, push_frames, DRAIN_INTERVAL};
 use super::types::*;
 
 /// How long a rebuild waits before trying again, per attempt. A USB or
@@ -28,15 +29,6 @@ const REBUILD_BACKOFF: [Duration; 5] = [
 /// How often the supervisor wakes to check whether the stream has died. Only
 /// the recovery latency depends on this — a stop signal wakes it immediately.
 const SUPERVISOR_POLL: Duration = Duration::from_millis(250);
-
-/// How often the supervisor drains the capture ring into the preprocessor.
-/// This is the latency the ring adds; 10 ms is under one VAD frame.
-const DRAIN_INTERVAL: Duration = Duration::from_millis(10);
-
-/// Ring capacity, in seconds of source audio. Absorbs a capture thread that
-/// stalls (a slow lock on the shared buffer, a busy machine) without dropping
-/// anything; normal drains keep it nearly empty.
-const RING_SECONDS: usize = 2;
 
 /// How long a stream has to survive before it counts as good and the rebuild
 /// budget resets. Without this, a device that opens cleanly and dies a moment
@@ -242,73 +234,13 @@ where
             move |err| {
                 // cpal calls this once, as the stream dies; rebuilding has to
                 // happen elsewhere. Flag it for the supervisor and record why.
-                eprintln!("Audio stream error: {}", err);
+                tracing::error!("[audio] input stream error: {}", err);
                 *failure_message.lock() = err.to_string();
                 stream_failed.store(true, Ordering::SeqCst);
             },
             None,
         )
         .map_err(|e| format!("Failed to build input stream: {}", e))
-}
-
-/// The callback body: queue as many whole frames of `data` as the ring has
-/// room for and return how many samples did not fit. Allocation- and lock-free.
-fn push_frames<T: Copy>(
-    producer: &mut Producer<f32>,
-    data: &[T],
-    channels: usize,
-    convert: fn(T) -> f32,
-) -> usize {
-    let writable = producer.slots().min(data.len()) / channels * channels;
-    if writable > 0 {
-        if let Ok(chunk) = producer.write_chunk_uninit(writable) {
-            chunk.fill_from_iter(data[..writable].iter().copied().map(convert));
-        }
-    }
-    data.len() - writable
-}
-
-/// Move everything the callback has queued through the preprocessor and onto
-/// the shared buffer. Runs on the supervisor thread, never the audio thread.
-fn drain_ring(
-    consumer: &mut Consumer<f32>,
-    pre: &mut AudioPreprocessor,
-    audio_buffer: &Mutex<Vec<f32>>,
-    buffer_size: &AtomicUsize,
-) {
-    let available = consumer.slots();
-    if available == 0 {
-        return;
-    }
-    let Ok(chunk) = consumer.read_chunk(available) else {
-        return;
-    };
-    let (first, second) = chunk.as_slices();
-    let mut processed = pre.process(first);
-    if !second.is_empty() {
-        processed.extend_from_slice(&pre.process(second));
-    }
-    chunk.commit_all();
-    if processed.is_empty() {
-        return;
-    }
-    let mut buf = audio_buffer.lock();
-    buf.extend_from_slice(&processed);
-    buffer_size.store(buf.len(), Ordering::SeqCst);
-}
-
-/// A sized ring with its pages already touched, so the first seconds of
-/// capture do not take page faults on the audio thread. (Touching does not
-/// pin them; it only gets the first-use faults out of the way.)
-fn capture_ring(capacity: usize) -> (Producer<f32>, Consumer<f32>) {
-    let (mut producer, mut consumer) = RingBuffer::new(capacity);
-    if let Ok(chunk) = producer.write_chunk(capacity) {
-        chunk.commit_all();
-    }
-    if let Ok(chunk) = consumer.read_chunk(capacity) {
-        chunk.commit_all();
-    }
-    (producer, consumer)
 }
 
 /// Open the device and start a stream, returning it alive and playing.
@@ -360,9 +292,7 @@ fn open_stream(
     let pre = AudioPreprocessor::new(source_sample_rate, source_channels, selected_channel);
 
     // A whole number of frames, so reads never split one at the wrap point.
-    let frame = (source_channels as usize).max(1);
-    let (producer, consumer) =
-        capture_ring(source_sample_rate as usize * RING_SECONDS * frame);
+    let (producer, consumer) = capture_ring_for(source_sample_rate, source_channels);
 
     macro_rules! build {
         ($t:ty, $conv:expr) => {
@@ -519,7 +449,7 @@ pub fn start_microphone_capture(
                             let dropped = overrun_samples.load(Ordering::Relaxed);
                             if dropped > 0 {
                                 overrun_reported = true;
-                                eprintln!(
+                                tracing::warn!(
                                     "[audio] capture fell behind; the input ring overflowed and \
                                      {} samples were dropped",
                                     dropped
@@ -557,13 +487,7 @@ pub fn start_microphone_capture(
             //
             // Done on the rebuild path too, not just on stop: that audio was
             // recorded before the device died and belongs ahead of the gap.
-            drain_ring(&mut consumer, &mut pre, &audio_buffer, &buffer_size);
-            let tail = pre.flush();
-            if !tail.is_empty() {
-                let mut buf = audio_buffer.lock();
-                buf.extend_from_slice(&tail);
-                buffer_size.store(buf.len(), Ordering::SeqCst);
-            }
+            finish_ring(&mut consumer, &mut pre, &audio_buffer, &buffer_size);
 
             if !died {
                 break 'session;
@@ -650,80 +574,6 @@ fn report_and_back_off(
         }
     }
     true
-}
-
-#[cfg(test)]
-mod ring_tests {
-    use super::*;
-
-    /// Draining through the ring — in odd-sized callbacks, across the wrap
-    /// point, a frame at a time — has to give the preprocessor exactly the
-    /// audio it would have seen directly. Stereo with channel selection is the
-    /// case that breaks if a read ever starts mid-frame.
-    #[test]
-    fn the_ring_is_transparent_to_the_preprocessor() {
-        let rate = 48_000u32;
-        let channels = 2usize;
-        // Left carries a tone, right carries noise-like garbage, so reading
-        // the wrong channel after a misaligned split shows up in the output.
-        let frames = rate as usize; // one second
-        let input: Vec<f32> = (0..frames)
-            .flat_map(|i| {
-                let t = i as f32 / rate as f32;
-                let left = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
-                let right = if i % 3 == 0 { 0.9 } else { -0.9 };
-                [left, right]
-            })
-            .collect();
-
-        let mut direct = AudioPreprocessor::new(rate, channels as u16, Some(0));
-        let mut expected = direct.process(&input);
-        expected.extend(direct.flush());
-
-        // A small ring (0.1 s) forces many wraps over a second of audio.
-        let (mut producer, mut consumer) = capture_ring(rate as usize / 10 * channels);
-        let mut pre = AudioPreprocessor::new(rate, channels as u16, Some(0));
-        let buffer = Mutex::new(Vec::new());
-        let size = AtomicUsize::new(0);
-
-        // Callback sizes that are not a divisor of the ring, drained every few
-        // callbacks so the ring fills unevenly.
-        let mut offset = 0;
-        let mut callbacks = 0;
-        while offset < input.len() {
-            let len = (441 * channels).min(input.len() - offset);
-            let dropped = push_frames(&mut producer, &input[offset..offset + len], channels, |s| s);
-            assert_eq!(dropped, 0, "ring overflowed in the test itself");
-            offset += len;
-            callbacks += 1;
-            if callbacks % 3 == 0 {
-                drain_ring(&mut consumer, &mut pre, &buffer, &size);
-            }
-        }
-        drain_ring(&mut consumer, &mut pre, &buffer, &size);
-        let mut got = buffer.into_inner();
-        // `buffer_size` tracks what reached the shared buffer, before the flush.
-        assert_eq!(size.load(Ordering::SeqCst), got.len());
-        got.extend(pre.flush());
-
-        assert_eq!(got.len(), expected.len());
-        for (i, (a, b)) in got.iter().zip(&expected).enumerate() {
-            assert!((a - b).abs() < 1e-5, "sample {i} differs: {a} vs {b}");
-        }
-    }
-
-    /// A full ring drops whole frames and reports exactly what it dropped,
-    /// so the next write still starts on a frame boundary.
-    #[test]
-    fn a_full_ring_drops_whole_frames() {
-        let (mut producer, _consumer) = capture_ring(10);
-        let data = [0.1f32; 7];
-        // Stereo: 7 samples is 3 whole frames plus one stray sample.
-        assert_eq!(push_frames(&mut producer, &data, 2, |s| s), 1);
-        // 4 slots left: two frames fit, the third frame and the stray do not.
-        assert_eq!(push_frames(&mut producer, &data, 2, |s| s), 3);
-        assert_eq!(producer.slots(), 0);
-    }
 }
 
 #[cfg(test)]
