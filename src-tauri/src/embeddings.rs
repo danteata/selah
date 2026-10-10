@@ -130,8 +130,8 @@ impl Embedder {
                 ids[r * width + c] = id as i64;
                 mask[r * width + c] = 1;
             }
-            if tokens.len() > MAX_TOKENS {
-                ids[r * width + len - 1] = *tokens.last().unwrap() as i64;
+            if let Some(&last) = tokens.last().filter(|_| tokens.len() > MAX_TOKENS) {
+                ids[r * width + len - 1] = last as i64;
             }
         }
 
@@ -177,10 +177,11 @@ fn embed_blocking(app: &AppHandle, texts: &[String]) -> Result<Vec<f32>, String>
     let mut slot = EMBEDDER
         .lock()
         .map_err(|_| "embedder lock poisoned".to_string())?;
-    if slot.is_none() {
-        *slot = Some(Embedder::load(&model_dir(app)?)?);
-    }
-    slot.as_mut().unwrap().embed(texts)
+    let embedder = match slot.take() {
+        Some(embedder) => embedder,
+        None => Embedder::load(&model_dir(app)?)?,
+    };
+    slot.insert(embedder).embed(texts)
 }
 
 /// Embed `texts` (already carrying their task prefix). Returns the vectors as

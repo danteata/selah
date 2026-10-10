@@ -136,3 +136,13 @@ default = ["custom-protocol", "native-transcription", "ndi"]
 custom-protocol = ["tauri/custom-protocol"]
 ndi = ["dep:libloading"]
 native-transcription = ["dep:transcribe-rs", "dep:transcribe-cpp"]
+
+# A panic mid-service takes the projector down with it, so production code
+# returns errors instead. Tests may still unwrap (clippy.toml). Startup code that
+# genuinely can't continue opts out per site, with a reason.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

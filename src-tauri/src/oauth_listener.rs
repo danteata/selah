@@ -64,7 +64,9 @@ fn active_flag() -> &'static std::sync::Mutex<bool> {
 /// immediately once the server is bound.
 #[tauri::command]
 pub fn start_oauth_listener(app: AppHandle) -> Result<String, String> {
-    let mut flag = active_flag().lock().unwrap();
+    // A bool can't be left half-written, so a lock poisoned by a panic
+    // elsewhere is still safe to use.
+    let mut flag = active_flag().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if *flag {
         // A previous listener is still running. Reuse the same URL.
         return Ok(format!(
@@ -216,11 +218,10 @@ pub fn start_oauth_listener(app: AppHandle) -> Result<String, String> {
   <script>setTimeout(function(){ try { window.close(); } catch (e) {} }, 1200);</script>
 </body>
 </html>"##;
-                let resp = Response::from_data(body.to_vec()).with_header(
-                    "Content-Type: text/html; charset=utf-8"
-                        .parse::<tiny_http::Header>()
-                        .expect("static header is valid"),
-                );
+                let mut resp = Response::from_data(body.to_vec());
+                if let Ok(header) = "Content-Type: text/html; charset=utf-8".parse::<tiny_http::Header>() {
+                    resp = resp.with_header(header);
+                }
                 if let Err(e) = req.respond(resp) {
                     eprintln!("[oauth] failed to send callback response: {}", e);
                 }
