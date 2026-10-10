@@ -7,6 +7,7 @@ import { ndiPushChannelService } from '../services/ndi-output/pushChannel'
 import { nativeMultiMonitorService } from '../services/native-multi-monitor'
 import type { AlternateOutputConfig } from '../types/alternateOutput'
 import type { Slide } from '../types'
+import { loadSlideFont } from '../lib/fonts'
 
 /**
  * The alternate output: a second output that either follows the live content or
@@ -134,18 +135,24 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
         if (!ctx) return
 
-        // Draw the slide even when its background can't be reproduced. Blanking
-        // the frame instead meant "Follow main output" sent black for any slide
-        // with an image behind it — which is nearly all of them — and looked
-        // broken rather than partial.
-        renderSlideToCanvas(ctx, slide, renderOptions)
-
-        // getImageData is RGBA with straight alpha, which is NDI's RGBA format —
-        // no swizzle, no premultiply correction.
-        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height)
-
         sendingRef.current = true
         try {
+            // A canvas doesn't wait for web fonts the way the DOM does: drawn
+            // before the face has loaded, the text is measured and painted in
+            // a fallback and stays that way until the next push. Resolves at
+            // once when the faces are already loaded.
+            await loadSlideFont(slide?.slideStyle?.font || defaultFont)
+
+            // Draw the slide even when its background can't be reproduced. Blanking
+            // the frame instead meant "Follow main output" sent black for any slide
+            // with an image behind it — which is nearly all of them — and looked
+            // broken rather than partial.
+            renderSlideToCanvas(ctx, slide, renderOptions)
+
+            // getImageData is RGBA with straight alpha, which is NDI's RGBA format —
+            // no swizzle, no premultiply correction.
+            const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height)
+
             await ndiPushChannelService.sendFrame(ALTERNATE_CHANNEL, {
                 pixels: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
                 width: canvas.width,
@@ -157,7 +164,7 @@ export function useAlternateOutput(): UseAlternateOutputReturn {
         } finally {
             sendingRef.current = false
         }
-    }, [getCanvas, slide, renderOptions])
+    }, [getCanvas, slide, renderOptions, defaultFont])
 
     const enable = useCallback(async (): Promise<string | null> => {
         if (config.destination.kind === 'monitor') {

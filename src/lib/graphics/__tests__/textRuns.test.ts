@@ -77,9 +77,9 @@ describe('mergeRuns', () => {
 
 describe('fontForRun', () => {
     it('builds a canvas font string, with bold overriding the base weight', () => {
-        expect(fontForRun(run('x'), 48, 'Inter', '400')).toBe('400 48px Inter')
-        expect(fontForRun(run('x', { bold: true }), 48, 'Inter', '400')).toBe('700 48px Inter')
-        expect(fontForRun(run('x', { italic: true }), 48, 'Inter', '400')).toBe('italic 400 48px Inter')
-        expect(fontForRun(run('x'), 48.6, 'Inter', '700')).toBe('700 49px Inter')
+        expect(fontForRun(run('x'), 48, 'Inter', '400')).toBe('400 48px "Inter", sans-serif')
+        expect(fontForRun(run('x', { bold: true }), 48, 'Inter', '400')).toBe('700 48px "Inter", sans-serif')
+        expect(fontForRun(run('x', { italic: true }), 48, 'Inter', '400')).toBe('italic 400 48px "Inter", sans-serif')
+        expect(fontForRun(run('x'), 48.6, 'Inter', '700')).toBe('700 49px "Inter", sans-serif')
     })
 })

@@ -10,6 +10,7 @@ import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption
 import { countdownDurationSeconds, formatCountdownTime, useCountdownSeconds } from '../../utils/countdown'
 import { slideBackgroundFilter } from '../../utils/slideBackground'
 import { slideBodyHtml } from '../../utils/slideHtml'
+import { cssFontStack } from '../../lib/fonts'
 import { AutoFitText } from './AutoFitText'
 import { KineticText } from './KineticText'
 import { VideoBackground } from './VideoBackground'
@@ -151,7 +152,7 @@ export function SlideView({
     const px = (n: number) => Math.max(minTextPx, n * scale)
     const captionFloor = minTextPx * 0.7
 
-    const font = slide.slideStyle?.font || settings.defaultFont || 'Inter'
+    const font = cssFontStack(slide.slideStyle?.font || settings.defaultFont)
     // A sung line stays on one line: the text shrinks to fit the longest one
     // instead of filling the screen and stranding a word ("me") on a line of
     // its own. The verse's own line breaks still apply.
@@ -261,7 +262,7 @@ export function SlideView({
                         className="text-white drop-shadow-2xl font-mono font-bold tabular-nums"
                         style={{
                             fontSize: '20cqw',
-                            fontFamily: slide.slideStyle?.font || 'monospace',
+                            fontFamily: cssFontStack(slide.slideStyle?.font || 'monospace'),
                             lineHeight: 1,
                             letterSpacing: '-0.02em',
                             textShadow: '0 4px 32px rgba(0,0,0,0.6)',

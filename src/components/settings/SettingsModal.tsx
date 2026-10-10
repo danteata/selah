@@ -35,6 +35,7 @@ import { getVersion } from '@tauri-apps/api/app'
 import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { Modal } from '../modals/Modal'
+import { SLIDE_FONTS, cssFontStack } from '../../lib/fonts'
 
 
 interface SettingsModalProps {
@@ -337,10 +338,7 @@ function DisplaySettings({
         }
     }, [identifyScreen, flashingId])
 
-    const fonts = [
-        'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat',
-        'Source Sans Pro', 'Poppins', 'Nunito', 'Raleway', 'Ubuntu',
-    ]
+    const fonts = SLIDE_FONTS.map((f) => f.family)
 
     return (
         <div className="space-y-6">
@@ -760,7 +758,7 @@ function DisplaySettings({
                     onChange={(v) => onUpdate.setDefaultFont(v)}
                 >
                     {fonts.map((font) => (
-                        <option key={font} value={font} style={{ fontFamily: font }}>
+                        <option key={font} value={font} style={{ fontFamily: cssFontStack(font) }}>
                             {font}
                         </option>
                     ))}
