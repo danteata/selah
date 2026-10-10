@@ -25,8 +25,9 @@ import { loadSlideFont } from '../lib/fonts'
  *     picture. Without it the feed draws the slide's backdrop too — colour,
  *     gradient, image or motion background — with crossfades and running
  *     countdowns, so "Follow main output" over NDI is a program feed that needs
- *     no live window. Video backgrounds aren't drawn: such a slide goes out as
- *     its text alone, with `textOnly` set so the UI can say so.
+ *     no live window. Media slides (photos, videos) are drawn on either. Only
+ *     external players (YouTube, Vimeo) can't be: such a slide goes out as its
+ *     text alone, with `textOnly` set so the UI can say so.
  */
 
 /** Channel id for the alternate output's NDI source. */

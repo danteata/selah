@@ -13,7 +13,7 @@
 
 import type { Slide } from '../../types'
 import { renderSlideToCanvas, type SlideRenderOptions } from '../../lib/graphics/renderSlide'
-import { backdropAnimates, backdropFor, BackdropImages, type Backdrop, type MotionStates } from '../../lib/graphics/renderBackdrop'
+import { backdropAnimates, backdropFor, BackdropImages, BackdropVideos, type Backdrop, type MotionStates } from '../../lib/graphics/renderBackdrop'
 import { isCountdownPaused } from '../../utils/countdown'
 
 export interface FeedScene {
@@ -51,6 +51,7 @@ export class CanvasFeed {
     private dirty = true
     private readonly clockStart = typeof performance !== 'undefined' ? performance.now() : 0
     private readonly images = new BackdropImages(() => { this.dirty = true })
+    private readonly videos = new BackdropVideos()
     private readonly motionStates: MotionStates = new Map()
     private readonly firstShown = new Map<string, number>()
     private worker: Worker | null = null
@@ -73,8 +74,13 @@ export class CanvasFeed {
         }
         if (scene.slide && !this.firstShown.has(scene.slide.id)) this.firstShown.set(scene.slide.id, Date.now())
         this.scene = scene
+        // A keyed feed draws no backdrop, but a media slide's photo or video is
+        // the content itself, so it is drawn either way.
         const opaque = !!scene.options.opaqueBackground
-        this.backdrop = scene.slide && opaque ? backdropFor(scene.slide, scene.backgroundUrl) : null
+        this.backdrop = scene.slide && (opaque || scene.slide.type === 'media')
+            ? backdropFor(scene.slide, scene.backgroundUrl)
+            : null
+        if (this.backdrop?.kind !== 'video') this.videos.release()
         this.dirty = true
     }
 
@@ -101,6 +107,7 @@ export class CanvasFeed {
     }
 
     stop(): void {
+        this.videos.release()
         this.worker?.postMessage({ fps: 0 })
         this.worker?.terminate()
         this.worker = null
@@ -139,6 +146,7 @@ export class CanvasFeed {
             backdrop: this.backdrop ?? undefined,
             timeSec: (now - this.clockStart) / 1000,
             images: this.images,
+            videos: this.videos,
             motionStates: this.motionStates,
             nowMs: Date.now(),
             countdownStartedAt: scene.slide ? this.firstShown.get(scene.slide.id) : undefined,

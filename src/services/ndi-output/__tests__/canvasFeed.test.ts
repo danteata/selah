@@ -21,6 +21,8 @@ describe('canvas feed timing', () => {
         expect(sceneAnimates(motion, null)).toBe(false)
         expect(sceneAnimates(slide({ type: 'countdown', contents: ['Soon', '00:05:00'] }), null)).toBe(true)
         expect(sceneAnimates(null, null)).toBe(false)
+        const video = slide({ background: 'clip.mp4', backgroundType: 'video' })
+        expect(sceneAnimates(video, backdropFor(video, 'asset://clip.mp4'))).toBe(true)
     })
 })
 
@@ -28,9 +30,17 @@ describe('backdropFor', () => {
     it('tells colours, gradients, images, motion and video apart', () => {
         expect(backdropFor(slide({ background: '#123456' }), null)).toEqual({ kind: 'color', color: '#123456' })
         expect(backdropFor(slide({ background: 'linear-gradient(red, blue)' }), null).kind).toBe('gradient')
-        expect(backdropFor(slide({ background: 'photo.jpg' }), 'asset://photo.jpg')).toEqual({ kind: 'image', url: 'asset://photo.jpg' })
+        expect(backdropFor(slide({ background: 'photo.jpg' }), 'asset://photo.jpg'))
+            .toEqual({ kind: 'image', url: 'asset://photo.jpg', fit: 'cover', media: false })
         expect(backdropFor(slide({ background: 'motion:aurora' }), null).kind).toBe('motion')
-        expect(backdropFor(slide({ background: 'clip.mp4', backgroundType: 'video' }), 'asset://clip.mp4').kind).toBe('unsupported')
+        expect(backdropFor(slide({ background: 'clip.mp4', backgroundType: 'video' }), 'asset://clip.mp4'))
+            .toEqual({ kind: 'video', url: 'asset://clip.mp4', fit: 'cover', media: false })
+        expect(backdropFor(slide({ type: 'external' as Slide['type'], backgroundType: 'external' }), null).kind).toBe('unsupported')
         expect(backdropFor(slide(), null).kind).toBe('none')
+    })
+
+    it('fits media as the slide asks, and backdrops always cover', () => {
+        const media = slide({ type: 'media', background: 'clip.mp4', backgroundType: 'video', slideStyle: { backgroundFillType: 'fit' } })
+        expect(backdropFor(media, 'asset://clip.mp4')).toEqual({ kind: 'video', url: 'asset://clip.mp4', fit: 'contain', media: true })
     })
 })

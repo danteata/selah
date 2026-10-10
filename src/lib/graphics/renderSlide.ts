@@ -22,7 +22,7 @@ import { parseTextRuns } from './textRuns'
 import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
 import { resolveVerseRefPx, VERSE_REF_BOUNDS } from '../../utils/verseRefStyle'
 import { countdownRemainingSeconds, formatCountdownTime } from '../../utils/countdown'
-import { backdropFor, paintBackdrop, type Backdrop, type BackdropImages, type MotionStates } from './renderBackdrop'
+import { backdropFor, paintBackdrop, type Backdrop, type BackdropImages, type BackdropVideos, type MotionStates } from './renderBackdrop'
 
 export interface SlideRenderOptions extends LowerThirdRenderOptions {
     /** Paint a background behind the text. Off for a keyed feed, on for a feed
@@ -42,6 +42,8 @@ export interface SlideRenderOptions extends LowerThirdRenderOptions {
     timeSec?: number
     /** Decoded background images, shared across frames. */
     images?: BackdropImages
+    /** The feed's video element, for video backgrounds and media. */
+    videos?: BackdropVideos
     /** Motion background state, kept across frames. */
     motionStates?: MotionStates
     /** Wall-clock ms for a running countdown, and when this feed first showed it. */
@@ -92,6 +94,7 @@ function paintOpaque(ctx: Canvas2DLike, slide: Slide, options: SlideRenderOption
             height: options.height,
             timeSec: options.timeSec ?? 0,
             images: options.images,
+            videos: options.videos,
             motionStates: options.motionStates,
         })
         return
@@ -235,6 +238,14 @@ export function renderSlideToCanvas(ctx: Canvas2DLike, slide: Slide | null, opti
 
     if (slide.type === 'countdown') {
         renderCountdown(ctx, slide, options)
+        return
+    }
+
+    if (slide.type === 'media') {
+        // The photo or video is the content itself: drawn on every feed, keyed
+        // or not, with nothing on top.
+        ctx.clearRect(0, 0, options.width, options.height)
+        if (options.backdrop) paintOpaque(ctx, slide, options)
         return
     }
 

@@ -34,8 +34,8 @@ output window and no spare display, the way EasyWorship and ProPresenter treat
 NDI: one destination among others.
 
 The main output's NDI toggle still mirrors the live output window, and still
-refuses to start without one. It is the only feed that carries **video**
-backgrounds (see below).
+refuses to start without one. It's the only feed that carries **YouTube or Vimeo**
+media (see below).
 
 ### How it works
 
@@ -48,7 +48,14 @@ backgrounds (see below).
   - colours;
   - CSS gradients (`cssGradient.ts`);
   - images, cover-fit;
-  - motion backgrounds.
+  - motion backgrounds;
+  - video backgrounds, muted and looping.
+
+  Media slides (a photo or video shown as the content) are drawn on every feed,
+  keyed or not, fitted as the slide asks and without dimming. Their videos follow
+  the operator's play, pause, seek and loop, as on the projector. All media loads
+  with CORS: a file served without CORS headers fails to load (black) rather
+  than tainting the canvas, which would break `getImageData` for every frame.
 
   It also draws running countdowns, follows the slide's text alignment, and
   crossfades between slides over the transition duration. With alpha on, only
@@ -82,17 +89,18 @@ backgrounds (see below).
 
 | | Why | Instead |
 |---|---|---|
-| Video backgrounds | Needs decoding a `<video>` into the canvas, frame by frame | The slide goes out as its text, and the badge reads **ALT — TEXT ONLY** |
+| YouTube and Vimeo media | They play in an iframe, which a canvas can't read | The badge reads **ALT — TEXT ONLY** |
 | Lower-third text build-ins, word morph | DOM-only animations (`useTextBuildIn`, `useWordMorph`) | The text appears with the slide's crossfade |
 | The beat-reactive visualizer and kinetic text | DOM-only | — |
 | Alerts | Not drawn on the projector either | — |
 
 ### Still to do
 
-- **Video backgrounds.** Draw a hidden `<video>` into the frame
-  (`drawImage(video)`, or `VideoFrame` from `requestVideoFrameCallback`). Video
-  decode stays on the main thread, so it can still stall while the window is
-  hidden.
+- **Video in a hidden window.** The feed's `<video>` decodes on the main thread,
+  so its playback can stall while the window is hidden, even though the worker
+  clock keeps ticking.
+- **Audio.** The canvas feed is video only; the main output's capture carries
+  audio on macOS.
 - **Workers can be throttled too** under OS power saving. 2D `OffscreenCanvas` in
   a worker would move the drawing itself off the main thread. It's not supported
   on older WebKitGTK and WKWebView, so it needs feature detection.
