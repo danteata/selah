@@ -20,6 +20,14 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITH
 
 use super::types::*;
 
+/// The WASAPI buffer, in 100 ns units. Events still arrive every device
+/// period; this is only how much audio the endpoint holds while this thread is
+/// busy. Sized at the minimum period it held ~3 ms, so any stall longer than
+/// that — preprocessing a packet, waiting on the `audio_buffer` lock a reader
+/// holds — lost audio. 200 ms absorbs those without adding latency, since we
+/// read whatever is ready on every event.
+const BUFFER_DURATION_HNS: i64 = 2_000_000;
+
 /// Start system audio capture on Windows using WASAPI loopback
 ///
 /// This captures the system audio output (what's playing through speakers/headphones).
@@ -107,7 +115,7 @@ pub fn start_system_audio_capture(
         // Key: get Render device + initialize with Capture direction = loopback mode
         let stream_mode = StreamMode::EventsShared {
             autoconvert: true,
-            buffer_duration_hns: min_period,
+            buffer_duration_hns: min_period.max(BUFFER_DURATION_HNS),
         };
 
         if let Err(e) =
@@ -148,6 +156,8 @@ pub fn start_system_audio_capture(
         // Lives for the whole capture loop: the resampler and the highpass
         // carry state that must not restart per WASAPI packet.
         let mut pre = AudioPreprocessor::new(source_sample_rate, channels as u16, None);
+        // Reused across packets rather than allocated per packet.
+        let mut buffer: Vec<u8> = Vec::new();
 
         // Capture loop
         loop {
@@ -161,7 +171,7 @@ pub fn start_system_audio_capture(
                 Ok(Some(frames_available)) => {
                     if frames_available > 0 {
                         let buf_size = frames_available as usize * channels * bytes_per_sample;
-                        let mut buffer = vec![0u8; buf_size];
+                        buffer.resize(buf_size, 0);
 
                         match capture_client.read_from_device(&mut buffer) {
                             Ok((frames_read, _buffer_info)) => {
@@ -238,6 +248,13 @@ pub fn start_system_audio_capture(
 
         // Cleanup
         audio_client.stop_stream().ok();
+        // The resampler's last partial block — the end of the last word.
+        let tail = pre.flush();
+        if !tail.is_empty() {
+            let mut buf = audio_buffer.lock();
+            buf.extend_from_slice(&tail);
+            buffer_size.store(buf.len(), Ordering::SeqCst);
+        }
         is_capturing.store(false, Ordering::SeqCst);
         println!("[WASAPI] Loopback capture stopped");
     });
