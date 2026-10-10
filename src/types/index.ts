@@ -47,6 +47,7 @@ export type AppEvents = {
     'upload-offline-slides': undefined
     'batch-update-slides': undefined
     'open-shortcuts': undefined
+    'import-pptx': undefined
     'promote-active-slide-live': undefined
 }
 
@@ -103,7 +104,7 @@ export interface Slide {
     title?: string
     songId?: string
     hasChorus?: boolean
-    data?: Song | Scripture | Hymn | DictionaryEntry | Countdown | ExtendedFileT | ExternalVideo
+    data?: Song | Scripture | Hymn | DictionaryEntry | Countdown | ExtendedFileT | ExternalVideo | PptxSlideData
     slideStyle?: SlideStyle
     saved?: boolean
     lockedBy?: string
@@ -178,6 +179,8 @@ export interface QuickAction {
     searchableOnly?: boolean
     meta?: string
     tier?: 'free' | 'pro'
+    /** Needs the desktop app; shown disabled on the web. */
+    desktopOnly?: boolean
 }
 
 export interface Scripture {
@@ -362,6 +365,15 @@ export interface ExternalVideo {
     type: string
     name?: string
     thumbnail?: string
+}
+
+/** What a slide imported from PowerPoint keeps from its deck (`lib/import/pptxToSlides`). */
+export interface PptxSlideData {
+    source: 'pptx'
+    deckName: string
+    /** 1-based, as PowerPoint numbers it. */
+    slideNumber: number
+    notes?: string
 }
 
 export interface Media {
@@ -718,6 +730,7 @@ export const appWideActions = {
     uploadOfflineSlides: 'upload-offline-slides',
     batchUpdateSlides: 'batch-update-slides',
     openShortcutsModal: 'open-shortcuts',
+    importPptx: 'import-pptx',
 } as const
 
 // ==================== Bible Books ====================
@@ -917,6 +930,15 @@ export const quickActionsArr: QuickAction[] = [
         meta: '',
         type: slideTypes.media,
         tier: 'pro',
+    },
+    {
+        icon: 'i-bx-slideshow',
+        name: 'Import PowerPoint',
+        desc: 'Turn a .pptx deck into editable slides',
+        action: appWideActions.importPptx,
+        meta: 'powerpoint pptx ppsx keynote google slides import deck presentation',
+        tier: 'pro',
+        desktopOnly: true,
     },
     {
         icon: 'i-bx-slideshow',

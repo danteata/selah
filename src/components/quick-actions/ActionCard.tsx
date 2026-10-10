@@ -1,5 +1,6 @@
 import { BookOpen, BookA, Music, Church, Image, Bell, Clock, FileText, Library, Plus, Search, Settings, Users, Keyboard, Moon, Trash2 } from 'lucide-react'
 import type { QuickAction } from '../../types'
+import { quickActionUnavailableReason } from './availability'
 
 interface ActionCardProps {
     action: QuickAction & { bibleChapterAndVerse?: string }
@@ -42,14 +43,17 @@ function PlayIcon({ className }: { className?: string }) {
 
 export function ActionCard({ action, dataActionIndex, isFocused, onClick }: ActionCardProps) {
     const Icon = iconMap[action.icon] || FileText
+    const unavailable = quickActionUnavailableReason(action)
 
     return (
         <button
             data-action-index={dataActionIndex}
             onClick={onClick}
+            disabled={!!unavailable}
+            title={unavailable ?? undefined}
             className={`
                 w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left
-                transition-all duration-150 group
+                transition-all duration-150 group disabled:opacity-50 disabled:cursor-not-allowed
                 ${isFocused
                     ? 'bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-400/40'
                     : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
@@ -79,7 +83,7 @@ export function ActionCard({ action, dataActionIndex, isFocused, onClick }: Acti
                     )}
                 </div>
                 <p className="text-xs text-gray-400 dark:text-gray-500 truncate leading-tight">
-                    {action.desc}
+                    {unavailable ?? action.desc}
                 </p>
             </div>
         </button>

@@ -25,6 +25,7 @@ import { saveMedia } from './useIndexedDB'
 import type { TemplateItem } from './useTemplates'
 import { useTemplates } from './useTemplates'
 import { sectionsForSong } from '../lib/songSections'
+import { buildPptxSlides, type PptxImportMode, type PptxImportResult } from '../lib/import/pptxToSlides'
 
 function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, defaultBg: string, defaultBgType: string, defaultBgVideoKey?: string): void {
     if (!template) {
@@ -810,6 +811,34 @@ export function useSlideCreation() {
         return slides
     }, [createMediaSlide])
 
+    /**
+     * Slides for a PowerPoint import, on Selah's defaults (background, style)
+     * where the deck sets nothing. `scheduleId` overrides the active schedule
+     * for a schedule created for the import a moment ago.
+     */
+    const createPptxSlides = useCallback((
+        result: PptxImportResult,
+        options: { mode: PptxImportMode; includeHidden: boolean; scheduleId?: string },
+    ): Slide[] => {
+        let index = activeSlides.length
+        const slides = buildPptxSlides(result, {
+            mode: options.mode,
+            includeHidden: options.includeHidden,
+            makeBase: () => {
+                const base = preSlideCreation()
+                base.index = index++
+                if (options.scheduleId) base.scheduleId = options.scheduleId
+                return base
+            },
+        })
+        trackEvent(AnalyticsEventType.SLIDE_CREATED, {
+            slide_type: options.mode === 'images' ? 'media' : 'text',
+            source: 'pptx_import',
+            count: slides.length,
+        })
+        return slides
+    }, [activeSlides.length, preSlideCreation, trackEvent])
+
     const createCountdownSlide = useCallback((countdown: Countdown): Slide => {
         const tempSlide = preSlideCreation()
         tempSlide.layout = slideLayoutTypes.countdown
@@ -883,6 +912,7 @@ export function useSlideCreation() {
         createSongSlides,
         createMediaSlide,
         createMultipleMediaSlides,
+        createPptxSlides,
         createCountdownSlide,
         createLowerThirdSlide,
         duplicateSlide,

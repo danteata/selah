@@ -37,6 +37,7 @@ const SlideEditor = lazy(() => import('../components/editor/SlideEditor').then((
 const LowerThirdEditor = lazy(() => import('../components/editor/LowerThirdEditor').then((m) => ({ default: m.LowerThirdEditor })))
 const MediaPicker = lazy(() => import('../components/media/MediaPicker').then((m) => ({ default: m.MediaPicker })))
 const ExternalVideoModal = lazy(() => import('../components/media/ExternalVideoModal').then((m) => ({ default: m.ExternalVideoModal })))
+const PptxImportModal = lazy(() => import('../components/media/PptxImportModal').then((m) => ({ default: m.PptxImportModal })))
 const TemplateBrowser = lazy(() => import('../components/templates/TemplateBrowser').then((m) => ({ default: m.TemplateBrowser })))
 const AddAlertModal = lazy(() => import('../components/alerts/AddAlertModal').then((m) => ({ default: m.AddAlertModal })))
 const AddCountdownModal = lazy(() => import('../components/countdown/AddCountdownModal').then((m) => ({ default: m.AddCountdownModal })))
@@ -520,6 +521,15 @@ export default function Dashboard() {
                         platform={quickActionsPage === 'vimeo' ? 'vimeo' : 'youtube'}
                         onClose={() => closeModal('externalVideo')}
                         onAdd={handleExternalVideoAdd}
+                    />
+                </Suspense>
+            )}
+
+            {modals.pptxImport && (
+                <Suspense fallback={null}>
+                    <PptxImportModal
+                        isOpen={modals.pptxImport}
+                        onClose={() => closeModal('pptxImport')}
                     />
                 </Suspense>
             )}

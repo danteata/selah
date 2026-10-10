@@ -90,6 +90,13 @@ export function useQuickActionHandlers(): QuickActionHandlersResult {
             }
         }))
 
+        // Open PowerPoint import. The modal itself says when it needs the
+        // desktop app or Pro.
+        unsubs.push(on(appWideActions.importPptx, () => {
+            trackEvent(AnalyticsEventType.QUICK_ACTION_USED, { action: 'importPptx' })
+            openModal('pptxImport')
+        }))
+
         // Open YouTube/Vimeo Video Modal — reuses `quickActionsPage` purely as
         // a "which platform" flag for the modal, distinct from its sidebar
         // sub-page meaning elsewhere.

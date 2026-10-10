@@ -34,6 +34,7 @@ export interface ModalState {
     scheduleModal: boolean
     lowerThirdEditor: boolean
     externalVideo: boolean
+    pptxImport: boolean
 }
 
 /** One step of the live arrangement, for the operator's position chips. */
@@ -222,6 +223,7 @@ const initialModalState: ModalState = {
     scheduleModal: false,
     lowerThirdEditor: false,
     externalVideo: false,
+    pptxImport: false,
 }
 
 const initialState: AppState = {
