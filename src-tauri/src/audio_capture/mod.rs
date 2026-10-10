@@ -8,7 +8,7 @@
 //! # Platform Support
 //! - macOS 12.3+: ScreenCaptureKit for system audio
 //! - Windows: WASAPI loopback for system audio
-//! - Linux: PulseAudio monitor source (microphone only for now)
+//! - Linux: the default output's PulseAudio/PipeWire monitor, via libpulse-simple
 
 // The probe drives a `transcribe_cpp::Session` in its own signatures, so it
 // only compiles when that crate is linked. Without the gate, `cargo test
@@ -120,8 +120,7 @@ pub fn is_system_audio_supported() -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        // Now partially implemented via monitor device search
-        true
+        linux::is_available()
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
@@ -300,7 +299,17 @@ fn start_audio_capture_internal(
                     stop_rx,
                 )
             }
-            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            #[cfg(target_os = "linux")]
+            {
+                linux::start_system_audio_capture(
+                    is_capturing,
+                    audio_buffer,
+                    buffer_size,
+                    sample_rate,
+                    stop_rx,
+                )
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
             {
                 Err("System audio capture not supported on this platform".to_string())
             }

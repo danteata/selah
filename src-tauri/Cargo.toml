@@ -118,6 +118,9 @@ transcribe-cpp = { version = "0.3", features = ["dynamic-backends", "vulkan"], o
 # MIT-SHM needs.
 x11-dl = "2.21"
 libc = "0.2"
+# System audio dlopens libpulse-simple (audio_capture::linux), so it is needed
+# whether or not NDI is built.
+libloading = "0.8"
 transcribe-cpp = { version = "0.3", features = ["dynamic-backends", "vulkan"], optional = true }  # Vulkan on Linux
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
