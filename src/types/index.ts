@@ -481,6 +481,8 @@ export interface AppSettings {
     liveOutputMonitorId?: string | null
     motionlessSlides?: boolean
     transitionInterval?: number
+    /** How text slides change on the output: a fade, or a word morph. */
+    slideTransition?: 'fade' | 'morph'
     alertLimit?: number
     // Default template IDs per slide type. Only the first five are read (see
     // `useSlideCreation`); the rest are retained so values persisted by an older

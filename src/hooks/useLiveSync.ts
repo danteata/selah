@@ -31,6 +31,7 @@ export function useLiveOutputSettings() {
         verseRefSizePercent: settings.slideStyles?.verseRefSizePercent,
         animations: settings.animations ?? true,
         transitionInterval: settings.transitionInterval ?? 0.7,
+        slideTransition: settings.slideTransition ?? 'fade',
         visualizerEnabled,
         liveOutputBlanked,
     }), [settings, visualizerEnabled, liveOutputBlanked])
