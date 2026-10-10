@@ -50,10 +50,14 @@ const drawnText = (calls: string[]) =>
     calls.filter((c) => c.startsWith('fillText')).map((c) => c.slice('fillText('.length).split('@')[0])
 
 describe('canRenderOnCanvas', () => {
-    it('is false for slides whose background can only come from the DOM', () => {
+    it('is false only for what the canvas can\'t draw: an external player', () => {
         expect(canRenderOnCanvas(slide())).toBe(true)
-        expect(canRenderOnCanvas(slide({ background: 'photo.jpg' }))).toBe(false)
-        expect(canRenderOnCanvas(slide({ type: 'media' }))).toBe(false)
+        expect(canRenderOnCanvas(slide({ background: 'photo.jpg' }))).toBe(true)
+        expect(canRenderOnCanvas(slide({ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }))).toBe(true)
+        expect(canRenderOnCanvas(slide({ background: 'motion:galaxy' }))).toBe(true)
+        expect(canRenderOnCanvas(slide({ background: 'clip.mp4', backgroundType: 'video' }))).toBe(true)
+        expect(canRenderOnCanvas(slide({ type: 'media', background: 'clip.mp4', backgroundType: 'video' }))).toBe(true)
+        expect(canRenderOnCanvas(slide({ type: 'media', backgroundType: 'external' }))).toBe(false)
         expect(canRenderOnCanvas(null)).toBe(true)
     })
 

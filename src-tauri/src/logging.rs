@@ -36,6 +36,37 @@ pub struct LogState {
     pub _guard: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
 
+/// Send panics to the log file as well as stderr.
+///
+/// The default hook only prints to stderr, which a user's support log never
+/// sees, so a panic on a background thread (an audio callback, a capture
+/// loop) disappeared without a trace. The previous hook still runs, so
+/// stderr and backtraces are unchanged.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(
+            "[panic] thread '{}' panicked at {}: {}",
+            std::thread::current().name().unwrap_or("<unnamed>"),
+            info.location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_else(|| "<unknown>".to_string()),
+            panic_message(info.payload()),
+        );
+        previous(info);
+    }));
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "<non-string panic payload>"
+    }
+}
+
 /// Initialize file logging and return (SentinelGuard, LogState).
 ///
 /// - Creates `{app_config_dir}/logs/` if it doesn't exist.
@@ -59,8 +90,11 @@ pub fn init_logging(app_config_dir: &PathBuf) -> (SentinelGuard, LogState) {
         .with(fmt::layer().with_writer(std::io::stdout))
         .with(fmt::layer().with_writer(non_blocking).with_ansi(false));
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    // Only fails if a subscriber is already installed; that one keeps logging.
+    if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+        eprintln!("[logging] Failed to set tracing subscriber: {}", e);
+    }
+    install_panic_hook();
 
     info!("[logging] Initialized file logging in {:?}", log_dir);
 
@@ -200,4 +234,19 @@ pub async fn check_previous_crash(
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     Ok(check_crash_detection(&config_dir).unwrap_or(false))
+}
+
+#[cfg(test)]
+mod panic_hook_tests {
+    use super::panic_message;
+
+    #[test]
+    fn reads_both_kinds_of_panic_payload() {
+        let literal: Box<dyn std::any::Any + Send> = Box::new("boom");
+        let formatted: Box<dyn std::any::Any + Send> = Box::new(String::from("boom 2"));
+        let other: Box<dyn std::any::Any + Send> = Box::new(42u8);
+        assert_eq!(panic_message(literal.as_ref()), "boom");
+        assert_eq!(panic_message(formatted.as_ref()), "boom 2");
+        assert_eq!(panic_message(other.as_ref()), "<non-string panic payload>");
+    }
 }

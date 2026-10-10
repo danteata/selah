@@ -36,6 +36,10 @@
 //! assumes, and says so when a prompt is supplied to a model that will ignore
 //! it.
 
+// Test-only (gated by `cfg(all(test, ...))` in mod.rs, which clippy's
+// allow-*-in-tests settings don't recognise), so the no-panic lints don't apply.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use super::vad::{SegmentCause, VadConfig, VadSegmenter};
 use std::path::PathBuf;
 

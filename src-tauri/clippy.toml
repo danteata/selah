@@ -1,0 +1,5 @@
+# Tests assert by unwrapping; the no-panic lints in Cargo.toml are for
+# production code.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

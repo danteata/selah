@@ -48,14 +48,16 @@ const PILL_HEIGHT: f64 = 60.0;
 /// of the macOS Dock and the Windows taskbar at their default sizes.
 const PILL_MARGIN_BOTTOM: f64 = 112.0;
 
-fn pill_url() -> WebviewUrl {
+fn pill_url() -> Result<WebviewUrl, String> {
     let origin = if cfg!(debug_assertions) {
         "http://localhost:3000"
     } else {
         "tauri://localhost"
     };
-    // `parse` cannot fail on either literal above.
-    WebviewUrl::External(format!("{origin}/dictation-pill.html").parse().unwrap())
+    format!("{origin}/dictation-pill.html")
+        .parse()
+        .map(WebviewUrl::External)
+        .map_err(|e| format!("Invalid dictation pill URL: {e}"))
 }
 
 /// Create the pill if it does not exist yet, leaving it hidden.
@@ -68,7 +70,7 @@ fn build_pill(app: &AppHandle) -> Result<WebviewWindow, String> {
         return Ok(existing);
     }
 
-    let window = WebviewWindowBuilder::new(app, PILL_LABEL, pill_url())
+    let window = WebviewWindowBuilder::new(app, PILL_LABEL, pill_url()?)
         .title("Dictation")
         .inner_size(PILL_WIDTH, PILL_HEIGHT)
         .decorations(false)

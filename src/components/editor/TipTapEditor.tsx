@@ -8,6 +8,7 @@ import Color from '@tiptap/extension-color'
 import FontFamily from '@tiptap/extension-font-family'
 import Placeholder from '@tiptap/extension-placeholder'
 import { TipTapToolbar } from './TipTapToolbar'
+import { cssFontStack } from '../../lib/fonts'
 
 interface TipTapEditorProps {
     content: string
@@ -78,7 +79,7 @@ export function TipTapEditor({
         editorProps: {
             attributes: {
                 class: `prose prose-slate dark:prose-invert max-w-none focus:outline-none min-h-[80px] p-3 ${className}`,
-                style: `font-family: ${font}; text-align: ${alignment};`,
+                style: `font-family: ${cssFontStack(font)}; text-align: ${alignment};`,
             },
         },
     })
@@ -179,7 +180,7 @@ export function TipTapInlineEditor({
         editorProps: {
             attributes: {
                 class: `prose prose-slate dark:prose-invert max-w-none focus:outline-none ${className}`,
-                style: `font-family: ${font}; text-align: ${alignment};`,
+                style: `font-family: ${cssFontStack(font)}; text-align: ${alignment};`,
             },
         },
     })

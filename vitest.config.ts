@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { version as pkgVersion } from './package.json'
@@ -15,6 +15,8 @@ export default defineConfig({
         environment: 'happy-dom',
         setupFiles: ['./src/test-setup.ts'],
         include: ['src/**/*.{test,spec}.{ts,tsx}'],
+        // Golden-image tests need a real browser: vitest.golden.config.ts.
+        exclude: [...configDefaults.exclude, 'src/**/*.golden.test.{ts,tsx}'],
         pool: 'forks',
         poolOptions: {
             forks: {

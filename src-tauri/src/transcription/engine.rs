@@ -21,7 +21,7 @@ use serde::Serialize;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
@@ -184,6 +184,10 @@ enum StreamCmd {
 pub struct StreamRouter {
     /// Command channel to the active streaming worker, present from
     /// `start_stream` until `finalize_stream`.
+    ///
+    /// Locked with poison recovery: the engine runs under `catch_unwind`, so
+    /// a caught panic must not make every later lock panic too, and an
+    /// `Option<Sender>` can't be left half-written.
     tx: Mutex<Option<mpsc::Sender<StreamCmd>>>,
     /// True while a stream is pending or active (channel is open). The
     /// capture loop checks this first to avoid the mutex lock when no stream
@@ -203,7 +207,7 @@ impl StreamRouter {
     /// receiver the worker should drain.
     fn open(&self) -> mpsc::Receiver<StreamCmd> {
         let (tx, rx) = mpsc::channel::<StreamCmd>();
-        *self.tx.lock().unwrap() = Some(tx);
+        *self.tx.lock().unwrap_or_else(PoisonError::into_inner) = Some(tx);
         self.open.store(true, Ordering::Relaxed);
         rx
     }
@@ -211,7 +215,7 @@ impl StreamRouter {
     /// Take the sender out (closing the channel to new feeds).
     fn take(&self) -> Option<mpsc::Sender<StreamCmd>> {
         self.open.store(false, Ordering::Relaxed);
-        self.tx.lock().unwrap().take()
+        self.tx.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 
     /// Drop the channel and mark closed without sending a final command (used
@@ -219,7 +223,7 @@ impl StreamRouter {
     /// model doesn't support streaming).
     fn clear(&self) {
         self.open.store(false, Ordering::Relaxed);
-        *self.tx.lock().unwrap() = None;
+        *self.tx.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     /// Forward a 16 kHz frame to the active streaming worker. Cheap no-op (a
@@ -228,7 +232,7 @@ impl StreamRouter {
         if !self.open.load(Ordering::Relaxed) {
             return;
         }
-        if let Some(tx) = self.tx.lock().unwrap().as_ref() {
+        if let Some(tx) = self.tx.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
             let _ = tx.send(StreamCmd::Feed(frame.to_vec(), Instant::now()));
         }
     }

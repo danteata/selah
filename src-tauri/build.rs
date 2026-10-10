@@ -1,3 +1,7 @@
+// A build script that can't continue should stop the build loudly; the
+// no-panic lints in Cargo.toml are for the app.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 fn main() {
     #[cfg(all(target_os = "macos", feature = "ndi"))]
     {

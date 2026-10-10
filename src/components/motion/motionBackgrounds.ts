@@ -51,6 +51,14 @@ export function seededRandom(seed: number): () => number {
     }
 }
 
+/** The seed a scene is set up with: a hash of its id, so every instance of a
+ *  background — every output, every thumbnail, every test — draws the same one. */
+export function motionSeed(id: string): number {
+    let h = 2166136261
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619)
+    return h >>> 0
+}
+
 function glow(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, alpha: number) {
     const g = ctx.createRadialGradient(x, y, 0, x, y, r)
     g.addColorStop(0, color.replace('ALPHA', String(alpha)))

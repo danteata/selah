@@ -21,6 +21,8 @@ import { drawRunLines, fitRuns } from './renderRuns'
 import { parseTextRuns } from './textRuns'
 import { isCaptionedSlideType, slideCaptionHtml } from '../../utils/slideCaption'
 import { resolveVerseRefPx, VERSE_REF_BOUNDS } from '../../utils/verseRefStyle'
+import { countdownRemainingSeconds, formatCountdownTime } from '../../utils/countdown'
+import { backdropFor, paintBackdrop, type Backdrop, type BackdropImages, type BackdropVideos, type MotionStates } from './renderBackdrop'
 
 export interface SlideRenderOptions extends LowerThirdRenderOptions {
     /** Paint a background behind the text. Off for a keyed feed, on for a feed
@@ -30,6 +32,23 @@ export interface SlideRenderOptions extends LowerThirdRenderOptions {
      *  setting, so one slide can be a full slide on the projector and a bar on
      *  the stream. */
     forceLowerThird?: boolean
+    /**
+     * With `opaqueBackground`, paint the slide's own backdrop (colour, gradient,
+     * image, motion) rather than black — the projector's picture, for a program
+     * feed. Resolve it with `backdropFor`.
+     */
+    backdrop?: Backdrop
+    /** Seconds on the feed's clock, for motion backgrounds. */
+    timeSec?: number
+    /** Decoded background images, shared across frames. */
+    images?: BackdropImages
+    /** The feed's video element, for video backgrounds and media. */
+    videos?: BackdropVideos
+    /** Motion background state, kept across frames. */
+    motionStates?: MotionStates
+    /** Wall-clock ms for a running countdown, and when this feed first showed it. */
+    nowMs?: number
+    countdownStartedAt?: number
 }
 
 /** Fraction of the frame reserved as a margin around body text. */
@@ -64,8 +83,51 @@ const BODY_HEIGHT_FRACTION = 0.74
 export function canRenderOnCanvas(slide: Slide | null): boolean {
     if (!slide) return true
     if (isLowerThird(slide)) return true
-    if (slide.type === 'media') return false
-    return !slide.background
+    return backdropFor(slide, null).kind !== 'unsupported'
+}
+
+/** Black, or the slide's backdrop when the feed asks for one. */
+function paintOpaque(ctx: Canvas2DLike, slide: Slide, options: SlideRenderOptions) {
+    if (options.backdrop) {
+        paintBackdrop(ctx, slide, options.backdrop, {
+            width: options.width,
+            height: options.height,
+            timeSec: options.timeSec ?? 0,
+            images: options.images,
+            videos: options.videos,
+            motionStates: options.motionStates,
+        })
+        return
+    }
+    ctx.fillStyle = '#000000'
+    ctx.fillRect(0, 0, options.width, options.height)
+}
+
+/** A countdown: its title, and the time left counting down. */
+export function renderCountdown(ctx: Canvas2DLike, slide: Slide, options: SlideRenderOptions) {
+    const { width, height } = options
+    ctx.clearRect(0, 0, width, height)
+    if (options.opaqueBackground) paintOpaque(ctx, slide, options)
+    const now = options.nowMs ?? Date.now()
+    const seconds = countdownRemainingSeconds(slide, now, options.countdownStartedAt ?? now)
+    const fontFamily = slide.slideStyle?.font || options.defaultFont || 'Inter, system-ui, sans-serif'
+    const color = options.textColor ?? '#ffffff'
+    const title = (slide.contents?.[0] ?? '').replace(/<[^>]*>/g, '').trim()
+    // Sizes from SlideView: the time at 20% of the width, the title at 4%.
+    const timePx = width * 0.2
+    const titlePx = width * 0.04
+    const timeY = height / 2 + (title ? titlePx * 0.8 : 0)
+    const maxWidth = width * (1 - TEXT_MARGIN * 2)
+    const line = (text: string, fontPx: number, weight: string, baselineY: number) => {
+        const runs = [{ text, bold: weight === '700', italic: false, color: null }]
+        const { lines, fontPx: fitted } = fitRuns(ctx, runs, { fontPx, fontFamily, weight, maxWidth, maxLines: 1 })
+        drawRunLines(ctx, lines, {
+            fontPx: fitted, fontFamily, weight, align: 'center', x: width / 2,
+            firstBaselineY: baselineY, lineHeight: fitted, color, outlined: !!slide.slideStyle?.textOutlined,
+        })
+    }
+    if (title) line(title, titlePx, '400', timeY - timePx * 0.62)
+    line(formatCountdownTime(seconds), timePx, '700', timeY)
 }
 
 /** Centred body text with an optional caption — the ordinary slide look. */
@@ -75,10 +137,11 @@ export function renderTextSlide(ctx: Canvas2DLike, slide: Slide, options: SlideR
     ctx.clearRect(0, 0, width, height)
     ctx.save()
 
-    if (options.opaqueBackground) {
-        ctx.fillStyle = '#000000'
-        ctx.fillRect(0, 0, width, height)
-    }
+    if (options.opaqueBackground) paintOpaque(ctx, slide, options)
+
+    // Body alignment follows the slide, as on the projector; the caption stays centred.
+    const align = (['left', 'center', 'right'] as const).find((a) => a === slide.slideStyle?.alignment) ?? 'center'
+    const bodyX = align === 'left' ? width * TEXT_MARGIN : align === 'right' ? width * (1 - TEXT_MARGIN) : width / 2
 
     const fontFamily = slide.slideStyle?.font || options.defaultFont || 'Inter, system-ui, sans-serif'
     const color = options.textColor ?? '#ffffff'
@@ -109,8 +172,8 @@ export function renderTextSlide(ctx: Canvas2DLike, slide: Slide, options: SlideR
             fontPx,
             fontFamily,
             weight: '600',
-            align: 'center',
-            x: width / 2,
+            align,
+            x: bodyX,
             firstBaselineY: firstY,
             lineHeight,
             color,
@@ -170,6 +233,19 @@ export function renderSlideToCanvas(ctx: Canvas2DLike, slide: Slide | null, opti
 
     if (options.forceLowerThird || isLowerThird(slide)) {
         renderLowerThird(ctx, slide, options)
+        return
+    }
+
+    if (slide.type === 'countdown') {
+        renderCountdown(ctx, slide, options)
+        return
+    }
+
+    if (slide.type === 'media') {
+        // The photo or video is the content itself: drawn on every feed, keyed
+        // or not, with nothing on top.
+        ctx.clearRect(0, 0, options.width, options.height)
+        if (options.backdrop) paintOpaque(ctx, slide, options)
         return
     }
 

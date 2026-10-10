@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { motionBackgroundFor, seededRandom, type MotionBackground } from './motionBackgrounds'
+import { motionBackgroundFor, motionSeed, seededRandom, type MotionBackground } from './motionBackgrounds'
 
 /** Longest side drawn, in canvas pixels. The scenes are soft, so a 1280-wide
  *  canvas scaled to a 1080p projector looks the same and costs a third. */
@@ -43,7 +43,7 @@ export function MotionCanvas({ background, className = '', style, still = false 
             height = h
             canvas.width = w
             canvas.height = h
-            state = motion.scene.setup(w, h, seededRandom(hash(motion.id)))
+            state = motion.scene.setup(w, h, seededRandom(motionSeed(motion.id)))
         }
 
         const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null
@@ -81,10 +81,4 @@ export function MotionCanvas({ background, className = '', style, still = false 
             style={{ backgroundImage: motion.poster, width: '100%', height: '100%', display: 'block', ...style }}
         />
     )
-}
-
-function hash(text: string): number {
-    let h = 2166136261
-    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)
-    return h >>> 0
 }

@@ -12,6 +12,7 @@ import { BackgroundPicker, type BackgroundSelection } from '../utils/BackgroundP
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 import { useGuardedClose } from '../../hooks/useGuardedClose'
 import { Modal } from '../modals/Modal'
+import { SLIDE_FONTS } from '../../lib/fonts'
 
 const REF_STYLE_COLOR_PRESETS = ['#ffffff', '#f59e0b', '#0d9488', '#3b82f6', '#ef4444']
 
@@ -96,10 +97,7 @@ export function SlideEditor({ slide, isOpen, onClose, onSave }: SlideEditorProps
         { value: 'right', icon: AlignRight },
     ]
 
-    const fontOptions = [
-        'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat',
-        'Source Sans Pro', 'Poppins', 'Nunito', 'Georgia', 'Playfair Display'
-    ]
+    const fontOptions = SLIDE_FONTS.map((f) => f.family)
 
     return (
         // Escape and a backdrop click go through the unsaved-changes guard; a

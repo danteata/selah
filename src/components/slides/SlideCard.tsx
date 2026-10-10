@@ -12,6 +12,7 @@ import { getObjectFit, getBackgroundSize } from '../../utils/mediaFit'
 import { slideCaptionHtml } from '../../utils/slideCaption'
 import { useAppStore } from '../../store/appStore'
 import { slideBodyHtml } from '../../utils/slideHtml'
+import { cssFontStack } from '../../lib/fonts'
 
 interface SlideCardProps {
     slide: Slide
@@ -77,7 +78,7 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     // Per-slide font, falling back to the user's global default so the
     // queue preview actually reflects the font they'll see on stage.
     const defaultFont = useAppStore((state) => state.settings.defaultFont)
-    const slideFont = slide.slideStyle?.font || defaultFont || 'Inter'
+    const slideFont = cssFontStack(slide.slideStyle?.font || defaultFont)
 
     // Check if this is a video background
     // A motion background shows its still poster here: dozens of animating

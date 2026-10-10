@@ -1,4 +1,5 @@
 import type { Emitter, EventType } from 'mitt'
+import type { TextAnimation } from '../lib/animation/textBuildIn'
 
 // ==================== App Events Type ====================
 
@@ -418,6 +419,8 @@ export interface SlideStyle {
     // Lower Third settings
     lowerThirdStyle?: 'standard' | 'minimalist' | 'accent-bar' | 'gradient-bar'
     lowerThirdPosition?: 'left' | 'center' | 'right'
+    /** How a lower third's text builds in (lib/animation/textBuildIn). */
+    textAnimation?: TextAnimation
     lowerThirdAccentColor?: string
     lowerThirdSubtitle?: string
     // Verse reference position
@@ -478,6 +481,8 @@ export interface AppSettings {
     liveOutputMonitorId?: string | null
     motionlessSlides?: boolean
     transitionInterval?: number
+    /** How text slides change on the output: a fade, or a word morph. */
+    slideTransition?: 'fade' | 'morph'
     alertLimit?: number
     // Default template IDs per slide type. Only the first five are read (see
     // `useSlideCreation`); the rest are retained so values persisted by an older

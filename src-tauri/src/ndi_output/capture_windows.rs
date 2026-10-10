@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 use windows::core::{Interface, Result as WinResult};
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem};
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+use windows::Win32::Foundation::{BOOL, E_POINTER, HWND, LPARAM, TRUE};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
@@ -158,7 +158,10 @@ fn create_d3d_device() -> WinResult<(ID3D11Device, ID3D11DeviceContext)> {
         )?;
     }
 
-    Ok((device.unwrap(), context.unwrap()))
+    match (device, context) {
+        (Some(device), Some(context)) => Ok((device, context)),
+        _ => Err(E_POINTER.into()),
+    }
 }
 
 fn capture_item_for(hwnd: HWND) -> WinResult<GraphicsCaptureItem> {
@@ -232,7 +235,9 @@ fn run_capture(hwnd: HWND, sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Wi
                 if staging.as_ref().map(|(_, w, h)| (*w, *h)) != Some((width, height)) {
                     staging = Some((create_staging_texture(&device, width, height)?, width, height));
                 }
-                let (staging_texture, _, _) = staging.as_ref().unwrap();
+                let Some((staging_texture, _, _)) = staging.as_ref() else {
+                    continue;
+                };
 
                 unsafe {
                     context.CopyResource(staging_texture, &texture);
@@ -308,7 +313,7 @@ fn create_staging_texture(
 
     let mut texture: Option<ID3D11Texture2D> = None;
     unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture))? };
-    Ok(texture.unwrap())
+    texture.ok_or_else(|| E_POINTER.into())
 }
 
 /// Whether this machine can do WGC at all. `GraphicsCaptureSession::IsSupported`

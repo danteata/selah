@@ -1,0 +1,103 @@
+name: CI
+
+# Tests, lint, golden images and the Rust no-panic lints on every pull request and push to
+# main. build-desktop.yml only runs on release tags and only builds, so until
+# this existed nothing ran the test suites or clippy before a change merged.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend (lint, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Same pin as build-desktop.yml.
+          bun-version: 1.4.0
+
+      - run: bun install
+      - run: bun run lint
+      - run: bun run test
+
+  golden:
+    name: Golden images
+    runs-on: ubuntu-latest
+    # The same image goldens are recorded in (docs/TESTING.md), so text
+    # rasterises identically. Keep its tag equal to the playwright devDependency.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - run: bun install
+      - run: bun run test:golden
+
+      - name: Upload golden diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-diffs
+          path: test-results/golden/
+
+  rust:
+    name: Rust (clippy, tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        # Same list as build-desktop.yml minus vulkan-sdk and libfuse2: this job
+        # builds without native-transcription (whose ggml Vulkan build needs
+        # the LunarG SDK) and bundles nothing.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Stub build inputs that aren't in git
+        # tauri::generate_context! embeds ../dist, and tauri-build fails when a
+        # bundle resource glob matches nothing. Neither matters for clippy or
+        # unit tests, so stand-ins are enough.
+        run: |
+          mkdir -p dist src-tauri/assets/embedding-models/ci
+          echo '<!doctype html>' > dist/index.html
+          touch src-tauri/assets/embedding-models/ci/placeholder
+
+      # The no-panic lints (unwrap_used, expect_used, panic, todo,
+      # unimplemented) are `deny` in Cargo.toml, so they fail this step; other
+      # clippy warnings are reported but don't.
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --no-default-features --features ndi
+
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --no-default-features --features ndi

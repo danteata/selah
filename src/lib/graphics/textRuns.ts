@@ -17,6 +17,8 @@
  * (`TipTapEditor.tsx`), so those are what this understands.
  */
 
+import { cssFontStack } from '../fonts'
+
 export interface TextRun {
     text: string
     bold: boolean
@@ -141,9 +143,13 @@ export function runsToText(runs: TextRun[]): string {
     return runs.map((run) => run.text).join('').trim()
 }
 
-/** `ctx.font` for a run at a given size. */
+/**
+ * `ctx.font` for a run at a given size. The family goes through `cssFontStack`:
+ * an unquoted family that isn't a valid CSS identifier makes the whole value
+ * invalid, and the canvas silently keeps its previous font.
+ */
 export function fontForRun(run: TextRun, fontPx: number, fontFamily: string, baseWeight: string): string {
     const weight = run.bold ? '700' : baseWeight
     const style = run.italic ? 'italic ' : ''
-    return `${style}${weight} ${Math.round(fontPx)}px ${fontFamily}`
+    return `${style}${weight} ${Math.round(fontPx)}px ${cssFontStack(fontFamily)}`
 }

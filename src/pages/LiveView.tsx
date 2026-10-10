@@ -27,6 +27,7 @@ interface LiveState {
         verseRefSizePercent?: number
         animations?: boolean
         transitionInterval?: number
+        slideTransition?: 'fade' | 'morph'
         visualizerEnabled?: boolean
         liveOutputBlanked?: boolean
     }

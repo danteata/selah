@@ -309,7 +309,10 @@ pub async fn identify_monitor(
         "tauri://localhost"
     };
     let url = format!("{}/identify.html", dev_url);
-    let webview_url = tauri::WebviewUrl::External(url.parse().unwrap());
+    let webview_url = tauri::WebviewUrl::External(url.parse().map_err(|e| MultiMonitorError {
+        code: "WINDOW_CREATE_FAILED".to_string(),
+        message: format!("Invalid identification window URL {}: {}", url, e),
+    })?);
 
     let window = tauri::WebviewWindowBuilder::new(&app, label, webview_url)
         .title("Identify")

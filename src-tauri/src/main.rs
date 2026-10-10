@@ -124,12 +124,12 @@ use ndi_output::{
     ndi_get_state,
     ndi_start_output,
     ndi_stop_output,
-    ndi_send_video_frame,
     ndi_send_audio_frame,
     ndi_push_open,
     ndi_push_close,
     ndi_push_frame,
     ndi_push_frames_sent,
+    ndi_push_stats,
     ndi_discover_sources,
 };
 
@@ -378,12 +378,12 @@ pub fn run() {
             ndi_get_state,
             ndi_start_output,
             ndi_stop_output,
-            ndi_send_video_frame,
             ndi_send_audio_frame,
             ndi_push_open,
             ndi_push_close,
             ndi_push_frame,
             ndi_push_frames_sent,
+            ndi_push_stats,
             ndi_discover_sources,
             log_message,
             get_logs,
@@ -416,8 +416,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             // Initialize file logging and crash detection
-            let app_config_dir = app.path().app_config_dir()
-                .expect("Failed to get app config dir");
+            let app_config_dir = app.path().app_config_dir()?;
             std::fs::create_dir_all(&app_config_dir)
                 .unwrap_or_else(|e| eprintln!("[main] Failed to create config dir: {}", e));
             
@@ -496,13 +495,18 @@ pub fn run() {
 
             #[cfg(debug_assertions)]
             {
-                let window = app.get_webview_window("main").unwrap();
-                window.open_devtools();
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
             }
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            tracing::error!("[main] error while running tauri application: {}", e);
+            eprintln!("error while running tauri application: {e}");
+            std::process::exit(1);
+        });
 }
 
 fn main() {
