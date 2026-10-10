@@ -1,0 +1,266 @@
+{
+  "deckName": "deck",
+  "aspect": 1.778,
+  "warnings": [],
+  "slides": [
+    {
+      "index": 0,
+      "hidden": false,
+      "title": "Amazing Grace",
+      "paragraphs": [
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Amazing Grace",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri Light"
+            }
+          ]
+        },
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Amazing grace, how sweet the sound",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "That saved a wretch like me",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "I once was lost, but now am found",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Was blind, but now I see",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.0625,
+        "y": 0.05,
+        "w": 0.875,
+        "h": 0.8667
+      },
+      "background": {
+        "kind": "image",
+        "path": "media/image-10.png"
+      },
+      "warnings": []
+    },
+    {
+      "index": 1,
+      "hidden": false,
+      "paragraphs": [
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Ɛyɛ me dɛ sɛ meyɛ wo dea\nƆdɔ a ɛnni awieeɛ",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": []
+        },
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Nyame ne ɔhene",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.0625,
+        "y": 0.25,
+        "w": 0.875,
+        "h": 0.6667
+      },
+      "background": {
+        "kind": "image",
+        "path": "media/image-10.png"
+      },
+      "notes": "Sing twice\nKey of G",
+      "warnings": []
+    },
+    {
+      "index": 2,
+      "hidden": true,
+      "title": "Chorus",
+      "paragraphs": [
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Chorus",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri Light"
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "How ",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            },
+            {
+              "text": "great",
+              "b": true,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            },
+            {
+              "text": " is ",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            },
+            {
+              "text": "our God",
+              "b": false,
+              "i": true,
+              "u": true,
+              "color": "#ffc000",
+              "font": "Calibri"
+            },
+            {
+              "text": ", sing with me",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Montserrat"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.0625,
+        "y": 0.05,
+        "w": 0.875,
+        "h": 0.8667
+      },
+      "background": {
+        "kind": "image",
+        "path": "media/image-10.png"
+      },
+      "warnings": []
+    },
+    {
+      "index": 3,
+      "hidden": false,
+      "paragraphs": [
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Thank you for worshipping with us",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#ffffff",
+              "font": "Calibri"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.0625,
+        "y": 0.25,
+        "w": 0.875,
+        "h": 0.6667
+      },
+      "background": {
+        "kind": "color",
+        "color": "#1f3864"
+      },
+      "warnings": []
+    }
+  ]
+}

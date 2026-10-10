@@ -54,6 +54,17 @@ libloading = { version = "0.8", optional = true }
 # tables below.
 transcribe-rs = { version = "0.3.8", features = ["onnx"], optional = true }
 transcribe-cpp = { version = "0.3", optional = true }
+# PowerPoint import (src/pptx_import.rs), behind the `pptx-import` feature.
+# deckcraft (MIT OR Apache-2.0, see THIRD_PARTY_NOTICES.md) reads the package
+# and resolves the slide → layout → master → theme formatting chain. Pinned to
+# a commit, not a branch: it is young and untested on real-world decks, so an
+# upgrade should be a reviewed change. `render` draws slides for images mode
+# (`pptx-images`). zip is the same major version deckcraft uses, so the
+# container check adds no second copy.
+deckcraft-pptx = { git = "https://github.com/storytold/deckcraft", rev = "84acb49895c8190396b686c1eb9f20c730e48633", optional = true }
+deckcraft-model = { git = "https://github.com/storytold/deckcraft", rev = "84acb49895c8190396b686c1eb9f20c730e48633", optional = true }
+deckcraft-render = { git = "https://github.com/storytold/deckcraft", rev = "84acb49895c8190396b686c1eb9f20c730e48633", optional = true }
+zip = { version = "3", default-features = false, features = ["deflate"], optional = true }
 
 # Platform-specific dependencies for system audio capture
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -132,10 +143,17 @@ tauri-plugin-global-shortcut = "2.0"
 
 [features]
 # Native in-process transcription is now the default engine (transcribe-rs).
-default = ["custom-protocol", "native-transcription", "ndi"]
+default = ["custom-protocol", "native-transcription", "ndi", "pptx-import"]
 custom-protocol = ["tauri/custom-protocol"]
 ndi = ["dep:libloading"]
 native-transcription = ["dep:transcribe-rs", "dep:transcribe-cpp"]
+# PowerPoint import, editable mode (text, backgrounds, notes).
+pptx-import = ["dep:deckcraft-pptx", "dep:deckcraft-model", "dep:zip"]
+# PowerPoint import, images mode: each slide rendered to a picture. Off by
+# default: deckcraft-render pulls in epaint_default_fonts 0.36, which needs
+# rustc 1.95, and the mode is untested on real decks. Exporting PNGs from
+# PowerPoint and adding them as media does the same job meanwhile.
+pptx-images = ["pptx-import", "dep:deckcraft-render"]
 
 # A panic mid-service takes the projector down with it, so production code
 # returns errors instead. Tests may still unwrap (clippy.toml). Startup code that

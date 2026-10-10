@@ -38,6 +38,8 @@ mod multi_monitor;
 mod ndi_output;
 mod oauth_listener;
 mod platform;
+// PowerPoint import; the deckcraft reader inside is behind `pptx-import`.
+mod pptx_import;
 mod shortcuts;
 // Model catalog/downloader always compiles; the transcribe-rs engine inside is
 // gated behind the `native-transcription` feature.
@@ -413,6 +415,9 @@ pub fn run() {
             show_dictation_pill,
             hide_dictation_pill,
             close_dictation_pill,
+            pptx_import::pptx_import,
+            pptx_import::pptx_import_cancel,
+            pptx_import::pptx_import_capabilities,
         ])
         .setup(move |app| {
             // Initialize file logging and crash detection
