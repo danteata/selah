@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowUpCircle, X, Loader2, AlertTriangle } from 'lucide-react'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
 import { useDialog } from '../../hooks/useDialog'
+import { ReleaseNotes } from './ReleaseNotes'
 
 /**
  * UpdatePrompt — the pill in the top bar that says an update is waiting.
@@ -68,7 +69,7 @@ export function UpdatePrompt() {
                             aria-modal="true"
                             aria-label="Update Selah"
                             tabIndex={-1}
-                            className="relative w-full max-w-md rounded-2xl outline-none bg-[var(--bg-secondary)] border border-[var(--border-default)] shadow-2xl overflow-hidden"
+                            className="relative w-full max-w-lg rounded-2xl outline-none bg-[var(--bg-secondary)] border border-[var(--border-default)] shadow-2xl overflow-hidden"
                         >
                             <div className="flex items-start gap-3 p-4 border-b border-[var(--border-subtle)]">
                                 <div className="p-2 rounded-lg bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] flex-shrink-0">
@@ -94,10 +95,8 @@ export function UpdatePrompt() {
                             </div>
 
                             {available.notes && (
-                                <div className="px-4 py-3 max-h-56 overflow-y-auto">
-                                    <p className="text-xs leading-relaxed text-[var(--text-secondary)] whitespace-pre-line">
-                                        {available.notes}
-                                    </p>
+                                <div className="px-5 py-4 max-h-[55vh] overflow-y-auto">
+                                    <ReleaseNotes markdown={available.notes} version={available.version} />
                                 </div>
                             )}
 
