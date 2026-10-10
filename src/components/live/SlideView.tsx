@@ -11,6 +11,8 @@ import { countdownDurationSeconds, formatCountdownTime, useCountdownSeconds } fr
 import { slideBackgroundFilter } from '../../utils/slideBackground'
 import { slideBodyHtml } from '../../utils/slideHtml'
 import { cssFontStack } from '../../lib/fonts'
+import { isTextBuildInPreset, wrapUnits, type TextAnimation } from '../../lib/animation/textBuildIn'
+import { prefersReducedMotion, useTextBuildIn } from '../../hooks/useTextBuildIn'
 import { AutoFitText } from './AutoFitText'
 import { KineticText } from './KineticText'
 import { VideoBackground } from './VideoBackground'
@@ -170,6 +172,25 @@ export function SlideView({
         [slide.id]
     )
 
+    // A lower third's title (and caption) can build in letter by letter or word
+    // by word. Only where the slide animates at all: never in thumbnails, the
+    // Next Up preview, with animations off, or for a viewer who asked for less
+    // motion. Text that won't animate is never wrapped, because the wrapped
+    // units start hidden.
+    const storedAnimation = slide.slideStyle?.textAnimation
+    const textAnimation: TextAnimation | null =
+        slide.layout === 'lower-third' && animate && settings.animations !== false
+            && isTextBuildInPreset(storedAnimation?.preset) && !prefersReducedMotion()
+            ? storedAnimation ?? null
+            : null
+    const buildInPreset = textAnimation?.preset
+    const lowerThirdBodyHtml = useMemo(() => {
+        const html = slideBodyHtml(slide.contents[0])
+        return buildInPreset ? wrapUnits(html, buildInPreset) : html
+    }, [slide.contents, buildInPreset])
+    const [lowerThirdEl, setLowerThirdEl] = useState<HTMLDivElement | null>(null)
+    useTextBuildIn(lowerThirdEl, textAnimation, `${slide.id}:${lowerThirdBodyHtml}`)
+
     const isMedia = slide.type === slideTypes.media
     const motion = motionBackgroundFor(slide.background)
     const isVideoBackground = !motion && slide.backgroundType === 'video' && !!backgroundUrl
@@ -201,7 +222,9 @@ export function SlideView({
             const alignItems = position === 'center' ? 'center' : position === 'right' ? 'flex-end' : 'flex-start'
             const textAlign = (position as 'left' | 'center' | 'right') || 'left'
 
-            const captionNode = (captionHtml || subtitle) && (
+            // The subtitle is plain text; as markup it can be wrapped for the build-in too.
+            const captionMarkup = captionHtml || (subtitle && escapeHtml(subtitle))
+            const captionNode = captionMarkup && (
                 <div
                     className="shrink-0 drop-shadow-lg"
                     style={{
@@ -212,15 +235,13 @@ export function SlideView({
                         textAlign,
                         ...getVerseRefStyle(slide.slideStyle, settings, scaledBounds(VERSE_REF_BOUNDS.lowerThird, scale, captionFloor)),
                     }}
-                    // The Bible reference is HTML so its <b> book title renders; a subtitle is plain.
-                    {...(captionHtml
-                        ? { dangerouslySetInnerHTML: { __html: captionHtml } }
-                        : { children: subtitle })}
+                    // The Bible reference is HTML so its <b> book title renders.
+                    dangerouslySetInnerHTML={{ __html: buildInPreset ? wrapUnits(captionMarkup, buildInPreset) : captionMarkup }}
                 />
             )
 
             return (
-                <div className="absolute inset-x-0 bottom-0" style={{ height: '30cqh' }}>
+                <div ref={setLowerThirdEl} className="absolute inset-x-0 bottom-0" style={{ height: '30cqh' }}>
                     <div
                         className="w-full h-full flex flex-col"
                         style={{ alignItems, padding: `${u(20)} ${u(48)}`, gap: u(8), ...lowerThirdBar(slide.slideStyle) }}
@@ -228,7 +249,7 @@ export function SlideView({
                         {captionOnTop && captionNode}
                         <KineticText enabled={visualizer} className="w-full flex-1 min-h-0">
                             <AutoFitText
-                                html={slideBodyHtml(slide.contents[0])}
+                                html={lowerThirdBodyHtml}
                                 className="w-full h-full text-white drop-shadow-lg tiptap-preview"
                                 minPx={px(18)}
                                 maxPx={px(160)}
@@ -405,4 +426,8 @@ export function SlideView({
             </div>
         </div>
     )
+}
+
+function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }

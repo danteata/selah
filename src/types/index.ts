@@ -1,4 +1,5 @@
 import type { Emitter, EventType } from 'mitt'
+import type { TextAnimation } from '../lib/animation/textBuildIn'
 
 // ==================== App Events Type ====================
 
@@ -418,6 +419,8 @@ export interface SlideStyle {
     // Lower Third settings
     lowerThirdStyle?: 'standard' | 'minimalist' | 'accent-bar' | 'gradient-bar'
     lowerThirdPosition?: 'left' | 'center' | 'right'
+    /** How a lower third's text builds in (lib/animation/textBuildIn). */
+    textAnimation?: TextAnimation
     lowerThirdAccentColor?: string
     lowerThirdSubtitle?: string
     // Verse reference position

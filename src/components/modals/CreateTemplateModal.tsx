@@ -16,6 +16,8 @@ import { OFFERED_MOTION_BACKGROUNDS, MOTION_PREFIX } from '../motion/motionBackg
 import { openExternalUrl } from '../../utils/openExternalUrl'
 import type { SlideStyle } from '../../types'
 import { Modal } from './Modal'
+import { TextBuildInPicker } from '../editor/TextBuildInPicker'
+import type { TextAnimation } from '../../lib/animation/textBuildIn'
 
 type TemplateLayout = 'full-text' | 'lower-third'
 
@@ -118,6 +120,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const [lowerThirdPosition, setLowerThirdPosition] = useState<NonNullable<SlideStyle['lowerThirdPosition']>>('left')
     const [lowerThirdAccentColor, setLowerThirdAccentColor] = useState<string>('#0d9488')
     const [lowerThirdSubtitle, setLowerThirdSubtitle] = useState<string>('')
+    const [textAnimation, setTextAnimation] = useState<TextAnimation | undefined>(undefined)
 
     const isEditing = !!editingTemplate
 
@@ -179,6 +182,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setLowerThirdPosition(slideData?.slideStyle?.lowerThirdPosition || 'left')
                 setLowerThirdAccentColor(slideData?.slideStyle?.lowerThirdAccentColor || '#0d9488')
                 setLowerThirdSubtitle(slideData?.slideStyle?.lowerThirdSubtitle || '')
+                setTextAnimation(slideData?.slideStyle?.textAnimation)
             } else {
                 // Reset form for new template
                 setName('')
@@ -198,6 +202,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setLowerThirdPosition('left')
                 setLowerThirdAccentColor('#0d9488')
                 setLowerThirdSubtitle('')
+                setTextAnimation(undefined)
             }
         }
     }, [isOpen, editingTemplate])
@@ -436,6 +441,7 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     lowerThirdPosition,
                     lowerThirdAccentColor,
                     lowerThirdSubtitle,
+                    textAnimation,
                 }
                 : undefined
 
@@ -727,6 +733,9 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                     })}
                                 </div>
                             </div>
+
+                            {/* Text build-in */}
+                            <TextBuildInPicker value={textAnimation} onChange={setTextAnimation} />
 
                             {/* Accent Color */}
                             <div>
