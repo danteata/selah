@@ -97,3 +97,6 @@ src-tauri/windows-runtime/
 # any Linux build without the native-transcription feature.
 src-tauri/linux-runtime/*
 !src-tauri/linux-runtime/.gitkeep
+
+# Golden-image diffs written when a comparison fails (bun run test:golden)
+test-results/

@@ -230,6 +230,7 @@ selah/
 | `lint` | Run ESLint |
 | `test` | Run all tests once |
 | `test:watch` | Run tests in watch mode |
+| `test:golden` | Golden-image tests in headless Chromium (see [docs/TESTING.md](docs/TESTING.md)) |
 | `download-gguf-model` | Download the bundled GGUF Whisper model for native transcription |
 | `build-dictionary-packs` | Rebuild the bundled dictionary packs in `public/dictionaries/` |
 | `desktop:dev` | Download assets, then start the Tauri desktop app in dev mode |
