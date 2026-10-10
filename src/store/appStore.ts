@@ -34,6 +34,7 @@ export interface ModalState {
     scheduleModal: boolean
     lowerThirdEditor: boolean
     externalVideo: boolean
+    pptxImport: boolean
 }
 
 /** One step of the live arrangement, for the operator's position chips. */
@@ -223,6 +224,7 @@ const initialModalState: ModalState = {
     scheduleModal: false,
     lowerThirdEditor: false,
     externalVideo: false,
+    pptxImport: false,
 }
 
 const initialState: AppState = {
@@ -541,12 +543,24 @@ export const useAppStore = create<AppStore>()(
                 })
             },
 
+            // The batch form of appendActiveSlide, with the same rules: one undo
+            // step, slides already present are skipped, and the new ids join the
+            // end of the operator's deck. Rebuilding the deck from every active
+            // slide here put back slides the operator had left out of it.
             appendActiveSlides: (slides) => {
                 set((state) => {
-                    const tempSlides = [...state.activeSlides, ...slides]
+                    const present = new Set(state.activeSlides.map((s) => s?.id))
+                    const added = ensureUniqueIds(slides.filter((s) => s && !present.has(s.id)))
+                    if (added.length === 0) return state
+
+                    const currentOrder = state.liveOutputSlidesId || []
+                    const inDeck = new Set(currentOrder)
+                    const newIds = added.map((s) => s.id).filter((id) => id && !inDeck.has(id))
+
                     return {
-                        activeSlides: ensureUniqueIds(tempSlides),
-                        liveOutputSlidesId: Array.from(new Set(tempSlides.map((slide) => slide.id))),
+                        pastStates: pushHistory(state),
+                        activeSlides: [...state.activeSlides, ...added],
+                        liveOutputSlidesId: [...currentOrder, ...newIds],
                         futureStates: []
                     }
                 })

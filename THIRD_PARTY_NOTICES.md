@@ -1,6 +1,7 @@
 # Third-party notices
 
-Code in Selah that is ported from other open-source projects, with its licence.
+Code in Selah that is ported from, or depends on, other open-source projects,
+with its licence.
 Fonts are listed separately, in THIRD_PARTY_FONTS.md.
 
 ## EffectCraft
@@ -44,6 +45,12 @@ under MIT.
 
 - `src/lib/animation/wordMorph.ts`: the Morph transition's word matching and
   motion, from `crates/render/src/morph_text.rs`
+- PowerPoint import in the desktop app (`src-tauri/src/pptx_import.rs`) uses
+  the `deckcraft-pptx` and `deckcraft-model` crates, unmodified, at commit
+  `84acb49895c8190396b686c1eb9f20c730e48633`
+- the font substitution table in `src/lib/import/pptxToSlides.ts` is modelled
+  on DeckCraft's `substitutes()` (`crates/fonts/src/fontdb.rs`), cut down to the
+  fonts Selah ships
 
 ```
 MIT License

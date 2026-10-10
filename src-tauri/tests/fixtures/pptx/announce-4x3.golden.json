@@ -1,0 +1,246 @@
+{
+  "deckName": "deck",
+  "aspect": 1.333,
+  "warnings": [],
+  "slides": [
+    {
+      "index": 0,
+      "hidden": false,
+      "title": "Church Announcements",
+      "paragraphs": [
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Church Announcements",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri Light"
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "level": 0,
+          "bullet": "bullet",
+          "runs": [
+            {
+              "text": "Youth camp",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "level": 1,
+          "bullet": "bullet",
+          "runs": [
+            {
+              "text": "Register by Friday",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "level": 0,
+          "bullet": "bullet",
+          "runs": [
+            {
+              "text": "Choir practice",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.05,
+        "y": 0.05,
+        "w": 0.8875,
+        "h": 0.6833
+      },
+      "background": {
+        "kind": "color",
+        "color": "#ffffff"
+      },
+      "notes": "Mention the deadline",
+      "warnings": [
+        "Left out a picture",
+        "Left out a chart"
+      ]
+    },
+    {
+      "index": 1,
+      "hidden": false,
+      "paragraphs": [
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Welcome!",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Georgia"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.1,
+        "y": 0.4,
+        "w": 0.8,
+        "h": 0.2
+      },
+      "background": {
+        "kind": "image",
+        "path": "media/image-13.png"
+      },
+      "warnings": [
+        "Left out SmartArt"
+      ]
+    },
+    {
+      "index": 2,
+      "hidden": false,
+      "paragraphs": [
+        {
+          "align": "right",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Fish & Chips <script>alert(\"x\")</script>",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "level": 0,
+          "bullet": "number",
+          "runs": [
+            {
+              "text": "Pray",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "level": 0,
+          "bullet": "number",
+          "runs": [
+            {
+              "text": "Give",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri"
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "level": 0,
+          "bullet": "number",
+          "runs": [
+            {
+              "text": "Serve",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.1,
+        "y": 0.1333,
+        "w": 0.8,
+        "h": 0.7667
+      },
+      "background": {
+        "kind": "gradient",
+        "angle": 90.0,
+        "radial": false,
+        "stops": [
+          {
+            "pos": 0.0,
+            "color": "#0f0c29"
+          },
+          {
+            "pos": 1.0,
+            "color": "#302b63"
+          }
+        ]
+      },
+      "warnings": []
+    },
+    {
+      "index": 3,
+      "hidden": false,
+      "title": "Offering",
+      "paragraphs": [
+        {
+          "align": "center",
+          "level": 0,
+          "bullet": "none",
+          "runs": [
+            {
+              "text": "Offering",
+              "b": false,
+              "i": false,
+              "u": false,
+              "color": "#000000",
+              "font": "Calibri Light"
+            }
+          ]
+        }
+      ],
+      "box": {
+        "x": 0.0625,
+        "y": 0.05,
+        "w": 0.875,
+        "h": 0.1667
+      },
+      "background": {
+        "kind": "color",
+        "color": "#ffffff"
+      },
+      "warnings": [
+        "Left out a picture in a format Selah can't show"
+      ]
+    }
+  ]
+}

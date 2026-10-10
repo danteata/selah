@@ -9,6 +9,7 @@ import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
 import { DictionaryPanel } from '../dictionary/DictionaryPanel'
 import { SongList } from '../songs/SongList'
+import { quickActionUnavailableReason } from './availability'
 
 // Icon mapping for actions
 const actionIconMap: Record<string, React.ReactNode> = {
@@ -251,6 +252,7 @@ export function QuickActionsSidebar() {
     // Handle action execution
     const executeAction = useCallback(async (action: QuickAction | string, goLive: boolean = false) => {
         const actionStr = typeof action === 'string' ? action : action.action
+        if (typeof action === 'object' && quickActionUnavailableReason(action)) return
 
         if (actionStr === appWideActions.newBible || actionStr === appWideActions.newSearchBible) {
             setQuickActionsPage('bible')
@@ -274,6 +276,10 @@ export function QuickActionsSidebar() {
         }
         if (actionStr === appWideActions.newTemplates) {
             openModal('templateBrowser')
+            return
+        }
+        if (actionStr === appWideActions.importPptx) {
+            openModal('pptxImport')
             return
         }
         if (actionStr === appWideActions.newAlert) {
@@ -547,13 +553,17 @@ export function QuickActionsSidebar() {
                             }
 
                             // Standard rendering
+                            const unavailable = quickActionUnavailableReason(action)
                             return (
                                 <button
                                     key={action.name}
                                     onClick={() => executeAction(action)}
+                                    aria-disabled={unavailable ? true : undefined}
+                                    title={unavailable ?? undefined}
                                     className={`
                                         w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-xs
                                         transition-colors relative group
+                                        ${unavailable ? 'opacity-50 cursor-not-allowed' : ''}
                                         ${index === focusedIndex
                                             ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                                             : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
@@ -564,6 +574,9 @@ export function QuickActionsSidebar() {
                                         {getActionIcon(action.icon)}
                                     </span>
                                     <span className="truncate">{action.name}</span>
+                                    {unavailable && (
+                                        <span className="ml-auto flex-shrink-0 text-[10px] text-[var(--text-muted)]">{unavailable}</span>
+                                    )}
                                     {action.type && (
                                         <SlideChip slideType={action.type} />
                                     )}

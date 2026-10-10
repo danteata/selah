@@ -27,6 +27,28 @@ describe('live deck', () => {
         useAppStore.getState().signOut()
     })
 
+    it('appending a batch adds the new slides to the end of the deck and keeps what was left out', () => {
+        seed(['a', 'b', 'c'], ['c', 'a']) // b deliberately not in the deck
+
+        act(() => useAppStore.getState().appendActiveSlides([slide('d'), slide('e')]))
+
+        const state = useAppStore.getState()
+        expect(state.activeSlides.map((s) => s.id)).toEqual(['a', 'b', 'c', 'd', 'e'])
+        expect(state.liveOutputSlidesId).toEqual(['c', 'a', 'd', 'e'])
+    })
+
+    it('appending a batch skips slides already present and is one undo step', () => {
+        seed(['a'], ['a'])
+
+        act(() => useAppStore.getState().appendActiveSlides([slide('a'), slide('b'), slide('b'), slide('c')]))
+        expect(useAppStore.getState().activeSlides.map((s) => s.id)).toEqual(['a', 'b', 'c'])
+
+        act(() => useAppStore.getState().undo())
+        const state = useAppStore.getState()
+        expect(state.activeSlides.map((s) => s.id)).toEqual(['a'])
+        expect(state.liveOutputSlidesId).toEqual(['a'])
+    })
+
     it('removing a slide leaves slides the operator left out of the deck out', () => {
         seed(['a', 'b', 'c'], ['c', 'a']) // b deliberately not in the deck
 

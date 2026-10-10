@@ -17,6 +17,7 @@ import { BibleList } from '../bible/BibleList'
 import { HymnList } from '../hymns/HymnList'
 import { DictionaryPanel } from '../dictionary/DictionaryPanel'
 import { SongList } from '../songs/SongList'
+import { quickActionUnavailableReason } from './availability'
 
 // Group actions into categories for better visual organisation
 const PRIMARY_ACTIONS: Set<string> = new Set([
@@ -31,6 +32,7 @@ const PRIMARY_ACTIONS: Set<string> = new Set([
 const CREATE_ACTIONS: Set<string> = new Set([
     appWideActions.newSlide,
     appWideActions.newMedia,
+    appWideActions.importPptx,
     appWideActions.newTemplates,
     appWideActions.newAlert,
     appWideActions.newCountdown,
@@ -163,6 +165,7 @@ export function QuickActions() {
 
     // Handle action execution
     const executeAction = useCallback(async (action: QuickAction) => {
+        if (quickActionUnavailableReason(action)) return
         if (action.action === appWideActions.newBible || action.action === appWideActions.newSearchBible) {
             setQuickActionsPage('bible')
             return
@@ -193,6 +196,10 @@ export function QuickActions() {
         }
         if (action.action === appWideActions.newTemplates) {
             openModal('templateBrowser')
+            return
+        }
+        if (action.action === appWideActions.importPptx) {
+            openModal('pptxImport')
             return
         }
         if (action.action === appWideActions.newAlert) {

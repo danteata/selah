@@ -43,6 +43,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # setup-bun unpacks its download with unzip, which the Playwright image
+      # doesn't have. The job runs as root inside the container.
+      - name: Install unzip
+        run: apt-get update && apt-get install -y --no-install-recommends unzip
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -96,8 +101,8 @@ jobs:
       # clippy warnings are reported but don't.
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets --no-default-features --features ndi
+        run: cargo clippy --all-targets --no-default-features --features ndi,pptx-import
 
       - name: Tests
         working-directory: src-tauri
-        run: cargo test --no-default-features --features ndi
+        run: cargo test --no-default-features --features ndi,pptx-import

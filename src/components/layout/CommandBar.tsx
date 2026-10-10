@@ -3,10 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
     Search, Command, Zap, Play, Book, BookA,
     Music, Image, Settings, HelpCircle, ArrowRight,
-    Layout, Clock, AlertCircle
+    Layout, Clock, AlertCircle, FileUp
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useDialog } from '../../hooks/useDialog'
+import { quickActionUnavailableReason } from '../quick-actions/availability'
 
 interface CommandItem {
     id: string
@@ -15,6 +16,8 @@ interface CommandItem {
     icon: React.ElementType
     category: 'action' | 'navigation' | 'slide' | 'bible'
     shortcut?: string
+    /** Listed but can't run here (e.g. desktop-only on the web). */
+    disabled?: boolean
     action: () => void
 }
 
@@ -28,6 +31,7 @@ export function CommandBar() {
     const activeSlides = useAppStore((s) => s.activeSlides)
     const setLiveSlide = useAppStore((s) => s.setLiveSlide)
     const activeSchedule = useAppStore((s) => s.activeSchedule)
+    const openModal = useAppStore((s) => s.openModal)
     
     const [query, setQuery] = useState('')
     const [selectedIndex, setSelectedIndex] = useState(0)
@@ -109,6 +113,22 @@ export function CommandBar() {
             category: 'navigation',
             action: () => { setActiveNavSection('alerts'); handleClose() }
         },
+        (() => {
+            const unavailable = quickActionUnavailableReason({ desktopOnly: true })
+            return {
+                id: 'import-pptx',
+                title: 'Import PowerPoint',
+                description: unavailable ?? 'Turn a .pptx deck into editable slides',
+                icon: FileUp,
+                category: 'action' as const,
+                disabled: !!unavailable,
+                action: () => {
+                    if (unavailable) return
+                    openModal('pptxImport')
+                    handleClose()
+                },
+            }
+        })(),
         {
             id: 'stop-live',
             title: 'Stop Live Output',
@@ -301,7 +321,8 @@ export function CommandBar() {
                                             data-command-index={index}
                                             onClick={() => command.action()}
                                             onMouseEnter={() => setSelectedIndex(index)}
-                                            className={`w-full flex items-center gap-4 px-3 py-3 rounded-xl transition-all group ${
+                                            aria-disabled={command.disabled || undefined}
+                                            className={`w-full flex items-center gap-4 px-3 py-3 rounded-xl transition-all group ${command.disabled ? 'opacity-50 cursor-not-allowed ' : ''}${
                                                 activeIndex === index 
                                                     ? 'bg-[var(--accent-teal)] text-white shadow-lg shadow-[var(--accent-teal)]/20' 
                                                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
