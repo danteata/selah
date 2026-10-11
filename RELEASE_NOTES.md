@@ -1,18 +1,17 @@
-## Selah 0.1.39
+## Selah 0.1.40
 
-Motion backgrounds you can see from the back of the room, and a songs panel that's ready to search the moment you open it.
+Song slides that fill the screen, and Selah on a phone rebuilt as a remote control, with the slide queue for everyone helping run the service.
 
-### Motion backgrounds stand out on the projector
+### Song lyrics fill the screen
 
-- **Motion backgrounds are no longer dimmed twice.** Like photos and videos, they were darkened to half brightness behind the text, even though they're already drawn dark enough for it. Embers looked like a black screen from a distance. They now show at full brightness, on the projector and the NDI feed, unless a slide or template sets its own brightness.
-- **Embers glows.** Bigger, brighter sparks rise from a flickering fire along the bottom of the screen, with a few large, soft embers drifting close by.
-- **Galaxy's stars and nebula are easier to see**, with stars about twice the size.
-- **Aurora no longer shows faint vertical stripes.**
+- **Song and hymn slides are much bigger.** A verse used to sit in a band across the middle of the screen, because each sung line was kept whole and the longest line set the size. Now a long line is split in two at its most natural point, like "Amazing grace, / how sweet the sound", whenever that makes the words noticeably bigger. A typical four-line verse now fills about twice as much of the screen.
+- **No word is ever left on its own**, and the verse's own line breaks always stay. Short verses and scripture look the same as before.
 
-### The songs panel opens ready to search
+### Selah on a phone
 
-- **Click the songs icon and start typing straight away.** The panel used to take a couple of seconds to show your songs and hymns, and searches waited for it. Selah now loads your library and prepares its search in the background, so opening the panel is instant even with thousands of songs.
-
-### Smaller things
-
-- **Update notes are easier to read.** The update window shows release notes with proper headings, lists and bold text instead of raw formatting symbols. You'll see this from the next update after this one.
+- **The slide queue is on your phone.** Tap **Queue** to see everything lined up for the service. Contributors can suggest any song, reading or slide to the operator (or add it straight to the deck in Open sessions), and anyone the session allows can put a slide, or a single verse, on the screen.
+- **A remote control in your hand.** The phone shows what's live by name ("Amazing Grace · 2 of 3"), the live slide, and the next three slides, each a tap away from the screen. A big **Next** button sits right under your thumb.
+- **Contributors get a "Suggest slides" button** instead of one that only suggested what the operator already had. People who are only watching are no longer offered it.
+- **Session controls fit the screen.** In a live session they used to run off the edge, so you couldn't end or leave a session from a phone. Now one button shows your role and who's there, and opens Hand over, End session, Leave, or Join.
+- **Operators can accept and dismiss suggestions with proper-sized buttons.**
+- **Songs, Bible and the other panels open full screen on a phone**, instead of a see-through column that slid under the bottom bar.
