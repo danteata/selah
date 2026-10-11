@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Search, Plus, ChevronLeft, Music, Trash2, Edit, Zap } from 'lucide-react'
-import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
+import { searchMusicIndex } from '../../lib/search/musicSearch'
+import { songIndexFor } from '../../lib/search/musicLibraryIndex'
 import { useSong, useSongs, useSlideCreation, useAnalytics } from '../../hooks'
+import { useProgressiveList } from '../../hooks/useProgressiveList'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
 import { AnalyticsEventType } from '../../services/analytics/types'
@@ -70,20 +72,6 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
         onFinal: (text) => setQuery(text),
     })
 
-    // BM25 index over the loaded library — title/artist field-weighted above
-    // lyrics — rebuilt only when the list changes, then queried per keystroke.
-    const songIndex = useMemo(
-        () => buildMusicIndex(
-            songs.map((s: Song) => ({
-                id: s._id || s.id,
-                title: s.title,
-                subtitle: s.artist,
-                body: s.lyrics || '',
-            })),
-        ),
-        [songs],
-    )
-
     // Ranked, typo/punctuation/whitespace-tolerant search over title/artist +
     // lyrics, so a half-remembered line ("amazing grace how sweet") finds the
     // song even when the operator misremembers the title. Empty query browses
@@ -91,11 +79,16 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
     const filteredSongs = useMemo(() => {
         const q = query.trim()
         if (!q) return songs
+        // BM25 index over the library — title/artist field-weighted above
+        // lyrics — built once per version of the list (musicLibraryIndex.ts),
+        // and only once there's something to search: inside the songs panel
+        // this list's search box is hidden and the panel searches for it.
         const byId = new Map(songs.map((s) => [s._id || s.id, s]))
-        return searchMusicIndex(songIndex, q, 50)
+        return searchMusicIndex(songIndexFor(songs), q, 50)
             .map((r) => byId.get(r.item.id))
             .filter((s): s is Song => !!s)
-    }, [songs, songIndex, query])
+    }, [songs, query])
+    const shownSongs = useProgressiveList(filteredSongs)
 
     // Same keyboard contract as the Bible and dictionary panels: the top hit is
     // highlighted as results arrive, Enter sends it live, Shift+Enter queues it.
@@ -317,7 +310,7 @@ export function SongList({ onClose, isInline = false, hideSearch = false }: Song
                             </div>
                         ) : (
                             <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                                {filteredSongs.map((song, index) => (
+                                {shownSongs.map((song, index) => (
                                     <div
                                         key={song._id || song.id}
                                         data-result-index={index}

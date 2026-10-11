@@ -4,10 +4,12 @@ import {
     X, BookOpen, BookA, Music, Image, Layout, Clock,
     AlertCircle, Archive, Calendar, Mic, Settings, Maximize2, Pin, Search, Zap, Plus, Edit, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useSongs, useSong, useHymn, useSlideCreation } from '../../hooks'
+import { useSongs, useSong, useSlideCreation } from '../../hooks'
+import { getLoadedHymns, loadHymns } from '../../hooks/useHymn'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
-import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
+import { searchMusicIndex } from '../../lib/search/musicSearch'
+import { unifiedMusicIndexFor, type UnifiedHit } from '../../lib/search/musicLibraryIndex'
 import { isInlineNavSection, type NavSection } from '../../types/studio'
 import type { Slide, ExternalVideo, Song, Hymn } from '../../types'
 import type { TemplateItem } from '../../hooks/useTemplates'
@@ -394,15 +396,6 @@ export function ContextSectionContent({
     )
 }
 
-interface UnifiedHit {
-    id: string
-    kind: 'song' | 'hymn'
-    title: string
-    subtitle: string
-    song?: Song
-    hymn?: Hymn
-}
-
 // Subtitle under a result title — the author when it's meaningful, otherwise a
 // short lyrics preview for songs (many have "Unknown" authors), so the second
 // line helps you decide to Add / go Live instead of just reading "Unknown".
@@ -435,9 +428,9 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
 
     const { songs, deleteSong } = useSongs()
     const { getSong } = useSong()
-    const { getAllHymns } = useHymn()
     const { createSongSlides, createHymnSlides } = useSlideCreation()
-    const [hymns, setHymns] = useState<Hymn[]>([])
+    // Null until read; from memory, straight away, after the first time.
+    const [hymns, setHymns] = useState<Hymn[] | null>(getLoadedHymns)
     // Song to edit / delete straight from a search result — the browse list
     // (which normally carries these actions) is hidden while searching, so
     // without these you'd have to clear the query and scroll thousands of songs.
@@ -460,10 +453,11 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
     }, [confirm, deleteSong])
 
     useEffect(() => {
+        if (hymns) return
         let alive = true
-        void getAllHymns().then((all) => { if (alive) setHymns(all) })
+        void loadHymns().then((all) => { if (alive) setHymns(all) })
         return () => { alive = false }
-    }, [getAllHymns])
+    }, [hymns])
 
     // Focus the search box as soon as the music panel opens, so you can type
     // immediately without an extra click — matching the Bible panel.
@@ -471,37 +465,18 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
         searchInputRef.current?.focus()
     }, [])
 
-    // Combined BM25 index over songs + hymns (rebuilt only when either list
-    // changes), plus an id → source map to resolve a hit back to its record.
-    const { index, byId } = useMemo(() => {
-        const map = new Map<string, UnifiedHit>()
-        const items = [
-            ...songs.map((s) => {
-                const id = `song:${s._id || s.id}`
-                map.set(id, { id, kind: 'song', title: s.title, subtitle: s.artist, song: s })
-                return { id, title: s.title, subtitle: s.artist, body: s.lyrics || '' }
-            }),
-            ...hymns.map((h) => {
-                const id = `hymn:${h.number}`
-                map.set(id, { id, kind: 'hymn', title: h.title, subtitle: `Hymn ${h.number}`, hymn: h })
-                return {
-                    id,
-                    title: h.title,
-                    subtitle: `${h.author ?? ''} ${h.number}`.trim(),
-                    body: `${h.chorus ?? ''}\n${(h.verses ?? []).join('\n')}`,
-                }
-            }),
-        ]
-        return { index: buildMusicIndex(items), byId: map }
-    }, [songs, hymns])
+    // Combined BM25 index over songs + hymns, kept for the session and rebuilt
+    // only when either list changes (musicLibraryIndex.ts). Not built until the
+    // hymns are in: an index without them would be thrown away a moment later.
+    const unified = useMemo(() => (hymns ? unifiedMusicIndexFor(songs, hymns) : null), [songs, hymns])
 
     const results = useMemo(() => {
         const q = query.trim()
-        if (!q) return []
-        return searchMusicIndex(index, q, 40)
-            .map((r) => byId.get(r.item.id))
+        if (!q || !unified) return []
+        return searchMusicIndex(unified.index, q, 40)
+            .map((r) => unified.byId.get(r.item.id))
             .filter((h): h is UnifiedHit => !!h)
-    }, [index, byId, query])
+    }, [unified, query])
 
     const { canGoLive, addToQueue, addAndGoLive } = useGoLive()
     // No alternate-output button: everything here is a song or a hymn, which are
@@ -601,7 +576,7 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                 <div className="flex-1 overflow-y-auto p-2" ref={listRef}>
                     {results.length === 0 ? (
                         <div className="p-8 text-center text-[var(--text-muted)] text-sm">
-                            No songs or hymns match “{query.trim()}”
+                            {unified ? <>No songs or hymns match “{query.trim()}”</> : 'Loading songs & hymns…'}
                         </div>
                     ) : (
                         <div

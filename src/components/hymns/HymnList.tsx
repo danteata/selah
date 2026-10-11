@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Search, X, ChevronLeft, Music, Zap, Plus } from 'lucide-react'
-import { buildMusicIndex, searchMusicIndex } from '../../lib/search/musicSearch'
+import { searchMusicIndex } from '../../lib/search/musicSearch'
+import { hymnIndexFor } from '../../lib/search/musicLibraryIndex'
 import { useHymn, useSlideCreation, useAnalytics } from '../../hooks'
+import { useProgressiveList } from '../../hooks/useProgressiveList'
+import { getLoadedHymns } from '../../hooks/useHymn'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
 import { AnalyticsEventType } from '../../services/analytics/types'
@@ -22,9 +25,10 @@ interface HymnListProps {
 
 export function HymnList({ onClose, isInline = false, hideSearch = false }: HymnListProps) {
     const [query, setQuery] = useState('')
-    const [hymns, setHymns] = useState<Hymn[]>([])
+    // From memory, straight away, once the hymnal has been read this session.
+    const [hymns, setHymns] = useState<Hymn[]>(() => getLoadedHymns() ?? [])
     const [selectedHymn, setSelectedHymn] = useState<Hymn | null>(null)
-    const [loading, setLoading] = useState(true)
+    const [loading, setLoading] = useState(() => !getLoadedHymns())
     const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
 
     const { getAllHymns } = useHymn()
@@ -68,31 +72,19 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
         loadHymns()
     }, [getAllHymns])
 
-    // BM25 index over title/number/author + lyrics (chorus + verses). The
-    // number goes in the subtitle field so a numeric lookup ("123") still
-    // works; digits survive normalizeText.
-    const hymnIndex = useMemo(
-        () => buildMusicIndex(
-            hymns.map((h) => ({
-                id: h.number,
-                title: h.title,
-                subtitle: `${h.author ?? ''} ${h.number}`.trim(),
-                body: `${h.chorus ?? ''}\n${(h.verses ?? []).join('\n')}`,
-            })),
-        ),
-        [hymns],
-    )
-
     // Ranked, typo/punctuation/whitespace-tolerant search, so a half-remembered
     // line finds the hymn even without its title/number. Empty query browses all.
     const filteredHymns = useMemo(() => {
         const q = query.trim()
         if (!q) return hymns
+        // BM25 index over title/number/author + lyrics, built once per session
+        // (musicLibraryIndex.ts), and only once there's something to search.
         const byId = new Map(hymns.map((h) => [h.number, h]))
-        return searchMusicIndex(hymnIndex, q, 50)
+        return searchMusicIndex(hymnIndexFor(hymns), q, 50)
             .map((r) => byId.get(r.item.id))
             .filter((h): h is Hymn => !!h)
-    }, [hymns, hymnIndex, query])
+    }, [hymns, query])
+    const shownHymns = useProgressiveList(filteredHymns)
 
     // Same keyboard contract as the songs, Bible and dictionary panels.
     const { focusedIndex, setFocusedIndex, handleKeyDown, listRef } = useResultNavigation<HTMLDivElement>({
@@ -201,7 +193,7 @@ export function HymnList({ onClose, isInline = false, hideSearch = false }: Hymn
                         </div>
                     ) : (
                         <div className="divide-y divide-gray-200 dark:divide-gray-800">
-                            {filteredHymns.map((hymn, index) => (
+                            {shownHymns.map((hymn, index) => (
                                 <div
                                     key={hymn.number}
                                     data-result-index={index}
