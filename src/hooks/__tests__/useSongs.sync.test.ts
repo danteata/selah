@@ -17,6 +17,7 @@ import type { ConvexReactClient } from 'convex/react'
 import { useSongs } from '../useSongs'
 import { getIndexedDB } from '../useIndexedDB'
 import { refreshServerSongs, resetServerSongs } from '../../services/songs/serverSongs'
+import { resetDeviceSongs } from '../../services/songs/deviceSongs'
 import type { Song } from '../../types'
 
 const T0 = '2026-10-07T10:00:00.000Z'
@@ -29,6 +30,7 @@ async function serverHas(songs: Song[]) {
 describe('useSongs with device and server libraries', () => {
     beforeEach(async () => {
         resetServerSongs()
+        resetDeviceSongs()
         deleteSongMutation.mockClear()
         await getIndexedDB().library.clear()
     })
@@ -71,6 +73,26 @@ describe('useSongs with device and server libraries', () => {
             { _id: 'srv_b', id: 'srv_b', title: 'Cornerstone', artist: 'x', lyrics: 'hope' } as Song,
         ])
         await waitFor(() => expect(result.current.songs.map((s) => s._id).sort()).toEqual(['ew_1', 'srv_b']))
+    })
+
+    it('shares one list between instances, until a song changes', async () => {
+        await getIndexedDB().library.put({
+            id: 'ew_1', type: 'song', createdAt: T0, updatedAt: T0,
+            content: { id: 'ew_1', _id: 'ew_1', title: 'Hymn', artist: 'x', lyrics: 'la' } as Song,
+        })
+        const a = renderHook(() => useSongs())
+        await waitFor(() => expect(a.result.current.songs).toHaveLength(1))
+        // A panel opened later gets the same array, so what's built from it
+        // (the search index) is reused rather than rebuilt.
+        const b = renderHook(() => useSongs())
+        expect(b.result.current.songs).toBe(a.result.current.songs)
+
+        const before = a.result.current.songs
+        await act(async () => {
+            await a.result.current.importSongs([{ data: { title: 'New Song', artist: 'x', lyrics: 'la' } }])
+        })
+        expect(b.result.current.songs).not.toBe(before)
+        expect(b.result.current.songs).toHaveLength(2)
     })
 
     it('deletes the server copy along with a linked device song', async () => {

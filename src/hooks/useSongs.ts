@@ -5,7 +5,16 @@ import { useAppStore } from '../store/appStore'
 import type { Song } from '../types'
 import { getIndexedDB } from './useIndexedDB'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
-import { getServerSongs, shadowedServerIds, subscribeServerSongs } from '../services/songs/serverSongs'
+import { getServerSongs, subscribeServerSongs } from '../services/songs/serverSongs'
+import {
+    getDeviceSongs,
+    getLibrarySongs,
+    loadDeviceSongs,
+    reloadDeviceSongs,
+    subscribeDeviceSongs,
+} from '../services/songs/deviceSongs'
+
+export { notifySongsChanged, subscribeSongsChanged } from '../services/songs/deviceSongs'
 
 // Per-call timeout for Convex mutations. If the websocket dies, useMutation
 // promises can hang indefinitely — bounded timeout lets the wizard move on
@@ -23,25 +32,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
             (e) => { clearTimeout(timer); reject(e) },
         )
     })
-}
-
-// Cross-instance refresh signal — fired whenever any useSongs() instance mutates
-// IndexedDB so every other instance (Songs panel, MusicBrowser, etc.) reloads.
-const songsChangeTarget = new EventTarget()
-export const notifySongsChanged = () => songsChangeTarget.dispatchEvent(new Event('songs-changed'))
-
-/**
- * Subscribe to the same signal from outside a `useSongs()` instance. Returns an
- * unsubscribe function.
- *
- * Non-component consumers need this too: `useSongAutoDetect` keeps a
- * module-scoped search index built once per session, which silently went stale
- * on any library mutation — a song imported or edited mid-service could not be
- * auto-detected for the rest of that session.
- */
-export function subscribeSongsChanged(listener: () => void): () => void {
-    songsChangeTarget.addEventListener('songs-changed', listener)
-    return () => songsChangeTarget.removeEventListener('songs-changed', listener)
 }
 
 export interface UseSongsReturn {
@@ -86,7 +76,6 @@ export function useSongs(): UseSongsReturn {
     const activeSchedule = useAppStore((state) => state.activeSchedule)
     const churchId = activeSchedule?.churchId || ''
     const { isOffline } = useConvexConnection()
-    const [localSongs, setLocalSongs] = useState<Song[]>([])
 
     const deleteSongMutation = useMutation(api.songs.deleteSong)
 
@@ -94,60 +83,20 @@ export function useSongs(): UseSongsReturn {
     // by every instance (see serverSongs.ts). Undefined until first fetched.
     const allSongsQuery = useSyncExternalStore(subscribeServerSongs, getServerSongs)
 
-    // Always load local IndexedDB songs and merge with server results so that
-    // imported / locally-created songs (e.g. from EasyWorship import in offline
-    // mode) always show up in the Songs panel, regardless of connection state.
-    const loadLocalSongs = useCallback(async () => {
-        try {
-            const db = getIndexedDB()
-            const localItems = await db.library
-                .where('type')
-                .equals('song')
-                .toArray()
-            setLocalSongs(localItems.map(item => item.content as Song))
-        } catch (err) {
-            console.warn('[useSongs] Failed to load local songs:', err)
-        }
-    }, [])
-
+    // This device's songs (imported, created offline, and the mirrored server
+    // list), shared by every instance and merged with the server's list once
+    // (see deviceSongs.ts), so the songs panel shows them regardless of
+    // connection state.
+    useSyncExternalStore(subscribeDeviceSongs, getDeviceSongs)
     useEffect(() => {
-        loadLocalSongs()
-        const onChange = () => { void loadLocalSongs() }
-        songsChangeTarget.addEventListener('songs-changed', onChange)
-        return () => songsChangeTarget.removeEventListener('songs-changed', onChange)
-    }, [loadLocalSongs])
+        if (getDeviceSongs() === undefined) void loadDeviceSongs()
+    }, [])
 
     const isOfflineData = isOffline && (allSongsQuery === undefined || allSongsQuery === null)
 
-    // Merge local + server, deduplicating by id (prefer most-recently-updated copy).
-    const effectiveSongs = useMemo(() => {
-        // A server song this device keeps its own copy of shows once, as that copy.
-        const shadowed = shadowedServerIds(localSongs)
-        const serverList = ((allSongsQuery || []) as Song[]).filter((s) => !shadowed.has(s._id || s.id))
-        if (localSongs.length === 0) return serverList
-        const map = new Map<string, Song>()
-        for (const s of serverList) {
-            const k = s._id || s.id
-            if (!k) continue
-            map.set(k, s)
-        }
-        for (const s of localSongs) {
-            const k = s._id || s.id
-            if (!k) continue
-            const existing = map.get(k)
-            if (!existing) {
-                map.set(k, s)
-            } else {
-                // Prefer whichever was updated more recently
-                const localTime = new Date(s.updatedAt || 0).getTime()
-                const serverTime = new Date(existing.updatedAt || 0).getTime()
-                if (localTime > serverTime) {
-                    map.set(k, s)
-                }
-            }
-        }
-        return Array.from(map.values())
-    }, [allSongsQuery, localSongs])
+    // The same array until the server's list or this device's changes; both
+    // are subscribed to above, so a change re-renders with the new one.
+    const effectiveSongs = getLibrarySongs()
 
     const searchSongs = useCallback((query: string = '', limit: number = 20): Song[] => {
         if (!query.trim()) {
@@ -208,8 +157,7 @@ export function useSongs(): UseSongsReturn {
             }, now)
             await getIndexedDB().library.put(row)
 
-            await loadLocalSongs()
-            notifySongsChanged()
+            await reloadDeviceSongs()
             return row.content
         } catch (error) {
             console.error('Error creating song:', error)
@@ -217,7 +165,7 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [churchId, loadLocalSongs])
+    }, [churchId])
 
     const updateSong = useCallback(async (
         songId: string,
@@ -236,8 +184,7 @@ export function useSongs(): UseSongsReturn {
             )
             await db.library.put(row)
 
-            await loadLocalSongs()
-            notifySongsChanged()
+            await reloadDeviceSongs()
             return row.content
         } catch (error) {
             console.error('Error updating song:', error)
@@ -245,7 +192,7 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [loadLocalSongs])
+    }, [])
 
     const importSongs = useCallback(async (items: ImportedSong[]) => {
         const db = getIndexedDB()
@@ -270,10 +217,9 @@ export function useSongs(): UseSongsReturn {
             return pendingRow(id, { id, title: '', artist: '', lyrics: '', churchId, createdAt: now, ...data }, now)
         })
         await db.library.bulkPut(rows)
-        await loadLocalSongs()
-        notifySongsChanged()
+        await reloadDeviceSongs()
         return { created, updated }
-    }, [churchId, loadLocalSongs])
+    }, [churchId])
 
     const deleteSong = useCallback(async (songId: string): Promise<boolean> => {
         try {
@@ -300,8 +246,7 @@ export function useSongs(): UseSongsReturn {
                 }
             }
 
-            await loadLocalSongs()
-            notifySongsChanged()
+            await reloadDeviceSongs()
             return true
         } catch (error) {
             console.error('Error deleting song:', error)
@@ -309,7 +254,7 @@ export function useSongs(): UseSongsReturn {
         } finally {
             setLoading(false)
         }
-    }, [deleteSongMutation, isOffline, loadLocalSongs])
+    }, [deleteSongMutation, isOffline])
 
     const parseSongLyrics = useCallback((
         lyrics: string,

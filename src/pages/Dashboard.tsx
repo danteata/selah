@@ -26,6 +26,7 @@ import type { Slide, ExtendedFileT } from '../types'
 import type { TemplateItem, SlideType } from '../hooks/useTemplates'
 import { clearSignedOutUser } from '../services/auth/signOutCleanup'
 import { prewarmSemanticSearch } from '../services/sermon-listener/localEmbeddings'
+import { keepMusicSearchWarm } from '../services/songs/musicSearchWarmup'
 import { useScheduleOutboxSync } from '../hooks/useScheduleOutboxSync'
 import { countdownSlideFromForm } from '../utils/countdown'
 
@@ -198,6 +199,10 @@ export default function Dashboard() {
         const timer = setTimeout(warm, 3000)
         return () => clearTimeout(timer)
     }, [])
+
+    // Have the songs panel's search ready before it's opened: building it
+    // when the panel opened kept you waiting a couple of seconds to search.
+    useEffect(() => keepMusicSearchWarm(), [])
 
     // Quick action handlers - sets up event listeners
     const { handleSlideEditorSave } = useQuickActionHandlers()
