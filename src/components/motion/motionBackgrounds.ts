@@ -71,10 +71,13 @@ interface Star { x: number; y: number; r: number; phase: number; speed: number; 
 
 const galaxy: MotionScene = {
     setup(w, h, random) {
+        // Sizes are for a 720-high canvas, big enough to see from the back of
+        // a room once a projector scales it up.
+        const scale = h / 720
         const stars: Star[] = Array.from({ length: Math.round((w * h) / 4500) }, () => ({
             x: random() * w,
             y: random() * h,
-            r: random() < 0.08 ? 1.4 + random() * 1.4 : 0.4 + random() * 0.9,
+            r: (random() < 0.1 ? 2.2 + random() * 1.8 : 0.8 + random() * 1.1) * scale,
             phase: random() * Math.PI * 2,
             speed: 0.5 + random() * 1.5,
             depth: 0.2 + random() * 0.8,
@@ -110,9 +113,9 @@ const galaxy: MotionScene = {
         ]
         for (const [offset, dist, size, color] of clouds) {
             const a = t * 0.03 + offset
-            glow(target, nw / 2 + Math.cos(a) * nw * dist, nh / 2 + Math.sin(a) * nh * dist * 0.6, Math.max(nw, nh) * size, color, 0.32)
+            glow(target, nw / 2 + Math.cos(a) * nw * dist, nh / 2 + Math.sin(a) * nh * dist * 0.6, Math.max(nw, nh) * size, color, 0.5)
         }
-        glow(target, nw / 2, nh / 2, Math.min(nw, nh) * 0.35, 'rgba(255, 220, 255, ALPHA)', 0.08)
+        glow(target, nw / 2, nh / 2, Math.min(nw, nh) * 0.4, 'rgba(255, 220, 255, ALPHA)', 0.14)
         target.globalCompositeOperation = 'source-over'
         ctx.globalCompositeOperation = 'lighter'
         if (nebula && nebulaCtx) ctx.drawImage(nebula, 0, 0, w, h)
@@ -121,11 +124,11 @@ const galaxy: MotionScene = {
         for (const s of stars) {
             const x = (s.x + t * 6 * s.depth) % w
             const twinkle = 0.55 + 0.45 * Math.sin(t * s.speed + s.phase)
-            ctx.fillStyle = `rgba(255, 255, 255, ${(0.35 + 0.65 * s.depth) * twinkle})`
+            ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1, (0.55 + 0.6 * s.depth) * twinkle)})`
             ctx.beginPath()
             ctx.arc(x, s.y, s.r, 0, Math.PI * 2)
             ctx.fill()
-            if (s.r > 1.4) glow(ctx, x, s.y, s.r * 6, 'rgba(180, 200, 255, ALPHA)', 0.25 * twinkle)
+            if (s.r > 2.1 * (h / 720)) glow(ctx, x, s.y, s.r * 6, 'rgba(180, 200, 255, ALPHA)', 0.4 * twinkle)
         }
         ctx.globalCompositeOperation = 'source-over'
     },
@@ -169,38 +172,113 @@ function orbScene(base: [string, string], colors: string[], count: number, alpha
 
 interface Mote { x: number; y: number; r: number; speed: number; sway: number; phase: number; alpha: number }
 
+/** One spark — a hot core in an orange glow — drawn once and stamped for
+ *  every ember: a new gradient per ember per frame cost twice the frame. */
+function sparkSprite(): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') return null
+    const size = 64
+    const sprite = document.createElement('canvas')
+    sprite.width = size
+    sprite.height = size
+    const c = sprite.getContext('2d')
+    if (!c) return null
+    const mid = size / 2
+    c.globalCompositeOperation = 'lighter'
+    glow(c, mid, mid, mid, 'rgba(255, 140, 40, ALPHA)', 0.6)
+    c.fillStyle = 'rgb(255, 225, 170)'
+    c.beginPath()
+    c.arc(mid, mid, mid * 0.14, 0, Math.PI * 2)
+    c.fill()
+    return sprite
+}
+
 const embers: MotionScene = {
     setup(w, h, random) {
-        const motes: Mote[] = Array.from({ length: Math.round((w * h) / 9000) }, () => ({
+        // Sizes are for a 720-high canvas; a projector scales it up again, so
+        // anything smaller than a few pixels is lost from the back of a room.
+        const scale = h / 720
+        const motes: Mote[] = Array.from({ length: Math.round((w * h) / 6000) }, () => ({
             x: random() * w,
             y: random() * h,
-            r: 0.8 + random() * 2.6,
-            speed: 6 + random() * 18,
-            sway: 8 + random() * 24,
+            r: (1.6 + random() * 3.2) * scale,
+            speed: (14 + random() * 34) * scale,
+            sway: (10 + random() * 30) * scale,
             phase: random() * Math.PI * 2,
-            alpha: 0.25 + random() * 0.6,
+            alpha: 0.5 + random() * 0.5,
         }))
-        return { motes }
+        // A few big, out-of-focus embers close to the viewer.
+        const bokeh: Mote[] = Array.from({ length: 9 }, () => ({
+            x: random() * w,
+            y: random() * h,
+            r: (14 + random() * 22) * scale,
+            speed: (8 + random() * 12) * scale,
+            sway: (20 + random() * 40) * scale,
+            phase: random() * Math.PI * 2,
+            alpha: 0.12 + random() * 0.14,
+        }))
+        // The fire and the bokeh are soft: drawn at a quarter size and scaled
+        // up, they look the same at a sixteenth of the cost.
+        const soft = typeof document !== 'undefined' ? document.createElement('canvas') : null
+        if (soft) {
+            soft.width = Math.max(1, Math.round(w / 4))
+            soft.height = Math.max(1, Math.round(h / 4))
+        }
+        return { motes, bokeh, soft, softCtx: soft?.getContext('2d') ?? null, spark: sparkSprite() }
     },
     draw(ctx, w, h, t, state) {
-        const { motes } = state as { motes: Mote[] }
-        const bg = ctx.createRadialGradient(w / 2, h * 1.1, 0, w / 2, h * 1.1, Math.max(w, h))
-        bg.addColorStop(0, '#3a1a0a')
-        bg.addColorStop(0.5, '#160a06')
-        bg.addColorStop(1, '#050303')
-        ctx.fillStyle = bg
-        ctx.fillRect(0, 0, w, h)
+        const { motes, bokeh, soft, softCtx, spark } = state as {
+            motes: Mote[]; bokeh: Mote[]; soft: HTMLCanvasElement | null; softCtx: CanvasRenderingContext2D | null; spark: HTMLCanvasElement | null
+        }
+        // Rising; brightest near the fire, cooling as they climb.
+        const rise = (m: Mote) => {
+            const y = h - ((h - m.y + t * m.speed) % (h + m.r * 8)) + m.r * 4
+            const x = m.x + Math.sin(t * 0.5 + m.phase) * m.sway
+            const cool = 0.45 + 0.55 * Math.min(1, Math.max(0, y / h))
+            return [x, y, cool] as const
+        }
+
+        // Everything soft — the dark, the fire, the bokeh — goes on the
+        // quarter-size layer, which then covers the frame in one scaled draw.
+        const target = softCtx ?? ctx
+        const k = soft && softCtx ? soft.width / w : 1
+        const bg = target.createLinearGradient(0, 0, 0, h * k)
+        bg.addColorStop(0, '#070303')
+        bg.addColorStop(0.55, '#180905')
+        bg.addColorStop(1, '#3d1406')
+        target.fillStyle = bg
+        target.fillRect(0, 0, w * k, h * k)
+        target.globalCompositeOperation = 'lighter'
+        // The fire below the frame: glows along the bottom edge that breathe
+        // and flicker out of step.
+        for (let i = 0; i < 5; i++) {
+            const flicker = 0.75 + 0.15 * Math.sin(t * 1.3 + i * 2.1) + 0.1 * Math.sin(t * 3.7 + i)
+            glow(target, w * (0.1 + i * 0.2) * k, h * 1.08 * k, Math.max(w, h) * 0.42 * flicker * k, 'rgba(255, 90, 20, ALPHA)', 0.3 * flicker)
+        }
+        glow(target, (w / 2) * k, h * 1.15 * k, Math.max(w, h) * 0.6 * k, 'rgba(255, 150, 60, ALPHA)', 0.16 + 0.04 * Math.sin(t * 0.9))
+        for (const m of bokeh) {
+            const [x, y, cool] = rise(m)
+            glow(target, x * k, y * k, m.r * k, 'rgba(255, 140, 50, ALPHA)', m.alpha * cool)
+        }
+        target.globalCompositeOperation = 'source-over'
+        if (soft && softCtx) ctx.drawImage(soft, 0, 0, w, h)
+
         ctx.globalCompositeOperation = 'lighter'
         for (const m of motes) {
-            const y = h - ((h - m.y + t * m.speed) % (h + 40)) + 20
-            const x = m.x + Math.sin(t * 0.5 + m.phase) * m.sway
+            const [x, y, cool] = rise(m)
             const flicker = 0.7 + 0.3 * Math.sin(t * 3 + m.phase)
-            glow(ctx, x, y, m.r * 5, 'rgba(255, 170, 70, ALPHA)', m.alpha * flicker * 0.55)
-            ctx.fillStyle = `rgba(255, 220, 160, ${m.alpha * flicker})`
+            const a = m.alpha * flicker * cool
+            if (spark) {
+                ctx.globalAlpha = a
+                ctx.drawImage(spark, x - m.r * 5, y - m.r * 5, m.r * 10, m.r * 10)
+                continue
+            }
+            glow(ctx, x, y, m.r * 5, 'rgba(255, 140, 40, ALPHA)', a * 0.6)
+            ctx.fillStyle = `rgba(255, 225, 170, ${a})`
             ctx.beginPath()
-            ctx.arc(x, y, m.r * 0.6, 0, Math.PI * 2)
+            ctx.arc(x, y, m.r * 0.7, 0, Math.PI * 2)
             ctx.fill()
         }
+        ctx.globalAlpha = 1
         ctx.globalCompositeOperation = 'source-over'
     },
 }
@@ -430,14 +508,16 @@ const aurora: MotionScene = {
                 const edge = h * (c.base + 0.08 * Math.sin(u * c.freq * Math.PI * 2 + t * c.speed * 6 + c.phase)
                     + 0.03 * Math.sin(u * c.freq * 5.1 - t * c.speed * 9))
                 const bright = 0.5 + 0.5 * Math.sin(u * 23 + t * 0.6 + c.phase) * Math.sin(u * 7 - t * 0.35)
-                const alpha = 0.05 + 0.13 * bright * Math.sin(Math.PI * u)
+                const alpha = 0.08 + 0.2 * bright * Math.sin(Math.PI * u)
                 const top = edge - h * c.height
                 const grad = ctx.createLinearGradient(0, top, 0, edge)
                 grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`)
                 grad.addColorStop(0.8, `rgba(${r}, ${g}, ${b}, ${alpha})`)
                 grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, ${alpha * 0.2})`)
                 ctx.fillStyle = grad
-                ctx.fillRect(x, top, step + 1, edge - top)
+                // Exactly `step` wide: strips that overlap add up under
+                // 'lighter' and stripe the curtain.
+                ctx.fillRect(x, top, step, edge - top)
             }
         }
         ctx.globalCompositeOperation = 'source-over'
@@ -470,7 +550,7 @@ export const MOTION_BACKGROUNDS: MotionBackground[] = [
         id: 'embers',
         name: 'Embers',
         description: 'Rising sparks over a dark fire',
-        poster: 'radial-gradient(ellipse at 50% 110%, #3a1a0a, #160a06 50%, #050303)',
+        poster: 'radial-gradient(ellipse 90% 60% at 50% 110%, rgba(255,110,30,.55), transparent 70%), linear-gradient(#070303, #180905 55%, #3d1406)',
         scene: embers,
     },
     {
