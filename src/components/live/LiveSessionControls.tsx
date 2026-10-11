@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useMutation, useQuery } from 'convex/react'
-import { StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight, Lock, Unlock, MessageSquare } from 'lucide-react'
+import { StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight, Lock, Unlock, MessageSquare, X, LogOut } from 'lucide-react'
 import { api } from '../../../convex/_generated/api'
 import type { Id } from '../../../convex/_generated/dataModel'
 import { useUserRole } from '../../hooks/useUserRole'
@@ -19,6 +20,10 @@ const MODE_INFO: Record<CollaborationMode, { label: string; description: string;
 
 interface LiveSessionControlsProps {
     churchId: string
+    /** For a phone: one chip that opens a sheet with the session's details
+     *  and every action, instead of a row of badges and buttons that ran off
+     *  the screen (taking End and Leave with it). */
+    compact?: boolean
 }
 
 interface SessionUser {
@@ -30,9 +35,10 @@ interface SessionUser {
         avatar: string
         role: string
     } | null
+    sessionRole?: 'operator' | 'contributor' | 'viewer'
 }
 
-export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
+export function LiveSessionControls({ churchId, compact = false }: LiveSessionControlsProps) {
     const { isOffline } = useConvexConnection()
     const { currentUser } = useUserRole()
     const { activeSchedule, schedules, setActiveSchedule } = useSchedules()
@@ -153,6 +159,32 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
     const isOperator = effectiveSession?.operatorId === currentUser?._id
     const isActive = effectiveSession?.status === 'active'
     const isInSession = sessionUsers?.some((u: SessionUser) => u.userId === currentUser?._id)
+
+    if (compact) {
+        const mode = effectiveSession?.collaborationMode as CollaborationMode | undefined
+        const ownRole = isOperator
+            ? 'operator'
+            : (sessionUsers as SessionUser[] | undefined)?.find((u) => u.userId === currentUser?._id)?.sessionRole ?? null
+        return (
+            <CompactSession
+                isOffline={isOffline}
+                isActive={!!(isActive && effectiveSession)}
+                canStart={!!activeSchedule?._id}
+                isStarting={isStarting}
+                defaultMode={defaultCollaborationMode}
+                mode={mode}
+                ownRole={isInSession || isOperator ? ownRole : null}
+                users={(sessionUsers as SessionUser[] | undefined) ?? []}
+                currentUserId={currentUser?._id}
+                error={error}
+                onStart={handleStartSession}
+                onJoin={handleJoin}
+                onLeave={handleLeave}
+                onEnd={handleEndSession}
+                onTransfer={handleTransfer}
+            />
+        )
+    }
 
     if (isOffline) {
         return (
@@ -313,5 +345,218 @@ export function LiveSessionControls({ churchId }: LiveSessionControlsProps) {
                 <span className="text-[10px] text-rose-500">{error}</span>
             )}
         </div>
+    )
+}
+
+const ROLE_LABEL = { operator: 'Operator', contributor: 'Contributor', viewer: 'Viewer' } as const
+const ROLE_ICON = { operator: Crown, contributor: Shield, viewer: Eye } as const
+
+interface CompactSessionProps {
+    isOffline: boolean
+    isActive: boolean
+    canStart: boolean
+    isStarting: boolean
+    defaultMode: CollaborationMode
+    mode: CollaborationMode | undefined
+    ownRole: 'operator' | 'contributor' | 'viewer' | null
+    users: SessionUser[]
+    currentUserId: string | undefined
+    error: string | null
+    onStart: () => void
+    onJoin: (role: 'contributor' | 'viewer') => void
+    onLeave: () => void
+    onEnd: () => void
+    onTransfer: (userId: string) => void
+}
+
+/** The session on a phone: a chip in the live strip, and a sheet with the rest. */
+function CompactSession(props: CompactSessionProps) {
+    const { isOffline, isActive, canStart, isStarting, defaultMode, mode, ownRole, users, currentUserId, error } = props
+    const [open, setOpen] = useState(false)
+    const [handingOver, setHandingOver] = useState(false)
+
+    if (isOffline) {
+        return (
+            <span className="flex items-center gap-1.5 h-8 px-2.5 rounded-full text-[11px] font-medium text-[var(--text-muted)] bg-[var(--bg-tertiary)]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)]" />
+                Offline
+            </span>
+        )
+    }
+
+    if (!isActive) {
+        return (
+            <button
+                type="button"
+                onClick={props.onStart}
+                disabled={isStarting || !canStart}
+                title={canStart ? `Start a ${MODE_INFO[defaultMode].label.toLowerCase()} session` : 'Select a schedule first'}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold text-[var(--accent-teal)] bg-[var(--accent-teal)]/10 active:scale-95 transition-transform disabled:opacity-50"
+            >
+                {isStarting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />}
+                Start session
+            </button>
+        )
+    }
+
+    const modeInfo = mode ? MODE_INFO[mode] : null
+    const RoleIcon = ownRole ? ROLE_ICON[ownRole] : Users
+    const others = users.filter((u) => u.userId !== currentUserId)
+    const close = () => { setOpen(false); setHandingOver(false) }
+    const act = (fn: () => void) => () => { fn(); close() }
+
+    return (
+        <>
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                aria-label={`Live session${modeInfo ? `, ${modeInfo.label} mode` : ''}${ownRole ? `, you are ${ROLE_LABEL[ownRole]}` : ''}`}
+                className="flex items-center gap-1.5 h-8 pl-2 pr-2.5 rounded-full text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/12 active:scale-95 transition-transform"
+            >
+                <RoleIcon className="w-3.5 h-3.5" />
+                <span>{ownRole ? ROLE_LABEL[ownRole] : 'Join'}</span>
+                <span className="text-emerald-700/50 dark:text-emerald-300/50" aria-hidden>·</span>
+                <Users className="w-3 h-3 opacity-70" />
+                <span className="tabular-nums">{users.length}</span>
+            </button>
+
+            <AnimatePresence>
+                {open && (
+                    <>
+                        <motion.div
+                            className="fixed inset-0 bg-black/50 z-40"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={close}
+                        />
+                        <motion.div
+                            role="dialog"
+                            aria-label="Live session"
+                            className="fixed bottom-0 left-0 right-0 z-50 max-h-[80vh] flex flex-col bg-[var(--bg-elevated)] border-t border-[var(--border-default)] rounded-t-2xl shadow-2xl"
+                            initial={{ y: '100%' }}
+                            animate={{ y: 0 }}
+                            exit={{ y: '100%' }}
+                            transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                        >
+                            <div className="flex items-start justify-between gap-3 pl-4 pr-1.5 pt-3 pb-3 border-b border-[var(--border-subtle)]">
+                                <div className="min-w-0 pt-1">
+                                    <h2 className="text-[17px] text-[var(--text-primary)]">Live session</h2>
+                                    {modeInfo && (
+                                        <p className="flex items-center gap-1.5 mt-0.5 text-xs text-[var(--text-secondary)]">
+                                            <modeInfo.icon className="w-3.5 h-3.5 flex-shrink-0" />
+                                            <span><span className="font-semibold">{modeInfo.label}</span> · {modeInfo.description}</span>
+                                        </p>
+                                    )}
+                                </div>
+                                <button onClick={close} aria-label="Close" className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-full text-[var(--text-muted)] active:bg-[var(--bg-tertiary)]">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            <ul className="flex-1 min-h-0 overflow-y-auto px-2 py-2" aria-label="People in the session">
+                                {users.map((u) => {
+                                    const role = u.sessionRole
+                                    const Icon = role ? ROLE_ICON[role] : Users
+                                    const isSelf = u.userId === currentUserId
+                                    return (
+                                        <li key={u.userId} className="flex items-center gap-3 px-2 py-2">
+                                            <span className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-[var(--text-secondary)] bg-[var(--bg-tertiary)]">
+                                                {u.user?.fullname?.charAt(0)?.toUpperCase() || '?'}
+                                            </span>
+                                            <span className="flex-1 min-w-0 text-sm text-[var(--text-primary)] truncate">
+                                                {u.user?.fullname || 'Unknown'}{isSelf && <span className="text-[var(--text-muted)]"> (you)</span>}
+                                            </span>
+                                            {role && (
+                                                <span className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
+                                                    <Icon className="w-3.5 h-3.5" />
+                                                    {ROLE_LABEL[role]}
+                                                </span>
+                                            )}
+                                        </li>
+                                    )
+                                })}
+                            </ul>
+
+                            {handingOver && (
+                                <div className="px-4 pb-2">
+                                    <p className="text-xs text-[var(--text-secondary)] mb-1.5">Hand control to</p>
+                                    {others.length === 0 ? (
+                                        <p className="text-sm text-[var(--text-muted)] py-2">No one else has joined yet.</p>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                            {others.map((u) => (
+                                                <button
+                                                    key={u.userId}
+                                                    type="button"
+                                                    onClick={act(() => props.onTransfer(u.userId))}
+                                                    className="h-10 px-3.5 rounded-full text-sm font-medium text-[var(--text-primary)] bg-[var(--bg-tertiary)] active:scale-95 transition-transform"
+                                                >
+                                                    {u.user?.fullname || 'Unknown'}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {error && <p className="px-4 pb-2 text-xs text-rose-500">{error}</p>}
+
+                            <div className="grid grid-cols-2 gap-2 p-4 pt-2 border-t border-[var(--border-subtle)] pb-[max(1rem,env(safe-area-inset-bottom))]">
+                                {ownRole === 'operator' ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => setHandingOver((v) => !v)}
+                                            aria-pressed={handingOver}
+                                            className="h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-[var(--text-primary)] bg-[var(--bg-tertiary)] active:scale-[0.98] transition-transform"
+                                        >
+                                            <SwitchCamera className="w-4 h-4" />
+                                            Hand over
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={act(props.onEnd)}
+                                            className="h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white bg-rose-600 active:scale-[0.98] transition-transform"
+                                        >
+                                            <StopCircle className="w-4 h-4" />
+                                            End session
+                                        </button>
+                                    </>
+                                ) : ownRole ? (
+                                    <button
+                                        type="button"
+                                        onClick={act(props.onLeave)}
+                                        className="col-span-2 h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-[var(--text-primary)] bg-[var(--bg-tertiary)] active:scale-[0.98] transition-transform"
+                                    >
+                                        <LogOut className="w-4 h-4" />
+                                        Leave session
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={act(() => props.onJoin('contributor'))}
+                                            className="h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white bg-[var(--accent-teal)] active:scale-[0.98] transition-transform"
+                                        >
+                                            <Shield className="w-4 h-4" />
+                                            Join to help
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={act(() => props.onJoin('viewer'))}
+                                            className="h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-[var(--text-primary)] bg-[var(--bg-tertiary)] active:scale-[0.98] transition-transform"
+                                        >
+                                            <Eye className="w-4 h-4" />
+                                            Just watch
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
+        </>
     )
 }
