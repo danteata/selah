@@ -1,65 +1,71 @@
 /**
- * MobileStudioWorkspace — a focused, single-purpose mobile layout.
+ * MobileStudioWorkspace — the studio on a phone, built as a remote control.
  *
- * The desktop StudioWorkspace shows the slide queue, the program-output
- * sidecar, the next-slide preview, the operator badge, and the live
- * output all at once. On a phone that becomes a wall of cramped panels.
- * This layout collapses everything down to three things a presenter
- * actually needs on mobile:
+ * Top to bottom, in order of how often it's needed during a service:
  *
- *   1. The current live slide — large, tappable to push live.
- *   2. A compact next-up preview so they know what's coming.
- *   3. Prev / Next / Add buttons.
+ *   1. What's live, named ("Amazing Grace · 2 of 3"), and the session chip.
+ *   2. The live slide, in the projector's 16:9 frame.
+ *   3. Up next: the next few slides, each a tap away from going live, and
+ *      the whole queue in a sheet (MobileQueueSheet).
+ *   4. For the operator, contributors' suggestions to accept or dismiss.
+ *   5. In thumb reach, the one action this person's role allows: Next (and
+ *      Prev) for whoever controls the screen, "Suggest slides" for a
+ *      contributor in review mode, nothing but a note for someone watching.
  *
- * Desktop-only chrome (program output, multi-monitor, contributor
- * queue, NDI) stays in the desktop StudioWorkspace — the operator
- * running the booth on a phone doesn't need it. The Sermon Listener is
- * also desktop-only, hidden on mobile via the MobileBottomNav.
+ * Adding slides goes through the bottom nav (Bible, Music, Add). Desktop-only
+ * chrome (program output, multi-monitor, NDI) stays in StudioWorkspace.
  */
 
-import { useMemo, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Play, Mic, FileText, Lightbulb, Check, X } from 'lucide-react'
+import { useMemo, useCallback, useState } from 'react'
+import { BookOpen, Check, ChevronLeft, ChevronRight, Lightbulb, ListOrdered, Music, Play, Search, X } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useLiveSession } from '../../hooks/useLiveSession'
 import { useUserRole } from '../../hooks/useUserRole'
 import { LiveSessionControls } from '../live/LiveSessionControls'
 import { SlideView } from '../live/SlideView'
 import { useLiveOutputSettings } from '../../hooks/useLiveSync'
-import { PresenceAvatars } from '../live/PresenceAvatars'
+import { MobileQueueSheet } from './MobileQueueSheet'
+import { queueSlidesFor } from '../preview/groupQueueItems'
+import { slideText, slideTitle, songTitleOf } from '../preview/slideLabels'
 import type { Slide } from '../../types'
 
+/** Rows shown under "Up next" before the queue sheet takes over. */
+const UP_NEXT = 3
 
 export function MobileStudioWorkspace() {
     const activeSlides = useAppStore((s) => s.activeSlides)
     const liveSlideId = useAppStore((s) => s.liveSlideId)
     const liveOutputSlidesId = useAppStore((s) => s.liveOutputSlidesId)
     const sharedQueueSlideIds = useAppStore((s) => s.sharedQueueSlideIds)
-    const openModal = useAppStore((s) => s.openModal)
-    const workspaceMode = useAppStore((s) => s.workspaceMode)
+    const activeScheduleId = useAppStore((s) => s.activeSchedule?._id)
+    const scheduleName = useAppStore((s) => s.activeSchedule?.name)
+    const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     // The Convex-backed slide actions from the hook — NOT the local-only
     // store setter. This is what makes an operator's slide changes on mobile
     // propagate to every other device, and routes contributor actions through
     // the correct mode-aware path (open → operator deck, moderated → queue).
     const {
         isOperator,
+        isContributor,
         isConnected,
         isOpen,
         isStrict,
         setLiveSlide,
-        addToQueue,
         acceptFromQueue,
         removeFromQueue,
+        sessionScheduleId,
     } = useLiveSession()
     const { currentUser } = useUserRole()
     const churchId = currentUser?.churchId || ''
+    const outputSettings = useLiveOutputSettings()
+    const [queueOpen, setQueueOpen] = useState(false)
 
     // Who may push the live slide directly: solo users, the operator, or
-    // anyone when the session is in open mode. Connected non-operators in
-    // strict/moderated mode cannot — they suggest instead. Mirrors the
-    // desktop gating in PreviewContent/LiveOutput.
+    // anyone when the session is in open mode. Mirrors the desktop gating in
+    // PreviewContent/LiveOutput.
     const canControlLive = !isConnected || isOperator || isOpen
-    // A connected non-operator in a non-strict mode can suggest slides.
-    const canSuggest = isConnected && !isOperator && !isStrict
+    // A contributor (not a viewer) in a non-strict session suggests instead.
+    const canSuggest = isConnected && isContributor && !isStrict
 
     const liveOutputSlides = useMemo(() => {
         if (!liveOutputSlidesId) return []
@@ -68,292 +74,295 @@ export function MobileStudioWorkspace() {
             .filter((slide): slide is Slide => slide !== undefined)
     }, [liveOutputSlidesId, activeSlides])
 
-    const currentIndex = liveOutputSlides.findIndex(slide => slide.id === liveSlideId)
-    const liveSlide = currentIndex >= 0 ? liveOutputSlides[currentIndex] : activeSlides.find(s => s.id === liveSlideId) ?? null
+    // The deck being projected: the operator's order when there is one, else
+    // everything active, so there's always something to step through.
+    const deck = liveOutputSlides.length > 0 ? liveOutputSlides : activeSlides
+    const liveIndex = deck.findIndex((slide) => slide.id === liveSlideId)
+    const liveSlide = liveIndex >= 0 ? deck[liveIndex] : activeSlides.find((s) => s.id === liveSlideId) ?? null
+    const prevSlide = liveIndex > 0 ? deck[liveIndex - 1] : null
+    // Nothing live yet: "next" is the start of the deck.
+    const upNext = deck.slice(liveIndex + 1, liveIndex + 1 + UP_NEXT)
+    const nextSlide = upNext[0] ?? null
 
-    // The active queue is everything the operator wants to project. If no
-    // queue has been pushed yet, we fall back to all active slides so the
-    // mobile view still has something to navigate.
-    const queue = liveOutputSlides.length > 0 ? liveOutputSlides : activeSlides
-    const fallbackIndex = queue.findIndex(slide => slide.id === liveSlideId)
-    const effectiveIndex = currentIndex >= 0 ? currentIndex : fallbackIndex
-    const effectiveLiveSlide = liveSlide ?? (effectiveIndex >= 0 ? queue[effectiveIndex] : null)
-    const outputSettings = useLiveOutputSettings()
-    const effectiveNextSlide = queue[effectiveIndex + 1] ?? null
-    const effectivePrevSlide = queue[effectiveIndex - 1] ?? null
+    const queuedCount = useMemo(
+        () => queueSlidesFor(activeSlides, sessionScheduleId || activeScheduleId).length,
+        [activeSlides, sessionScheduleId, activeScheduleId],
+    )
 
-    const goPrev = useCallback(() => {
-        if (!effectivePrevSlide) return
-        if (!canControlLive) return
-        void setLiveSlide(effectivePrevSlide.id)
-    }, [effectivePrevSlide, canControlLive, setLiveSlide])
-
-    const goNext = useCallback(() => {
-        if (!effectiveNextSlide) return
-        if (!canControlLive) return
-        void setLiveSlide(effectiveNextSlide.id)
-    }, [effectiveNextSlide, canControlLive, setLiveSlide])
-
-    // Contributor suggestion: push the next-up (or current) slide into the
-    // shared queue. In open mode this lands directly on the operator's deck;
-    // in moderated mode it awaits operator approval — the hook's addToQueue
-    // branches on mode, so we don't decide that here.
-    const suggestTarget = effectiveNextSlide ?? effectiveLiveSlide
-    const handleSuggest = useCallback(() => {
-        if (!suggestTarget) return
-        void addToQueue([suggestTarget.id])
-    }, [suggestTarget, addToQueue])
+    const goLive = useCallback((slide: Slide | null) => {
+        if (!slide || !canControlLive) return
+        void setLiveSlide(slide.id)
+    }, [canControlLive, setLiveSlide])
 
     // Slides suggested by contributors, awaiting the operator's review.
-    const sharedQueueSlides = useMemo(() => {
-        if (!sharedQueueSlideIds || sharedQueueSlideIds.length === 0) return []
-        return sharedQueueSlideIds.map((id, idx) => ({
-            queueKey: `${id}-${idx}`,
-            slideId: id,
-            slide: activeSlides.find((s) => s.id === id) ?? null,
-        }))
-    }, [sharedQueueSlideIds, activeSlides])
+    const suggestions = useMemo(() => (sharedQueueSlideIds ?? []).map((id, idx) => ({
+        key: `${id}-${idx}`,
+        slideId: id,
+        slide: activeSlides.find((s) => s.id === id) ?? null,
+    })), [sharedQueueSlideIds, activeSlides])
 
     const openSearch = useCallback(() => {
-        // The TopBar listens for this and opens the command bar, which
-        // is the unified search/add flow on mobile too.
+        // The TopBar listens for this and opens the command bar, the unified
+        // search/add flow.
         window.dispatchEvent(new Event('selah:focus-quick-actions'))
     }, [])
 
-    const openAddModal = useCallback((kind: 'bible' | 'song' | 'hymn' | 'template') => {
-        // Bible / Song / Hymn lists and the template browser are all
-        // reached through the quick actions sidebar (top-bar /command+/).
-        // On mobile, dispatching `selah:focus-quick-actions` opens it
-        // just the same, so the same code path works across viewports.
-        // The template browser is the only one with a dedicated modal.
-        if (kind === 'template') {
-            openModal('templateBrowser')
-        } else {
-            window.dispatchEvent(new Event('selah:focus-quick-actions'))
-        }
-    }, [openModal])
-
-
     return (
         <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
-            {/* Compact live indicator strip */}
-            <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 flex-shrink-0">
-                <div className="flex items-center gap-2">
-                    <span
-                        className={`w-2 h-2 rounded-full ${effectiveLiveSlide
-                            ? 'bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.6)]'
-                            : 'bg-[var(--text-muted)]/50'}`}
-                    />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
-                        {effectiveLiveSlide ? 'Live' : 'Idle'}
-                    </span>
-                    {workspaceMode === 'studio' && isConnected && isOperator && (
-                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                            Op
-                        </span>
-                    )}
-                </div>
-                <div className="flex items-center gap-1.5 min-w-0">
-                    {/* Collaboration controls — surfaced here for mobile,
-                        which never renders the desktop TopBar's collab block. */}
-                    {churchId && (
-                        <>
-                            <PresenceAvatars churchId={churchId} maxVisible={3} />
-                            <LiveSessionControls churchId={churchId} />
-                        </>
-                    )}
-                    <button
-                        onClick={openSearch}
-                        className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--accent-teal)] hover:bg-[var(--bg-tertiary)] transition-colors flex-shrink-0"
-                        aria-label="Search and add slides"
-                    >
-                        <Plus className="w-4 h-4" />
-                    </button>
-                </div>
+            {/* What's live, by name, and the session. */}
+            <div className="flex items-center gap-3 pl-4 pr-3 h-14 border-b border-[var(--border-subtle)] flex-shrink-0">
+                <LiveCaption slide={liveSlide} deck={deck} index={liveIndex} idleText={scheduleName || 'Ready when you are'} />
+                {churchId && <LiveSessionControls churchId={churchId} compact />}
             </div>
 
-            {/* Main live slide — fills available space, scrolls if text overflows. */}
-            <div className="flex-1 min-h-0 px-3 py-3 overflow-hidden">
-                {effectiveLiveSlide ? (
-                    // The projector's renderer, in the projector's 16:9 frame.
-                    <div className="w-full h-full flex items-center justify-center">
-                        <SlideView
-                            slide={effectiveLiveSlide}
-                            settings={outputSettings}
-                            muted
-                            showMissingMedia
-                            minTextPx={12}
-                            className="w-full aspect-video max-h-full rounded-xl border border-[var(--border-subtle)] shadow-lg"
-                        />
-                    </div>
-                ) : (
-                    <button
-                        onClick={openSearch}
-                        className="w-full h-full rounded-xl border-2 border-dashed border-[var(--border-default)] flex flex-col items-center justify-center gap-3 text-[var(--text-muted)] hover:border-[var(--accent-teal)] hover:text-[var(--accent-teal)] transition-colors"
-                    >
-                        <Plus className="w-8 h-8" />
-                        <span className="text-sm font-medium">Add your first slide</span>
-                        <span className="text-xs opacity-60">Tap to search or browse</span>
-                    </button>
-                )}
-            </div>
-
-            {/* Next-up preview + transport controls. The strip is fixed-height
-                so the live area above always gets the lion's share of
-                the screen. */}
-            <div className="flex-shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/30">
-                {/* Transport row */}
-                <div className="flex items-center justify-between px-2 py-2">
-                    <button
-                        type="button"
-                        onClick={goPrev}
-                        disabled={!effectivePrevSlide || !canControlLive}
-                        className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-[var(--text-secondary)] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[var(--bg-tertiary)] active:scale-95 transition-all"
-                    >
-                        <ChevronLeft className="w-4 h-4" />
-                        Prev
-                    </button>
-
-                    {effectiveNextSlide ? (
-                        <button
-                            type="button"
-                            onClick={goNext}
-                            className="flex-1 mx-2 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[var(--bg-tertiary)]/70 border border-[var(--border-subtle)] hover:border-[var(--accent-teal)]/40 active:scale-[0.98] transition-all min-h-0 overflow-hidden"
-                        >
-                            <div className="flex-shrink-0 w-1 self-stretch rounded-full bg-[var(--accent-teal)]/40" />
-                            <div className="min-w-0 flex-1 text-left">
-                                <div className="text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Next up</div>
-                                <div className="text-xs text-[var(--text-primary)] truncate">
-                                    {effectiveNextSlide.contents[0]?.replace(/<[^>]+>/g, '') || 'Untitled'}
-                                </div>
+            {deck.length === 0 ? (
+                <EmptyDeck
+                    waitingForOperator={isConnected && !isOperator}
+                    onSongs={() => setActiveNavSection('music')}
+                    onBible={() => setActiveNavSection('bible')}
+                    onSearch={openSearch}
+                />
+            ) : (
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+                    {/* The live slide, in the projector's renderer and frame. */}
+                    <div className="px-4 pt-4">
+                        {liveSlide ? (
+                            <SlideView
+                                slide={liveSlide}
+                                settings={outputSettings}
+                                muted
+                                showMissingMedia
+                                minTextPx={12}
+                                className="w-full aspect-video rounded-xl border border-[var(--border-subtle)] shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+                            />
+                        ) : (
+                            <div className="w-full aspect-video rounded-xl border border-dashed border-[var(--border-default)] flex flex-col items-center justify-center gap-1 text-center px-6">
+                                <span className="text-sm font-medium text-[var(--text-secondary)]">Nothing on the screen</span>
+                                <span className="text-xs text-[var(--text-muted)]">
+                                    {canControlLive ? 'Tap a slide below to put it up.' : 'The operator will put the first slide up.'}
+                                </span>
                             </div>
-                        </button>
-                    ) : (
-                        <button
-                            type="button"
-                            onClick={openSearch}
-                            className="flex-1 mx-2 min-w-0 flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg-tertiary)]/40 border border-dashed border-[var(--border-default)] text-[var(--text-muted)] hover:border-[var(--accent-teal)] hover:text-[var(--accent-teal)] transition-colors min-h-0"
-                        >
-                            <Plus className="w-4 h-4 flex-shrink-0" />
-                            <span className="text-xs">Add next slide</span>
-                        </button>
-                    )}
-
-                    <button
-                        type="button"
-                        onClick={goNext}
-                        disabled={!effectiveNextSlide || !canControlLive}
-                        className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium text-[var(--text-secondary)] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[var(--bg-tertiary)] active:scale-95 transition-all"
-                    >
-                        Next
-                        <ChevronRight className="w-4 h-4" />
-                    </button>
-                </div>
-
-                {/* Contributor suggest bar — shown to connected non-operators in
-                    a non-strict mode, who can't push live directly. In open
-                    mode this adds straight to the operator's deck; in review
-                    mode it awaits approval. */}
-                {canSuggest && (
-                    <div className="px-2 pb-2">
-                        <button
-                            type="button"
-                            onClick={handleSuggest}
-                            disabled={!suggestTarget}
-                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20 hover:bg-blue-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                        >
-                            <Lightbulb className="w-3.5 h-3.5" />
-                            {isOpen ? 'Add next to deck' : 'Suggest next slide'}
-                        </button>
+                        )}
                     </div>
-                )}
 
-                {/* Operator review panel — suggestions from contributors, with
-                    accept/reject. Lets an operator run the whole session from a
-                    phone (desktop parity with the LiveOutput "Suggested" strip). */}
-                {isConnected && isOperator && sharedQueueSlides.length > 0 && (
-                    <div className="px-2 pb-2 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
-                                Suggested ({sharedQueueSlides.length})
-                            </span>
+                    {/* Up next, and the way into the whole queue. */}
+                    <section className="px-4 pt-5" aria-labelledby="mobile-up-next">
+                        <div className="flex items-center justify-between mb-2">
+                            <h2 id="mobile-up-next" className="mobile-section-label">{liveSlide ? 'Up next' : 'First up'}</h2>
                             <button
                                 type="button"
-                                onClick={() => acceptFromQueue(sharedQueueSlides.map((s) => s.slideId))}
-                                className="text-[10px] font-medium text-[var(--accent-teal)] hover:text-[var(--accent-teal)]/80 transition-colors"
+                                onClick={() => setQueueOpen(true)}
+                                className="flex items-center gap-1.5 h-9 -mr-2 px-3 rounded-full text-xs font-semibold text-[var(--accent-teal)] active:bg-[var(--accent-teal)]/10"
                             >
-                                Accept all
+                                <ListOrdered className="w-4 h-4" />
+                                Queue
+                                <span className="tabular-nums text-[var(--text-muted)] font-medium">{queuedCount}</span>
                             </button>
                         </div>
-                        <div className="flex gap-2 overflow-x-auto pb-1">
-                            {sharedQueueSlides.map((entry) => (
-                                <div
-                                    key={entry.queueKey}
-                                    className="flex-shrink-0 w-32 rounded-lg p-2 bg-[var(--bg-tertiary)]/60 border border-blue-500/20"
+                        {upNext.length === 0 ? (
+                            <p className="py-3 text-sm text-[var(--text-muted)]">That’s the last slide in the queue.</p>
+                        ) : (
+                            <ol className="space-y-1.5">
+                                {upNext.map((slide, i) => (
+                                    <li key={slide.id}>
+                                        <UpNextRow
+                                            slide={slide}
+                                            emphasis={i === 0}
+                                            onGoLive={canControlLive ? () => goLive(slide) : undefined}
+                                        />
+                                    </li>
+                                ))}
+                            </ol>
+                        )}
+                    </section>
+
+                    {/* Contributors' suggestions, for the operator to take or leave. */}
+                    {isConnected && isOperator && suggestions.length > 0 && (
+                        <section className="px-4 pt-5" aria-labelledby="mobile-suggested">
+                            <div className="flex items-center justify-between mb-2">
+                                <h2 id="mobile-suggested" className="mobile-section-label">Suggested ({suggestions.length})</h2>
+                                <button
+                                    type="button"
+                                    onClick={() => acceptFromQueue(suggestions.map((s) => s.slideId))}
+                                    className="h-9 -mr-2 px-3 rounded-full text-xs font-semibold text-[var(--accent-teal)] active:bg-[var(--accent-teal)]/10"
                                 >
-                                    <div className="text-[10px] text-[var(--text-secondary)] truncate">
-                                        {entry.slide?.name ?? 'Pending slide'}
-                                    </div>
-                                    <div className="flex items-center justify-end gap-1 mt-1.5">
-                                        <button
-                                            type="button"
-                                            onClick={() => acceptFromQueue([entry.slideId])}
-                                            className="p-1 rounded bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/30"
-                                            aria-label="Accept suggestion"
-                                        >
-                                            <Check className="w-3 h-3" />
-                                        </button>
+                                    Accept all
+                                </button>
+                            </div>
+                            <ul className="space-y-1.5">
+                                {suggestions.map((entry) => (
+                                    <li key={entry.key} className="flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-xl bg-blue-500/8 border border-blue-500/15">
+                                        <Lightbulb className="w-4 h-4 flex-shrink-0 text-blue-500" />
+                                        <span className="flex-1 min-w-0">
+                                            <span className="block text-sm text-[var(--text-primary)] truncate">
+                                                {entry.slide ? slideTitle(entry.slide) : 'A slide on its way…'}
+                                            </span>
+                                            {entry.slide && slideText(entry.slide) && slideText(entry.slide) !== slideTitle(entry.slide) && (
+                                                <span className="block text-xs text-[var(--text-muted)] truncate">{slideText(entry.slide)}</span>
+                                            )}
+                                        </span>
                                         <button
                                             type="button"
                                             onClick={() => removeFromQueue([entry.slideId])}
-                                            className="p-1 rounded bg-rose-500/20 text-rose-400 hover:bg-rose-500/30"
+                                            className="w-11 h-11 flex items-center justify-center rounded-full text-[var(--text-muted)] active:bg-rose-500/10 active:text-rose-500"
                                             aria-label="Dismiss suggestion"
                                         >
-                                            <X className="w-3 h-3" />
+                                            <X className="w-5 h-5" />
                                         </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Quick-add row: Bible / Songs / Hymns / Templates. Keeps the
-                    most common actions one tap from the live screen. */}
-                <div className="grid grid-cols-4 gap-1 px-2 pb-2">
-                    <button
-                        type="button"
-                        onClick={() => openAddModal('bible')}
-                        className="flex flex-col items-center gap-0.5 py-2 rounded-lg text-[10px] font-medium text-[var(--text-muted)] hover:text-[var(--accent-teal)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Bible
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => openAddModal('song')}
-                        className="flex flex-col items-center gap-0.5 py-2 rounded-lg text-[10px] font-medium text-[var(--text-muted)] hover:text-[var(--accent-teal)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                    >
-                        <Mic className="w-4 h-4" />
-                        Songs
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => openAddModal('hymn')}
-                        className="flex flex-col items-center gap-0.5 py-2 rounded-lg text-[10px] font-medium text-[var(--text-muted)] hover:text-[var(--accent-teal)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                    >
-                        <FileText className="w-4 h-4" />
-                        Hymns
-                    </button>
-                    <button
-                        type="button"
-                        onClick={openSearch}
-                        className="flex flex-col items-center gap-0.5 py-2 rounded-lg text-[10px] font-medium text-[var(--text-muted)] hover:text-[var(--accent-teal)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                    >
-                        <Play className="w-4 h-4" />
-                        Search
-                    </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => acceptFromQueue([entry.slideId])}
+                                            className="w-11 h-11 flex items-center justify-center rounded-full text-white bg-[var(--accent-teal)] active:scale-95 transition-transform"
+                                            aria-label="Accept suggestion"
+                                        >
+                                            <Check className="w-5 h-5" />
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                    <div className="h-4" />
                 </div>
+            )}
+
+            {/* The action this person's role allows, in thumb reach. */}
+            {deck.length > 0 && (
+                <div className="flex-shrink-0 px-4 pt-3 pb-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+                    {canControlLive ? (
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => goLive(prevSlide)}
+                                disabled={!prevSlide}
+                                aria-label="Previous slide"
+                                className="h-14 w-16 flex items-center justify-center rounded-2xl text-[var(--text-primary)] bg-[var(--bg-tertiary)] active:scale-[0.97] transition-transform disabled:opacity-35 disabled:active:scale-100"
+                            >
+                                <ChevronLeft className="w-6 h-6" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => goLive(nextSlide)}
+                                disabled={!nextSlide}
+                                className="flex-1 h-14 flex items-center justify-center gap-2 rounded-2xl text-base font-semibold text-white bg-[var(--accent-teal)] shadow-[0_6px_16px_rgba(13,148,136,0.35)] active:scale-[0.98] transition-transform disabled:opacity-40 disabled:shadow-none disabled:active:scale-100"
+                            >
+                                {liveSlide ? 'Next' : 'Start'}
+                                {liveSlide ? <ChevronRight className="w-5 h-5" /> : <Play className="w-4 h-4" />}
+                            </button>
+                        </div>
+                    ) : canSuggest ? (
+                        <button
+                            type="button"
+                            onClick={() => setQueueOpen(true)}
+                            className="w-full h-14 flex items-center justify-center gap-2 rounded-2xl text-base font-semibold text-white bg-blue-600 shadow-[0_6px_16px_rgba(37,99,235,0.3)] active:scale-[0.98] transition-transform"
+                        >
+                            <Lightbulb className="w-5 h-5" />
+                            Suggest slides
+                        </button>
+                    ) : (
+                        <p className="h-10 flex items-center justify-center text-sm text-[var(--text-muted)]">
+                            The operator is controlling the slides.
+                        </p>
+                    )}
+                </div>
+            )}
+
+            <MobileQueueSheet open={queueOpen} onClose={() => setQueueOpen(false)} />
+        </div>
+    )
+}
+
+/** "● Live" over the live slide's name and place: "Amazing Grace · 2 of 3". */
+function LiveCaption({ slide, deck, index, idleText }: { slide: Slide | null; deck: Slide[]; index: number; idleText: string }) {
+    let place = ''
+    if (slide && index >= 0) {
+        if (slide.songId) {
+            let start = index
+            while (start > 0 && deck[start - 1].songId === slide.songId) start--
+            let end = index
+            while (end < deck.length - 1 && deck[end + 1].songId === slide.songId) end++
+            if (end > start) place = `${index - start + 1} of ${end - start + 1}`
+        } else {
+            place = `${index + 1} of ${deck.length}`
+        }
+    }
+    return (
+        <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+                <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${slide
+                        ? 'bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]'
+                        : 'bg-[var(--text-muted)]/50'}`}
+                />
+                <span className={`text-[11px] font-bold uppercase tracking-[0.14em] ${slide ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
+                    {slide ? 'Live' : 'Idle'}
+                </span>
+            </div>
+            <p className="text-sm font-medium text-[var(--text-primary)] truncate">
+                {slide ? slideTitle(slide) : idleText}
+                {place && <span className="text-[var(--text-muted)] font-normal tabular-nums"> · {place}</span>}
+            </p>
+        </div>
+    )
+}
+
+/** A slide coming up: its words first, then what it's from. */
+function UpNextRow({ slide, emphasis, onGoLive }: { slide: Slide; emphasis: boolean; onGoLive?: () => void }) {
+    const text = slideText(slide)
+    const source = songTitleOf(slide) ?? (slide.type === 'bible' ? slide.name : null)
+    const body = (
+        <>
+            <span className="flex-1 min-w-0">
+                <span className={`block truncate ${emphasis ? 'text-[15px] text-[var(--text-primary)]' : 'text-sm text-[var(--text-secondary)]'}`}>
+                    {text || slideTitle(slide)}
+                </span>
+                {source && <span className="block text-xs text-[var(--text-muted)] truncate">{source}</span>}
+            </span>
+            {onGoLive && <Play className="w-4 h-4 flex-shrink-0 text-[var(--text-muted)]" />}
+        </>
+    )
+    const className = `w-full min-h-[52px] flex items-center gap-3 px-3.5 py-2 rounded-xl text-left ${emphasis
+        ? 'bg-[var(--bg-secondary)] border border-[var(--border-default)]'
+        : 'bg-[var(--bg-secondary)]/50 border border-[var(--border-subtle)]'}`
+    if (!onGoLive) return <div className={className}>{body}</div>
+    return (
+        <button type="button" onClick={onGoLive} aria-label={`Go live: ${text || slideTitle(slide)}`} className={`${className} active:scale-[0.99] active:border-[var(--accent-teal)]/50 transition-transform`}>
+            {body}
+        </button>
+    )
+}
+
+function EmptyDeck({ waitingForOperator, onSongs, onBible, onSearch }: {
+    waitingForOperator: boolean
+    onSongs: () => void
+    onBible: () => void
+    onSearch: () => void
+}) {
+    return (
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-6 px-8 text-center">
+            <div className="space-y-1.5">
+                <h2 className="text-xl text-[var(--text-primary)]">
+                    {waitingForOperator ? 'Waiting for the first slide' : 'Nothing queued yet'}
+                </h2>
+                <p className="text-sm text-[var(--text-secondary)]">
+                    {waitingForOperator
+                        ? 'The operator’s slides appear here. You can find songs and readings to suggest meanwhile.'
+                        : 'Find a song or a reading to put on the screen.'}
+                </p>
+            </div>
+            <div className="w-full max-w-xs grid grid-cols-2 gap-2">
+                <button type="button" onClick={onSongs} className="h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-[var(--text-primary)] bg-[var(--bg-secondary)] border border-[var(--border-default)] active:scale-[0.98] transition-transform">
+                    <Music className="w-4 h-4 text-[var(--accent-teal)]" />
+                    Songs
+                </button>
+                <button type="button" onClick={onBible} className="h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-[var(--text-primary)] bg-[var(--bg-secondary)] border border-[var(--border-default)] active:scale-[0.98] transition-transform">
+                    <BookOpen className="w-4 h-4 text-[var(--accent-teal)]" />
+                    Bible
+                </button>
+                <button type="button" onClick={onSearch} aria-label="Search and add slides" className="col-span-2 h-12 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white bg-[var(--accent-teal)] active:scale-[0.98] transition-transform">
+                    <Search className="w-4 h-4" />
+                    Search everything
+                </button>
             </div>
         </div>
     )
