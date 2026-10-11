@@ -1,6 +1,6 @@
 import { MotionCanvas } from '../motion/MotionCanvas'
 import { motionBackgroundFor } from '../motion/motionBackgrounds'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Slide, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
 import { useSlideBackgroundUrl } from '../../hooks/useSlideBackgroundUrl'
@@ -16,6 +16,7 @@ import { prefersReducedMotion, useTextBuildIn } from '../../hooks/useTextBuildIn
 import { wrapWords } from '../../lib/animation/wordMorph'
 import { useWordMorph } from '../../hooks/useWordMorph'
 import { AutoFitText } from './AutoFitText'
+import { balanceLyricHtml } from '../../utils/lyricLines'
 import { KineticText } from './KineticText'
 import { VideoBackground } from './VideoBackground'
 import { MediaContent, type MediaProgress } from './MediaContent'
@@ -152,12 +153,18 @@ export function SlideView({
         setFrameEl(el)
     }, [])
     const [width, setWidth] = useState(0)
+    // The frame's shape, for laying out a song's lines to fill it.
+    const [frameAspect, setFrameAspect] = useState(16 / 9)
     useLayoutEffect(() => {
         const el = rootRef.current
         if (!el) return
-        setWidth(el.clientWidth)
+        const read = () => {
+            setWidth(el.clientWidth)
+            if (el.clientWidth > 0 && el.clientHeight > 0) setFrameAspect(el.clientWidth / el.clientHeight)
+        }
+        read()
         if (typeof ResizeObserver === 'undefined') return
-        const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+        const ro = new ResizeObserver(read)
         ro.observe(el)
         return () => ro.disconnect()
     }, [])
@@ -213,10 +220,32 @@ export function SlideView({
     const morphMode = settings.slideTransition === 'morph' && transition === '' && !visualizer
         && !isMedia && slide.layout !== 'lower-third' && slide.type !== 'countdown'
         && !prefersReducedMotion()
+    // A song's long lines split evenly when that fills the frame better than
+    // keeping each whole (lyricLines.ts), the way scripture fills it. Planned
+    // again once web fonts load: a fallback's widths would split differently.
+    const [fontsLoaded, setFontsLoaded] = useState(0)
+    useEffect(() => {
+        let alive = true
+        document.fonts?.ready.then(() => { if (alive) setFontsLoaded((n) => n + 1) }).catch(() => {})
+        return () => { alive = false }
+    }, [])
+    const padding = slide.slideStyle?.windowPadding
+    const lettercase = slide.slideStyle?.lettercase
     const bodyHtml = useMemo(() => {
-        const html = slideBodyHtml(slide.contents[0])
+        let html = slideBodyHtml(slide.contents[0])
+        if (keepLines && slide.layout !== 'lower-third') {
+            // The text area in frame units: the frame less its padding, and
+            // room for a reference line when there is one.
+            const textW = FRAME_WIDTH - (padding?.left ?? 32) - (padding?.right ?? 32)
+            const textH = FRAME_WIDTH / frameAspect - (padding?.top ?? 32) - (padding?.bottom ?? 32)
+                - (slide.contents.length > 1 ? 110 : 0)
+            if (textW > 0 && textH > 0) {
+                html = balanceLyricHtml(html, { font, aspect: textW / textH, uppercase: lettercase === 'uppercase' })
+            }
+        }
         return morphMode ? wrapWords(html) : html
-    }, [slide.contents, morphMode])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontsLoaded: plan again in the real face
+    }, [slide.contents, slide.layout, morphMode, keepLines, padding, frameAspect, font, lettercase, fontsLoaded])
     const [morphBody, setMorphBody] = useState<HTMLDivElement | null>(null)
     useWordMorph(frameEl, morphBody, { enabled: morphMode, slideId: slide.id, seconds: transitionSeconds })
     const isVideoBackground = !motion && slide.backgroundType === 'video' && !!backgroundUrl
@@ -341,7 +370,6 @@ export function SlideView({
         const refs = slide.contents.slice(1).map((ref, i) => (
             <div key={i} dangerouslySetInnerHTML={{ __html: ref }} />
         ))
-        const padding = slide.slideStyle?.windowPadding
         // While the body morphs, the layer itself doesn't fade, so the references do.
         const refTransition = morphMode ? 'studio-slide-transition' : ''
         return (

@@ -42,6 +42,16 @@ describe('SlideView (DOM, the projector)', () => {
         await expectGolden('slideview-lyric', el, 'render')
     })
 
+    it('a song verse, its long lines split to fill the frame', async () => {
+        const el = await mount(slide({
+            type: 'song',
+            songId: 'grace',
+            contents: ['Amazing grace, how sweet the sound\nThat saved a wretch like me\nI once was lost, but now am found\nWas blind, but now I see'],
+            background: 'linear-gradient(135deg, #1e3a8a 0%, #312e81 100%)',
+        }))
+        await expectGolden('slideview-song-verse', el, 'render')
+    })
+
     it('a scripture slide in a serif template font', async () => {
         const el = await mount(slide({
             type: 'bible',
