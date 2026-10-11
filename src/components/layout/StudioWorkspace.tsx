@@ -1,28 +1,19 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { PreviewContent } from '../preview/PreviewContent'
 import { LiveOutput } from '../live/LiveOutput'
 import { MobileStudioWorkspace } from './MobileStudioWorkspace'
 import { useAppStore } from '../../store/appStore'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 export function StudioWorkspace() {
     const slideQueueWidth = useAppStore((s) => s.slideQueueWidth)
     const setSlideQueueWidth = useAppStore((s) => s.setSlideQueueWidth)
     const isResizing = useRef(false)
 
-    // Switch to a focused mobile layout below the `md` breakpoint. The
-    // desktop layout crams slide queue, program output, contributor
-    // queue, NDI status, and operator badge into a phone screen — none
-    // of which the user can act on from a mobile device.
-    const [isMobile, setIsMobile] = useState(() => {
-        if (typeof window === 'undefined') return false
-        return window.matchMedia('(max-width: 767px)').matches
-    })
-    useEffect(() => {
-        const mq = window.matchMedia('(max-width: 767px)')
-        const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-        mq.addEventListener('change', onChange)
-        return () => mq.removeEventListener('change', onChange)
-    }, [])
+    // Switch to a focused mobile layout below the `md` breakpoint: a phone
+    // can't hold the slide queue beside the program output, so it gets its
+    // own layout, with the queue as a sheet.
+    const isMobile = useIsMobile()
 
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {

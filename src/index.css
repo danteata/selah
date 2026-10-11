@@ -1262,3 +1262,21 @@ h6 {
     content-visibility: auto;
     contain-intrinsic-size: auto 64px;
 }
+
+/* The context panel on a phone: a sheet between the top bar and the bottom
+   nav (which stays tappable above it), full width and opaque — translucent,
+   the live slide's lyrics showed through the panel. */
+@media (max-width: 767px) {
+    .studio-context-panel.studio-context-panel--sheet {
+        position: fixed;
+        top: 44px;
+        bottom: 56px;
+        left: 0;
+        right: 0;
+        width: auto;
+        z-index: 25;
+        border: 0;
+        background: var(--bg-secondary);
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+    }
+}
