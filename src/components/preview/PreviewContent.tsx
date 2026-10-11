@@ -7,7 +7,7 @@ import { bibleBooks } from '../../types'
 import { SlideCard } from '../slides/SlideCard'
 import { EmptyState } from '../utils/EmptyState'
 import { SongVerseBrowser } from '../slides/SongVerseBrowser'
-import { groupQueueItems, type SongGroupItem } from './groupQueueItems'
+import { groupQueueItems, queueSlidesFor, type SongGroupItem } from './groupQueueItems'
 
 export function PreviewContent() {
     const [activeSlide, setActiveSlide] = useState<Slide | undefined>()
@@ -94,16 +94,10 @@ export function PreviewContent() {
 
     // Derive slides from store - single source of truth
     // Show slides that match the active schedule, or slides without a schedule if no active schedule
-    const slides = useMemo(() => {
-        const effectiveScheduleId = sessionScheduleId || activeSchedule?._id
-        if (effectiveScheduleId) {
-            return activeSlides.filter(
-                (slide) => slide.scheduleId === effectiveScheduleId || slide.scheduleId === ''
-            )
-        }
-        // If no active schedule, show all slides without a scheduleId
-        return activeSlides.filter((slide) => !slide.scheduleId || slide.scheduleId === '')
-    }, [activeSlides, activeSchedule?._id, sessionScheduleId])
+    const slides = useMemo(
+        () => queueSlidesFor(activeSlides, sessionScheduleId || activeSchedule?._id),
+        [activeSlides, activeSchedule?._id, sessionScheduleId],
+    )
 
     // Collapse a song's verse slides (createSongSlides materializes one per
     // verse, up front, so the tracker/auto-detect features have somewhere to

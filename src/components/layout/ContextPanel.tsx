@@ -6,6 +6,7 @@ import {
 import { useAppStore } from '../../store/appStore'
 import { useSongs, useSong, useSlideCreation } from '../../hooks'
 import { getLoadedHymns, loadHymns } from '../../hooks/useHymn'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
 import { searchMusicIndex } from '../../lib/search/musicSearch'
@@ -130,6 +131,7 @@ export function ContextPanel() {
     const handleClose = useCallback(() => {
         setActiveNavSection(null)
     }, [setActiveNavSection])
+    const isMobile = useIsMobile()
 
     const handleDetach = useCallback(() => {
         setPanelMode('floating')
@@ -144,6 +146,44 @@ export function ContextPanel() {
 
     const meta = SECTION_META[activeNavSection]
     const SectionIcon = meta.icon
+
+    const panelContent = (
+        <div className="flex-1 min-h-0 overflow-hidden">
+            <ContextSectionContent section={activeNavSection} onClose={handleClose} />
+        </div>
+    )
+
+    // On a phone the panel is a sheet over the workspace, between the top bar
+    // and the bottom nav: full width, opaque, nothing to resize or pop out.
+    if (isMobile) {
+        return (
+            <motion.aside
+                className="studio-context-panel studio-context-panel--sheet flex flex-col"
+                initial={{ y: 24, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 24, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                aria-label={meta.title}
+            >
+                <div className="flex items-center justify-between pl-4 pr-1.5 h-12 border-b border-[var(--border-subtle)] flex-shrink-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <SectionIcon className="w-4 h-4 flex-shrink-0 text-[var(--accent-teal)]" />
+                        <h3 className="text-[17px] text-[var(--text-primary)] truncate">
+                            {meta.title}
+                        </h3>
+                    </div>
+                    <button
+                        aria-label="Close"
+                        onClick={handleClose}
+                        className="w-11 h-11 flex items-center justify-center rounded-full text-[var(--text-muted)] active:bg-[var(--bg-tertiary)] active:text-[var(--text-primary)]"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+                {panelContent}
+            </motion.aside>
+        )
+    }
 
     const panelHeader = (
         <div
@@ -184,12 +224,6 @@ export function ContextPanel() {
                     <X className="w-4 h-4" />
                 </button>
             </div>
-        </div>
-    )
-
-    const panelContent = (
-        <div className="flex-1 min-h-0 overflow-hidden">
-            <ContextSectionContent section={activeNavSection} onClose={handleClose} />
         </div>
     )
 

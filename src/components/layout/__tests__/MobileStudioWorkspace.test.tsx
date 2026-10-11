@@ -168,8 +168,8 @@ describe('MobileStudioWorkspace', () => {
         expect(document.querySelector('p.scripture-label')).toBeNull()
     })
 
-    it('dispatches the quick-actions focus event when search button is tapped', () => {
-        setStore([bibleSlide], bibleSlide.id)
+    it('offers search from the empty state', () => {
+        setStore([], '')
 
         const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
 
@@ -188,7 +188,6 @@ describe('MobileStudioWorkspace', () => {
         render(<MobileStudioWorkspace />)
 
         expect(screen.getByTestId('live-session-controls').textContent).toBe('church-1')
-        expect(screen.getByTestId('presence-avatars').textContent).toBe('church-1')
     })
 
     // --- Mode-aware collaboration transport ---------------------------------
@@ -223,18 +222,32 @@ describe('MobileStudioWorkspace', () => {
         expect(mocks.session.setLiveSlide).toHaveBeenCalledWith('s2')
     })
 
-    it('blocks direct advance but offers Suggest for a contributor in review mode', () => {
+    it('gives a contributor in review mode the queue to suggest from, not Next', () => {
         setSession({ isContributor: true, isConnected: true }) // moderated: not open, not strict
         setStore([slideA, slideB], 's1')
 
         render(<MobileStudioWorkspace />)
-        expect(nextBtn().disabled).toBe(true)
+        expect(screen.queryByRole('button', { name: /^Next$/ })).toBeNull()
 
-        const suggest = screen.getByRole('button', { name: /suggest next slide/i })
-        fireEvent.click(suggest)
+        fireEvent.click(screen.getByRole('button', { name: /suggest slides/i }))
+        fireEvent.click(screen.getByRole('button', { name: 'Suggest: Slide B' }))
 
         expect(mocks.session.addToQueue).toHaveBeenCalledWith(['s2'])
         expect(mocks.session.setLiveSlide).not.toHaveBeenCalled()
+        expect(screen.getAllByText('Suggested').length).toBeGreaterThan(0)
+    })
+
+    it('suggests a whole song from the queue, every verse of it', () => {
+        setSession({ isContributor: true, isConnected: true })
+        const v1: Slide = { ...bibleSlide, id: 'v1', type: 'song', songId: 'song-1', name: 'Cornerstone - Verse 1', data: { title: 'Cornerstone' } } as Slide
+        const v2: Slide = { ...v1, id: 'v2', name: 'Cornerstone - Verse 2' }
+        setStore([slideA, v1, v2], 's1')
+
+        render(<MobileStudioWorkspace />)
+        fireEvent.click(screen.getByRole('button', { name: /suggest slides/i }))
+        fireEvent.click(screen.getByRole('button', { name: 'Suggest: Cornerstone' }))
+
+        expect(mocks.session.addToQueue).toHaveBeenCalledWith(['v1', 'v2'])
     })
 
     it('offers no Suggest affordance in strict mode', () => {
@@ -242,8 +255,36 @@ describe('MobileStudioWorkspace', () => {
         setStore([slideA, slideB], 's1')
 
         render(<MobileStudioWorkspace />)
-        expect(nextBtn().disabled).toBe(true)
-        expect(screen.queryByRole('button', { name: /suggest next slide/i })).toBeNull()
+        expect(screen.queryByRole('button', { name: /^Next$/ })).toBeNull()
+        expect(screen.queryByRole('button', { name: /suggest/i })).toBeNull()
+        expect(screen.getByText(/operator is controlling the slides/i)).not.toBeNull()
+    })
+
+    it('offers a viewer nothing to suggest (only contributors suggest)', () => {
+        setSession({ isConnected: true })
+        setStore([slideA, slideB], 's1')
+
+        render(<MobileStudioWorkspace />)
+        expect(screen.queryByRole('button', { name: /suggest/i })).toBeNull()
+    })
+
+    it('puts an up-next slide live with one tap for whoever controls the screen', () => {
+        setSession({ isOperator: true, isConnected: true })
+        setStore([slideA, slideB], 's1')
+
+        render(<MobileStudioWorkspace />)
+        fireEvent.click(screen.getByRole('button', { name: /^Go live: Slide B body/ }))
+
+        expect(mocks.session.setLiveSlide).toHaveBeenCalledWith('s2')
+    })
+
+    it('opens the whole queue from Up next', () => {
+        setStore([slideA, slideB], 's1')
+
+        render(<MobileStudioWorkspace />)
+        fireEvent.click(screen.getByRole('button', { name: /^Queue/ }))
+
+        expect(screen.getByRole('dialog', { name: 'Slide queue' })).not.toBeNull()
     })
 
     it('shows the operator a suggestion-approval panel with accept/reject', () => {
