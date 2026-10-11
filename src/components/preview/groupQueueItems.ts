@@ -24,6 +24,18 @@ export interface SongGroupItem {
 export type QueueItem = SingleQueueItem | SongGroupItem
 
 /**
+ * The slides the queue shows: those in the session's (or else the active)
+ * schedule plus unscheduled ones, or with no schedule, only the unscheduled.
+ * Shared by the desktop queue and the mobile one so they always agree.
+ */
+export function queueSlidesFor(activeSlides: Slide[], scheduleId: string | null | undefined): Slide[] {
+    if (scheduleId) {
+        return activeSlides.filter((slide) => slide.scheduleId === scheduleId || slide.scheduleId === '')
+    }
+    return activeSlides.filter((slide) => !slide.scheduleId || slide.scheduleId === '')
+}
+
+/**
  * Collapse a song's per-verse slides (createSongSlides materializes one Slide
  * per verse up front, so the live song tracker/auto-detect has somewhere to
  * point setLiveSlide at) into a single row for the slide-queue panel — a song
