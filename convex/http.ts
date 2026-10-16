@@ -181,6 +181,9 @@ type NormalizedEvent = {
     authorizationCode?: string
     /** True only for charge.success, so discounted cycles count once per charge. */
     isCharge?: boolean
+    /** The church the checkout was for: our own metadata (initializeProCheckout),
+     *  echoed back in the signed event. Only a checkout's own charge carries it. */
+    checkoutChurchId?: string
 }
 
 /**
@@ -201,8 +204,10 @@ function normalizePaystackEvent(event: {
     if (!email) return null
 
     const subNode = data.subscription ?? data
+    const metadataChurch = data.metadata?.churchId
     const base = {
         email,
+        checkoutChurchId: typeof metadataChurch === 'string' && metadataChurch ? metadataChurch : undefined,
         plan: 'pro' as const,
         paystackCustomerCode: customer.customer_code,
         paystackSubscriptionCode: subNode.subscription_code,
