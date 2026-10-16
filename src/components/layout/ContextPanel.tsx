@@ -9,6 +9,7 @@ import { getLoadedHymns, loadHymns } from '../../hooks/useHymn'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useGoLive } from '../../hooks/useGoLive'
 import { useResultNavigation } from '../../hooks/useResultNavigation'
+import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { searchMusicIndex } from '../../lib/search/musicSearch'
 import { unifiedMusicIndexFor, type UnifiedHit } from '../../lib/search/musicLibraryIndex'
 import { isInlineNavSection, type NavSection } from '../../types/studio'
@@ -23,6 +24,7 @@ import { HymnList } from '../hymns/HymnList'
 import { SongList } from '../songs/SongList'
 import { AddSongModal } from '../songs/AddSongModal'
 import { LiveSongNavigator } from '../songs/LiveSongNavigator'
+import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { PanelErrorBoundary } from '../offline/PanelErrorBoundary'
 import { MediaPicker, type MediaItem } from '../media/MediaPicker'
@@ -452,6 +454,11 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
     // hymns, so operators don't have to be on the right tab to find something.
     // Empty query falls back to the per-tab browse lists below.
     const [query, setQuery] = useState('')
+    // Speak a title or a line of the lyrics, as in the Bible panel — mostly
+    // for the phone, where typing mid-service is slow.
+    const voice = useVoiceSearch({
+        onFinal: (text) => setQuery(text),
+    })
     // A search handed over from the command bar: take it and clear it.
     const musicPanelQuery = useAppStore((s) => s.musicPanelQuery)
     const setMusicPanelQuery = useAppStore((s) => s.setMusicPanelQuery)
@@ -563,21 +570,29 @@ function MusicBrowser({ onClose }: { onClose: () => void }) {
                     <input
                         ref={searchInputRef}
                         type="text"
-                        value={query}
+                        value={voice.isListening ? voice.transcript : query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search songs & hymns…"
+                        placeholder={voice.isListening ? 'Listening…' : 'Search songs & hymns…'}
                         autoFocus
-                        className="w-full pl-9 pr-8 py-2 text-sm border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                        className="w-full pl-9 pr-16 py-2 text-sm border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
                     />
-                    {query && (
-                        <button
-                            onClick={() => setQuery('')}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                            aria-label="Clear search"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    )}
+                    <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                        {query && !voice.isListening && (
+                            <button
+                                onClick={() => setQuery('')}
+                                className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                aria-label="Clear search"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                        <VoiceSearchButton
+                            isListening={voice.isListening}
+                            isSupported={voice.isSupported}
+                            error={voice.error}
+                            onClick={voice.isListening ? voice.stop : voice.start}
+                        />
+                    </div>
                 </div>
                 <button
                     onClick={() => setShowAddSong(true)}

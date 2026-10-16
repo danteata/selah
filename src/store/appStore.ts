@@ -7,6 +7,7 @@ import type {
     Alert,
     BackgroundVideo,
     AppSettings,
+    SessionDefaultTemplates,
     SlideStyle,
     Advert,
     BibleVersion,
@@ -111,6 +112,10 @@ export interface AppState {
     activeSlides: Slide[]
     liveOutputSlidesId: string[] | null
     sharedQueueSlideIds: string[]
+    /** The live session operator's default templates, while this device is a
+     *  collaborator in their session; null otherwise. Slides created here
+     *  without an explicit template take these over this device's own. */
+    sessionDefaultTemplates: SessionDefaultTemplates | null
     liveSlideId: string | null
     // True while the operator has deliberately cleared the live output to a
     // blank screen (e.g. during prayer) — independent of `liveSlideId`, which
@@ -234,6 +239,7 @@ const initialState: AppState = {
     activeSlides: [],
     liveOutputSlidesId: null,
     sharedQueueSlideIds: [],
+    sessionDefaultTemplates: null,
     liveSlideId: null,
     liveOutputBlanked: false,
     alternateOutput: DEFAULT_ALTERNATE_OUTPUT,
@@ -349,6 +355,7 @@ interface AppStore extends AppState {
     setActiveSlides: (slides: Slide[]) => void
     setLiveOutputSlidesId: (slides: string[]) => void
     setSharedQueueSlideIds: (slideIds: string[]) => void
+    setSessionDefaultTemplates: (templates: SessionDefaultTemplates | null) => void
     addSharedQueueSlideIds: (slideIds: string[]) => void
     removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string | null) => void
@@ -737,6 +744,10 @@ export const useAppStore = create<AppStore>()(
 
             setSharedQueueSlideIds: (slideIds) => {
                 set({ sharedQueueSlideIds: slideIds })
+            },
+
+            setSessionDefaultTemplates: (templates) => {
+                set({ sessionDefaultTemplates: templates })
             },
 
             addSharedQueueSlideIds: (slideIds) => {
@@ -1187,6 +1198,7 @@ export const useAppStore = create<AppStore>()(
                     liveOutputSlidesId: initialState.liveOutputSlidesId,
                     liveSlideId: initialState.liveSlideId,
                     sharedQueueSlideIds: initialState.sharedQueueSlideIds,
+                    sessionDefaultTemplates: initialState.sessionDefaultTemplates,
                     selectedSlideIds: initialState.selectedSlideIds,
                     editingSlide: initialState.editingSlide,
                     liveOutputBlanked: initialState.liveOutputBlanked,

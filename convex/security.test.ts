@@ -91,6 +91,18 @@ describe('church data stays in its church', () => {
         await asAlice.mutation(api.liveSessions.toggleBlank, { sessionId, isBlank: true })
     })
 
+    it("lets only the session's operator set its default templates", async () => {
+        const { asAlice, asBob, churchA } = await twoChurches()
+        const scheduleId = await asAlice.mutation(api.schedules.createSchedule, { name: 'Sunday', churchId: churchA })
+        const sessionId = await asAlice.mutation(api.liveSessions.startSession, { scheduleId, churchId: churchA })
+        const defaultTemplates = { scripture: 'tpl-lower-third', song: null }
+
+        await expect(asBob.mutation(api.liveSessions.setDefaultTemplates, { sessionId, defaultTemplates })).rejects.toThrow()
+        await asAlice.mutation(api.liveSessions.setDefaultTemplates, { sessionId, defaultTemplates })
+        const session = await asAlice.query(api.liveSessions.getSession, { sessionId })
+        expect(session?.defaultTemplates).toEqual(defaultTemplates)
+    })
+
     it('keeps API keys out of the settings sent to ordinary users', async () => {
         const { t, asBob } = await twoChurches()
         await t.run(async (ctx) => {
