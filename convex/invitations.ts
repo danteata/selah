@@ -118,6 +118,10 @@ export const createInviteLink = mutation({
     },
 });
 
+/** Email invitations a church may send in 24 hours, and the note's length. */
+const MAX_INVITE_EMAILS_PER_DAY = 30;
+const MAX_INVITE_MESSAGE_CHARS = 1000;
+
 // Create an email invitation and send the email.
 export const sendEmailInvitation = mutation({
     args: {
@@ -132,6 +136,23 @@ export const sendEmailInvitation = mutation({
         const normalizedEmail = args.email.toLowerCase().trim();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
             throw new Error("Please enter a valid email address");
+        }
+
+        // Invites go out from Selah's one shared sender, so a church sending
+        // without limit (anyone can found a church and be its admin) spends
+        // that sender's reputation for every church. Cap the rate and the note.
+        if ((args.message?.length ?? 0) > MAX_INVITE_MESSAGE_CHARS) {
+            throw new Error(`Please keep the note under ${MAX_INVITE_MESSAGE_CHARS} characters`);
+        }
+        const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const recent = await ctx.db
+            .query("invitations")
+            .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
+            .order("desc")
+            .take(500);
+        const sentToday = recent.filter((inv) => inv.type === "email" && inv.createdAt >= dayAgo).length;
+        if (sentToday >= MAX_INVITE_EMAILS_PER_DAY) {
+            throw new Error(`Your church has sent ${MAX_INVITE_EMAILS_PER_DAY} invitations today. Try again tomorrow, or share the invite link instead.`);
         }
 
         // An address may hold pending invitations from several churches, so

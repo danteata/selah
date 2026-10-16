@@ -150,6 +150,27 @@ export const updateUserChurch = mutation({
         const church = await getById(ctx, "churches", args.churchId);
         if (!church) throw new Error("Church not found");
 
+        if (church._id !== user.churchId) {
+            // A live session they're running would be left with an operator
+            // who's no longer in its church: its members couldn't take over
+            // (in strict or moderated mode), end it, or start another.
+            const running = user.churchId
+                ? await ctx.db
+                    .query("liveSessions")
+                    .withIndex("by_church_active", (q) => q.eq("churchId", user.churchId).eq("status", "active"))
+                    .take(20)
+                : [];
+            if (running.some((session) => session.operatorId === user._id)) {
+                throw new Error("You're running this church's live session. Hand it over or end it before switching church.");
+            }
+            // Their presence belongs to the church they're leaving.
+            const presence = await ctx.db
+                .query("presence")
+                .withIndex("by_user", (q) => q.eq("userId", user._id!))
+                .take(20);
+            for (const row of presence) await ctx.db.delete(row._id);
+        }
+
         await ctx.db.patch(user._id, {
             churchId: church._id,
             updatedAt: new Date().toISOString(),

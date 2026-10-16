@@ -18,7 +18,7 @@
  */
 
 import { query, mutation, action, internalQuery, internalMutation, type DatabaseWriter } from './_generated/server'
-import { internal } from './_generated/api'
+import { api, internal } from './_generated/api'
 import { v } from 'convex/values'
 import { requireSuperadmin } from './lib/auth'
 
@@ -80,16 +80,26 @@ export const getPromoByCode = internalQuery({
  * whether this user had already redeemed it.
  */
 export const recordRedemption = internalMutation({
-    args: { code: v.string(), email: v.string(), kind: v.string() },
+    args: { code: v.string(), email: v.string(), kind: v.string(), churchId: v.optional(v.string()) },
     handler: async (ctx, args) => {
         const code = normalizeCode(args.code)
         const email = args.email.toLowerCase()
+        const churchId = args.churchId || undefined
 
-        const existing = await ctx.db
+        // One slot per church: whoever in it redeems first takes it, and the
+        // rest of the church shares it (comped or discounted Pro is the whole
+        // church's anyway). Per person only for someone without a church.
+        const existing = churchId
+            ? await ctx.db
+                .query('promoRedemptions')
+                .withIndex('by_code_church', (q) => q.eq('code', code).eq('churchId', churchId))
+                .first()
+            : null
+        const mine = existing ?? await ctx.db
             .query('promoRedemptions')
             .withIndex('by_code_email', (q) => q.eq('code', code).eq('email', email))
-            .unique()
-        if (existing) return { alreadyRedeemed: true }
+            .first()
+        if (mine) return { alreadyRedeemed: true }
 
         const promo = await ctx.db
             .query('promoCodes')
@@ -101,7 +111,7 @@ export const recordRedemption = internalMutation({
         }
 
         const now = new Date().toISOString()
-        await ctx.db.insert('promoRedemptions', { code, email, kind: args.kind, redeemedAt: now })
+        await ctx.db.insert('promoRedemptions', { code, email, kind: args.kind, churchId, redeemedAt: now })
         await ctx.db.patch(promo._id, {
             timesRedeemed: promo.timesRedeemed + 1,
             updatedAt: now,
@@ -171,13 +181,16 @@ export const redeemComp = action({
             throw new Error('This code is applied at checkout, not redeemed directly')
         }
 
-        // Reserve the slot first (throws if full / returns alreadyRedeemed).
+        // Reserve the slot first (throws if full / returns alreadyRedeemed),
+        // one per church: the comp is the whole church's.
+        const me = await ctx.runQuery(api.users.getCurrentUser, { clerkId: identity.subject })
         const { alreadyRedeemed } = await ctx.runMutation(internal.promos.recordRedemption, {
             code: args.code,
             email,
             kind: 'comp',
+            churchId: me?.churchId || undefined,
         })
-        if (alreadyRedeemed) throw new Error('You have already used this code')
+        if (alreadyRedeemed) throw new Error('Your church has already used this code')
 
         const expiresAt = await ctx.runMutation(internal.licensing.grantCompSubscription, {
             email,

@@ -42,12 +42,13 @@ export const getBySchedule = query({
         const user = await getCurrentUser(ctx);
         if (!user?.churchId) return [];
 
-        const transcripts = await ctx.db
+        // By church and schedule together, so no other church's transcripts
+        // can take up the window.
+        return await ctx.db
             .query("transcripts")
-            .withIndex("by_schedule", (q) => q.eq("scheduleId", args.scheduleId))
+            .withIndex("by_church_and_schedule", (q) => q.eq("churchId", user.churchId).eq("scheduleId", args.scheduleId))
             .order("desc")
             .take(MAX_LISTED);
-        return transcripts.filter((t) => t.churchId === user.churchId);
     },
 });
 

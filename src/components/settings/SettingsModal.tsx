@@ -4,6 +4,7 @@ import { X, Settings, User, Monitor, Palette, Book, HardDrive, Keyboard, Check, 
 import { useAppStore } from '../../store/appStore'
 import type { AppSettings, SlideStyle, SettingsTab } from '../../types'
 import { useTemplates } from '../../hooks/useTemplates'
+import { DEFAULT_TEMPLATE_SLOTS, useDefaultTemplates } from '../../hooks/useDefaultTemplates'
 import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
 import { useNdiOutput } from '../../hooks/useNdiOutput'
 import { useAlternateOutput } from '../../hooks/useAlternateOutput'
@@ -203,7 +204,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 setAppSettings={setAppSettings}
                             />
                         )}
-                        {activeTab === 'templates' && <TemplatesSettings />}
+                        {activeTab === 'templates' && <TemplatesSettings onClose={onClose} />}
                         {activeTab === 'bible' && (
                             <BibleSettings
                                 settings={settings}
@@ -938,25 +939,17 @@ function SettingsSelect({ value, onChange, children }: {
 }
 
 // Templates Settings Tab
-function TemplatesSettings() {
+function TemplatesSettings({ onClose }: { onClose: () => void }) {
     const setDefaultTemplate = useAppStore((state) => state.setDefaultTemplate)
     const settings = useAppStore((state) => state.settings)
+    const setActiveNavSection = useAppStore((state) => state.setActiveNavSection)
+    const { inSession } = useDefaultTemplates()
     const { templates, getTemplatesForSlideType } = useTemplates()
 
-    // Exactly the slide types whose creation path actually consults
-    // `settings.defaultTemplates` (see `useSlideCreation`). Four rows used to be
-    // listed here that nothing ever read — Sermon, Announcements, Prayer and
-    // Countdown — so choosing a default for them looked like it worked and then
-    // did nothing; three of those aren't even slide types. Conversely Definitions
-    // was missing even though its default IS honoured. Adding a row here means
-    // adding the matching lookup in `useSlideCreation`, not just the label.
-    const templateCategories: { key: 'scripture' | 'hymn' | 'song' | 'text' | 'dictionary'; label: string; slideType: SlideType }[] = [
-        { key: 'scripture', label: 'Bible Verses', slideType: 'bible' },
-        { key: 'song', label: 'Songs', slideType: 'song' },
-        { key: 'hymn', label: 'Hymns', slideType: 'hymn' },
-        { key: 'dictionary', label: 'Definitions', slideType: 'dictionary' },
-        { key: 'text', label: 'Text / General', slideType: 'text' },
-    ]
+    // Exactly the slide types whose creation path consults
+    // `settings.defaultTemplates` (DEFAULT_TEMPLATE_SLOTS, shared with the
+    // templates panel, which sets the same defaults from each card).
+    const templateCategories = DEFAULT_TEMPLATE_SLOTS.map(({ slot, slideType, label }) => ({ key: slot, slideType, label }))
 
     const getTemplateName = (templateId: string | null | undefined) => {
         if (!templateId) return null
@@ -968,15 +961,33 @@ function TemplatesSettings() {
         return getTemplatesForSlideType(slideType)
     }
 
+    const browseTemplates = () => {
+        setActiveNavSection('templates')
+        onClose()
+    }
+
     return (
         <div className="space-y-6">
             <div>
                 <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-1">
                     Default Templates
                 </h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                    Choose a template to use automatically when creating new slides for each category.
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Every new slide of each kind gets its template automatically. You can also set these from the
+                    templates panel, where you can see each one first.
                 </p>
+                <button
+                    type="button"
+                    onClick={browseTemplates}
+                    className="mt-2 mb-4 text-xs font-semibold text-[var(--accent-teal)] hover:underline"
+                >
+                    Browse templates →
+                </button>
+                {inSession && (
+                    <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                        You're in someone's live session: their defaults come first, and these fill in where they haven't set one.
+                    </p>
+                )}
             </div>
 
             <div className="space-y-3">

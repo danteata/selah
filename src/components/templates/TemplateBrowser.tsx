@@ -1,22 +1,39 @@
+/**
+ * TemplateBrowser — the templates panel (inline in the studio, or a modal).
+ *
+ * A template is a look: background, layout and text style. It does one of two
+ * things, and the panel offers exactly those:
+ *
+ *   - Default for a kind of slide: every new Bible verse (song, hymn…) gets it.
+ *     The same setting as Settings → Templates, set right from the card.
+ *   - Add as slide: a new text slide in that look, for templates that suit text.
+ *
+ * Templates are found by what they work with (Bible verses, Songs…), which is
+ * what decides where they're offered. The old Announcement/Worship/Sermon
+ * category is only a filing label and no longer drives navigation. Favourites
+ * are the church's: whoever is on the desk next sees the ones the team uses.
+ */
+
 import { MotionCanvas } from '../motion/MotionCanvas'
 import { motionBackgroundFor } from '../motion/motionBackgrounds'
 import { useTemplateMediaState } from '../../hooks/useTemplateMediaSync'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
-import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video } from 'lucide-react'
+import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video, Star, Save } from 'lucide-react'
 import {
     useTemplates,
-    TEMPLATE_CATEGORIES,
     TEMPLATE_SLIDE_TYPE_OPTIONS,
     templateCategory,
     type TemplateItem,
     type SlideType,
     useFileUrl,
 } from '../../hooks/useTemplates'
+import { DEFAULT_TEMPLATE_SLOTS, templateWorksWith, useDefaultTemplates, type DefaultTemplateSlot } from '../../hooks/useDefaultTemplates'
 import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { useAppStore } from '../../store/appStore'
 import { Modal } from '../modals/Modal'
 
 const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
@@ -33,34 +50,37 @@ const SLIDE_TYPE_LABELS: Record<SlideType, string> = {
     any: 'Any',
 }
 
+const SLOT_SHORT_LABELS: Record<DefaultTemplateSlot, string> = {
+    scripture: 'Bible',
+    song: 'Songs',
+    hymn: 'Hymns',
+    dictionary: 'Definitions',
+    text: 'Text',
+}
+
 /** The slide types offered as a "Works with" filter. `any` is excluded: it isn't
  *  a thing to filter *for*, it's the wildcard that matches every filter. */
 const WORKS_WITH_FILTERS = TEMPLATE_SLIDE_TYPE_OPTIONS.filter((o) => o.id !== 'any')
 
-function CategoryBadge({ category }: { category: string }) {
-    const config = templateCategory(category)
-    if (!config) return null
-    return (
-        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${config.badgeClass}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${config.dotClass}`} />
-            {config.label}
-        </span>
-    )
+/** The kinds of slide this template can be the default for. */
+function slotsFor(template: TemplateItem) {
+    return DEFAULT_TEMPLATE_SLOTS.filter(({ slideType }) => templateWorksWith(template, slideType))
 }
 
 function AppliesToBadges({ appliesTo }: { appliesTo?: SlideType[] }) {
-    if (!appliesTo || appliesTo.length === 0) return null
-    const filtered = appliesTo.filter(t => t !== 'any')
-    if (filtered.length === 0) return null
+    const filtered = (appliesTo ?? []).filter(t => t !== 'any')
+    if (filtered.length === 0) {
+        return <span className="text-[9px] text-white/70">Any slide</span>
+    }
     return (
         <div className="flex flex-wrap gap-0.5">
             {filtered.slice(0, 3).map(t => (
-                <span key={t} className="px-1 py-0.5 text-[9px] rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                <span key={t} className="px-1 py-0.5 text-[9px] rounded bg-black/40 text-white/85">
                     {SLIDE_TYPE_LABELS[t] || t}
                 </span>
             ))}
             {filtered.length > 3 && (
-                <span className="px-1 py-0.5 text-[9px] rounded bg-gray-100 dark:bg-gray-700 text-gray-400">
+                <span className="px-1 py-0.5 text-[9px] rounded bg-black/40 text-white/70">
                     +{filtered.length - 3}
                 </span>
             )}
@@ -72,26 +92,32 @@ function TemplateCard({
     template,
     isSelected,
     isCompact,
+    defaultFor,
+    operatorDefaultFor,
     onSelect,
     onDelete,
     onEdit,
     onFavorite,
     isDeleting,
     isFavoriting,
-    isCustom,
+    canEdit,
 }: {
     template: TemplateItem
     isSelected: boolean
     isCompact: boolean
+    /** Kinds of slide this device uses it as the default for. */
+    defaultFor: DefaultTemplateSlot[]
+    /** Kinds of slide the live session's operator uses it for. */
+    operatorDefaultFor: DefaultTemplateSlot[]
     onSelect: () => void
     onDelete: (e: React.MouseEvent) => void
     onEdit: (e: React.MouseEvent) => void
     onFavorite: (e: React.MouseEvent) => void
     isDeleting: boolean
     isFavoriting: boolean
-    isCustom: boolean
+    canEdit: boolean
 }) {
-    const isFavorite = template.favoritedBy && template.favoritedBy.length > 0
+    const isFavorite = !!template.isFavorite
     const config = templateCategory(template.category)
 
     const slideData = useMemo(() => {
@@ -178,12 +204,22 @@ function TemplateCard({
         )
     }
 
+
+    // Shown on hover where there's a pointer to hover with; always on touch,
+    // where hover never happens.
+    const hoverOnly = '[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100'
+
     return (
         <div
+            role="button"
+            tabIndex={0}
+            aria-pressed={isSelected}
+            aria-label={template.name}
             onClick={onSelect}
-            className={`group relative rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${isSelected
-                ? 'border-[var(--accent-teal)] shadow-lg shadow-[var(--accent-teal)]/10 scale-[0.98]'
-                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-md'
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect() } }}
+            className={`group relative rounded-lg overflow-hidden border-2 transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-teal)] ${isSelected
+                ? 'border-[var(--accent-teal)] shadow-lg shadow-[var(--accent-teal)]/10'
+                : 'border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:shadow-md'
             }`}
         >
             <div className={`relative ${isCompact ? 'aspect-[4/3]' : 'aspect-video'}`}>
@@ -197,35 +233,51 @@ function TemplateCard({
                     </div>
                 )}
 
-                {/* Category badge — top left */}
-                <div className="absolute top-1.5 left-1.5 z-10">
-                    <CategoryBadge category={template.category} />
-                </div>
+                {/* What it's the default for — top left. */}
+                {(defaultFor.length > 0 || operatorDefaultFor.length > 0) && (
+                    <div className="absolute top-1.5 left-1.5 right-14 z-10 flex flex-wrap gap-0.5">
+                        {operatorDefaultFor.map((slot) => (
+                            <span key={`op-${slot}`} className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-600 text-white" title={`The operator's default for ${SLOT_SHORT_LABELS[slot]}`}>
+                                Operator · {SLOT_SHORT_LABELS[slot]}
+                            </span>
+                        ))}
+                        {defaultFor.map((slot) => (
+                            <span key={slot} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--accent-teal)] text-white" title={`Your default for ${SLOT_SHORT_LABELS[slot]}`}>
+                                <Star className="w-2.5 h-2.5 fill-current" />
+                                {SLOT_SHORT_LABELS[slot]}
+                            </span>
+                        ))}
+                    </div>
+                )}
 
-                {/* Action buttons — top right, show on hover */}
-                <div className="absolute top-1.5 right-1.5 z-10 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* Actions — top right. A favourite's heart stays visible. */}
+                <div className="absolute top-1.5 right-1.5 z-10 flex gap-0.5">
                     <button
                         onClick={onFavorite}
                         disabled={isFavoriting}
-                        className="p-1 rounded bg-black/40 backdrop-blur-sm hover:bg-black/60 text-white transition-colors"
-                        title={isFavorite ? 'Unfavorite' : 'Favorite'}
+                        className={`p-1 rounded bg-black/40 backdrop-blur-sm hover:bg-black/60 text-white transition-opacity ${isFavorite ? '' : hoverOnly}`}
+                        title={isFavorite ? 'Remove from your church’s favourites' : 'Add to your church’s favourites'}
+                        aria-label={isFavorite ? 'Unfavourite' : 'Favourite'}
+                        aria-pressed={isFavorite}
                     >
                         <Heart className={`w-3 h-3 ${isFavorite ? 'fill-current text-red-400' : ''}`} />
                     </button>
-                    {isCustom && (
+                    {canEdit && (
                         <>
                             <button
                                 onClick={onEdit}
-                                className="p-1 rounded bg-black/40 backdrop-blur-sm hover:bg-black/60 text-white transition-colors"
+                                className={`p-1 rounded bg-black/40 backdrop-blur-sm hover:bg-black/60 text-white transition-opacity ${hoverOnly}`}
                                 title="Edit"
+                                aria-label="Edit template"
                             >
                                 <Edit2 className="w-3 h-3" />
                             </button>
                             <button
                                 onClick={onDelete}
                                 disabled={isDeleting}
-                                className="p-1 rounded bg-black/40 backdrop-blur-sm hover:bg-red-500/80 text-white transition-colors"
+                                className={`p-1 rounded bg-black/40 backdrop-blur-sm hover:bg-red-500/80 text-white transition-opacity ${hoverOnly}`}
                                 title="Delete"
+                                aria-label="Delete template"
                             >
                                 {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                             </button>
@@ -233,13 +285,13 @@ function TemplateCard({
                     )}
                 </div>
 
-                {/* Template name — bottom */}
-                <div className="absolute bottom-0 left-0 right-0 z-10 p-2">
+                {/* Name and what it works with — bottom. */}
+                <div className="absolute bottom-0 left-0 right-0 z-10 p-2 space-y-0.5">
                     <p className="text-white text-xs font-semibold leading-tight truncate drop-shadow-md">
                         {template.name}
                     </p>
                     {template.description && !isCompact && (
-                        <p className="text-white/70 text-[10px] truncate mt-0.5">
+                        <p className="text-white/70 text-[10px] truncate">
                             {template.description}
                         </p>
                     )}
@@ -247,12 +299,9 @@ function TemplateCard({
                 </div>
             </div>
 
-            {/* Selected indicator */}
             {isSelected && (
-                <div className="absolute inset-0 bg-[var(--accent-teal)]/10 border-2 border-[var(--accent-teal)] rounded-lg flex items-center justify-center pointer-events-none">
-                    <div className="bg-[var(--accent-teal)] rounded-full p-0.5">
-                        <Check className="w-4 h-4 text-white" />
-                    </div>
+                <div className="absolute bottom-1.5 right-1.5 z-10 bg-[var(--accent-teal)] rounded-full p-0.5 pointer-events-none">
+                    <Check className="w-3.5 h-3.5 text-white" />
                 </div>
             )}
         </div>
@@ -262,7 +311,10 @@ function TemplateCard({
 interface TemplateBrowserProps {
     isOpen?: boolean
     onClose?: () => void
+    /** Add a new slide in this template's look. */
     onSelect: (template: TemplateItem) => void
+    /** Save the live slide as a new template (the caller's flow). Offered only
+     *  while a slide is live. */
     onCreateCustom?: () => boolean | void
     isInline?: boolean
     slideType?: SlideType
@@ -271,16 +323,11 @@ interface TemplateBrowserProps {
 export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCustom, isInline = false, slideType }: TemplateBrowserProps) {
     const { confirm: askConfirm, ConfirmDialog } = useConfirmDialog()
     const [searchQuery, setSearchQuery] = useState('')
-    const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
-    // Second, independent filter axis. Category answers "how is this filed?";
-    // this answers "which slide type can use it?". Only the latter reflects
-    // `appliesTo`, which until now the panel showed as badges but never filtered
-    // on — so an operator who had scoped a template to Songs had no way to find
-    // it by that, and the Prayer *category* chip looked like it should have done
-    // the job. `null` means no restriction.
+    // Which slide type a template works with: the filter that matters, since
+    // it decides where the template is offered. `null` means no restriction.
     const [selectedSlideType, setSelectedSlideType] = useState<SlideType | null>(null)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-    const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | null>(null)
+    const [selectedId, setSelectedId] = useState<string | null>(null)
     const [deletingId, setDeletingId] = useState<string | null>(null)
     const [isResetting, setIsResetting] = useState(false)
     const [showCreateModal, setShowCreateModal] = useState(false)
@@ -289,21 +336,24 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     const [favoritingId, setFavoritingId] = useState<string | null>(null)
 
     const { templates, isLoading, deleteTemplate, toggleFavorite, seedDefaultTemplates, resetDefaultTemplates, getTemplatesForSlideType } = useTemplates()
+    const defaults = useDefaultTemplates()
+    const hasLiveSlide = useAppStore((s) => !!s.liveSlideId)
     const { isSignedIn } = useAuth()
     const isAuthenticated = isSignedIn ?? false
     // The system templates are shared by every church, so only a superadmin
     // may reset them (the server enforces this too).
-    const { isSuperadmin } = useUserRole()
+    const { isSuperadmin, currentUser } = useUserRole()
 
     // Add any built-in templates this deployment is missing, once a session:
-    // the server adds only what's absent (the motion backgrounds came in a
-    // later release than the first seed).
+    // the server adds only what's absent, and scopes built-ins seeded before
+    // they said which slide types they suit.
     const seededRef = useRef(false)
     useEffect(() => {
         if (seededRef.current || !(isOpen || isInline) || isLoading || !templates || !isAuthenticated) return
-        const builtins = templates.filter((t) => !t.createdBy).map((t) => t.name)
+        const builtins = templates.filter((t) => !t.createdBy)
+        const names = builtins.map((t) => t.name)
         // Silk is the newest built-in and Ocean the retired one.
-        const upToDate = builtins.includes('Silk') && !builtins.includes('Ocean')
+        const upToDate = names.includes('Silk') && !names.includes('Ocean') && builtins.every((t) => t.appliesTo)
         if (templates.length > 0 && upToDate) return
         seededRef.current = true
         void Promise.resolve(seedDefaultTemplates()).catch(() => { seededRef.current = false })
@@ -326,29 +376,10 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
 
     useEffect(() => {
         if (isOpen || isInline) {
-            setSelectedTemplate(null)
+            setSelectedId(null)
             setSearchQuery('')
-            setSelectedCategory(null)
         }
     }, [isOpen, isInline])
-
-    const categories = [
-        { id: null as string | null, label: 'All', icon: Grid, color: null as string | null, abbr: null as string | null },
-        ...TEMPLATE_CATEGORIES.map((cfg) => ({
-            id: cfg.id as string | null,
-            label: cfg.label,
-            color: cfg.dotClass as string | null,
-            abbr: cfg.abbr as string | null,
-            icon: null,
-        })),
-    ]
-
-    const handleSelect = () => {
-        if (selectedTemplate) {
-            onSelect(selectedTemplate)
-            onClose?.()
-        }
-    }
 
     const handleDeleteTemplate = async (e: React.MouseEvent, templateId: string) => {
         e.stopPropagation()
@@ -361,9 +392,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
         setDeletingId(templateId)
         try {
             await deleteTemplate(templateId)
-            if (selectedTemplate?._id === templateId) {
-                setSelectedTemplate(null)
-            }
+            if (selectedId === templateId) setSelectedId(null)
         } finally {
             setDeletingId(null)
         }
@@ -387,44 +416,51 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
     }
 
     // A `slideType` prop means the caller has already scoped the panel to one
-    // type, so it wins and the picker below is hidden — nothing good comes of
+    // type, so it wins and the filter row is hidden — nothing good comes of
     // offering a filter that fights the caller's own constraint.
     const activeSlideType = slideType ?? selectedSlideType
 
     const filteredTemplates = useMemo(() => {
         // `getTemplatesForSlideType` is reused rather than reimplemented so the
-        // panel agrees with the inline pickers about what "works with" means —
-        // notably that an "Any Type" template matches every slide type, and that
-        // a template with no `appliesTo` at all is unconstrained.
+        // panel agrees with the inline pickers about what "works with" means.
         const source = activeSlideType ? getTemplatesForSlideType(activeSlideType) : (templates || [])
+        const query = searchQuery.trim().toLowerCase()
         return source.filter((t) => {
-            if (showFavorites && !t.favoritedBy?.length) return false
-            if (selectedCategory && t.category !== selectedCategory) return false
-            if (searchQuery) {
-                const query = searchQuery.toLowerCase()
-                return (
-                    t.name.toLowerCase().includes(query) ||
-                    t.description?.toLowerCase().includes(query)
-                )
-            }
-            return true
+            if (showFavorites && !t.isFavorite) return false
+            if (!query) return true
+            return t.name.toLowerCase().includes(query) || !!t.description?.toLowerCase().includes(query)
         })
-    }, [templates, activeSlideType, getTemplatesForSlideType, selectedCategory, searchQuery, showFavorites])
+    }, [templates, activeSlideType, getTemplatesForSlideType, searchQuery, showFavorites])
+
+    const selectedTemplate = filteredTemplates.find((t) => t._id === selectedId) ?? null
+    const selectedSlots = selectedTemplate ? slotsFor(selectedTemplate) : []
+    const canAddAsSlide = !!selectedTemplate && templateWorksWith(selectedTemplate, 'text')
+
+    const handleAddAsSlide = () => {
+        if (!selectedTemplate) return
+        onSelect(selectedTemplate)
+        if (!isInline) onClose?.()
+    }
 
     if (!isOpen && !isInline) return null
+
+    const chip = (active: boolean) => `flex-shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors ${active
+        ? 'bg-[var(--accent-teal)] text-white'
+        : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+    }`
 
     const content = (
         <div className="h-full flex flex-col overflow-hidden">
             {!isInline && (
-                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)] bg-gradient-to-r from-[var(--accent-teal)]/5 to-amber-500/5">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-subtle)]">
                     <div className="flex items-center gap-3">
                         <Sparkles className="w-6 h-6 text-[var(--accent-teal)]" />
                         <div>
                             <h2 id="template-browser-title" className="text-lg font-semibold text-[var(--text-primary)]">
-                                Slide Templates
+                                Templates
                             </h2>
                             <p className="text-sm text-[var(--text-muted)]">
-                                Choose from pre-designed templates or create your own
+                                A look for your slides. Make one the default and every new slide of that kind gets it.
                             </p>
                         </div>
                     </div>
@@ -438,268 +474,223 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                 </div>
             )}
 
-            <div className="flex-1 flex overflow-hidden">
-                {/* Sidebar */}
-                <div className={`${isInline ? 'w-14 p-1' : 'w-56 p-4'} border-r border-[var(--border-subtle)] space-y-1 overflow-y-auto custom-scrollbar`}>
-                    {!isInline && (
-                        <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                            Category
-                        </p>
-                    )}
-                    {categories.map((cat) => (
-                        <button
-                            key={cat.id || 'all'}
-                            onClick={() => setSelectedCategory(cat.id)}
-                            className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
-                                isInline ? 'p-1.5 justify-center flex-col gap-0.5' : 'px-3 py-2'
-                            } ${selectedCategory === cat.id
-                                ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
-                            }`}
-                            title={cat.label}
-                        >
-                            {cat.abbr ? (
-                                <span className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 ${cat.color}`}>
-                                    {cat.abbr}
-                                </span>
-                            ) : cat.icon ? (
-                                <cat.icon className={`w-4 h-4 flex-shrink-0 ${isInline ? '' : ''}`} />
-                            ) : null}
-                            <span className={isInline ? 'text-[9px] leading-tight truncate w-full text-center' : ''}>{cat.label}</span>
-                            {!isInline && cat.id && filteredTemplates.filter(t => t.category === cat.id).length > 0 && (
-                                <span className="ml-auto text-[10px] text-[var(--text-muted)]">{filteredTemplates.filter(t => t.category === cat.id).length}</span>
-                            )}
-                        </button>
-                    ))}
-
-                    {/* Works with — the second axis. Hidden when the caller already
-                        scoped the panel to a slide type. */}
-                    {!slideType && (
-                        <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-[var(--border-subtle)] space-y-1`}>
-                            {!isInline && (
-                                <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                                    Works with
-                                </p>
-                            )}
-                            <button
-                                onClick={() => setSelectedSlideType(null)}
-                                className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
-                                    isInline ? 'p-1.5 justify-center' : 'px-3 py-2'
-                                } ${selectedSlideType === null
-                                    ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
-                                }`}
-                                title="Any slide type"
-                            >
-                                <span className={isInline ? 'text-[9px] leading-tight truncate w-full text-center' : ''}>
-                                    {isInline ? 'Any' : 'Any slide type'}
-                                </span>
-                            </button>
-                            {WORKS_WITH_FILTERS.map((opt) => (
-                                <button
-                                    key={opt.id}
-                                    onClick={() => setSelectedSlideType(opt.id)}
-                                    className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
-                                        isInline ? 'p-1.5 justify-center' : 'px-3 py-2'
-                                    } ${selectedSlideType === opt.id
-                                        ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
-                                    }`}
-                                    title={`Templates that work with ${opt.label}`}
-                                >
-                                    <span className={isInline ? 'text-[9px] leading-tight truncate w-full text-center' : ''}>
-                                        {isInline ? SLIDE_TYPE_LABELS[opt.id] : opt.label}
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-
-                    <div className={`${isInline ? 'pt-2 mt-2' : 'pt-4 mt-4'} border-t border-[var(--border-subtle)]`}>
-                        {!isInline && (
-                            <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                                Quick Access
-                            </p>
-                        )}
-                        <button
-                            onClick={() => setShowFavorites(!showFavorites)}
-                            className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
-                                isInline ? 'p-2 justify-center' : 'px-3 py-2'
-                            } ${showFavorites
-                                ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]'
-                            }`}
-                            title="Favorites"
-                        >
-                            <Heart className={`w-4 h-4 flex-shrink-0 ${showFavorites ? 'fill-current' : ''}`} />
-                            {!isInline && 'Favorites'}
-                        </button>
-                    </div>
-
-                    <div className="pt-4 border-t border-[var(--border-subtle)] mt-4">
-                        {!isInline && (
-                            <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                                Your Templates
-                            </p>
-                        )}
-                        <button
-                            onClick={() => {
-                                if (onCreateCustom) {
-                                    const handled = onCreateCustom()
-                                    if (handled) onClose?.()
-                                } else {
-                                    setShowCreateModal(true)
-                                }
-                            }}
-                            className={`w-full flex items-center gap-2 rounded-lg text-sm font-medium text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10 transition-colors ${isInline ? 'p-2 justify-center' : 'px-3 py-2'}`}
-                            title="Create Custom Template"
-                        >
-                            <Plus className="w-4 h-4" />
-                            {!isInline && 'Create Custom'}
-                        </button>
-                    </div>
+            {/* Search, new template, and (in the window) layout and reset. */}
+            <div className="flex items-center gap-2 p-2 border-b border-[var(--border-subtle)]">
+                <div className="relative flex-1 min-w-0">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search templates…"
+                        className="w-full pl-9 pr-3 py-2 text-sm border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
+                    />
                 </div>
-
-                {/* Main Content */}
-                <div className="flex-1 flex flex-col min-w-0">
-                    {/* Search & View Toggle */}
-                    <div className="flex items-center gap-3 p-3 border-b border-[var(--border-subtle)]">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Search templates..."
-                                className="w-full pl-9 pr-4 py-1.5 text-xs border border-[var(--border-default)] rounded-lg outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] focus:ring-2 focus:ring-[var(--accent-teal)]/30 transition-all"
-                            />
-                        </div>
-                        {!isInline && (
-                            <div className="flex bg-[var(--bg-tertiary)] rounded-lg p-0.5">
-                                <button
-                                    onClick={() => setViewMode('grid')}
-                                    className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-[var(--text-muted)]'}`}
-                                >
-                                    <Grid className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                    onClick={() => setViewMode('list')}
-                                    className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'text-[var(--text-muted)]'}`}
-                                >
-                                    <List className="w-3.5 h-3.5" />
-                                </button>
-                            </div>
-                        )}
-                        {!isInline && isSuperadmin && (
-                            <button
-                                onClick={handleResetDefaults}
-                                disabled={isResetting}
-                                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
-                                title="Reset default templates"
-                                aria-label="Reset default templates"
-                            >
-                                <RefreshCw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
-                            </button>
-                        )}
+                {!isInline && onCreateCustom && hasLiveSlide && (
+                    <button
+                        onClick={() => { if (onCreateCustom()) onClose?.() }}
+                        className="flex-shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold text-[var(--accent-teal)] hover:bg-[var(--accent-teal)]/10"
+                        title="Save the slide that's live now as a template"
+                    >
+                        <Save className="w-4 h-4" />
+                        Save live slide
+                    </button>
+                )}
+                <button
+                    onClick={() => { setEditingTemplate(null); setShowCreateModal(true) }}
+                    className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 h-9 min-w-9 px-2.5 rounded-lg text-xs font-semibold text-white bg-[var(--accent-teal)] hover:brightness-110 shadow-sm"
+                    title="New template"
+                    aria-label="New template"
+                >
+                    <Plus className="w-4 h-4" />
+                    {!isInline && 'New template'}
+                </button>
+                {!isInline && (
+                    <div className="flex bg-[var(--bg-tertiary)] rounded-lg p-0.5">
+                        <button
+                            onClick={() => setViewMode('grid')}
+                            aria-label="Grid view"
+                            className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-[var(--bg-elevated)] shadow-sm' : 'text-[var(--text-muted)]'}`}
+                        >
+                            <Grid className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                            onClick={() => setViewMode('list')}
+                            aria-label="List view"
+                            className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-[var(--bg-elevated)] shadow-sm' : 'text-[var(--text-muted)]'}`}
+                        >
+                            <List className="w-3.5 h-3.5" />
+                        </button>
                     </div>
-
-                    {/* Results count */}
-                    <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-b border-gray-100 dark:border-gray-800">
-                        {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''}
-                        {activeSlideType && ` for ${SLIDE_TYPE_LABELS[activeSlideType] || activeSlideType}`}
-                        {selectedCategory && ` in ${templateCategory(selectedCategory)?.label || selectedCategory}`}
-                    </div>
-
-                    {/* Templates Grid */}
-                    <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
-                        {isLoading ? (
-                            <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-muted)]">
-                                <Loader2 className="w-6 h-6 animate-spin mb-2" />
-                                <p className="text-xs">Loading templates...</p>
-                            </div>
-                        ) : filteredTemplates.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-muted)] p-4">
-                                <LayoutTemplate className="w-8 h-8 mb-2 opacity-30" />
-                                <p className="text-sm font-medium">No templates found</p>
-                                <p className="text-xs mt-1 text-[var(--text-muted)]">
-                                    {searchQuery ? 'Try a different search' : 'Create one to get started'}
-                                </p>
-                            </div>
-                        ) : (
-                            <div className={`grid ${isInline ? 'grid-cols-2' : viewMode === 'list' ? 'grid-cols-1' : 'grid-cols-3'} gap-3`}>
-                                {filteredTemplates.map((template) => (
-                                    <TemplateCard
-                                        key={template._id}
-                                        template={template}
-                                        isSelected={selectedTemplate?._id === template._id}
-                                        isCompact={isInline}
-                                        onSelect={() => setSelectedTemplate(template)}
-                                        onDelete={(e) => handleDeleteTemplate(e, template._id)}
-                                        onEdit={(e) => handleEditTemplate(e, template)}
-                                        onFavorite={(e) => handleToggleFavorite(e, template._id)}
-                                        isDeleting={deletingId === template._id}
-                                        isFavoriting={favoritingId === template._id}
-                                        isCustom={!!template.createdBy}
-                                    />
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
+                )}
+                {!isInline && isSuperadmin && (
+                    <button
+                        onClick={handleResetDefaults}
+                        disabled={isResetting}
+                        className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
+                        title="Reset default templates"
+                        aria-label="Reset default templates"
+                    >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+                    </button>
+                )}
             </div>
 
-            {/* Footer */}
-            <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border-subtle)] bg-gray-50/50 dark:bg-gray-900/50">
-                <div className="flex-1 min-w-0 mr-4">
-                    {selectedTemplate && (
-                        <div className="flex items-center gap-2">
-                            <CategoryBadge category={selectedTemplate.category} />
-                            <p className="text-xs font-bold text-[var(--text-primary)] truncate">
-                                {selectedTemplate.name}
-                            </p>
+            {/* What it works with, and the church's favourites. */}
+            <div className="flex items-center gap-1.5 px-2 py-2 overflow-x-auto no-scrollbar border-b border-[var(--border-subtle)]" role="group" aria-label="Filter templates">
+                <button
+                    onClick={() => setShowFavorites((v) => !v)}
+                    className={chip(showFavorites)}
+                    aria-pressed={showFavorites}
+                    title="Your church's favourites"
+                >
+                    <Heart className={`w-3 h-3 ${showFavorites ? 'fill-current' : ''}`} />
+                    Favourites
+                </button>
+                {!slideType && (
+                    <>
+                        <span className="flex-shrink-0 w-px h-4 bg-[var(--border-default)]" aria-hidden="true" />
+                        <button
+                            onClick={() => setSelectedSlideType(null)}
+                            className={chip(selectedSlideType === null)}
+                            aria-pressed={selectedSlideType === null}
+                            title="Any slide type"
+                        >
+                            All
+                        </button>
+                        {WORKS_WITH_FILTERS.map((opt) => (
+                            <button
+                                key={opt.id}
+                                onClick={() => setSelectedSlideType(opt.id)}
+                                className={chip(selectedSlideType === opt.id)}
+                                aria-pressed={selectedSlideType === opt.id}
+                                title={`Templates that work with ${opt.label}`}
+                            >
+                                {opt.label}
+                            </button>
+                        ))}
+                    </>
+                )}
+            </div>
+
+            {/* Templates */}
+            <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+                {isLoading ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-muted)]">
+                        <Loader2 className="w-6 h-6 animate-spin mb-2" />
+                        <p className="text-xs">Loading templates…</p>
+                    </div>
+                ) : filteredTemplates.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center text-[var(--text-muted)] p-4">
+                        <LayoutTemplate className="w-8 h-8 mb-2 opacity-30" />
+                        <p className="text-sm font-medium">
+                            {showFavorites ? 'No favourites here yet' : 'No templates found'}
+                        </p>
+                        <p className="text-xs mt-1">
+                            {searchQuery
+                                ? 'Try a different search'
+                                : showFavorites
+                                    ? 'Tap the heart on a template to share it with your team.'
+                                    : 'Create one to get started'}
+                        </p>
+                    </div>
+                ) : (
+                    <div className={`grid ${isInline ? 'grid-cols-2' : viewMode === 'list' ? 'grid-cols-1' : 'grid-cols-2 sm:grid-cols-3'} gap-2`}>
+                        {filteredTemplates.map((template) => (
+                            <TemplateCard
+                                key={template._id}
+                                template={template}
+                                isSelected={selectedId === template._id}
+                                isCompact={isInline}
+                                defaultFor={DEFAULT_TEMPLATE_SLOTS.filter(({ slot }) => defaults.isMine(slot, template._id)).map(({ slot }) => slot)}
+                                operatorDefaultFor={DEFAULT_TEMPLATE_SLOTS.filter(({ slot }) => defaults.isOperators(slot, template._id)).map(({ slot }) => slot)}
+                                onSelect={() => setSelectedId((id) => (id === template._id ? null : template._id))}
+                                onDelete={(e) => handleDeleteTemplate(e, template._id)}
+                                onEdit={(e) => handleEditTemplate(e, template)}
+                                onFavorite={(e) => handleToggleFavorite(e, template._id)}
+                                isDeleting={deletingId === template._id}
+                                isFavoriting={favoritingId === template._id}
+                                canEdit={!!template.createdBy && template.createdBy === currentUser?._id}
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* What a template does, once one is picked. */}
+            <div className="flex-shrink-0 px-3 py-2.5 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 space-y-2">
+                {selectedTemplate ? (
+                    <>
+                        <div className="flex items-center gap-2 min-w-0">
+                            <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{selectedTemplate.name}</p>
                             {selectedTemplate.description && (
-                                <p className="text-[10px] text-[var(--text-muted)] truncate hidden sm:block">
-                                    — {selectedTemplate.description}
-                                </p>
+                                <p className="text-xs text-[var(--text-muted)] truncate hidden sm:block">— {selectedTemplate.description}</p>
                             )}
                         </div>
-                    )}
-                </div>
-                <div className="flex gap-2">
-                    {!isInline && (
-                        <button
-                            onClick={onClose}
-                            className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-lg"
-                        >
-                            Cancel
-                        </button>
-                    )}
-                    <button
-                        onClick={handleSelect}
-                        disabled={!selectedTemplate}
-                        className={`px-4 py-2 text-xs font-bold rounded-lg transition-all shadow-sm ${
-                            isInline ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--accent-teal)] text-white hover:brightness-110'
-                        } disabled:opacity-50`}
-                    >
-                        {isInline ? 'USE' : 'Use Template'}
-                    </button>
-                </div>
+                        {selectedSlots.length > 0 && (
+                            <div className="space-y-1">
+                                <p className="text-[11px] text-[var(--text-muted)]">Use as the default for new</p>
+                                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Default for">
+                                    {selectedSlots.map(({ slot, label }) => {
+                                        const on = defaults.isMine(slot, selectedTemplate._id)
+                                        return (
+                                            <button
+                                                key={slot}
+                                                onClick={() => defaults.toggle(slot, selectedTemplate._id)}
+                                                aria-pressed={on}
+                                                className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-full text-xs font-medium border transition-colors ${on
+                                                    ? 'bg-[var(--accent-teal)] border-[var(--accent-teal)] text-white'
+                                                    : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--accent-teal)]/60'
+                                                }`}
+                                            >
+                                                {on ? <Check className="w-3.5 h-3.5" /> : <Star className="w-3.5 h-3.5" />}
+                                                {label}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                        {defaults.inSession && (
+                            <p className="text-[11px] text-[var(--text-muted)]">
+                                In this live session the operator's defaults come first; yours fill in where they haven't set one.
+                            </p>
+                        )}
+                        {canAddAsSlide && (
+                            <button
+                                onClick={handleAddAsSlide}
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-lg text-xs font-semibold text-white bg-[var(--accent-teal)] hover:brightness-110 shadow-sm"
+                            >
+                                <Plus className="w-4 h-4" />
+                                Add as slide
+                            </button>
+                        )}
+                    </>
+                ) : (
+                    <p className="text-xs text-[var(--text-muted)]">
+                        Pick a template to make it a default{templates?.some((t) => templateWorksWith(t, 'text')) ? ' or add it as a slide' : ''}.
+                    </p>
+                )}
             </div>
         </div>
+    )
+
+    const createModal = (
+        <CreateTemplateModal
+            isOpen={showCreateModal}
+            onClose={() => {
+                setShowCreateModal(false)
+                setEditingTemplate(null)
+            }}
+            editingTemplate={editingTemplate}
+        />
     )
 
     if (isInline) return (
         <>
             {content}
             <ConfirmDialog />
-            <CreateTemplateModal
-                isOpen={showCreateModal}
-                onClose={() => {
-                    setShowCreateModal(false)
-                    setEditingTemplate(null)
-                }}
-                editingTemplate={editingTemplate}
-            />
+            {createModal}
         </>
     )
 
@@ -715,15 +706,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                 {content}
             </Modal>
             <ConfirmDialog />
-
-            <CreateTemplateModal
-                isOpen={showCreateModal}
-                onClose={() => {
-                    setShowCreateModal(false)
-                    setEditingTemplate(null)
-                }}
-                editingTemplate={editingTemplate}
-            />
+            {createModal}
         </>
     )
 }

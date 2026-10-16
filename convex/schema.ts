@@ -237,10 +237,15 @@ export default defineSchema({
         code: v.string(),
         email: v.string(),
         kind: v.string(),
+        // The church it was redeemed for. A code's limit counts churches, not
+        // people: per email, one church's members (or one admin's abandoned
+        // checkouts from several accounts) could use up a code for everyone.
+        churchId: v.optional(v.string()),
         redeemedAt: v.string(),
     })
         .index("by_code", ["code"])
-        .index("by_code_email", ["code", "email"]),
+        .index("by_code_email", ["code", "email"])
+        .index("by_code_church", ["code", "churchId"]),
 
     // Schedules table
     schedules: defineTable({
@@ -302,7 +307,9 @@ export default defineSchema({
         .index("by_schedule", ["scheduleId"])
         .index("by_church", ["churchId"])
         .index("by_user", ["userId"])
-        .index("by_locked", ["lockedBy"]),
+        .index("by_locked", ["lockedBy"])
+        // Who still uses an uploaded file, before it's deleted.
+        .index("by_background_storage", ["backgroundStorageId"]),
 
     // Songs table
     songs: defineTable({
@@ -358,7 +365,15 @@ export default defineSchema({
             updatedAt: v.optional(v.string()),
         })),
         createdBy: v.optional(v.string()), // Optional - system templates don't have a creator
-        favoritedBy: v.optional(v.array(v.string())), // Array of user IDs who favorited this template
+        // The church a custom template belongs to (none for the system ones).
+        // Templates used to belong to their creator's *current* church, found
+        // by scanning the whole table: a creator who moved took them along,
+        // and past the scan's 2000-row window templates simply vanished.
+        // Backfilled by migrations:backfillTemplateChurchIds.
+        churchId: v.optional(v.string()),
+        // Legacy: user ids, from every church at once. Superseded by the
+        // `templateFavorites` table (migrations:migrateTemplateFavorites).
+        favoritedBy: v.optional(v.array(v.string())),
         backgroundStorageId: v.optional(v.string()), // Storage ID for video/image files
         category: v.union(
             v.literal("announcement"),
@@ -374,7 +389,23 @@ export default defineSchema({
         updatedAt: v.string(),
     })
         .index("by_category", ["category"])
-        .index("by_creator", ["createdBy"]),
+        .index("by_creator", ["createdBy"])
+        .index("by_church", ["churchId"])
+        .index("by_background_storage", ["backgroundStorageId"]),
+
+    // A church's favourite templates: one volunteer's favourite is the whole
+    // team's, so the next person on the desk finds the ones in use. Kept apart
+    // from `templates` because the system templates are shared by every
+    // church — a list on the template itself mixed every church's favourites
+    // together (and made each toggle rewrite a document all of them read).
+    // `scope` is the church id, or the user's own id before they've joined one.
+    templateFavorites: defineTable({
+        scope: v.string(),
+        templateId: v.string(),
+        userId: v.string(),
+        createdAt: v.string(),
+    })
+        .index("by_scope_and_template", ["scope", "templateId"]),
 
     // Adverts table
     adverts: defineTable({
@@ -509,7 +540,11 @@ export default defineSchema({
         .index("by_schedule", ["scheduleId"])
         .index("by_church", ["churchId"])
         .index("by_creator", ["createdBy"])
-        .index("by_schedule_created", ["scheduleId", "createdAt"]),
+        .index("by_schedule_created", ["scheduleId", "createdAt"])
+        // A schedule's transcripts, one church's: by schedule alone, another
+        // church filing transcripts under the same schedule id could push a
+        // church's own out of the listed window.
+        .index("by_church_and_schedule", ["churchId", "scheduleId"]),
 
     // Speaker profiles — learned phonetic patterns per speaker
     speakerProfiles: defineTable({
@@ -543,7 +578,11 @@ export default defineSchema({
     })
         .index("by_status", ["status"])
         .index("by_speaker", ["speakerName", "churchId"])
-        .index("by_type", ["patternType", "status"]),
+        .index("by_type", ["patternType", "status"])
+        // Every read is one church's: through `by_status` alone each read
+        // loaded every church's patterns, so one church's volume could push
+        // the reads past their limits for all of them.
+        .index("by_church_and_status", ["churchId", "status"]),
 
     // Invitations table - for team member invitations
     invitations: defineTable({

@@ -151,13 +151,16 @@ export const initializeProCheckout = action({
             planCode = promo.introPlanCode
             appliedPromo = normalizeCode(args.promoCode)
 
-            // Reserve the redemption (idempotent per user) and persist the intro
+            // Reserve the redemption (idempotent per church) and persist the intro
             // intent before checkout, so the rollover bookkeeping survives even
             // if the webhook can't echo our metadata.
             await ctx.runMutation(internal.promos.recordRedemption, {
                 code: args.promoCode,
                 email,
                 kind: 'discount',
+                // One slot per church, so trying again (or from another
+                // admin's account) after an abandoned checkout takes no more.
+                churchId: churchId || undefined,
             })
             await ctx.runMutation(internal.licensing.preparePromoSubscription, {
                 email,

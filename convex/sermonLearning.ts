@@ -150,10 +150,12 @@ export const proposePattern = mutation({
     handler: async (ctx, args) => {
         await requireChurchMember(ctx, args.churchId);
         // Check if identical pending pattern already exists
+        // This church's pending patterns only: by status alone this read every
+        // church's, and one church's volume could break it for all of them.
         const existing = await ctx.db
             .query("misheardPatterns")
-            .withIndex("by_status", (q) => q.eq("status", "pending"))
-            .collect();
+            .withIndex("by_church_and_status", (q) => q.eq("churchId", args.churchId).eq("status", "pending"))
+            .take(1000);
 
         const match = existing.find(
             (p) =>
@@ -211,11 +213,9 @@ export const getPendingPatterns = query({
         if (!user || !isMemberOf(user, args.churchId)) return [];
         let patterns = await ctx.db
             .query("misheardPatterns")
-            .withIndex("by_status", (q) => q.eq("status", "pending"))
+            .withIndex("by_church_and_status", (q) => q.eq("churchId", args.churchId).eq("status", "pending"))
             .order("desc")
-            .collect();
-
-        patterns = patterns.filter((p) => p.churchId === args.churchId);
+            .take(500);
         if (args.speakerName) {
             patterns = patterns.filter((p) => p.speakerName === args.speakerName);
         }
@@ -230,11 +230,10 @@ export const getApprovedPatterns = query({
     handler: async (ctx, args) => {
         const user = await getCurrentUser(ctx);
         if (!user || !isMemberOf(user, args.churchId)) return [];
-        const patterns = await ctx.db
+        return await ctx.db
             .query("misheardPatterns")
-            .withIndex("by_status", (q) => q.eq("status", "approved"))
-            .collect();
-        return patterns.filter((p) => p.churchId === args.churchId);
+            .withIndex("by_church_and_status", (q) => q.eq("churchId", args.churchId).eq("status", "approved"))
+            .take(1000);
     },
 });
 
