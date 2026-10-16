@@ -119,7 +119,10 @@ export type TemplateItem = {
     appliesTo?: SlideType[]
     thumbnail?: string
     createdBy?: string
+    /** Legacy, per user; superseded by `isFavorite`. */
     favoritedBy?: string[]
+    /** Favourited by the caller's church (anyone in it), from getTemplates. */
+    isFavorite?: boolean
     backgroundStorageId?: string
     createdAt: string
     updatedAt: string

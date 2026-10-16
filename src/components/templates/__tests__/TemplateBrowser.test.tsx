@@ -1,15 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import type { TemplateItem, SlideType } from '../../../hooks/useTemplates'
+import { useAppStore } from '../../../store/appStore'
 
 /**
- * The two filter axes of the templates panel.
- *
- * `category` ("how is this template filed?") and `appliesTo` ("which slide types
- * may use it?") are independent, and the panel used to filter on category alone —
- * `appliesTo` was rendered as badges and never acted on. That made the panel
- * quietly misleading: an operator who scoped a template to Songs had no way to
- * find it by that, and the Prayer *category* chip looked like it ought to.
+ * The templates panel: found by what a template works with (which decides
+ * where it's offered), and doing the two things a template does — be the
+ * default for a kind of slide, or become a text slide.
  */
 
 function template(over: Partial<TemplateItem> & { _id: string; name: string }): TemplateItem {
@@ -24,17 +21,17 @@ function template(over: Partial<TemplateItem> & { _id: string; name: string }): 
 
 const TEMPLATES: TemplateItem[] = [
     template({ _id: 'a', name: 'Songs Only', category: 'worship', appliesTo: ['song'] }),
-    template({ _id: 'b', name: 'Bible Only', category: 'sermon', appliesTo: ['bible'] }),
+    template({ _id: 'b', name: 'Bible Only', category: 'sermon', appliesTo: ['bible'], isFavorite: true }),
     template({ _id: 'c', name: 'Universal', category: 'general', appliesTo: ['any'] }),
-    template({ _id: 'd', name: 'Unconstrained', category: 'prayer' }),
-    template({ _id: 'e', name: 'Prayer Filed Songs', category: 'prayer', appliesTo: ['song'] }),
+    template({ _id: 'd', name: 'Unconstrained', category: 'prayer', createdBy: 'me' }),
+    template({ _id: 'e', name: 'Colleague’s', category: 'prayer', appliesTo: ['text'], createdBy: 'someone-else' }),
 ]
 
 const h = vi.hoisted(() => ({ slideTypeProp: undefined as SlideType | undefined }))
 
 vi.mock('@clerk/clerk-react', () => ({ useAuth: () => ({ isSignedIn: true }) }))
 vi.mock('../../modals', () => ({ CreateTemplateModal: () => null }))
-vi.mock('../../../hooks/useUserRole', () => ({ useUserRole: () => ({ isSuperadmin: false }) }))
+vi.mock('../../../hooks/useUserRole', () => ({ useUserRole: () => ({ isSuperadmin: false, currentUser: { _id: 'me' } }) }))
 vi.mock('../../../hooks/useLocalBackground', () => ({ useLocalBackground: () => '' }))
 
 vi.mock('../../../hooks/useTemplates', async (importOriginal) => {
@@ -49,7 +46,7 @@ vi.mock('../../../hooks/useTemplates', async (importOriginal) => {
             toggleFavorite: vi.fn(),
             seedDefaultTemplates: vi.fn(),
             resetDefaultTemplates: vi.fn(),
-            // The real implementation, so the panel and the inline pickers can't
+            // The real rule, so the panel and the inline pickers can't
             // disagree about what "works with" means.
             getTemplatesForSlideType: (slideType: SlideType) =>
                 TEMPLATES.filter((t) => {
@@ -64,74 +61,123 @@ const { TemplateBrowser } = await import('../TemplateBrowser')
 
 /** Names of the template cards currently rendered. */
 function visibleNames(): string[] {
-    return TEMPLATES.map((t) => t.name).filter((name) => screen.queryAllByText(name).length > 0)
+    return TEMPLATES.map((t) => t.name).filter((name) => screen.queryByRole('button', { name }) !== null)
 }
+
+const onSelect = vi.fn()
 
 function renderBrowser() {
-    return render(<TemplateBrowser onSelect={vi.fn()} slideType={h.slideTypeProp} />)
+    return render(<TemplateBrowser isInline onSelect={onSelect} slideType={h.slideTypeProp} />)
 }
 
-describe('TemplateBrowser filters', () => {
+describe('TemplateBrowser', () => {
     beforeEach(() => {
         h.slideTypeProp = undefined
+        onSelect.mockReset()
+        useAppStore.setState((s) => ({
+            settings: { ...s.settings, defaultTemplates: {} },
+            sessionDefaultTemplates: null,
+        }))
     })
 
-    it('shows every template with no filter applied', () => {
-        renderBrowser()
-        expect(visibleNames()).toHaveLength(TEMPLATES.length)
+    describe('filters', () => {
+        it('shows every template with no filter applied', () => {
+            renderBrowser()
+            expect(visibleNames()).toHaveLength(TEMPLATES.length)
+        })
+
+        it('filters by the slide type a template works with', () => {
+            renderBrowser()
+            fireEvent.click(screen.getByTitle('Templates that work with Songs'))
+            expect(visibleNames().sort()).toEqual(['Songs Only', 'Unconstrained', 'Universal'])
+        })
+
+        it('keeps an "Any Type" template visible under every slide-type filter', () => {
+            renderBrowser()
+            for (const label of ['Songs', 'Bible Verses', 'Countdowns']) {
+                fireEvent.click(screen.getByTitle(`Templates that work with ${label}`))
+                expect(visibleNames()).toContain('Universal')
+                expect(visibleNames()).toContain('Unconstrained')
+            }
+        })
+
+        it('clears the slide-type filter again', () => {
+            renderBrowser()
+            fireEvent.click(screen.getByTitle('Templates that work with Bible Verses'))
+            expect(visibleNames()).not.toContain('Songs Only')
+            fireEvent.click(screen.getByTitle('Any slide type'))
+            expect(visibleNames()).toContain('Songs Only')
+        })
+
+        it('does not offer the filter when the caller already scoped the panel', () => {
+            h.slideTypeProp = 'bible'
+            renderBrowser()
+            expect(screen.queryByTitle('Templates that work with Songs')).toBeNull()
+            expect(visibleNames().sort()).toEqual(['Bible Only', 'Unconstrained', 'Universal'])
+        })
+
+        it('shows the church’s favourites', () => {
+            renderBrowser()
+            fireEvent.click(screen.getByTitle('Your church\'s favourites'))
+            expect(visibleNames()).toEqual(['Bible Only'])
+        })
+
+        it('no longer files templates by category', () => {
+            renderBrowser()
+            expect(screen.queryByTitle('Prayer')).toBeNull()
+            expect(screen.queryByTitle('Worship')).toBeNull()
+        })
     })
 
-    it('filters by category, independently of appliesTo', () => {
-        renderBrowser()
-        fireEvent.click(screen.getByTitle('Prayer'))
-        expect(visibleNames().sort()).toEqual(['Prayer Filed Songs', 'Unconstrained'])
+    describe('defaults', () => {
+        it('offers a default only for the kinds of slide a template works with', () => {
+            renderBrowser()
+            fireEvent.click(screen.getByRole('button', { name: 'Songs Only' }))
+            const defaults = within(screen.getByRole('group', { name: 'Default for' }))
+            expect(defaults.getByRole('button', { name: 'Songs' })).toBeInTheDocument()
+            expect(defaults.queryByRole('button', { name: 'Bible verses' })).toBeNull()
+        })
+
+        it('sets and clears this device’s default from the card', () => {
+            renderBrowser()
+            fireEvent.click(screen.getByRole('button', { name: 'Bible Only' }))
+            const toggle = screen.getByRole('button', { name: 'Bible verses' })
+
+            fireEvent.click(toggle)
+            expect(useAppStore.getState().settings.defaultTemplates?.scripture).toBe('b')
+            expect(toggle).toHaveAttribute('aria-pressed', 'true')
+            expect(within(screen.getByRole('button', { name: 'Bible Only' })).getByTitle('Your default for Bible')).toBeInTheDocument()
+
+            fireEvent.click(toggle)
+            expect(useAppStore.getState().settings.defaultTemplates?.scripture).toBeNull()
+        })
+
+        it('marks the operator’s defaults in a live session', () => {
+            useAppStore.setState({ sessionDefaultTemplates: { song: 'a' } })
+            renderBrowser()
+            expect(within(screen.getByRole('button', { name: 'Songs Only' })).getByTitle('The operator\'s default for Songs')).toBeInTheDocument()
+        })
     })
 
-    it('filters by the slide type a template works with', () => {
-        // The new axis. "Bible Only" is excluded; the wildcard and unconstrained
-        // templates are not.
-        renderBrowser()
-        fireEvent.click(screen.getByTitle('Templates that work with Songs'))
-        expect(visibleNames().sort()).toEqual([
-            'Prayer Filed Songs', 'Songs Only', 'Unconstrained', 'Universal',
-        ])
-    })
+    describe('actions', () => {
+        it('adds a text-capable template as a slide', () => {
+            renderBrowser()
+            fireEvent.click(screen.getByRole('button', { name: 'Universal' }))
+            fireEvent.click(screen.getByRole('button', { name: 'Add as slide' }))
+            expect(onSelect).toHaveBeenCalledWith(TEMPLATES[2])
+        })
 
-    it('keeps an "Any Type" template visible under every slide-type filter', () => {
-        // The behaviour the confusion was really about: a template saved as
-        // applying to "Any Type" genuinely does apply here, so it must not
-        // disappear when the operator narrows by slide type.
-        renderBrowser()
-        for (const label of ['Songs', 'Bible Verses', 'Countdowns']) {
-            fireEvent.click(screen.getByTitle(`Templates that work with ${label}`))
-            expect(visibleNames()).toContain('Universal')
-            expect(visibleNames()).toContain('Unconstrained')
-        }
-    })
+        it('doesn’t offer "Add as slide" for a template that isn’t for text', () => {
+            renderBrowser()
+            fireEvent.click(screen.getByRole('button', { name: 'Bible Only' }))
+            expect(screen.queryByRole('button', { name: 'Add as slide' })).toBeNull()
+        })
 
-    it('composes the two axes', () => {
-        renderBrowser()
-        fireEvent.click(screen.getByTitle('Prayer'))
-        fireEvent.click(screen.getByTitle('Templates that work with Songs'))
-        // Filed under Prayer AND usable on a song slide. 'Unconstrained' is also
-        // Prayer and unconstrained, so it survives too; 'Songs Only' is Worship.
-        expect(visibleNames().sort()).toEqual(['Prayer Filed Songs', 'Unconstrained'])
-    })
-
-    it('clears the slide-type filter again', () => {
-        renderBrowser()
-        fireEvent.click(screen.getByTitle('Templates that work with Bible Verses'))
-        expect(visibleNames()).not.toContain('Songs Only')
-        fireEvent.click(screen.getByTitle('Any slide type'))
-        expect(visibleNames()).toContain('Songs Only')
-    })
-
-    it('does not offer the filter when the caller already scoped the panel', () => {
-        // `slideType` is the caller's own constraint; a competing picker could
-        // only fight it.
-        h.slideTypeProp = 'bible'
-        renderBrowser()
-        expect(screen.queryByTitle('Templates that work with Songs')).toBeNull()
-        expect(visibleNames().sort()).toEqual(['Bible Only', 'Unconstrained', 'Universal'])
+        it('offers edit and delete only on the caller’s own templates', () => {
+            renderBrowser()
+            expect(within(screen.getByRole('button', { name: 'Unconstrained' })).getByLabelText('Edit template')).toBeInTheDocument()
+            expect(within(screen.getByRole('button', { name: 'Colleague’s' })).queryByLabelText('Edit template')).toBeNull()
+            expect(within(screen.getByRole('button', { name: 'Universal' })).queryByLabelText('Delete template')).toBeNull()
+        })
     })
 })

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LayoutTemplate, ChevronDown, X } from 'lucide-react'
+import { LayoutTemplate, ChevronDown, Heart, X } from 'lucide-react'
 import { useTemplates, templateCategory, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
 
 interface TemplateSelectorProps {
@@ -13,7 +13,10 @@ export function TemplateSelector({ slideType, selectedTemplate, onSelect, maxVis
     const [isOpen, setIsOpen] = useState(false)
     const { getTemplatesForSlideType, isLoading } = useTemplates()
 
-    const templates = getTemplatesForSlideType(slideType)
+    // The church's favourites first, so the ones the team uses are in the
+    // first few chips rather than behind "+N". Otherwise in stored order.
+    const all = getTemplatesForSlideType(slideType)
+    const templates = [...all.filter((t) => t.isFavorite), ...all.filter((t) => !t.isFavorite)]
 
     if (templates.length === 0 && !isLoading) return null
 
@@ -57,8 +60,9 @@ export function TemplateSelector({ slideType, selectedTemplate, onSelect, maxVis
                                 }`}
                                 title={template.description || template.name}
                             >
-                                {!isSelected && (
-                                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: dotColor }} />
+                                {!isSelected && (template.isFavorite
+                                    ? <Heart className="w-2.5 h-2.5 flex-shrink-0 fill-current text-red-400" aria-label="Favourite" />
+                                    : <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: dotColor }} />
                                 )}
                                 {template.name}
                             </button>

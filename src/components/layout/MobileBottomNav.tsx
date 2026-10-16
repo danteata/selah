@@ -3,8 +3,9 @@
  *
  * Renders only below the `md` breakpoint (768px) so it disappears on
  * tablet/desktop where the full NavRail takes over. Mirrors the rail's
- * most-used sections (Bible, Music, Templates, Sermon, Settings) plus
- * a quick-add button. Sections that open modals (library, schedule,
+ * most-used sections during a service (Bible, Music, Sermon) plus a
+ * quick-add button. Templates are setup work, not something reached for
+ * mid-service from a phone, so they live under More. Sections that open modals (library, schedule,
  * settings) are kept accessible via the more-button that opens the
  * full NavRail as a slide-up sheet on small screens.
  */
@@ -19,8 +20,8 @@ import { useAppStore } from '../../store/appStore'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import type { NavSection } from '../../types/studio'
 
-const PRIMARY_ITEMS: NavSection[] = ['bible', 'music', 'templates', 'sermon']
-const MORE_ITEMS: NavSection[] = ['media', 'dictionary', 'countdown', 'alerts', 'library', 'schedule', 'settings']
+const PRIMARY_ITEMS: NavSection[] = ['bible', 'music', 'sermon']
+const MORE_ITEMS: NavSection[] = ['media', 'dictionary', 'templates', 'countdown', 'alerts', 'library', 'schedule', 'settings']
 
 const ICON: Record<NavSection, React.ElementType> = {
     bible: BookOpen,
