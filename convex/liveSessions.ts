@@ -2,6 +2,7 @@ import { query, mutation, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getById, isChurchAdmin, isMemberOf, requireUser, type User } from "./lib/auth";
+import { sessionDefaultTemplatesValidator } from "./schema";
 
 /**
  * An active session in the caller's own church.
@@ -231,6 +232,32 @@ export const setLiveSlide = mutation({
             liveSlideId: args.slideId,
             // Any explicit live slide change should unblank the output.
             isBlank: false,
+            updatedAt: new Date().toISOString(),
+        });
+
+        return true;
+    },
+});
+
+/**
+ * Publish the operator's default templates on the session, so a slide a
+ * collaborator creates without picking a template takes the operator's house
+ * style instead of whatever their own device defaults to.
+ */
+export const setDefaultTemplates = mutation({
+    args: {
+        sessionId: v.id("liveSessions"),
+        defaultTemplates: sessionDefaultTemplatesValidator,
+    },
+    handler: async (ctx, args) => {
+        const { user, session } = await requireActiveSession(ctx, args.sessionId);
+
+        if (!isOperatorOrAdmin(user, session)) {
+            throw new Error("Only the operator can set the session's templates");
+        }
+
+        await ctx.db.patch(args.sessionId, {
+            defaultTemplates: args.defaultTemplates,
             updatedAt: new Date().toISOString(),
         });
 

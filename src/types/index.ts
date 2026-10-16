@@ -469,6 +469,16 @@ export interface DefaultBackgroundConfig {
     backgroundVideoKey: string | null
 }
 
+/** Default template ids per slide type, as a live session's operator set
+ *  them (mirrors `sessionDefaultTemplatesValidator` in convex/schema.ts). */
+export interface SessionDefaultTemplates {
+    scripture?: string | null
+    song?: string | null
+    hymn?: string | null
+    dictionary?: string | null
+    text?: string | null
+}
+
 export interface AppSettings {
     appVersion: string
     defaultBibleVersion: string

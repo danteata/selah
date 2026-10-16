@@ -296,8 +296,19 @@ export function useSlideCreation() {
     const activeSlides = useAppStore((state) => state.activeSlides)
     const settings = useAppStore((state) => state.settings)
     const activeSchedule = useAppStore((state) => state.activeSchedule)
+    const sessionDefaultTemplates = useAppStore((state) => state.sessionDefaultTemplates)
     const { templates } = useTemplates()
     const { trackEvent } = useAnalytics()
+
+    // The default template for a slide type. In someone else's live session
+    // the operator's default is the house style, so a slide sent from here
+    // looks like one they'd have sent; this device's own default covers a type
+    // they haven't set one for, or a template this device can't see.
+    const defaultTemplateFor = useCallback((type: 'scripture' | 'song' | 'hymn' | 'dictionary' | 'text'): TemplateItem | null => {
+        if (!templates) return null
+        const find = (id: string | null | undefined) => (id ? templates.find((t) => t._id === id) ?? null : null)
+        return find(sessionDefaultTemplates?.[type]) ?? find(settings.defaultTemplates?.[type])
+    }, [templates, sessionDefaultTemplates, settings.defaultTemplates])
 
     const preSlideCreation = useCallback((): Slide => {
         const tempSlide: Slide = {
@@ -334,8 +345,8 @@ export function useSlideCreation() {
         let templateToUse: TemplateItem | null = null
         if (options?.template) {
             templateToUse = options.template
-        } else if (settings.defaultTemplates?.text && templates) {
-            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.text) || null
+        } else {
+            templateToUse = defaultTemplateFor('text')
         }
 
         applyTemplateToSlide(
@@ -359,7 +370,7 @@ export function useSlideCreation() {
         })
 
         return tempSlide
-    }, [preSlideCreation, settings, templates, trackEvent])
+    }, [preSlideCreation, settings, defaultTemplateFor, trackEvent])
 
     const duplicateSlide = useCallback((slideToDuplicate?: Slide): Slide | null => {
         if (!slideToDuplicate) return null
@@ -387,8 +398,8 @@ export function useSlideCreation() {
         let templateToUse: TemplateItem | null = null
         if (options?.template) {
             templateToUse = options.template
-        } else if (settings.defaultTemplates?.scripture && templates) {
-            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.scripture) || null
+        } else {
+            templateToUse = defaultTemplateFor('scripture')
         }
 
         applyTemplateToSlide(
@@ -439,7 +450,7 @@ export function useSlideCreation() {
         })
 
         return tempSlide
-    }, [preSlideCreation, settings, templates, trackEvent])
+    }, [preSlideCreation, settings, defaultTemplateFor, trackEvent])
 
     /**
      * One slide showing one chunk of a dictionary definition.
@@ -466,12 +477,10 @@ export function useSlideCreation() {
         let templateToUse: TemplateItem | null = null
         if (options?.template) {
             templateToUse = options.template
-        } else if (settings.defaultTemplates?.dictionary && templates) {
-            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.dictionary) || null
-        } else if (settings.defaultTemplates?.scripture && templates) {
+        } else {
             // No dictionary-specific default set — fall back to the scripture
             // template so definitions match the verses they sit beside.
-            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.scripture) || null
+            templateToUse = defaultTemplateFor('dictionary') ?? defaultTemplateFor('scripture')
         }
 
         applyTemplateToSlide(
@@ -512,7 +521,7 @@ export function useSlideCreation() {
         })
 
         return tempSlide
-    }, [preSlideCreation, settings, templates, trackEvent])
+    }, [preSlideCreation, settings, defaultTemplateFor, trackEvent])
 
     /**
      * A whole entry as slides — one per sense, further split when a sense is
@@ -551,8 +560,8 @@ export function useSlideCreation() {
         let templateToUse: TemplateItem | null = null
         if (options?.template) {
             templateToUse = options.template
-        } else if (settings.defaultTemplates?.hymn && templates) {
-            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.hymn) || null
+        } else {
+            templateToUse = defaultTemplateFor('hymn')
         }
 
         applyTemplateToSlide(
@@ -605,7 +614,7 @@ export function useSlideCreation() {
         })
 
         return tempSlide
-    }, [preSlideCreation, settings, templates, trackEvent])
+    }, [preSlideCreation, settings, defaultTemplateFor, trackEvent])
 
     const createHymnSlides = useCallback((hymn: Hymn, options?: { template?: TemplateItem | null }): Slide[] => {
         const slides: Slide[] = []
@@ -631,8 +640,8 @@ export function useSlideCreation() {
         let templateToUse: TemplateItem | null = null
         if (options?.template) {
             templateToUse = options.template
-        } else if (settings.defaultTemplates?.song && templates) {
-            templateToUse = templates.find(t => t._id === settings.defaultTemplates?.song) || null
+        } else {
+            templateToUse = defaultTemplateFor('song')
         }
 
         applyTemplateToSlide(
@@ -675,7 +684,7 @@ export function useSlideCreation() {
         })
 
         return tempSlide
-    }, [preSlideCreation, settings, templates, trackEvent])
+    }, [preSlideCreation, settings, defaultTemplateFor, trackEvent])
 
     const createSongSlides = useCallback((song: Song, options?: { template?: TemplateItem | null }): Slide[] => {
         // `verses` is the only thing this builds slides from, but it is a

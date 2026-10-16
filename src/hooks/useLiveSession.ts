@@ -10,7 +10,7 @@ import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { canClientPushLiveSlide, selectDiscoveredSession } from './liveSessionUtils'
 import { diffScheduleSlides, removedOnServer, slideKey, type SlideKey } from './liveSlideSync'
-import type { Slide } from '../types'
+import type { SessionDefaultTemplates, Slide } from '../types'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
@@ -79,6 +79,18 @@ function toSyncableSlide(slide: Slide, index: number) {
         verseIndex: slide.verseIndex,
         totalVerses: slide.totalVerses,
         verseLabel: slide.verseLabel,
+    }
+}
+
+/** The slide types a session shares a default template for, every key
+ *  present so two copies compare equal however they were written. */
+function sessionTemplatesFrom(templates: SessionDefaultTemplates | null | undefined): Required<SessionDefaultTemplates> {
+    return {
+        scripture: templates?.scripture ?? null,
+        song: templates?.song ?? null,
+        hymn: templates?.hymn ?? null,
+        dictionary: templates?.dictionary ?? null,
+        text: templates?.text ?? null,
     }
 }
 
@@ -239,6 +251,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
     // component on every slide change.
     const liveOutputSlidesId = useAppStore((s) => (sync ? s.liveOutputSlidesId : null))
     const activeSlides = useAppStore((s) => (sync ? s.activeSlides : EMPTY_SLIDES))
+    const localDefaultTemplates = useAppStore((s) => (sync ? s.settings.defaultTemplates : undefined))
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
@@ -279,6 +292,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
     const setOverlayMutation = useMutation(api.liveSessions.setOverlay)
     const transferOperatorMutation = useMutation(api.liveSessions.transferOperator)
     const updateCollaborationModeMutation = useMutation(api.liveSessions.updateCollaborationMode)
+    const setDefaultTemplatesMutation = useMutation(api.liveSessions.setDefaultTemplates)
     const applyScheduleSlideChangesMutation = useMutation(api.slides.applyScheduleSlideChanges)
     const upsertScheduleSlideMutation = useMutation(api.slides.upsertScheduleSlide)
 
@@ -848,6 +862,39 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
 
         return () => clearTimeout(timeoutId)
     }, [sync, liveOutputSlidesId, resolvedSessionId, isConvexConnected, isOffline, sessionRole, setOperatorSlidesMutation])
+
+    // The operator's default templates are the session's house style: the
+    // operator's copy publishes them, and everyone else's adopts them, so a
+    // verse a collaborator sends live without picking a template looks the
+    // way the operator's own would (useSlideCreation reads them).
+    const sentDefaultTemplatesRef = useRef<string | null>(null)
+    useEffect(() => {
+        if (!sync) return
+        const active = liveSession?.status === 'active' ? liveSession : null
+        const isOp = !!active && active.operatorId === currentUser?._id
+
+        const adopted = active && !isOp ? active.defaultTemplates ?? null : null
+        const store = useAppStore.getState()
+        if (JSON.stringify(store.sessionDefaultTemplates) !== JSON.stringify(adopted)) {
+            store.setSessionDefaultTemplates(adopted)
+        }
+
+        if (!active || !isOp || !isConvexConnected || isOffline) return
+        const mine = sessionTemplatesFrom(localDefaultTemplates)
+        const key = JSON.stringify(mine)
+        if (key === JSON.stringify(sessionTemplatesFrom(active.defaultTemplates))) {
+            sentDefaultTemplatesRef.current = key
+            return
+        }
+        // Already on its way; the session just hasn't caught up yet.
+        if (key === sentDefaultTemplatesRef.current) return
+        sentDefaultTemplatesRef.current = key
+        setDefaultTemplatesMutation({ sessionId: active._id, defaultTemplates: mine })
+            .catch((err: unknown) => {
+                sentDefaultTemplatesRef.current = null
+                reportSessionError("Couldn't share your default templates with the team", err)
+            })
+    }, [sync, liveSession, currentUser?._id, isConvexConnected, isOffline, localDefaultTemplates, setDefaultTemplatesMutation])
 
     // A failed save is tried again on its own, with backoff: before, it waited
     // for the operator's next edit, so an order left alone after a blip stayed

@@ -18,6 +18,20 @@ import { v } from "convex/values";
  * such a template without the mutation rejecting its own stored value — narrow
  * the union only behind a migration that rewrites those rows first.
  */
+/**
+ * A live session's default template per slide type (template ids), as the
+ * operator set them. Keys are the slide types the client applies a default
+ * template to; null means the operator deliberately has none.
+ */
+const defaultTemplateId = v.optional(v.union(v.string(), v.null()));
+export const sessionDefaultTemplatesValidator = v.object({
+    scripture: defaultTemplateId,
+    song: defaultTemplateId,
+    hymn: defaultTemplateId,
+    dictionary: defaultTemplateId,
+    text: defaultTemplateId,
+});
+
 export const appliesToValidator = v.array(v.union(
     v.literal("bible"),
     v.literal("song"),
@@ -596,6 +610,10 @@ export default defineSchema({
         // Empty/absent arrangement => freeform tracking across all sections.
         trackedSongId: v.optional(v.string()),
         songArrangement: v.optional(v.array(v.string())),
+        // The operator's default template per slide type: the house style a
+        // collaborator's slide takes when they haven't picked a template, so
+        // what they send live looks like what the operator would have sent.
+        defaultTemplates: v.optional(sessionDefaultTemplatesValidator),
         status: v.union(v.literal("active"), v.literal("ended")),
         startedAt: v.string(),
         endedAt: v.optional(v.string()),
