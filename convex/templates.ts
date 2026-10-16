@@ -3,27 +3,47 @@ import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import type { Infer } from "convex/values";
 import { appliesToValidator } from "./schema";
-import { getById, getCurrentUser, requireSuperadmin, requireUser, type User } from "./lib/auth";
+import { getById, getCurrentUser, isMemberOf, requireSuperadmin, requireUser, type User } from "./lib/auth";
 
 /**
- * Templates a user may see: the shared system templates (no creator) plus those
- * made by anyone in their church. Templates carry no churchId, so membership is
- * resolved through the creator. `getTemplates` used to return every church's
- * templates — including their background storage ids — to any caller.
+ * Whether a user may see a template: the shared system ones (no creator), their
+ * church's, and their own from before they belonged to one.
+ *
+ * Membership used to be resolved through the creator's *current* church, from
+ * a scan of the whole table: a creator who moved church took their templates
+ * along, and once the table passed the scan's 2000-row window, newer templates
+ * (any church's, built-ins included) vanished from every list.
  */
-async function templateVisibility(ctx: QueryCtx, user: User | null) {
-    const creators = new Set<string>();
-    if (user) {
-        creators.add(user._id);
-        if (user.churchId) {
-            const members = await ctx.db
-                .query("users")
-                .withIndex("by_church", (q) => q.eq("churchId", user.churchId))
-                .take(500);
-            for (const member of members) creators.add(member._id);
-        }
+function canSeeTemplate(user: User | null, template: Doc<"templates">): boolean {
+    if (!template.createdBy) return true;
+    if (!user) return false;
+    if (template.churchId) return isMemberOf(user, template.churchId);
+    return template.createdBy === user._id;
+}
+
+/** The church's own templates (not the system ones): by index, never a scan. */
+async function churchTemplates(ctx: QueryCtx, user: User): Promise<Doc<"templates">[]> {
+    if (user.churchId) {
+        return await ctx.db
+            .query("templates")
+            .withIndex("by_church", (q) => q.eq("churchId", user.churchId))
+            .take(1000);
     }
-    return (template: Doc<"templates">) => !template.createdBy || creators.has(template.createdBy);
+    // Before joining a church: the ones they made, that belong to none.
+    const own = await ctx.db
+        .query("templates")
+        .withIndex("by_creator", (q) => q.eq("createdBy", user._id))
+        .take(1000);
+    return own.filter((t) => !t.churchId);
+}
+
+/** Everything a user may pick from: the system templates and their church's. */
+async function visibleTemplates(ctx: QueryCtx, user: User | null): Promise<Doc<"templates">[]> {
+    const system = await ctx.db
+        .query("templates")
+        .withIndex("by_creator", (q) => q.eq("createdBy", undefined))
+        .take(500);
+    return user ? [...system, ...(await churchTemplates(ctx, user))] : system;
 }
 
 /** Whose favourites a user shares: their church's, or their own before they join one. */
@@ -49,12 +69,8 @@ async function favoriteTemplateIds(ctx: QueryCtx, user: User | null): Promise<Se
  */
 export const TEMPLATE_MEDIA_LIMIT_BYTES = 100 * 1024 * 1024;
 
-/** The church's own templates (not the system ones), as `user` sees them. */
-async function churchTemplates(ctx: QueryCtx, user: User) {
-    const visible = await templateVisibility(ctx, user);
-    const templates = await ctx.db.query("templates").take(2000);
-    return templates.filter((t) => !!t.createdBy && visible(t));
-}
+/** A file fresh enough to be the caller's own upload, as media.ts allows. */
+const MAX_UPLOAD_AGE_MS = 6 * 60 * 60 * 1000;
 
 async function storageSize(ctx: QueryCtx, storageId: string): Promise<number | null> {
     const id = ctx.db.system.normalizeId("_storage", storageId);
@@ -74,31 +90,77 @@ async function backgroundBytes(ctx: QueryCtx, user: User, excludingTemplateId?: 
     return total;
 }
 
+/** Everything, in any church, that uses an uploaded file. */
+async function usesOfFile(ctx: QueryCtx, storageId: string) {
+    const [templates, media, slides] = await Promise.all([
+        ctx.db.query("templates").withIndex("by_background_storage", (q) => q.eq("backgroundStorageId", storageId)).take(50),
+        ctx.db.query("mediaLibrary").withIndex("by_storage", (q) => q.eq("storageId", storageId)).take(50),
+        ctx.db.query("slides").withIndex("by_background_storage", (q) => q.eq("backgroundStorageId", storageId)).take(50),
+    ]);
+    return { templates, media, slides };
+}
+
 /**
- * Refuse a background that would take the church past its limit, deleting the
- * uploaded file so a refused upload doesn't count against storage either.
+ * Check a template may take this file as its background, and say whether it's
+ * a fresh upload nothing uses yet (the only kind that's safe to delete if it's
+ * then refused).
+ *
+ * Storage ids travel in slides, templates and file URLs, and this used to take
+ * any of them on trust: a member of one church could name another church's
+ * file, and the quota refusal below, or replacing it afterwards, deleted it —
+ * that church's background went black. Now a file another church uses is
+ * refused, and so is an old one this church doesn't already use.
+ */
+async function requireUsableFile(ctx: QueryCtx, user: User, storageId: string, forTemplateId?: string) {
+    const id = ctx.db.system.normalizeId("_storage", storageId);
+    const file = id ? await ctx.db.system.get(id) : null;
+    if (!file) throw new Error("Uploaded file not found");
+
+    const uses = await usesOfFile(ctx, storageId);
+    const templates = uses.templates.filter((t) => t._id !== forTemplateId);
+    const ours = (churchId: string | undefined, createdBy?: string) =>
+        isMemberOf(user, churchId) || (!churchId && createdBy === user._id);
+    const elsewhere = templates.some((t) => !!t.createdBy && !ours(t.churchId, t.createdBy))
+        || uses.media.some((m) => !ours(m.churchId, m.createdBy))
+        || uses.slides.some((s) => !isMemberOf(user, s.churchId));
+    if (elsewhere) throw new Error("That file belongs to another church");
+
+    const usedHere = templates.length > 0 || uses.media.length > 0 || uses.slides.length > 0;
+    const fresh = Date.now() - file._creationTime <= MAX_UPLOAD_AGE_MS;
+    if (!fresh && !usedHere) throw new Error("That upload has expired; please upload the file again");
+    return { freshAndUnused: fresh && !usedHere };
+}
+
+/**
+ * Refuse a background that would take the church past its limit. A fresh
+ * upload nothing uses yet is deleted then, so a refused upload doesn't count
+ * against storage either; a file something already uses is never touched.
  */
 async function requireRoomFor(ctx: MutationCtx, user: User, storageId: string, excludingTemplateId?: string) {
+    const { freshAndUnused } = await requireUsableFile(ctx, user, storageId, excludingTemplateId);
     const size = await storageSize(ctx, storageId);
     if (size === null) throw new Error("Uploaded file not found");
     const used = await backgroundBytes(ctx, user, excludingTemplateId);
     if (used + size > TEMPLATE_MEDIA_LIMIT_BYTES) {
         const id = ctx.db.system.normalizeId("_storage", storageId);
-        if (id) await ctx.storage.delete(id);
+        if (id && freshAndUnused) await ctx.storage.delete(id);
         return { ok: false as const, usedBytes: used, limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
     }
     return { ok: true as const, usedBytes: used + size, limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
 }
 
-/** Delete a background file once no template or media library item uses it. */
-async function deleteBackgroundIfUnused(ctx: MutationCtx, user: User, storageId: string) {
-    const inTemplates = (await churchTemplates(ctx, user)).some((t) => t.backgroundStorageId === storageId);
-    const inLibrary = await ctx.db
-        .query("mediaLibrary")
-        .withIndex("by_storage", (q) => q.eq("storageId", storageId))
-        .first();
+/**
+ * Delete a background file once nothing uses it: no template, media library
+ * item or slide, in any church. Only this church's templates were checked, so
+ * a file still on another church's template — or on slides made from it —
+ * was deleted out from under them.
+ */
+async function deleteBackgroundIfUnused(ctx: MutationCtx, storageId: string) {
+    const uses = await usesOfFile(ctx, storageId);
     const id = ctx.db.system.normalizeId("_storage", storageId);
-    if (!inTemplates && !inLibrary && id) await ctx.storage.delete(id);
+    if (id && uses.templates.length === 0 && uses.media.length === 0 && uses.slides.length === 0) {
+        await ctx.storage.delete(id);
+    }
 }
 
 /** The church's template background usage against its limit. */
@@ -123,8 +185,7 @@ export const attachBackground = mutation({
     handler: async (ctx, args) => {
         const user = await requireUser(ctx);
         const template = await getById(ctx, "templates", args.templateId);
-        const visible = await templateVisibility(ctx, user);
-        if (!template || !template.createdBy || !visible(template)) throw new Error("Template not found");
+        if (!template || !template.createdBy || !canSeeTemplate(user, template)) throw new Error("Template not found");
 
         const room = await requireRoomFor(ctx, user, args.storageId, template._id);
         if (!room.ok) return room;
@@ -143,7 +204,7 @@ export const attachBackground = mutation({
             slideId,
             updatedAt: new Date().toISOString(),
         });
-        if (previous && previous !== args.storageId) await deleteBackgroundIfUnused(ctx, user, previous);
+        if (previous && previous !== args.storageId) await deleteBackgroundIfUnused(ctx, previous);
         return room;
     },
 });
@@ -213,13 +274,10 @@ export const getTemplates = query({
     args: {},
     handler: async (ctx) => {
         const user = await getCurrentUser(ctx);
-        const visible = await templateVisibility(ctx, user);
         const favorites = await favoriteTemplateIds(ctx, user);
-        const templates = await ctx.db.query("templates").take(2000);
         // `isFavorite` is the church's, not the caller's alone: whoever is on
         // the desk next finds the ones the team uses.
-        return templates
-            .filter(visible)
+        return (await visibleTemplates(ctx, user))
             .map((template) => ({ ...template, isFavorite: favorites.has(template._id) }));
     },
 });
@@ -236,13 +294,8 @@ export const getTemplatesByCategory = query({
         ),
     },
     handler: async (ctx, args) => {
-        const visible = await templateVisibility(ctx, await getCurrentUser(ctx));
-        const templates = await ctx.db
-            .query("templates")
-            .withIndex("by_category", (q) => q.eq("category", args.category))
-            .take(2000);
-
-        return templates.filter(visible);
+        const templates = await visibleTemplates(ctx, await getCurrentUser(ctx));
+        return templates.filter((t) => t.category === args.category);
     },
 });
 
@@ -254,8 +307,7 @@ export const getTemplate = query({
     handler: async (ctx, args) => {
         const template = await getById(ctx, "templates", args.templateId);
         if (!template) return null;
-        const visible = await templateVisibility(ctx, await getCurrentUser(ctx));
-        return visible(template) ? template : null;
+        return canSeeTemplate(await getCurrentUser(ctx), template) ? template : null;
     },
 });
 
@@ -289,6 +341,7 @@ export const createTemplate = mutation({
             description: args.description,
             slideId: args.slideId,
             createdBy: user._id!,
+            churchId: user.churchId || undefined,
             category: args.category,
             appliesTo: args.appliesTo,
             thumbnail: args.thumbnail,
@@ -327,7 +380,9 @@ export const updateTemplate = mutation({
         if (!template) {
             throw new Error("Template not found");
         }
-        if (template.createdBy !== user._id) {
+        // Its creator, while it's still their church's: a template stays with
+        // the church it was made in when its creator moves on.
+        if (template.createdBy !== user._id || !canSeeTemplate(user, template)) {
             throw new Error("Unauthorized");
         }
         const newStorageId = args.updates.backgroundStorageId;
@@ -356,7 +411,9 @@ export const deleteTemplate = mutation({
         if (!template) {
             throw new Error("Template not found");
         }
-        if (template.createdBy !== user._id) {
+        // Its creator, while it's still their church's: a template stays with
+        // the church it was made in when its creator moves on.
+        if (template.createdBy !== user._id || !canSeeTemplate(user, template)) {
             throw new Error("Unauthorized");
         }
 
@@ -375,8 +432,7 @@ export const toggleFavoriteTemplate = mutation({
         const user = await requireUser(ctx);
 
         const template = await getById(ctx, "templates", args.templateId);
-        const visible = await templateVisibility(ctx, user);
-        if (!template || !visible(template)) {
+        if (!template || !canSeeTemplate(user, template)) {
             throw new Error("Template not found");
         }
 

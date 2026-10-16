@@ -107,3 +107,34 @@ export const migrateTemplateFavorites = internalMutation({
         return { moved, skipped }
     },
 })
+
+/**
+ * Give each custom template the church it belongs to: its creator's church.
+ * Templates used to be matched to a church through their creator at read
+ * time; they're now read by `churchId`, so one without it is visible only to
+ * its creator until this runs. Idempotent: templates that have a churchId, and
+ * system templates (no creator), are skipped.
+ *
+ *   npx convex run migrations:backfillTemplateChurchIds
+ */
+export const backfillTemplateChurchIds = internalMutation({
+    args: {},
+    handler: async (ctx) => {
+        const templates = await ctx.db.query('templates').take(5000)
+        let updated = 0
+        let churchless = 0
+        for (const template of templates) {
+            if (!template.createdBy || template.churchId) continue
+            const creatorId = ctx.db.normalizeId('users', template.createdBy)
+            const creator = creatorId ? await ctx.db.get(creatorId) : null
+            if (creator?.churchId) {
+                await ctx.db.patch(template._id, { churchId: creator.churchId })
+                updated++
+            } else {
+                // The creator has no church (or is gone): it stays theirs alone.
+                churchless++
+            }
+        }
+        return { total: templates.length, updated, churchless }
+    },
+})

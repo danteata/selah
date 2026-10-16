@@ -302,7 +302,9 @@ export default defineSchema({
         .index("by_schedule", ["scheduleId"])
         .index("by_church", ["churchId"])
         .index("by_user", ["userId"])
-        .index("by_locked", ["lockedBy"]),
+        .index("by_locked", ["lockedBy"])
+        // Who still uses an uploaded file, before it's deleted.
+        .index("by_background_storage", ["backgroundStorageId"]),
 
     // Songs table
     songs: defineTable({
@@ -358,6 +360,12 @@ export default defineSchema({
             updatedAt: v.optional(v.string()),
         })),
         createdBy: v.optional(v.string()), // Optional - system templates don't have a creator
+        // The church a custom template belongs to (none for the system ones).
+        // Templates used to belong to their creator's *current* church, found
+        // by scanning the whole table: a creator who moved took them along,
+        // and past the scan's 2000-row window templates simply vanished.
+        // Backfilled by migrations:backfillTemplateChurchIds.
+        churchId: v.optional(v.string()),
         // Legacy: user ids, from every church at once. Superseded by the
         // `templateFavorites` table (migrations:migrateTemplateFavorites).
         favoritedBy: v.optional(v.array(v.string())),
@@ -376,7 +384,9 @@ export default defineSchema({
         updatedAt: v.string(),
     })
         .index("by_category", ["category"])
-        .index("by_creator", ["createdBy"]),
+        .index("by_creator", ["createdBy"])
+        .index("by_church", ["churchId"])
+        .index("by_background_storage", ["backgroundStorageId"]),
 
     // A church's favourite templates: one volunteer's favourite is the whole
     // team's, so the next person on the desk finds the ones in use. Kept apart
@@ -559,7 +569,11 @@ export default defineSchema({
     })
         .index("by_status", ["status"])
         .index("by_speaker", ["speakerName", "churchId"])
-        .index("by_type", ["patternType", "status"]),
+        .index("by_type", ["patternType", "status"])
+        // Every read is one church's: through `by_status` alone each read
+        // loaded every church's patterns, so one church's volume could push
+        // the reads past their limits for all of them.
+        .index("by_church_and_status", ["churchId", "status"]),
 
     // Invitations table - for team member invitations
     invitations: defineTable({
