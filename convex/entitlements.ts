@@ -124,7 +124,10 @@ export async function countTeamMembers(ctx: QueryCtx, churchId: string): Promise
         .query('users')
         .withIndex('by_church', (q) => q.eq('churchId', churchId))
         .collect()
-    return members.length
+    // A superadmin in the church is staff passing through (the church
+    // switcher), not one of its seats: counting them could block a real
+    // invitee at a free church's cap.
+    return members.filter((member) => member.role !== 'superadmin').length
 }
 
 /**

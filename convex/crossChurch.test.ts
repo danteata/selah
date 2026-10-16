@@ -8,6 +8,7 @@
 import { convexTest } from 'convex-test'
 import { describe, it, expect } from 'vitest'
 import { api, internal } from './_generated/api'
+import { countTeamMembers } from './entitlements'
 import schema from './schema'
 
 const modules = import.meta.glob('./**/*.ts')
@@ -159,5 +160,146 @@ describe('sermon-listener patterns', () => {
         await asAlice.mutation(api.sermonLearning.proposePattern, { correctForm: 'Psalms', heardAs: 'sams', patternType: 'book', churchId: churchA })
         const pending = await asAlice.query(api.sermonLearning.getPendingPatterns, { churchId: churchA })
         expect(pending.map((p) => p.heardAs)).toEqual(['sams'])
+    })
+})
+
+const carol = { subject: 'user_carol', email: 'carol@church-a.org', tokenIdentifier: 'clerk|user_carol' }
+
+/** Put Carol in Alice's church. */
+async function addCarol(t: Awaited<ReturnType<typeof setup>>['t'], churchA: string) {
+    const asCarol = t.withIdentity(carol)
+    await asCarol.mutation(api.users.upsertUser, { fullname: 'Carol' })
+    await t.run(async (ctx) => {
+        const row = (await ctx.db.query('users').collect()).find((u) => u.clerkId === 'user_carol')!
+        await ctx.db.patch(row._id, { churchId: churchA })
+    })
+    return asCarol
+}
+
+async function makeSuperadmin(t: Awaited<ReturnType<typeof setup>>['t'], clerkId: string) {
+    await t.run(async (ctx) => {
+        const row = (await ctx.db.query('users').collect()).find((u) => u.clerkId === clerkId)!
+        await ctx.db.patch(row._id, { role: 'superadmin' })
+    })
+}
+
+describe('promo codes', () => {
+    it('count a church once, so one church can’t use up a code for everyone', async () => {
+        const { t, asAlice, asBob, churchA } = await setup()
+        const asCarol = await addCarol(t, churchA)
+        await t.run((ctx) => ctx.db.insert('promoCodes', {
+            code: 'FREE30', kind: 'comp', active: true, maxRedemptions: 2, timesRedeemed: 0, compDays: 30, createdAt: '', updatedAt: '',
+        }))
+
+        await asAlice.action(api.promos.redeemComp, { code: 'FREE30' })
+        await expect(asCarol.action(api.promos.redeemComp, { code: 'FREE30' })).rejects.toThrow(/already used/)
+        // Church A took one slot; church B still gets the other.
+        await asBob.action(api.promos.redeemComp, { code: 'FREE30' })
+        const promo = await t.run((ctx) => ctx.db.query('promoCodes').first())
+        expect(promo?.timesRedeemed).toBe(2)
+    })
+})
+
+describe('transcripts', () => {
+    it("listed by schedule can't be crowded out by another church's", async () => {
+        const { t, asAlice, churchA, churchB } = await setup()
+        await t.run(async (ctx) => {
+            // Ours first, so the other church's newer ones fill the window ahead of it.
+            await ctx.db.insert('transcripts', {
+                title: 'Ours', transcript: '', provider: 'web-speech', scheduleId: 'shared', churchId: churchA, createdBy: 'x', createdAt: '', updatedAt: '',
+            })
+            for (let i = 0; i < 250; i++) {
+                await ctx.db.insert('transcripts', {
+                    title: `B${i}`, transcript: '', provider: 'web-speech', scheduleId: 'shared', churchId: churchB, createdBy: 'x', createdAt: '', updatedAt: '',
+                })
+            }
+        })
+        const listed = await asAlice.query(api.transcripts.getBySchedule, { scheduleId: 'shared' })
+        expect(listed.map((tr) => tr.title)).toEqual(['Ours'])
+    })
+})
+
+describe('a superadmin switching church', () => {
+    it("can't strand a live session they're running", async () => {
+        const { t, asAlice, churchA, churchB } = await setup()
+        await makeSuperadmin(t, 'user_alice')
+        const scheduleId = await asAlice.mutation(api.schedules.createSchedule, { name: 'Sunday', churchId: churchA })
+        const sessionId = await asAlice.mutation(api.liveSessions.startSession, { scheduleId, churchId: churchA })
+
+        await expect(asAlice.mutation(api.users.updateUserChurch, { churchId: churchB })).rejects.toThrow(/Hand it over or end it/)
+
+        await asAlice.mutation(api.liveSessions.endSession, { sessionId })
+        await asAlice.mutation(api.users.updateUserChurch, { churchId: churchB })
+        // And they're no longer listed in the church they left.
+        const presence = await t.run((ctx) => ctx.db.query('presence').collect())
+        expect(presence).toHaveLength(0)
+    })
+
+    it('leaves the old church’s session behind in their presence', async () => {
+        const { t, asAlice, churchA, churchB } = await setup()
+        await makeSuperadmin(t, 'user_alice')
+        const scheduleId = await asAlice.mutation(api.schedules.createSchedule, { name: 'Sunday', churchId: churchA })
+        const sessionId = await asAlice.mutation(api.liveSessions.startSession, { scheduleId, churchId: churchA })
+        // Joining again used to add a second row that leaving never removed.
+        await asAlice.mutation(api.liveSessions.joinSession, { sessionId, role: 'contributor' })
+        expect(await t.run((ctx) => ctx.db.query('presence').collect())).toHaveLength(1)
+
+        // Simulate an older switch that skipped the cleanup.
+        await t.run(async (ctx) => {
+            const me = (await ctx.db.query('users').collect()).find((u) => u.clerkId === 'user_alice')!
+            await ctx.db.patch(me._id, { churchId: churchB })
+        })
+        await asAlice.mutation(api.presence.heartbeat, { location: 'dashboard' })
+        const [row] = await t.run((ctx) => ctx.db.query('presence').collect())
+        expect(row.churchId).toBe(churchB)
+        expect(row.liveSessionId).toBeUndefined()
+        expect(row.sessionRole).toBeUndefined()
+    })
+
+    it("doesn't take one of the new church's seats", async () => {
+        const { t, churchB } = await setup()
+        await makeSuperadmin(t, 'user_alice')
+        await t.run(async (ctx) => {
+            const me = (await ctx.db.query('users').collect()).find((u) => u.clerkId === 'user_alice')!
+            await ctx.db.patch(me._id, { churchId: churchB })
+        })
+        expect(await t.run((ctx) => countTeamMembers(ctx, churchB))).toBe(1)
+    })
+})
+
+describe('invitation emails', () => {
+    it('are capped per church per day', async () => {
+        const { asAlice, churchA } = await setup()
+        for (let i = 0; i < 30; i++) {
+            await asAlice.mutation(api.invitations.sendEmailInvitation, { churchId: churchA, email: `person${i}@example.org` })
+        }
+        await expect(asAlice.mutation(api.invitations.sendEmailInvitation, { churchId: churchA, email: 'one-more@example.org' }))
+            .rejects.toThrow(/30 invitations today/)
+    })
+})
+
+describe('the shared settings', () => {
+    it('show nothing of the deployment to someone signed out', async () => {
+        // Bob, not Alice: the first account on a deployment is its superadmin.
+        const { t, asBob } = await setup()
+        await t.run((ctx) => ctx.db.insert('globalAppSettings', {
+            sermonListener_whisperEndpoint: 'https://whisper.internal/token=abc', createdAt: '', updatedAt: '', updatedBy: 'superadmin-id',
+        } as never))
+        const signedOut = await t.query(api.globalAppSettings.getGlobalSettings, {})
+        expect(signedOut).not.toHaveProperty('sermonListener_whisperEndpoint')
+        const member = await asBob.query(api.globalAppSettings.getGlobalSettings, {})
+        expect(member).not.toHaveProperty('updatedBy')
+    })
+})
+
+describe('file urls', () => {
+    it("are only given for files the caller can already see", async () => {
+        const { t, asAlice, asBob, store, template } = await setup()
+        const file = await store(MB)
+        await asAlice.mutation(api.templates.attachBackground, { templateId: await template(asAlice, 'A'), storageId: file })
+
+        expect(await asAlice.query(api.templates.getFileUrl, { storageId: file })).toEqual(expect.any(String))
+        expect(await asBob.query(api.templates.getFileUrl, { storageId: file })).toBeNull()
+        expect(await t.query(api.templates.getFileUrl, { storageId: file })).toBeNull()
     })
 })

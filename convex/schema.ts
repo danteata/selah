@@ -237,10 +237,15 @@ export default defineSchema({
         code: v.string(),
         email: v.string(),
         kind: v.string(),
+        // The church it was redeemed for. A code's limit counts churches, not
+        // people: per email, one church's members (or one admin's abandoned
+        // checkouts from several accounts) could use up a code for everyone.
+        churchId: v.optional(v.string()),
         redeemedAt: v.string(),
     })
         .index("by_code", ["code"])
-        .index("by_code_email", ["code", "email"]),
+        .index("by_code_email", ["code", "email"])
+        .index("by_code_church", ["code", "churchId"]),
 
     // Schedules table
     schedules: defineTable({
@@ -535,7 +540,11 @@ export default defineSchema({
         .index("by_schedule", ["scheduleId"])
         .index("by_church", ["churchId"])
         .index("by_creator", ["createdBy"])
-        .index("by_schedule_created", ["scheduleId", "createdAt"]),
+        .index("by_schedule_created", ["scheduleId", "createdAt"])
+        // A schedule's transcripts, one church's: by schedule alone, another
+        // church filing transcripts under the same schedule id could push a
+        // church's own out of the listed window.
+        .index("by_church_and_schedule", ["churchId", "scheduleId"]),
 
     // Speaker profiles — learned phonetic patterns per speaker
     speakerProfiles: defineTable({

@@ -1,4 +1,4 @@
-import { query, mutation, type QueryCtx } from "./_generated/server";
+import { query, mutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getById, isChurchAdmin, isMemberOf, requireUser, type User } from "./lib/auth";
@@ -25,6 +25,38 @@ async function requireActiveSession(ctx: QueryCtx, sessionId: Id<"liveSessions">
 
 function isOperatorOrAdmin(user: User, session: { operatorId: string; churchId: string }) {
     return session.operatorId === user._id || isChurchAdmin(user, session.churchId);
+}
+
+/**
+ * Put the user's one presence row in a session: patch the row they have,
+ * rather than adding another. Starting and joining sessions used to insert a
+ * row each time, while leaving removed only one — so the leftovers kept a
+ * user listed in a session (as its operator, even) long after they'd gone,
+ * including from inside another church.
+ */
+async function setSessionPresence(
+    ctx: MutationCtx,
+    user: User,
+    fields: { churchId: string; activeScheduleId: string; liveSessionId: Id<"liveSessions">; sessionRole: "operator" | "contributor" | "viewer" },
+) {
+    const rows = await ctx.db
+        .query("presence")
+        .withIndex("by_user", (q) => q.eq("userId", user._id!))
+        .take(20);
+    const [keep, ...extra] = rows;
+    for (const row of extra) await ctx.db.delete(row._id);
+    if (keep) {
+        await ctx.db.patch(keep._id, { ...fields, location: "live", selectedSlideId: undefined, lastSeen: Date.now() });
+        return;
+    }
+    await ctx.db.insert("presence", {
+        userId: user._id!,
+        ...fields,
+        location: "live",
+        selectedSlideId: undefined,
+        lastSeen: Date.now(),
+        createdAt: new Date().toISOString(),
+    });
 }
 
 /** The church's active session for a schedule, if there is one. */
@@ -156,16 +188,11 @@ export const startSession = mutation({
             updatedAt: now,
         });
 
-        await ctx.db.insert("presence", {
-            userId: user._id!,
+        await setSessionPresence(ctx, user, {
             churchId: args.churchId,
-            location: "live",
             activeScheduleId: args.scheduleId,
             liveSessionId: sessionId,
             sessionRole: "operator",
-            selectedSlideId: undefined,
-            lastSeen: Date.now(),
-            createdAt: now,
         });
 
         return sessionId;
@@ -589,30 +616,11 @@ export const joinSession = mutation({
     handler: async (ctx, args) => {
         const { user, session } = await requireActiveSession(ctx, args.sessionId);
 
-        const existingPresence = await ctx.db
-            .query("presence")
-            .withIndex("by_session", (q) => q.eq("liveSessionId", args.sessionId))
-            .filter((q) => q.eq(q.field("userId"), user._id))
-            .first();
-
-        if (existingPresence) {
-            await ctx.db.patch(existingPresence._id, {
-                sessionRole: args.role || "contributor",
-                lastSeen: Date.now(),
-            });
-            return true;
-        }
-
-        await ctx.db.insert("presence", {
-            userId: user._id!,
+        await setSessionPresence(ctx, user, {
             churchId: session.churchId,
-            location: "live",
             activeScheduleId: session.scheduleId,
             liveSessionId: args.sessionId,
             sessionRole: args.role || "contributor",
-            selectedSlideId: undefined,
-            lastSeen: Date.now(),
-            createdAt: new Date().toISOString(),
         });
 
         return true;

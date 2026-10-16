@@ -10,8 +10,9 @@ import { v } from "convex/values";
 import { getCurrentUser, isSuperadmin, requireSuperadmin } from "./lib/auth";
 
 // Provider credentials live in this document. Only a superadmin (who edits
-// them) ever receives them; everyone else gets the settings without.
-const SECRET_FIELDS = ["sermonListener_whisperApiKey", "sermonListener_elevenLabsApiKey"] as const;
+// them) ever receives them; everyone else gets the settings without — and
+// without who last edited them, which is a superadmin's user id.
+const SECRET_FIELDS = ["sermonListener_whisperApiKey", "sermonListener_elevenLabsApiKey", "updatedBy"] as const;
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -40,6 +41,11 @@ const DEFAULT_SETTINGS = {
 export const getGlobalSettings = query({
     args: {},
     handler: async (ctx) => {
+        // Signed in only: these name the deployment's transcription endpoints,
+        // which were readable by anyone with the app's URL.
+        const user = await getCurrentUser(ctx);
+        if (!user) return { ...DEFAULT_SETTINGS, exists: false };
+
         // Get the first (and only) settings document
         const settings = await ctx.db
             .query("globalAppSettings")
@@ -52,7 +58,6 @@ export const getGlobalSettings = query({
             };
         }
 
-        const user = await getCurrentUser(ctx);
         const visible: Record<string, unknown> = { ...settings };
         if (!user || !isSuperadmin(user)) {
             for (const field of SECRET_FIELDS) delete visible[field];
@@ -172,9 +177,10 @@ export const getTranscriptionConfig = query({
     handler: async (ctx) => {
         // API keys are deliberately absent from this config: it goes to every
         // signed-in client, and none of the providers still in use needs one.
-        const settings = await ctx.db
-            .query("globalAppSettings")
-            .first();
+        // Signed-out callers get the defaults, not the deployment's endpoints.
+        const settings = (await getCurrentUser(ctx))
+            ? await ctx.db.query("globalAppSettings").first()
+            : null;
 
         if (!settings) {
             return {

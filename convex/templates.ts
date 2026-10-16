@@ -229,6 +229,22 @@ export const getFileUrl = query({
     handler: async (ctx, args) => {
         const storageId = args.storageId ? ctx.db.system.normalizeId("_storage", args.storageId) : null;
         if (!storageId) return null;
+        // Only for a file the caller may already see — on a template they can
+        // see, or their church's media or slides — or a fresh upload nothing
+        // uses yet. It turned any storage id into a URL for anyone, signed in
+        // or not, which made every id that leaked into a URL or a log a way in.
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
+        const uses = await usesOfFile(ctx, args.storageId);
+        const visible = uses.templates.some((t) => canSeeTemplate(user, t))
+            || uses.media.some((m) => isMemberOf(user, m.churchId) || m.createdBy === user._id)
+            || uses.slides.some((sl) => isMemberOf(user, sl.churchId));
+        const unused = uses.templates.length === 0 && uses.media.length === 0 && uses.slides.length === 0;
+        if (!visible) {
+            const file = await ctx.db.system.get(storageId);
+            const fresh = !!file && Date.now() - file._creationTime <= MAX_UPLOAD_AGE_MS;
+            if (!(unused && fresh)) return null;
+        }
         return await ctx.storage.getUrl(storageId);
     },
 });

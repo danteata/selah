@@ -117,14 +117,19 @@ export const heartbeat = mutation({
             .first();
 
         if (existingPresence) {
+            // Carry the last-known schedule, session and slide forward only
+            // within the same church. After a church switch the old values
+            // named the old church's session, so the user stayed listed in it
+            // (as its operator) for as long as they worked in the new one.
+            const kept = existingPresence.churchId === user.churchId ? existingPresence : undefined;
             await ctx.db.patch(existingPresence._id, {
                 // Follow the user if they have switched churches since.
                 churchId: user.churchId,
                 location: args.location || existingPresence.location,
-                activeScheduleId: args.activeScheduleId ?? existingPresence.activeScheduleId,
-                liveSessionId: args.liveSessionId ?? existingPresence.liveSessionId,
-                sessionRole: args.sessionRole ?? existingPresence.sessionRole,
-                selectedSlideId: args.selectedSlideId ?? existingPresence.selectedSlideId,
+                activeScheduleId: args.activeScheduleId ?? kept?.activeScheduleId,
+                liveSessionId: args.liveSessionId ?? kept?.liveSessionId,
+                sessionRole: args.sessionRole ?? kept?.sessionRole,
+                selectedSlideId: args.selectedSlideId ?? kept?.selectedSlideId,
                 lastSeen: Date.now(),
             });
             return existingPresence._id;
@@ -152,14 +157,12 @@ export const leavePresence = mutation({
         const user = await getCurrentUser(ctx);
         if (!user) return null;
 
-        const presenceEntry = await ctx.db
+        // Every row: older builds could leave more than one.
+        const entries = await ctx.db
             .query("presence")
             .withIndex("by_user", (q) => q.eq("userId", user._id))
-            .first();
-
-        if (presenceEntry) {
-            await ctx.db.delete(presenceEntry._id);
-        }
+            .take(20);
+        for (const entry of entries) await ctx.db.delete(entry._id);
 
         return true;
     },
