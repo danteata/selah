@@ -1,6 +1,7 @@
 import { query, mutation, type QueryCtx, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
+import type { Infer } from "convex/values";
 import { appliesToValidator } from "./schema";
 import { getById, getCurrentUser, requireSuperadmin, requireUser, type User } from "./lib/auth";
 
@@ -23,6 +24,21 @@ async function templateVisibility(ctx: QueryCtx, user: User | null) {
         }
     }
     return (template: Doc<"templates">) => !template.createdBy || creators.has(template.createdBy);
+}
+
+/** Whose favourites a user shares: their church's, or their own before they join one. */
+function favoriteScope(user: User): string {
+    return user.churchId || user._id!;
+}
+
+/** Ids of the templates the user's church has favourited. */
+async function favoriteTemplateIds(ctx: QueryCtx, user: User | null): Promise<Set<string>> {
+    if (!user) return new Set();
+    const rows = await ctx.db
+        .query("templateFavorites")
+        .withIndex("by_scope_and_template", (q) => q.eq("scope", favoriteScope(user)))
+        .take(1000);
+    return new Set(rows.map((row) => row.templateId));
 }
 
 /**
@@ -196,9 +212,15 @@ const DEFAULT_BACKGROUNDS = {
 export const getTemplates = query({
     args: {},
     handler: async (ctx) => {
-        const visible = await templateVisibility(ctx, await getCurrentUser(ctx));
+        const user = await getCurrentUser(ctx);
+        const visible = await templateVisibility(ctx, user);
+        const favorites = await favoriteTemplateIds(ctx, user);
         const templates = await ctx.db.query("templates").take(2000);
-        return templates.filter(visible);
+        // `isFavorite` is the church's, not the caller's alone: whoever is on
+        // the desk next finds the ones the team uses.
+        return templates
+            .filter(visible)
+            .map((template) => ({ ...template, isFavorite: favorites.has(template._id) }));
     },
 });
 
@@ -344,6 +366,7 @@ export const deleteTemplate = mutation({
 });
 
 // Toggle favorite template
+/** Favourite a template for the caller's church, or take it off again. */
 export const toggleFavoriteTemplate = mutation({
     args: {
         templateId: v.string(),
@@ -357,19 +380,22 @@ export const toggleFavoriteTemplate = mutation({
             throw new Error("Template not found");
         }
 
-        const currentFavorites = template.favoritedBy || [];
-        const isFavorited = currentFavorites.includes(user._id!);
-
-        const updatedFavorites = isFavorited
-            ? currentFavorites.filter(id => id !== user._id)
-            : [...currentFavorites, user._id!];
-
-        await ctx.db.patch(template._id, {
-            favoritedBy: updatedFavorites,
-            updatedAt: new Date().toISOString(),
+        const scope = favoriteScope(user);
+        const existing = await ctx.db
+            .query("templateFavorites")
+            .withIndex("by_scope_and_template", (q) => q.eq("scope", scope).eq("templateId", template._id))
+            .first();
+        if (existing) {
+            await ctx.db.delete(existing._id);
+            return false;
+        }
+        await ctx.db.insert("templateFavorites", {
+            scope,
+            templateId: template._id,
+            userId: user._id!,
+            createdAt: new Date().toISOString(),
         });
-
-        return !isFavorited; // Returns the new favorite state
+        return true; // The new favourite state
     },
 });
 
@@ -385,6 +411,10 @@ export const getActiveAdvert = query({
 });
 
 // The shared system templates (no creator), seeded once per deployment.
+/** Which slide types a built-in template is offered for. Without one it was
+ *  offered for everything: "Welcome Slide" as a style for Bible verses. */
+type SlideTypeList = Infer<typeof appliesToValidator>;
+
 function defaultTemplates(now: string) {
     return [
         {
@@ -399,6 +429,7 @@ function defaultTemplates(now: string) {
             }),
             category: "general" as const,
             thumbnail: DEFAULT_BACKGROUNDS.general.background,
+            appliesTo: ["text"] as SlideTypeList,
             createdAt: now,
             updatedAt: now,
         },
@@ -414,6 +445,7 @@ function defaultTemplates(now: string) {
             }),
             category: "announcement" as const,
             thumbnail: DEFAULT_BACKGROUNDS.announcement.background,
+            appliesTo: ["text"] as SlideTypeList,
             createdAt: now,
             updatedAt: now,
         },
@@ -429,6 +461,7 @@ function defaultTemplates(now: string) {
             }),
             category: "worship" as const,
             thumbnail: DEFAULT_BACKGROUNDS.worship.background,
+            appliesTo: ["song", "hymn"] as SlideTypeList,
             createdAt: now,
             updatedAt: now,
         },
@@ -444,6 +477,7 @@ function defaultTemplates(now: string) {
             }),
             category: "sermon" as const,
             thumbnail: DEFAULT_BACKGROUNDS.sermon.background,
+            appliesTo: ["text"] as SlideTypeList,
             createdAt: now,
             updatedAt: now,
         },
@@ -459,6 +493,7 @@ function defaultTemplates(now: string) {
             }),
             category: "prayer" as const,
             thumbnail: DEFAULT_BACKGROUNDS.prayer.background,
+            appliesTo: ["text"] as SlideTypeList,
             createdAt: now,
             updatedAt: now,
         },
@@ -474,6 +509,7 @@ function defaultTemplates(now: string) {
             }),
             category: "general" as const,
             thumbnail: DEFAULT_BACKGROUNDS.bible.background,
+            appliesTo: ["bible", "dictionary"] as SlideTypeList,
             createdAt: now,
             updatedAt: now,
         },
@@ -488,6 +524,8 @@ function defaultTemplates(now: string) {
                 backgroundType: "motion",
             }),
             category,
+            // A moving background suits any slide.
+            appliesTo: ["any"] as SlideTypeList,
             createdAt: now,
             updatedAt: now,
         })),
@@ -533,22 +571,35 @@ export const seedDefaultTemplates = mutation({
                 removed++;
             }
         }
+        const definitions = defaultTemplates(new Date().toISOString());
         const have = new Set(existingSystem.map((t) => t.name));
-        const missing = defaultTemplates(new Date().toISOString()).filter((t) => !have.has(t.name));
+        const missing = definitions.filter((t) => !have.has(t.name));
         for (const template of missing) {
             await ctx.db.insert("templates", template);
         }
+        // Built-ins seeded before they said which slide types they suit.
+        const appliesToByName = new Map(definitions.map((t) => [t.name, t.appliesTo]));
+        let scoped = 0;
+        for (const t of existingSystem) {
+            const appliesTo = appliesToByName.get(t.name);
+            if (!t.appliesTo && appliesTo && !RETIRED_SYSTEM_TEMPLATES.has(t.name)) {
+                await ctx.db.patch(t._id, { appliesTo });
+                scoped++;
+            }
+        }
 
-        return missing.length > 0 || removed > 0
+        return missing.length > 0 || removed > 0 || scoped > 0
             ? { seeded: true, count: missing.length }
             : { seeded: false, message: "Templates already exist" };
     },
 });
 
-// Replace the system templates with the latest versions. Custom templates are
+// Put the system templates back to their latest versions. Custom templates are
 // untouched. Superadmin only: the system templates are shared by every church,
-// so a reset by anyone else rewrote them — and dropped their favourites — for
-// all of them.
+// so a reset by anyone else rewrote them for all of them. Each is updated in
+// place, matched by name, so it keeps its id: deleting and re-inserting gave
+// every built-in a new one, which silently cleared every church's default
+// templates and favourites that pointed at the old ids.
 export const resetDefaultTemplates = mutation({
     args: {},
     handler: async (ctx) => {
@@ -558,19 +609,20 @@ export const resetDefaultTemplates = mutation({
             .query("templates")
             .withIndex("by_creator", (q) => q.eq("createdBy", undefined))
             .collect();
-
-        // Keep each template's favourites across the reset, matched by name.
-        const favoritesByName = new Map(existingSystem.map((t) => [t.name, t.favoritedBy]));
-        for (const template of existingSystem) {
-            await ctx.db.delete(template._id);
-        }
+        const byName = new Map(existingSystem.map((t) => [t.name, t]));
 
         const templates = defaultTemplates(new Date().toISOString());
+        const current = new Set(templates.map((t) => t.name));
         for (const template of templates) {
-            await ctx.db.insert("templates", {
-                ...template,
-                favoritedBy: favoritesByName.get(template.name),
-            });
+            const existing = byName.get(template.name);
+            if (existing) {
+                await ctx.db.replace(existing._id, { ...template, createdAt: existing.createdAt });
+            } else {
+                await ctx.db.insert("templates", template);
+            }
+        }
+        for (const template of existingSystem) {
+            if (!current.has(template.name)) await ctx.db.delete(template._id);
         }
 
         return { seeded: true, count: templates.length };

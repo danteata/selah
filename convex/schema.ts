@@ -358,7 +358,9 @@ export default defineSchema({
             updatedAt: v.optional(v.string()),
         })),
         createdBy: v.optional(v.string()), // Optional - system templates don't have a creator
-        favoritedBy: v.optional(v.array(v.string())), // Array of user IDs who favorited this template
+        // Legacy: user ids, from every church at once. Superseded by the
+        // `templateFavorites` table (migrations:migrateTemplateFavorites).
+        favoritedBy: v.optional(v.array(v.string())),
         backgroundStorageId: v.optional(v.string()), // Storage ID for video/image files
         category: v.union(
             v.literal("announcement"),
@@ -375,6 +377,20 @@ export default defineSchema({
     })
         .index("by_category", ["category"])
         .index("by_creator", ["createdBy"]),
+
+    // A church's favourite templates: one volunteer's favourite is the whole
+    // team's, so the next person on the desk finds the ones in use. Kept apart
+    // from `templates` because the system templates are shared by every
+    // church — a list on the template itself mixed every church's favourites
+    // together (and made each toggle rewrite a document all of them read).
+    // `scope` is the church id, or the user's own id before they've joined one.
+    templateFavorites: defineTable({
+        scope: v.string(),
+        templateId: v.string(),
+        userId: v.string(),
+        createdAt: v.string(),
+    })
+        .index("by_scope_and_template", ["scope", "templateId"]),
 
     // Adverts table
     adverts: defineTable({
