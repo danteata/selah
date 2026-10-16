@@ -588,13 +588,23 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
                 // `getState()` ensures we always find the freshly-added slide.
                 const currentActiveSlides = useAppStore.getState().activeSlides
                 const localSlide = slideId ? currentActiveSlides.find((slide) => slide.id === slideId) : null
-                if (localSlide && sessionScheduleId) {
-                    await upsertScheduleSlideMutation({
-                        scheduleId: sessionScheduleId,
-                        slide: toSyncableSlide(localSlide, 0),
-                    })
-                }
-                await setLiveSlideMutation({ sessionId: resolvedSessionId, slideId: slideId || undefined })
+                // Send both now, not one after the other. Convex runs a
+                // client's mutations in the order they're sent, so the slide's
+                // content still lands before the live pointer that names it.
+                // Awaiting the upsert first cost a whole extra round trip, and
+                // for a slide that was just added (a search result sent
+                // straight live) it let the debounced deck and service-order
+                // saves that the add queued go out ahead of the live change —
+                // seconds on a phone before the screen moved.
+                await Promise.all([
+                    localSlide && sessionScheduleId
+                        ? upsertScheduleSlideMutation({
+                            scheduleId: sessionScheduleId,
+                            slide: toSyncableSlide(localSlide, 0),
+                        })
+                        : null,
+                    setLiveSlideMutation({ sessionId: resolvedSessionId, slideId: slideId || undefined }),
+                ])
             } catch (err) {
                 const serverSlideId = liveSession?.liveSlideId || ''
                 setLiveSlideStore(serverSlideId)
