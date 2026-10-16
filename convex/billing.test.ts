@@ -106,3 +106,45 @@ describe('applyPaystackEvent', () => {
         expect(scheduled.map((job) => job.name)).toContain('licensing:startRollover')
     })
 })
+
+describe('the church a subscription entitles', () => {
+    /** A payer now in church B whose subscription row still names church A. */
+    async function movedPayer() {
+        const t = convexTest(schema, modules)
+        await t.run(async (ctx) => {
+            await ctx.db.insert('users', {
+                fullname: 'Sam', email, role: 'superadmin', avatar: '', theme: '', churchId: 'church_b', createdAt: '', updatedAt: '',
+            })
+            await ctx.db.insert('subscriptions', {
+                email, churchId: 'church_a', plan: 'free', status: 'cancelled', source: 'paystack', currentPeriodEnd: null,
+                gracePeriodDays: 14, createdAt: '', updatedAt: '',
+            })
+        })
+        return t
+    }
+    const charge = { ...base, status: 'active' as const, isCharge: true, eventAt: '2026-10-01T00:00:00.000Z' }
+
+    it('is the church the checkout was for, not the one the row named before', async () => {
+        const t = await movedPayer()
+        await t.mutation(internal.licensing.applyPaystackEvent, { ...charge, checkoutChurchId: 'church_b', eventKey: 'k1' })
+        expect((await subscriptionRow(t))?.churchId).toBe('church_b')
+    })
+
+    it("isn't a church the payer doesn't belong to", async () => {
+        const t = await movedPayer()
+        await t.mutation(internal.licensing.applyPaystackEvent, { ...charge, checkoutChurchId: 'church_c', eventKey: 'k2' })
+        expect((await subscriptionRow(t))?.churchId).toBe('church_a')
+    })
+
+    it("stays put for events that don't say (renewals, invoices)", async () => {
+        const t = await movedPayer()
+        await t.mutation(internal.licensing.applyPaystackEvent, { ...charge, eventKey: 'k3' })
+        expect((await subscriptionRow(t))?.churchId).toBe('church_a')
+    })
+
+    it('is the redeemer’s church now for a comp code', async () => {
+        const t = await movedPayer()
+        await t.mutation(internal.licensing.grantCompSubscription, { email, compDays: 30, promoCode: 'FREE30' })
+        expect((await subscriptionRow(t))?.churchId).toBe('church_b')
+    })
+})

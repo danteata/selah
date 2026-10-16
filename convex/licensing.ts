@@ -241,6 +241,8 @@ export const applyPaystackEvent = internalMutation({
         // True only for charge.success, so we count exactly one discounted cycle
         // per charge (invoice.* events for the same charge don't double-count).
         isCharge: v.optional(v.boolean()),
+        // The church the checkout was for, from our own metadata on the event.
+        checkoutChurchId: v.optional(v.string()),
         eventAt: v.string(),
         // Identifies the delivery; a key seen before makes this a no-op.
         // Optional only so a caller without one still works (unguarded).
@@ -332,14 +334,19 @@ export const applyPaystackEvent = internalMutation({
             }
         }
 
-        // Resolve the church this subscription entitles: keep an existing
-        // churchId, else the payer's church (by email). This is what makes the
-        // whole church inherit Pro.
+        // Resolve the church this subscription entitles — what makes the whole
+        // church inherit Pro. The church the checkout was for comes first, when
+        // the payer belongs to it: the row's old church used to win always, so
+        // someone who moved church and paid for the new one gave Pro to the old
+        // one instead. Otherwise keep the row's church, else the payer's.
         const userByEmail = await ctx.db
             .query('users')
             .withIndex('by_email', (q) => q.eq('email', email))
             .first()
-        const churchId = existing?.churchId ?? userByEmail?.churchId ?? undefined
+        const checkoutChurch = args.checkoutChurchId && userByEmail?.churchId === args.checkoutChurchId
+            ? args.checkoutChurchId
+            : undefined
+        const churchId = checkoutChurch ?? existing?.churchId ?? userByEmail?.churchId ?? undefined
 
         // Paystack doesn't promise delivery order, and `eventAt` is its own
         // timestamp for the event. One older than the last applied must not
@@ -424,8 +431,11 @@ export const grantCompSubscription = internalMutation({
         const user = await ctx.db
             .query('users')
             .withIndex('by_email', (q) => q.eq('email', email))
-            .unique()
-        const churchId = existing?.churchId ?? user?.churchId ?? undefined
+            .first()
+        // A comp is redeemed for the church the redeemer is in now. The row's
+        // old church used to win, so one redeemed after moving church went to
+        // the church they'd left.
+        const churchId = user?.churchId || existing?.churchId || undefined
 
         // Don't shorten an existing longer paid/comp period.
         const periodEnd =
