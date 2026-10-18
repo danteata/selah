@@ -6,16 +6,34 @@ import { WelcomeScene } from "@/components/landing/WelcomeScene";
 import { Magnetic } from "@/components/landing/Magnetic";
 import { DemoVideoModal } from "@/components/landing/DemoVideoModal";
 
+// Letters animate one by one, but each word's letters sit in a span that
+// can't wrap: split into bare letters (with the spaces as &nbsp;), a narrow
+// screen broke lines mid-word ("Preach the sermo / n.").
 function splitChars(el: HTMLElement) {
   const text = el.textContent ?? "";
   el.setAttribute("aria-label", text);
   el.innerHTML = text
-    .split("")
+    .split(" ")
     .map(
-      (c) =>
-        `<span class="hero-char inline-block will-change-transform" aria-hidden="true">${c === " " ? "&nbsp;" : c}</span>`
+      (word) =>
+        `<span class="inline-block whitespace-nowrap" aria-hidden="true">${word
+          .split("")
+          .map((c) => `<span class="hero-char inline-block will-change-transform">${c}</span>`)
+          .join("")}</span>`
     )
-    .join("");
+    .join(" ");
+}
+
+// A gradient clipped to the text can't paint through letters that are each
+// their own inline-block, so each letter gets its own step of it instead.
+function paintGradient(el: HTMLElement) {
+  const from = [0x5e, 0xea, 0xd4];
+  const to = [0xfc, 0xd3, 0x4d];
+  const chars = el.querySelectorAll<HTMLElement>(".hero-char");
+  chars.forEach((c, i) => {
+    const k = chars.length > 1 ? i / (chars.length - 1) : 0;
+    c.style.color = `rgb(${from.map((f, j) => Math.round(f + (to[j] - f) * k)).join(",")})`;
+  });
 }
 
 export function Hero({ started }: { started: boolean }) {
@@ -27,7 +45,13 @@ export function Hero({ started }: { started: boolean }) {
 
   useEffect(() => {
     if (!started || !h1.current) return;
-    h1.current.querySelectorAll(".hero-line").forEach((line) => splitChars(line as HTMLElement));
+    h1.current.querySelectorAll(".hero-line").forEach((line) => {
+      // Split inside a styled span (the italic gradient line), not around it:
+      // splitting the whole line threw the span, and its styling, away.
+      const target = (line.querySelector("[data-gradient]") as HTMLElement | null) ?? (line as HTMLElement);
+      splitChars(target);
+      if (target.dataset.gradient) paintGradient(target);
+    });
 
     const tl = gsap.timeline();
     tl.from(".hero-char", {
@@ -73,25 +97,24 @@ export function Hero({ started }: { started: boolean }) {
       <div className="relative z-10 max-w-6xl mx-auto text-center" style={{ perspective: "800px" }}>
         <div className="hero-eyebrow inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-7 text-[10px] font-bold uppercase tracking-[0.22em]" style={{ background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(13,148,136,0.05) 100%)', border: '1px solid rgba(20,184,166,0.35)', color: '#5eead4' }}>
           <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
-          Now in open beta · v2 ships this month
+          Now in open beta
         </div>
 
         <h1 ref={h1} className="text-5xl sm:text-7xl lg:text-[5.5rem] text-white leading-[1.02] tracking-tight" style={{ fontFamily: "Crimson Pro, serif", fontWeight: 600 }}>
           <span className="hero-line block">Preach the sermon.</span>
           <span className="hero-line block">
-            <span className="italic" style={{ background: 'linear-gradient(135deg, #5eead4 0%, #fcd34d 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>Selah finds the verse.</span>
+            <span className="italic" data-gradient="mint-gold" style={{ color: '#5eead4' }}>Selah finds the verse.</span>
           </span>
         </h1>
 
         <p className="hero-sub mt-7 text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-          It hears the reference as you say it and puts the verse on screen &mdash; <span className="text-zinc-200">no typing, no internet.</span>
+          It hears the reference as you say it and puts the verse on screen. <span className="text-zinc-200">No typing, and no internet needed on the desktop app.</span>
         </p>
 
         <div className="mt-9 flex flex-wrap justify-center gap-4">
           <Magnetic>
             <Link
               to="/signup"
-              data-cursor="Go"
               className="hero-cta group inline-flex items-center gap-2 rounded-full px-8 py-4 font-semibold text-[#08090c] transition-all"
               style={{ background: 'linear-gradient(135deg, #14b8a6, #0d9488)', boxShadow: '0 8px 32px -4px rgba(20,184,166,0.45), inset 0 1px 0 rgba(255,255,255,0.2)' }}
             >
@@ -103,7 +126,6 @@ export function Hero({ started }: { started: boolean }) {
             <button
               type="button"
               onClick={() => setDemoOpen(true)}
-              data-cursor="Watch"
               className="hero-cta inline-flex items-center gap-2 rounded-full border border-zinc-700/80 px-7 py-4 text-zinc-200 hover:border-teal-500/60 hover:text-white transition-colors"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
@@ -117,8 +139,8 @@ export function Hero({ started }: { started: boolean }) {
           {[
             { label: '14-day free trial', check: true },
             { label: 'No credit card', check: true },
-            { label: 'Works fully offline', check: true },
-            { label: 'Under 30-min setup', check: true },
+            { label: 'Works offline on desktop', check: true },
+            { label: 'Free plan forever', check: true },
           ].map((s) => (
             <span key={s.label} className="hero-stat inline-flex items-center gap-1.5">
               <svg className="w-3.5 h-3.5 text-primary-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>
@@ -155,9 +177,11 @@ export function Hero({ started }: { started: boolean }) {
           </div>
 
           {/* App body */}
-          <div className="grid grid-cols-[180px_1fr_220px] min-h-[280px]">
+          {/* On a phone the two side panels squeezed the verse to a word a line;
+              below md only the screen preview shows. */}
+          <div className="grid grid-cols-1 md:grid-cols-[180px_1fr_220px] min-h-[240px] md:min-h-[280px]">
             {/* Left rail — service order */}
-            <div className="p-3 border-r" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="hidden md:block p-3 border-r" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
               <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40 mb-2.5 px-1">Service order</div>
               {[
                 { label: 'Welcome', done: true },
@@ -199,15 +223,15 @@ export function Hero({ started }: { started: boolean }) {
                 <div className="relative">
                   <div className="text-[9px] font-mono uppercase tracking-[0.3em] text-teal-300/80 mb-2">John 3:16</div>
                   <div className="text-white text-base sm:text-lg leading-snug" style={{ fontFamily: 'Crimson Pro, serif' }}>
-                    &ldquo;For God so loved the world<br/>that he gave his one and only Son…&rdquo;
+                    &ldquo;For God so loved the world,<br/>that he gave his only begotten Son…&rdquo;
                   </div>
-                  <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/30 mt-3">NIV · Pushed 2s ago</div>
+                  <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-white/30 mt-3">KJV · Pushed 2s ago</div>
                 </div>
               </div>
             </div>
 
             {/* Right — AI listener status */}
-            <div className="p-3 border-l" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
+            <div className="hidden md:block p-3 border-l" style={{ borderColor: 'rgba(255,255,255,0.05)', background: 'rgba(0,0,0,0.2)' }}>
               <div className="flex items-center justify-between mb-2.5 px-1">
                 <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-white/40">AI Listener</div>
                 <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-[0.22em] text-emerald-400">
@@ -241,16 +265,18 @@ export function Hero({ started }: { started: boolean }) {
           </div>
         </div>
 
-        {/* Floating annotation chips around the mockup */}
+        {/* Annotation chips, on the top and bottom edges where they frame the
+            verse. Placed on the sides they covered the service order and the
+            listener panel. */}
         <div
-          className="hidden lg:flex absolute -left-6 top-1/4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
+          className="hidden lg:flex absolute left-1/2 -translate-x-1/2 -top-4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
           style={{ background: 'rgba(15,18,22,0.95)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)' }}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           <span style={{ color: 'rgba(255,255,255,0.85)' }}>Caught it the moment you said it</span>
         </div>
         <div
-          className="hidden lg:flex absolute -right-6 bottom-12 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
+          className="hidden lg:flex absolute left-1/2 -translate-x-1/2 -bottom-4 items-center gap-2 px-3 py-2 rounded-xl text-xs whitespace-nowrap"
           style={{ background: 'rgba(15,18,22,0.95)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)' }}
         >
           <svg className="w-3.5 h-3.5 text-teal-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 13l4 4L19 7"/></svg>

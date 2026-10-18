@@ -5,6 +5,9 @@ export function Magnetic({ children, strength = 0.35 }: { children: ReactNode; s
   const ref = useRef<HTMLDivElement>(null);
 
   const onMove = (e: React.PointerEvent) => {
+    // A pull toward the pointer is decoration; skip it for anyone who asked
+    // for less motion, and on touch, where there's no hover to follow.
+    if (e.pointerType !== "mouse" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const el = ref.current!;
     const r = el.getBoundingClientRect();
     gsap.to(el, {
@@ -25,8 +28,9 @@ export function Magnetic({ children, strength = 0.35 }: { children: ReactNode; s
     gsap.to([ref.current, ref.current!.firstElementChild], {
       x: 0,
       y: 0,
-      duration: 0.7,
-      ease: "elastic.out(1, 0.4)",
+      // A smooth settle: the elastic bounce read as wobble, not polish.
+      duration: 0.5,
+      ease: "power3.out",
     });
   };
 

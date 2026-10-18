@@ -5,7 +5,7 @@ import { gsap } from "@/lib/gsap";
 /**
  * WelcomeScene — ambient particle wave for the desktop welcome screen.
  *
- * Inspired by HeroScene, but tuned for a single non-scrolling viewport:
+ * Tuned for a single non-scrolling viewport:
  *  - no ScrollTrigger / no camera flatten on scroll (the welcome screen
  *    is a static full-height page)
  *  - camera framed for a tall vertical panel

@@ -39,7 +39,7 @@ export function SermonListener() {
         );
       }
 
-      tl.from(".sl-detect-card", { scale: 0.85, opacity: 0, y: 20, duration: 0.3, ease: "back.out(2)" })
+      tl.from(".sl-detect-card", { scale: 0.92, opacity: 0, y: 16, duration: 0.3, ease: "power3.out" })
         .from(".sl-projection", { clipPath: "inset(0 100% 0 0)", duration: 0.5, ease: "power3.inOut" })
         .from(".sl-verse-text", { opacity: 0, y: 12, duration: 0.3 });
 
@@ -65,7 +65,7 @@ export function SermonListener() {
 
   return (
     <section ref={section} id="sermon-listener" className="relative min-h-screen flex items-center px-6">
-      <div className="mx-auto grid max-w-6xl gap-12 lg:grid-cols-2 items-center">
+      <div className="mx-auto grid w-full max-w-6xl gap-12 lg:grid-cols-2 items-center [&>*]:min-w-0">
         <div className="sl-copy">
           <p className="text-sm uppercase tracking-[0.3em] text-teal-400">AI Sermon Listener</p>
           <h2 className="mt-4 text-4xl sm:text-5xl text-white" style={{ fontFamily: "Crimson Pro, serif" }}>
@@ -75,14 +75,16 @@ export function SermonListener() {
           </h2>
           <p className="mt-6 text-zinc-400 max-w-md">
             Your scroll wheel is the sermon. Watch Selah transcribe it, follow the context, and find the
-            verse — offline, as it's spoken.
+            verse as it's spoken, even offline in the desktop app.
           </p>
         </div>
 
         <div className="sl-panel rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 backdrop-blur">
-          <div className="flex h-12 items-center gap-[3px]">
+          {/* The bars share the panel's width: at a fixed 4px each they were
+              wider than a phone and pushed the whole section off screen. */}
+          <div className="flex h-12 items-center gap-[3px] overflow-hidden">
             {Array.from({ length: 48 }).map((_, i) => (
-              <span key={i} className="sl-bar h-full w-1 origin-center rounded-full bg-teal-500/70" />
+              <span key={i} className="sl-bar h-full min-w-0 flex-1 max-w-1 origin-center rounded-full bg-teal-500/70" />
             ))}
           </div>
 
@@ -105,9 +107,9 @@ export function SermonListener() {
 
           <div className="sl-projection mt-4 rounded-xl bg-black p-6 ring-1 ring-zinc-800">
             <p className="sl-verse-text text-lg text-white" style={{ fontFamily: "Crimson Pro, serif" }}>
-              "For God so loved the world that he gave his one and only Son…"
+              "For God so loved the world, that he gave his only begotten Son…"
             </p>
-            <p className="mt-2 text-xs text-zinc-500">JOHN 3:16 · NIV</p>
+            <p className="mt-2 text-xs text-zinc-500">JOHN 3:16 · KJV</p>
           </div>
         </div>
       </div>
