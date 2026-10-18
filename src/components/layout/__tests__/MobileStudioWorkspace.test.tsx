@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => {
             setLiveSlide: vi.fn(),
             acceptFromQueue: vi.fn(),
             removeFromQueue: vi.fn(),
+            syncSlideContent: vi.fn(),
             sessionScheduleId: undefined as string | undefined,
         },
     }
@@ -60,6 +61,11 @@ vi.mock('../../live/LiveSessionControls', () => ({
 // Tested on its own (HeardVersesStrip.test.tsx); it reaches templates and Bible
 // data this file doesn't set up.
 vi.mock('../HeardVersesStrip', () => ({ HeardVersesStrip: () => null }))
+
+// Tested on its own (MobileVerseStepper.test.tsx); here only where it shows.
+vi.mock('../MobileVerseStepper', () => ({
+    MobileVerseStepper: () => <div data-testid="verse-stepper" />,
+}))
 
 vi.mock('../../live/PresenceAvatars', () => ({
     PresenceAvatars: ({ churchId }: { churchId: string }) => (
@@ -112,6 +118,7 @@ function setSession(overrides: SessionOverrides) {
         setLiveSlide: vi.fn(),
         acceptFromQueue: vi.fn(),
         removeFromQueue: vi.fn(),
+        syncSlideContent: vi.fn(),
         sessionScheduleId: undefined,
         ...overrides,
     }
@@ -170,6 +177,25 @@ describe('MobileStudioWorkspace', () => {
         render(<MobileStudioWorkspace />)
 
         expect(document.querySelector('p.scripture-label')).toBeNull()
+    })
+
+    it('offers the previous / next verse while a Bible slide is live', () => {
+        const song: Slide = { ...bibleSlide, id: 's1', type: 'song', name: 'Amazing Grace' }
+        setStore([bibleSlide, song], bibleSlide.id)
+        const { unmount } = render(<MobileStudioWorkspace />)
+        expect(screen.getByTestId('verse-stepper')).toBeInTheDocument()
+        unmount()
+
+        setStore([bibleSlide, song], song.id)
+        render(<MobileStudioWorkspace />)
+        expect(screen.queryByTestId('verse-stepper')).toBeNull()
+    })
+
+    it("doesn't offer verse stepping to someone who doesn't control the screen", () => {
+        setSession({ isConnected: true, isContributor: true, isStrict: true })
+        setStore([bibleSlide], bibleSlide.id)
+        render(<MobileStudioWorkspace />)
+        expect(screen.queryByTestId('verse-stepper')).toBeNull()
     })
 
     it('offers search from the empty state', () => {

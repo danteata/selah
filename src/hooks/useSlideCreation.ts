@@ -265,6 +265,34 @@ export function generateSlideContent(
     }
 }
 
+/**
+ * A Bible slide showing different verses: its content, name and verse
+ * numbers, and a font size recomputed from the new verses — a slide that held
+ * a long, illegible range must not keep that tiny size once narrowed down.
+ */
+export function withScripture(slide: Slide, scripture: Scripture): Slide {
+    const contentString = typeof scripture.content === 'string'
+        ? scripture.content
+        : Array.isArray(scripture.content)
+            ? scripture.content.map((v) => v.scripture).join(' ')
+            : ''
+    const displayVerseNumbers = Array.isArray(scripture.content)
+        ? scripture.content.map((v) => Number(v.verse))
+        : undefined
+
+    return {
+        ...slide,
+        name: scripture.label || slide.name,
+        data: scripture,
+        contents: generateSlideContent(slide, scripture),
+        displayVerseNumbers,
+        slideStyle: {
+            ...slide.slideStyle,
+            fontSize: Number(calculateScreenFontSize(contentString)),
+        },
+    }
+}
+
 // Generate slide name
 export function generateSlideName(slide: Slide): string {
     if (slide.name && slide.name !== 'Untitled') return slide.name

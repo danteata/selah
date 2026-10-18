@@ -11,8 +11,10 @@
  *      the whole queue in a sheet (MobileQueueSheet).
  *   5. For the operator, contributors' suggestions to accept or dismiss.
  *   6. In thumb reach, the one action this person's role allows: Next (and
- *      Prev) for whoever controls the screen, "Suggest slides" for a
- *      contributor in review mode, nothing but a note for someone watching.
+ *      Prev) for whoever controls the screen, with the previous / next verse
+ *      above them while a Bible slide is live (MobileVerseStepper), "Suggest
+ *      slides" for a contributor in review mode, nothing but a note for
+ *      someone watching.
  *
  * Adding slides goes through the bottom nav (Bible, Music, Add). Desktop-only
  * chrome (program output, multi-monitor, NDI) stays in StudioWorkspace.
@@ -28,6 +30,7 @@ import { SlideView } from '../live/SlideView'
 import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { MobileQueueSheet } from './MobileQueueSheet'
 import { HeardVersesStrip } from './HeardVersesStrip'
+import { MobileVerseStepper } from './MobileVerseStepper'
 import { queueSlidesFor } from '../preview/groupQueueItems'
 import { slideText, slideTitle, songTitleOf } from '../preview/slideLabels'
 import type { Slide } from '../../types'
@@ -56,6 +59,7 @@ export function MobileStudioWorkspace() {
         setLiveSlide,
         acceptFromQueue,
         removeFromQueue,
+        syncSlideContent,
         sessionScheduleId,
     } = useLiveSession()
     const { currentUser } = useUserRole()
@@ -239,6 +243,9 @@ export function MobileStudioWorkspace() {
             {/* The action this person's role allows, in thumb reach. */}
             {deck.length > 0 && (
                 <div className="flex-shrink-0 px-4 pt-3 pb-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+                    {canControlLive && liveSlide?.type === 'bible' && (
+                        <MobileVerseStepper slide={liveSlide} onSlideChanged={(slide) => void syncSlideContent(slide)} />
+                    )}
                     {canControlLive ? (
                         <div className="flex gap-2">
                             <button
