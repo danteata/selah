@@ -3,9 +3,12 @@
  *
  * Renders only below the `md` breakpoint (768px) so it disappears on
  * tablet/desktop where the full NavRail takes over. Mirrors the rail's
- * most-used sections during a service (Bible, Music, Sermon) plus a
- * quick-add button. Templates are setup work, not something reached for
- * mid-service from a phone, so they live under More. Sections that open modals (library, schedule,
+ * most-used sections during a service (Bible, Music) plus a quick-add
+ * button. Templates are setup work, so they live under More. So does the
+ * sermon listener: a phone browser stops listening at every pause (Android
+ * beeps each time) and when the screen locks, so it belongs on the desk's
+ * computer — but while it's running here it stays on the bar, recording
+ * light and all, so it can always be found and stopped. Sections that open modals (library, schedule,
  * settings) are kept accessible via the more-button that opens the
  * full NavRail as a slide-up sheet on small screens.
  */
@@ -20,8 +23,8 @@ import { useAppStore } from '../../store/appStore'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import type { NavSection } from '../../types/studio'
 
-const PRIMARY_ITEMS: NavSection[] = ['bible', 'music', 'sermon']
-const MORE_ITEMS: NavSection[] = ['media', 'dictionary', 'templates', 'countdown', 'alerts', 'library', 'schedule', 'settings']
+const PRIMARY_ITEMS: NavSection[] = ['bible', 'music']
+const MORE_ITEMS: NavSection[] = ['media', 'dictionary', 'templates', 'sermon', 'countdown', 'alerts', 'library', 'schedule', 'settings']
 
 const ICON: Record<NavSection, React.ElementType> = {
     bible: BookOpen,
@@ -57,6 +60,10 @@ export function MobileBottomNav() {
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const sermonListener = useSermonListenerContext()
     const [moreOpen, setMoreOpen] = useState(false)
+    // A listener running on this phone keeps its tab, so it's never out of sight.
+    const listening = !!sermonListener?.isListening
+    const primaryItems: NavSection[] = listening ? [...PRIMARY_ITEMS, 'sermon'] : PRIMARY_ITEMS
+    const moreItems = listening ? MORE_ITEMS.filter((section) => section !== 'sermon') : MORE_ITEMS
 
     const handleNav = useCallback((section: NavSection) => {
         if (activeNavSection === section) {
@@ -78,7 +85,7 @@ export function MobileBottomNav() {
                 aria-label="Mobile navigation"
             >
                 <div className="flex items-stretch justify-around h-14">
-                    {PRIMARY_ITEMS.map((section) => {
+                    {primaryItems.map((section) => {
                         const Icon = ICON[section]
                         const isActive = activeNavSection === section
                         const isRecording = section === 'sermon' && sermonListener?.isListening
@@ -168,7 +175,7 @@ export function MobileBottomNav() {
                                 </button>
                             </div>
                             <div className="grid grid-cols-3 gap-1 p-3">
-                                {MORE_ITEMS.map((section) => {
+                                {moreItems.map((section) => {
                                     const Icon = ICON[section]
                                     const isActive = activeNavSection === section
                                     return (
