@@ -91,6 +91,20 @@ describe('church data stays in its church', () => {
         await asAlice.mutation(api.liveSessions.toggleBlank, { sessionId, isBlank: true })
     })
 
+    it("takes heard verses from the church's own members only, the newest five", async () => {
+        const { asAlice, asBob, churchA } = await twoChurches()
+        const scheduleId = await asAlice.mutation(api.schedules.createSchedule, { name: 'Sunday', churchId: churchA })
+        const sessionId = await asAlice.mutation(api.liveSessions.startSession, { scheduleId, churchId: churchA })
+        const verses = Array.from({ length: 7 }, (_, i) => ({
+            reference: `Psalms 23:${i + 1}`, book: 'Psalms', chapter: 23, verseStart: i + 1, heardAt: 1000 - i,
+        }))
+
+        await expect(asBob.mutation(api.liveSessions.setHeardVerses, { sessionId, verses })).rejects.toThrow()
+        await asAlice.mutation(api.liveSessions.setHeardVerses, { sessionId, verses })
+        const session = await asAlice.query(api.liveSessions.getSession, { sessionId })
+        expect(session?.heardVerses?.map((verse) => verse.reference)).toEqual(verses.slice(0, 5).map((verse) => verse.reference))
+    })
+
     it("lets only the session's operator set its default templates", async () => {
         const { asAlice, asBob, churchA } = await twoChurches()
         const scheduleId = await asAlice.mutation(api.schedules.createSchedule, { name: 'Sunday', churchId: churchA })

@@ -960,7 +960,7 @@ export function detectVerses(text: string): DetectedVerse[] {
     return detected
 }
 
-export function verseToLabel(verse: DetectedVerse): string {
+export function verseToLabel(verse: Pick<DetectedVerse, 'book' | 'chapter' | 'verseStart' | 'verseEnd'>): string {
     const bookNum = BOOK_TO_NUMBER[verse.book]
     if (!bookNum) return ''
 

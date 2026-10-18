@@ -469,6 +469,20 @@ export interface DefaultBackgroundConfig {
     backgroundVideoKey: string | null
 }
 
+/** A verse the sermon listener heard, as shared through the live session
+ *  (mirrors `heardVerseValidator` in convex/schema.ts). */
+export interface HeardVerse {
+    reference: string
+    book: string
+    chapter: number
+    verseStart: number
+    verseEnd?: number
+    /** The translation the listening device was using. */
+    version?: string
+    /** When it was heard, in ms since the epoch. */
+    heardAt: number
+}
+
 /** Default template ids per slide type, as a live session's operator set
  *  them (mirrors `sessionDefaultTemplatesValidator` in convex/schema.ts). */
 export interface SessionDefaultTemplates {

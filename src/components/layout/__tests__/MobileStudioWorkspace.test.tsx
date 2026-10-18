@@ -57,6 +57,10 @@ vi.mock('../../live/LiveSessionControls', () => ({
     ),
 }))
 
+// Tested on its own (HeardVersesStrip.test.tsx); it reaches templates and Bible
+// data this file doesn't set up.
+vi.mock('../HeardVersesStrip', () => ({ HeardVersesStrip: () => null }))
+
 vi.mock('../../live/PresenceAvatars', () => ({
     PresenceAvatars: ({ churchId }: { churchId: string }) => (
         <div data-testid="presence-avatars">{churchId}</div>

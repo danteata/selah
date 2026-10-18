@@ -2,7 +2,7 @@ import { query, mutation, type MutationCtx, type QueryCtx } from "./_generated/s
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getById, isChurchAdmin, isMemberOf, requireUser, type User } from "./lib/auth";
-import { sessionDefaultTemplatesValidator } from "./schema";
+import { heardVerseValidator, MAX_HEARD_VERSES, sessionDefaultTemplatesValidator } from "./schema";
 
 /**
  * An active session in the caller's own church.
@@ -288,6 +288,34 @@ export const setDefaultTemplates = mutation({
             updatedAt: new Date().toISOString(),
         });
 
+        return true;
+    },
+});
+
+/**
+ * Publish the verses this device's sermon listener heard, newest first. Any
+ * member of the session's church may: the listener often runs on a computer
+ * at the desk that isn't the operator's. Only the newest few are kept.
+ */
+export const setHeardVerses = mutation({
+    args: {
+        sessionId: v.id("liveSessions"),
+        verses: v.array(heardVerseValidator),
+    },
+    handler: async (ctx, args) => {
+        await requireActiveSession(ctx, args.sessionId);
+        const verses = args.verses
+            .slice(0, MAX_HEARD_VERSES)
+            .map((verse) => ({
+                ...verse,
+                reference: verse.reference.slice(0, 64),
+                book: verse.book.slice(0, 32),
+                version: verse.version?.slice(0, 16),
+            }));
+        await ctx.db.patch(args.sessionId, {
+            heardVerses: verses,
+            updatedAt: new Date().toISOString(),
+        });
         return true;
     },
 });
