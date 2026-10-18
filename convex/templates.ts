@@ -62,10 +62,10 @@ async function favoriteTemplateIds(ctx: QueryCtx, user: User | null): Promise<Se
 }
 
 /**
- * Template backgrounds a church may keep on the server, in total. Desktop
- * template backgrounds upload automatically (see templateMediaSync.ts); this
- * bounds what that costs. Past it, a background stays on the computer that
- * has it and the template says so.
+ * Template backgrounds a church may keep on the server, in total. A desktop
+ * template background uploads when someone syncs it (see templateMediaSync.ts),
+ * a web one when it is picked; this bounds what that costs. Past it, a
+ * background stays on the computer that has it and the template says so.
  */
 export const TEMPLATE_MEDIA_LIMIT_BYTES = 100 * 1024 * 1024;
 

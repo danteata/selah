@@ -334,8 +334,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 }
 
                 // A copy in Selah's media folder: the template keeps working if
-                // the original is moved, and it uploads from there (see
-                // templateMediaSync.ts).
+                // the original is moved, and "Sync to cloud" uploads from there
+                // (see templateMediaSync.ts).
                 setIsUploading(true)
                 const copied = await copyIntoMediaLibrary(filePath).catch(() => filePath)
                 setIsUploading(false)

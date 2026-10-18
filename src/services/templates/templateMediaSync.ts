@@ -9,10 +9,12 @@
  * black. Now:
  *
  *  - upload: on desktop, a church template whose background is a local file
- *    this computer has, and that has no uploaded copy yet, is uploaded and
- *    attached (`templates.attachBackground`). The church's total is capped
- *    (100 MB); past it the template is marked over the limit and keeps working
- *    on the computer that has the file.
+ *    this computer has, and that has no uploaded copy yet, is marked as on
+ *    this computer only. It uploads and attaches (`templates.attachBackground`)
+ *    when someone asks for it (`uploadTemplateBackground`), never just because
+ *    the app is online. The church's total is capped (100 MB); past it the
+ *    template is marked over the limit and keeps working on the computer that
+ *    has the file.
  *  - prefetch: on every device, uploaded backgrounds are downloaded into the
  *    template cache while online, so a template works offline and doesn't
  *    wait on the network when it goes live.
@@ -25,6 +27,8 @@ import { isDesktop } from '../../platform'
 import { prefetchTemplateBackground } from '../../hooks/useTemplates'
 
 export type TemplateMediaState =
+    /** The background is a file on this computer, not uploaded. */
+    | 'local'
     | 'uploading'
     | 'uploaded'
     /** The background is a file on another computer. */
@@ -119,13 +123,31 @@ async function readLocal(source: { path?: string; assetUrl?: string }): Promise<
     }
 }
 
-/** Templates this device already tried this session; not retried until restart. */
-const attempted = new Set<string>()
+/** Whether this computer has the file, without reading a whole video to find out. */
+async function hasLocal(source: { path?: string; assetUrl?: string }): Promise<boolean> {
+    try {
+        let url = source.assetUrl
+        if (source.path) {
+            const { convertFileSrc } = await import('@tauri-apps/api/core')
+            url = convertFileSrc(source.path)
+        }
+        if (!url) return false
+        const response = await fetch(url, { headers: { Range: 'bytes=0-0' } })
+        void response.body?.cancel().catch(() => {})
+        return response.ok
+    } catch {
+        return false
+    }
+}
+
+/** A background on this computer that has no uploaded copy yet: one the church could sync. */
+export function canUploadBackground(template: TemplateLike): boolean {
+    return isDesktop() && !!template.createdBy && !storageIdOf(template) && !!localSourceOf(template)
+}
 
 async function uploadOne(convex: ConvexReactClient, template: TemplateLike, remaining: { bytes: number }): Promise<void> {
     const source = localSourceOf(template)
     if (!source) return
-    attempted.add(template._id)
     const blob = await readLocal(source)
     if (!blob) {
         setState(template._id, 'missing')
@@ -161,19 +183,37 @@ async function uploadOne(convex: ConvexReactClient, template: TemplateLike, rema
 
 let running: Promise<void> | null = null
 
-/** Upload what this computer can, then download what it lacks. Single-flight. */
+/**
+ * Upload one template's background from this computer, because someone asked
+ * to. Its outcome lands in the template's state.
+ */
+export async function uploadTemplateBackground(convex: ConvexReactClient, template: TemplateLike): Promise<void> {
+    if (!canUploadBackground(template) || states.get(template._id) === 'uploading') return
+    setState(template._id, 'uploading')
+    try {
+        const usage = await convex.query(api.templates.backgroundUsage, { excludingTemplateId: template._id })
+        await uploadOne(convex, template, { bytes: usage.limitBytes - usage.usedBytes })
+    } catch (err) {
+        console.warn('[templateMedia] could not upload a template background:', err)
+        setState(template._id, 'failed')
+    }
+}
+
+/** Outcomes of an upload someone asked for, kept until they try again. */
+const ASKED: ReadonlySet<TemplateMediaState | undefined> = new Set(['uploading', 'over-limit', 'failed'])
+
+/**
+ * Mark which local backgrounds this computer has, then download the uploaded
+ * ones it lacks. Uploads nothing: see `uploadTemplateBackground`. Single-flight.
+ */
 export function syncTemplateMedia(convex: ConvexReactClient, templates: TemplateLike[]): Promise<void> {
     if (running) return running
     running = (async () => {
         try {
             if (isDesktop()) {
-                const needUpload = templates.filter(
-                    (t) => !!t.createdBy && !storageIdOf(t) && !!localSourceOf(t) && !attempted.has(t._id),
-                )
-                if (needUpload.length > 0) {
-                    const usage = await convex.query(api.templates.backgroundUsage, {})
-                    const remaining = { bytes: usage.limitBytes - usage.usedBytes }
-                    for (const t of needUpload) await uploadOne(convex, t, remaining)
+                for (const t of templates) {
+                    if (!canUploadBackground(t) || ASKED.has(states.get(t._id))) continue
+                    setState(t._id, (await hasLocal(localSourceOf(t)!)) ? 'local' : 'missing')
                 }
             } else {
                 // The web can't read files on disk: such a background is elsewhere.
@@ -194,7 +234,6 @@ export function syncTemplateMedia(convex: ConvexReactClient, templates: Template
 /** For tests. */
 export function resetTemplateMedia(): void {
     states.clear()
-    attempted.clear()
     running = null
     version++
 }

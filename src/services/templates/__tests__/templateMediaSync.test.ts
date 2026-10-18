@@ -13,6 +13,7 @@ import {
     storageIdOf,
     syncTemplateMedia,
     templateMediaState,
+    uploadTemplateBackground,
     type TemplateLike,
 } from '../templateMediaSync'
 
@@ -62,12 +63,32 @@ describe('template backgrounds', () => {
         expect(localSourceOf(template('a', { background: 'https://images.unsplash.com/x.jpg' }))).toBeNull()
     })
 
-    it('uploads a background this computer has and attaches it', async () => {
+    it("doesn't upload just because the app is online: it marks the background as this computer's", async () => {
         disk({ '/Users/me/Galaxy.mp4': 2 * MB })
         const { client, attach } = convex()
         await syncTemplateMedia(client, [template('t1', { backgroundType: 'video', localFilePath: '/Users/me/Galaxy.mp4' })])
+        expect(attach).not.toHaveBeenCalled()
+        expect(client.mutation).not.toHaveBeenCalled()
+        expect(templateMediaState('t1')).toBe('local')
+    })
+
+    it('uploads a background this computer has and attaches it, when asked', async () => {
+        disk({ '/Users/me/Galaxy.mp4': 2 * MB })
+        const { client, attach } = convex()
+        const t1 = template('t1', { backgroundType: 'video', localFilePath: '/Users/me/Galaxy.mp4' })
+        await uploadTemplateBackground(client, t1)
+        expect(client.query).toHaveBeenCalledWith(expect.anything(), { excludingTemplateId: 't1' })
         expect(attach).toHaveBeenCalledWith({ templateId: 't1', storageId: `stored_${2 * MB}` })
         expect(templateMediaState('t1')).toBe('uploaded')
+    })
+
+    it("keeps an asked-for upload's outcome when the template list syncs again", async () => {
+        disk({ '/Users/me/Big.mp4': 30 * MB })
+        const { client } = convex(80 * MB)
+        const t1 = template('t1', { localFilePath: '/Users/me/Big.mp4' })
+        await uploadTemplateBackground(client, t1)
+        await syncTemplateMedia(client, [t1])
+        expect(templateMediaState('t1')).toBe('over-limit')
     })
 
     it("marks a background that's on another computer, without uploading", async () => {
@@ -81,7 +102,7 @@ describe('template backgrounds', () => {
     it("doesn't upload past the church's limit", async () => {
         disk({ '/Users/me/Big.mp4': 30 * MB })
         const { client, attach } = convex(80 * MB)
-        await syncTemplateMedia(client, [template('t1', { localFilePath: '/Users/me/Big.mp4' })])
+        await uploadTemplateBackground(client, template('t1', { localFilePath: '/Users/me/Big.mp4' }))
         expect(attach).not.toHaveBeenCalled()
         expect(templateMediaState('t1')).toBe('over-limit')
     })
@@ -89,10 +110,11 @@ describe('template backgrounds', () => {
     it('leaves system templates and already-uploaded ones alone, and downloads the uploaded ones', async () => {
         disk({ '/Users/me/a.mp4': MB })
         const { client, attach } = convex()
-        await syncTemplateMedia(client, [
-            template('system', { localFilePath: '/Users/me/a.mp4' }, { createdBy: undefined }),
-            template('done', { localFilePath: '/Users/me/a.mp4' }, { backgroundStorageId: 'kg2a8s' }),
-        ])
+        const system = template('system', { localFilePath: '/Users/me/a.mp4' }, { createdBy: undefined })
+        const done = template('done', { localFilePath: '/Users/me/a.mp4' }, { backgroundStorageId: 'kg2a8s' })
+        await syncTemplateMedia(client, [system, done])
+        await uploadTemplateBackground(client, system)
+        await uploadTemplateBackground(client, done)
         expect(attach).not.toHaveBeenCalled()
         expect(prefetch).toHaveBeenCalledWith(client, 'kg2a8s')
     })
