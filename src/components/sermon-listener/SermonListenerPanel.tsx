@@ -35,6 +35,8 @@ import {
 import { writeSessionSidecar } from '../../services/sermon-listener/devAccuracyReport'
 import { DevAccuracyPanel } from './DevAccuracyPanel'
 import { useAudioLevel } from '../../services/sermon-listener/audioLevel'
+import { useIsMobile } from '../../hooks/useIsMobile'
+import { isDesktop } from '../../platform'
 
 interface SermonListenerPanelProps {
     autoDisplay?: boolean
@@ -104,6 +106,10 @@ function SermonListenerPanelInner({
     sermonListener,
 }: SermonListenerPanelInnerProps) {
     const { confirm: askConfirm, ConfirmDialog } = useConfirmDialog()
+    // A phone or tablet browser (not the desktop app), where listening can't
+    // run unbroken — see the note shown above Start.
+    const isPhoneLayout = useIsMobile()
+    const onPhoneBrowser = !isDesktop() && (isPhoneLayout || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent))
     const [showSavedTranscripts, setShowSavedTranscripts] = useState(false)
     const [showSaveDialog, setShowSaveDialog] = useState(false)
     const [showExportPicker, setShowExportPicker] = useState(false)
@@ -623,6 +629,27 @@ function SermonListenerPanelInner({
 
             {/* Dev-only: recorded-session accuracy review. Renders nothing in production builds. */}
             {import.meta.env.DEV && <DevAccuracyPanel refreshSignal={sessionRecordedSignal} />}
+
+            {/* On a phone or tablet browser, say up front what listening there is
+                like, rather than let it beep through a sermon: the browser's
+                recognition ends at every pause (Android sounds a tone on each
+                stop and start), drops words while it restarts, and stops when
+                the screen locks. None of that can be turned off from a page. */}
+            {onPhoneBrowser && !isListening && !isStarting && (
+                <div className="p-3 rounded-lg bg-amber-100/70 dark:bg-amber-900/25 text-amber-800 dark:text-amber-200" role="note">
+                    <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0 space-y-1">
+                            <p className="text-sm font-medium">Best run on the computer at the desk</p>
+                            <p className="text-xs leading-relaxed">
+                                In a phone browser, listening stops at every pause (on Android that’s the beep), misses words
+                                while it restarts, and ends when the screen locks. The Selah desktop app listens without
+                                breaks, from the sound desk’s feed. To find one verse here, use the mic in the Bible panel.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Error message with structured actions */}
             {error && (() => {
