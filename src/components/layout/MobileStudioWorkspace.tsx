@@ -5,10 +5,12 @@
  *
  *   1. What's live, named ("Amazing Grace · 2 of 3"), and the session chip.
  *   2. The live slide, in the projector's 16:9 frame.
- *   3. Up next: the next few slides, each a tap away from going live, and
+ *   3. What the session's sermon listener just heard (on the desk's computer),
+ *      each verse a tap from the screen (HeardVersesStrip).
+ *   4. Up next: the next few slides, each a tap away from going live, and
  *      the whole queue in a sheet (MobileQueueSheet).
- *   4. For the operator, contributors' suggestions to accept or dismiss.
- *   5. In thumb reach, the one action this person's role allows: Next (and
+ *   5. For the operator, contributors' suggestions to accept or dismiss.
+ *   6. In thumb reach, the one action this person's role allows: Next (and
  *      Prev) for whoever controls the screen, "Suggest slides" for a
  *      contributor in review mode, nothing but a note for someone watching.
  *
@@ -25,6 +27,7 @@ import { LiveSessionControls } from '../live/LiveSessionControls'
 import { SlideView } from '../live/SlideView'
 import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { MobileQueueSheet } from './MobileQueueSheet'
+import { HeardVersesStrip } from './HeardVersesStrip'
 import { queueSlidesFor } from '../preview/groupQueueItems'
 import { slideText, slideTitle, songTitleOf } from '../preview/slideLabels'
 import type { Slide } from '../../types'
@@ -116,12 +119,16 @@ export function MobileStudioWorkspace() {
             </div>
 
             {deck.length === 0 ? (
-                <EmptyDeck
-                    waitingForOperator={isConnected && !isOperator}
-                    onSongs={() => setActiveNavSection('music')}
-                    onBible={() => setActiveNavSection('bible')}
-                    onSearch={openSearch}
-                />
+                <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+                    {/* A verse just heard is the obvious first slide. */}
+                    <HeardVersesStrip canControlLive={canControlLive} canSuggest={canSuggest} />
+                    <EmptyDeck
+                        waitingForOperator={isConnected && !isOperator}
+                        onSongs={() => setActiveNavSection('music')}
+                        onBible={() => setActiveNavSection('bible')}
+                        onSearch={openSearch}
+                    />
+                </div>
             ) : (
                 <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
                     {/* The live slide, in the projector's renderer and frame. */}
@@ -144,6 +151,9 @@ export function MobileStudioWorkspace() {
                             </div>
                         )}
                     </div>
+
+                    {/* What the listener at the desk just heard. */}
+                    <HeardVersesStrip canControlLive={canControlLive} canSuggest={canSuggest} />
 
                     {/* Up next, and the way into the whole queue. */}
                     <section className="px-4 pt-5" aria-labelledby="mobile-up-next">

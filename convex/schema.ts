@@ -23,6 +23,21 @@ import { v } from "convex/values";
  * operator set them. Keys are the slide types the client applies a default
  * template to; null means the operator deliberately has none.
  */
+/** A verse the sermon listener heard: the reference, the translation the
+ *  listening device was using, and when (ms since epoch). */
+export const heardVerseValidator = v.object({
+    reference: v.string(),
+    book: v.string(),
+    chapter: v.number(),
+    verseStart: v.number(),
+    verseEnd: v.optional(v.number()),
+    version: v.optional(v.string()),
+    heardAt: v.number(),
+});
+
+/** How many heard verses a session keeps. */
+export const MAX_HEARD_VERSES = 5;
+
 const defaultTemplateId = v.optional(v.union(v.string(), v.null()));
 export const sessionDefaultTemplatesValidator = v.object({
     scripture: defaultTemplateId,
@@ -653,6 +668,10 @@ export default defineSchema({
         // collaborator's slide takes when they haven't picked a template, so
         // what they send live looks like what the operator would have sent.
         defaultTemplates: v.optional(sessionDefaultTemplatesValidator),
+        // The last few verses the sermon listener heard, newest first, from
+        // whichever device in the session is listening (the desk's computer),
+        // so everyone else's phone can send one live without listening itself.
+        heardVerses: v.optional(v.array(heardVerseValidator)),
         status: v.union(v.literal("active"), v.literal("ended")),
         startedAt: v.string(),
         endedAt: v.optional(v.string()),

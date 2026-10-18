@@ -878,6 +878,11 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         if (JSON.stringify(store.sessionDefaultTemplates) !== JSON.stringify(adopted)) {
             store.setSessionDefaultTemplates(adopted)
         }
+        // What the session's sermon listener heard, for every device in it.
+        const heard = active?.heardVerses ?? []
+        if (JSON.stringify(store.sessionHeardVerses) !== JSON.stringify(heard)) {
+            store.setSessionHeardVerses(heard)
+        }
 
         if (!active || !isOp || !isConvexConnected || isOffline) return
         const mine = sessionTemplatesFrom(localDefaultTemplates)
