@@ -2,10 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { CreateTemplateModal } from '../CreateTemplateModal'
 import type { TemplateItem } from '../../../hooks/useTemplates'
+import { openFileDialog } from '../../../utils/fileDialog'
+
+const MB = 1024 * 1024
 
 const mockCreateTemplate = vi.fn()
 const mockUpdateTemplate = vi.fn()
 const mockGenerateUploadUrl = vi.fn()
+const mockBackgroundUsage = vi.fn()
+
+vi.mock('convex/react', () => ({
+    useQuery: () => mockBackgroundUsage(),
+}))
 
 // Only the hook is stubbed; everything else — notably the shared
 // TEMPLATE_SLIDE_TYPE_OPTIONS list the modal renders its chips from — comes from
@@ -51,6 +59,7 @@ describe('CreateTemplateModal', () => {
         vi.clearAllMocks()
         mockCreateTemplate.mockResolvedValue(undefined)
         mockUpdateTemplate.mockResolvedValue(undefined)
+        mockBackgroundUsage.mockReturnValue({ usedBytes: 0, limitBytes: 100 * MB })
     })
 
     it('renders nothing when closed', () => {
@@ -289,6 +298,37 @@ describe('CreateTemplateModal', () => {
         fireEvent.change(screen.getByPlaceholderText('My Template'), { target: { value: 'Motion' } })
         fireEvent.click(screen.getByText('Video'))
         expect(screen.getByText('Create Template').closest('button')).toBeDisabled()
+    })
+
+    describe('picking a video on the web', () => {
+        const pickVideo = async (bytes: number) => {
+            const file = new File(['x'], 'worship.mp4', { type: 'video/mp4' })
+            Object.defineProperty(file, 'size', { value: bytes })
+            vi.mocked(openFileDialog).mockResolvedValueOnce([file])
+            render(<CreateTemplateModal {...baseProps} />)
+            fireEvent.click(screen.getByText('Video'))
+            fireEvent.click(screen.getByText(/Upload Video/))
+        }
+
+        beforeEach(() => {
+            vi.spyOn(window, 'alert').mockImplementation(() => {})
+            URL.createObjectURL = vi.fn().mockReturnValue('blob:worship')
+            mockGenerateUploadUrl.mockResolvedValue('https://upload.example')
+            vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ storageId: 'stored' }) }))
+        })
+
+        it('uploads a video past the old 50MB cap when the church has room', async () => {
+            await pickVideo(80 * MB)
+            await waitFor(() => expect(fetch).toHaveBeenCalled())
+            expect(window.alert).not.toHaveBeenCalled()
+        })
+
+        it("refuses a video bigger than the church's room left, before uploading it", async () => {
+            mockBackgroundUsage.mockReturnValue({ usedBytes: 70 * MB, limitBytes: 100 * MB })
+            await pickVideo(40 * MB)
+            await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('30 MB')))
+            expect(mockGenerateUploadUrl).not.toHaveBeenCalled()
+        })
     })
 
     it('shows image upload section when image type is selected', () => {

@@ -163,13 +163,20 @@ async function deleteBackgroundIfUnused(ctx: MutationCtx, storageId: string) {
     }
 }
 
-/** The church's template background usage against its limit. */
+/**
+ * The church's template background usage against its limit. Leaving out the
+ * template being edited counts what a new background for it may use, since
+ * replacing one frees the old.
+ */
 export const backgroundUsage = query({
-    args: {},
-    handler: async (ctx) => {
+    args: { excludingTemplateId: v.optional(v.string()) },
+    handler: async (ctx, args) => {
         const user = await getCurrentUser(ctx);
         if (!user) return { usedBytes: 0, limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
-        return { usedBytes: await backgroundBytes(ctx, user), limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
+        return {
+            usedBytes: await backgroundBytes(ctx, user, args.excludingTemplateId),
+            limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES,
+        };
     },
 });
 

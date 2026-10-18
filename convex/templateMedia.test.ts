@@ -55,6 +55,14 @@ describe('attachBackground', () => {
         expect((await asAlice.query(api.templates.backgroundUsage, {})).usedBytes).toBe(60 * MB)
     })
 
+    it("reports the room a template's new background may use, leaving out its current one", async () => {
+        const { asAlice, store, template } = await setup()
+        const id = await template(asAlice, 'Galaxy')
+        await asAlice.mutation(api.templates.attachBackground, { templateId: id, storageId: await store(40 * MB) })
+        expect((await asAlice.query(api.templates.backgroundUsage, {})).usedBytes).toBe(40 * MB)
+        expect((await asAlice.query(api.templates.backgroundUsage, { excludingTemplateId: id })).usedBytes).toBe(0)
+    })
+
     it('counts a replaced background only once, and removes the old file', async () => {
         const { t, asAlice, store, template } = await setup()
         const id = await template(asAlice, 'Galaxy')

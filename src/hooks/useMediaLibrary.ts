@@ -16,6 +16,9 @@ import {
     type LocalMediaItem,
 } from './useIndexedDB'
 
+/** Largest file a media library item may send to the server. */
+export const CLOUD_SYNC_MAX_BYTES = 50 * 1024 * 1024
+
 export interface MediaLibraryItem {
     /** Local IndexedDB row id for device-local items; Convex `_id` for pure-remote items. */
     id: string
@@ -130,6 +133,11 @@ export function useMediaLibrary(): UseMediaLibraryReturn {
 
         const local = await getLocalMediaItems().then((all) => all.find((l) => l.id === item.id))
         if (!local) throw new Error('Local media item not found')
+        // Adding a file to the library is local and takes any size; only
+        // sending a copy to the server is bounded.
+        if (local.size > CLOUD_SYNC_MAX_BYTES) {
+            throw new Error(`Files over ${CLOUD_SYNC_MAX_BYTES / (1024 * 1024)} MB stay on this device and can't sync to the cloud`)
+        }
 
         let blob: Blob
         if (local.localFilePath) {

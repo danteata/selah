@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
+import { useQuery } from 'convex/react'
 import {
     X, Save, Upload, Image, Palette, Type, Loader2, Video,
     LayoutTemplate, PanelBottom, AlignLeft, AlignCenter, AlignRight, Sparkles, ExternalLink,
 } from 'lucide-react'
+import { api } from '../../../convex/_generated/api'
 import { useTemplates, TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
 import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
 import { openFileDialog } from '../../utils/fileDialog'
@@ -100,6 +102,12 @@ function FindFreeBackgrounds() {
 export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: CreateTemplateModalProps) {
     const { createTemplate, updateTemplate, generateUploadUrl } = useTemplates()
     const { isOffline } = useConvexConnection()
+    // The server's room for template backgrounds: the only bound on a web
+    // video, since that is the one that uploads.
+    const backgroundUsage = useQuery(
+        api.templates.backgroundUsage,
+        isOpen && !isOffline ? { excludingTemplateId: editingTemplate?._id } : 'skip',
+    )
     const [name, setName] = useState('')
     const [category, setCategory] = useState<string>('general')
     const [appliesTo, setAppliesTo] = useState<SlideType[]>(['any'])
@@ -350,22 +358,30 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     return
                 }
 
-                if (file.size > 50 * 1024 * 1024) {
-                    alert('Video must be less than 50MB')
+                // Offline the video only plays here, so no size applies. Online
+                // it uploads, and a file past the church's room would be
+                // refused at save after a long upload.
+                if (isOffline) {
+                    setBackgroundType('video')
+                    setBackground(URL.createObjectURL(file))
+                    setCustomImageUrl('')
                     return
+                }
+                if (backgroundUsage) {
+                    const room = backgroundUsage.limitBytes - backgroundUsage.usedBytes
+                    if (file.size > room) {
+                        const mb = (bytes: number) => Math.max(0, Math.round(bytes / (1024 * 1024)))
+                        alert(
+                            `This video is ${mb(file.size)} MB, and your church has ${mb(room)} MB of its `
+                            + `${mb(backgroundUsage.limitBytes)} MB for template backgrounds left. `
+                            + 'Choose a smaller video, or use the desktop app, which keeps large videos on the computer.',
+                        )
+                        return
+                    }
                 }
 
                 setIsUploading(true)
                 try {
-                    if (isOffline) {
-                        const blobUrl = URL.createObjectURL(file)
-                        setBackgroundType('video')
-                        setBackground(blobUrl)
-                        setCustomImageUrl('')
-                        setIsUploading(false)
-                        return
-                    }
-
                     const uploadUrl = await generateUploadUrl()
 
                     const response = await fetch(uploadUrl, {
@@ -971,7 +987,10 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                                     {isUploading ? 'Uploading...' : 'Upload Video (MP4, WebM, etc.)'}
                                 </button>
                                 <p className="text-xs text-[var(--text-muted)] text-center">
-                                    Max file size: 50MB. Supported formats: MP4, WebM, MOV
+                                    Supported formats: MP4, WebM, MOV
+                                    {!isDesktop() && backgroundUsage && (
+                                        <> · {Math.round(Math.max(0, backgroundUsage.limitBytes - backgroundUsage.usedBytes) / (1024 * 1024))} MB of template space left</>
+                                    )}
                                 </p>
                             </div>
 
