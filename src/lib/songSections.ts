@@ -317,3 +317,60 @@ export function sectionsForSong(song: {
  *  so results are cached against it — the identifier rebuilds its index over
  *  the whole library and would otherwise reparse every song's lyrics. */
 const derivedSections = new WeakMap<object, SongSection[]>()
+
+/** One slide of a song: the words it shows, and which section they are. */
+export interface SongSlideBlock {
+    /** The words, without any section heading line. */
+    text: string
+    /** "Verse 2", "Chorus". */
+    label: string
+    /** The section in {@link sectionsForSong}, when the block is one of them. */
+    sectionId?: string
+}
+
+/**
+ * A song's slides: one per block of its lyrics, each named for the section it
+ * is. Slides were all "Verse 1, Verse 2…" by position, a chorus included, and
+ * a heading line such as "Chorus" went up on the screen with the words.
+ *
+ * - A heading on a block's first line names it and leaves the text.
+ * - A block that is only a heading ("Chorus" between verses, meaning sing it
+ *   again) becomes that section's slide once more; a heading naming nothing
+ *   is dropped.
+ * - Each block is matched to its section by its words, so the song tracker
+ *   finds the right slide for a section (see useSongTracker).
+ */
+export function songSlideBlocks(song: {
+    sections?: SongSection[]
+    lyrics?: string
+    verses?: string[]
+}): SongSlideBlock[] {
+    const sections = sectionsForSong(song)
+    const raw = song.verses?.length ? song.verses : sections.map((s) => s.lines.join('\n'))
+    const byWords = new Map(sections.map((s) => [fingerprint(s.lines), s]))
+
+    const blocks: SongSlideBlock[] = []
+    raw.forEach((block) => {
+        const lines = block.split('\n').map((l) => l.trim()).filter((l) => l !== '')
+        if (lines.length === 0) return
+        const heading = parseSectionLabel(lines[0])
+        const body = heading ? lines.slice(1) : lines
+
+        if (body.length === 0) {
+            // Only a heading: the section it names, sung again.
+            const named = heading && (
+                sections.find((s) => s.type === heading.type && (heading.number === undefined || s.number === heading.number))
+            )
+            if (named) blocks.push({ text: named.lines.join('\n'), label: named.label ?? named.id, sectionId: named.id })
+            return
+        }
+
+        const section = byWords.get(fingerprint(body))
+        blocks.push({
+            text: body.join('\n'),
+            label: section?.label ?? (heading ? humanLabel(heading.type, heading.number) : `Verse ${blocks.length + 1}`),
+            sectionId: section?.id,
+        })
+    })
+    return blocks
+}

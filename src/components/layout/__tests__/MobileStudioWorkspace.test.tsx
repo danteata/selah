@@ -179,6 +179,17 @@ describe('MobileStudioWorkspace', () => {
         expect(document.querySelector('p.scripture-label')).toBeNull()
     })
 
+    it("names the part of the song that's live and next", () => {
+        const part = (id: string, verseLabel: string, words: string): Slide => ({
+            ...bibleSlide, id, type: 'song', songId: 'grace', name: `Amazing Grace - ${verseLabel}`,
+            verseLabel, contents: [words],
+        })
+        setStore([part('s1', 'Verse 1', 'Amazing grace'), part('s2', 'Chorus', 'My chains are gone')], 's1')
+        render(<MobileStudioWorkspace />)
+        expect(screen.getByText('· Verse 1', { exact: false })).toBeInTheDocument()
+        expect(screen.getByText('Chorus · Amazing Grace')).toBeInTheDocument()
+    })
+
     it('offers the previous / next verse while a Bible slide is live', () => {
         const song: Slide = { ...bibleSlide, id: 's1', type: 'song', name: 'Amazing Grace' }
         setStore([bibleSlide, song], bibleSlide.id)
