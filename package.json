@@ -1,7 +1,7 @@
 {
   "name": "selah",
   "private": true,
-  "version": "0.1.40",
+  "version": "0.1.41",
   "type": "module",
   "trustedDependencies": [
     "@esbuild/darwin-arm64",
