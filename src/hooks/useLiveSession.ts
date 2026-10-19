@@ -10,7 +10,7 @@ import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { canClientPushLiveSlide, selectDiscoveredSession } from './liveSessionUtils'
 import { diffScheduleSlides, removedOnServer, slideKey, type SlideKey } from './liveSlideSync'
-import type { SessionDefaultTemplates, Slide } from '../types'
+import type { Schedule, SessionDefaultTemplates, Slide } from '../types'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
@@ -166,6 +166,7 @@ function syncQueueFromServer(params: {
 const pendingQueue = { ids: [] as string[] }
 
 const EMPTY_SLIDES: Slide[] = []
+const EMPTY_SCHEDULES: Schedule[] = []
 
 // One toast per message in this window: a flaky connection makes every sync
 // fail at once, and a wall of identical toasts would bury the studio.
@@ -257,6 +258,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
     // component on every slide change.
     const liveOutputSlidesId = useAppStore((s) => (sync ? s.liveOutputSlidesId : null))
     const activeSlides = useAppStore((s) => (sync ? s.activeSlides : EMPTY_SLIDES))
+    const schedules = useAppStore((s) => (sync ? s.schedules : EMPTY_SCHEDULES))
     const localDefaultTemplates = useAppStore((s) => (sync ? s.settings.defaultTemplates : undefined))
 
     const activeSession = useQuery(
@@ -275,6 +277,18 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         sessionsByChurch: activeSessionsByChurch || null,
     })
     const resolvedActiveSession = activeSession || discoveredSession
+
+    // No schedule chosen on this device (signed in fresh, or a new browser)
+    // while the church has a session running: open the session's. The desk
+    // read "No Schedule" through a live service, and slides made there were
+    // tagged with no schedule, so the server's copy replaced them on its way
+    // back. A schedule picked on purpose (preparing next week's) is left be.
+    const sessionScheduleToOpen = resolvedActiveSession?.status === 'active' ? resolvedActiveSession.scheduleId : undefined
+    useEffect(() => {
+        if (!sync || activeScheduleId || !sessionScheduleToOpen) return
+        const schedule = schedules.find((s) => s._id === sessionScheduleToOpen)
+        if (schedule) useAppStore.getState().setActiveSchedule(schedule)
+    }, [sync, activeScheduleId, sessionScheduleToOpen, schedules])
 
     const liveSession = useQuery(
         api.liveSessions.getSession,

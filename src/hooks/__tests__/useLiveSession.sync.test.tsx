@@ -66,6 +66,21 @@ describe('useLiveSession background sync', () => {
 
     afterEach(() => vi.useRealTimers())
 
+    it("opens the session's schedule on a device that has none chosen", () => {
+        // Signed in fresh, the desk read "No Schedule" through a live service.
+        const sched1 = { _id: 'sched1', name: 'Sunday Service', authorId: 'u1', editorIds: [], churchId: 'c1', createdAt: '', updatedAt: '' }
+        useAppStore.setState({ activeSchedule: null, schedules: [sched1] })
+        renderHook(() => useLiveSession(undefined, { sync: true }))
+        expect(useAppStore.getState().activeSchedule?._id).toBe('sched1')
+    })
+
+    it('leaves a schedule picked on purpose alone', () => {
+        const next = { _id: 'sched2', name: 'Next Sunday', authorId: 'u1', editorIds: [], churchId: 'c1', createdAt: '', updatedAt: '' }
+        useAppStore.setState({ activeSchedule: next, schedules: [next] })
+        renderHook(() => useLiveSession(undefined, { sync: true }))
+        expect(useAppStore.getState().activeSchedule?._id).toBe('sched2')
+    })
+
     it('pushes an operator edit once, however many copies are mounted', async () => {
         renderHook(() => {
             useLiveSession(undefined, { sync: true })
