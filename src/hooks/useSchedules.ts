@@ -73,16 +73,17 @@ export function useSchedules() {
     }, [convexSchedules, isOffline, setSchedules])
 
     const createSchedule = useCallback(async (name: string) => {
+        const scheduleWithId = (_id: string): Schedule => ({
+            _id,
+            name,
+            authorId: currentUser?._id || '',
+            editorIds: [],
+            churchId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        })
         const createLocally = () => {
-            const localSchedule: Schedule = {
-                _id: newLocalScheduleId(),
-                name,
-                authorId: currentUser?._id || '',
-                editorIds: [],
-                churchId,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            }
+            const localSchedule = scheduleWithId(newLocalScheduleId())
             setActiveSchedule(localSchedule)
             // Without a church there is nowhere on the server for it to go.
             if (churchId) {
@@ -95,7 +96,11 @@ export function useSchedules() {
         if (isOffline || !churchId) return createLocally()
 
         try {
-            return await createScheduleMutation({ name, churchId })
+            const id = await createScheduleMutation({ name, churchId })
+            // A schedule made to use is opened, as it is offline. Online it
+            // stayed "No Schedule" until picked from the list.
+            if (id) setActiveSchedule(scheduleWithId(id))
+            return id
         } catch (err) {
             console.error('Failed to create schedule:', err)
             return createLocally()
