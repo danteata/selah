@@ -683,7 +683,7 @@ export function PreviewContent() {
                     >
                         <div className="text-sm font-medium text-[var(--text-primary)] truncate">{item.songTitle}</div>
                         <div className="text-xs text-[var(--text-muted)]">
-                            {item.verses.length} verses
+                            {item.verses.length} {item.verses.length === 1 ? 'slide' : 'slides'}
                             {liveVerse && (
                                 <span className="ml-1 font-semibold text-red-500">
                                     · {liveVerse.slide.verseLabel || `Verse ${(liveVerse.slide.verseIndex ?? 0) + 1}`} live
