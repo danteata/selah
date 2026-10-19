@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useMutation, useQuery } from 'convex/react'
-import { StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight, Lock, Unlock, MessageSquare, X, LogOut } from 'lucide-react'
+import { StopCircle, Users, Crown, Eye, Shield, Loader2, SwitchCamera, ArrowRight, Lock, Unlock, MessageSquare, X, LogOut, ChevronDown } from 'lucide-react'
 import { api } from '../../../convex/_generated/api'
 import type { Id } from '../../../convex/_generated/dataModel'
 import { useUserRole } from '../../hooks/useUserRole'
@@ -47,6 +47,7 @@ export function LiveSessionControls({ churchId, compact = false }: LiveSessionCo
     const [isStarting, setIsStarting] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [showTransferMenu, setShowTransferMenu] = useState(false)
+    const [showModeMenu, setShowModeMenu] = useState(false)
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
@@ -84,6 +85,7 @@ export function LiveSessionControls({ churchId, compact = false }: LiveSessionCo
     const joinSession = useMutation(api.liveSessions.joinSession)
     const leaveSession = useMutation(api.liveSessions.leaveSession)
     const transferOperator = useMutation(api.liveSessions.transferOperator)
+    const updateCollaborationMode = useMutation(api.liveSessions.updateCollaborationMode)
 
     const handleStartSession = async () => {
         if (!activeSchedule?._id || !churchId || isOffline) return
@@ -156,6 +158,18 @@ export function LiveSessionControls({ churchId, compact = false }: LiveSessionCo
         }
     }, [effectiveSession?._id, isOffline, transferOperator])
 
+    // The mode was fixed when the session started (from Settings), with no
+    // way to let the team drive, or take it back, mid-service.
+    const handleModeChange = useCallback(async (mode: CollaborationMode) => {
+        setShowModeMenu(false)
+        if (!effectiveSession?._id || isOffline || mode === effectiveSession.collaborationMode) return
+        try {
+            await updateCollaborationMode({ sessionId: effectiveSession._id as Id<"liveSessions">, collaborationMode: mode })
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to change the session mode')
+        }
+    }, [effectiveSession?._id, effectiveSession?.collaborationMode, isOffline, updateCollaborationMode])
+
     const isOperator = effectiveSession?.operatorId === currentUser?._id
     const isActive = effectiveSession?.status === 'active'
     const isInSession = sessionUsers?.some((u: SessionUser) => u.userId === currentUser?._id)
@@ -182,6 +196,7 @@ export function LiveSessionControls({ churchId, compact = false }: LiveSessionCo
                 onLeave={handleLeave}
                 onEnd={handleEndSession}
                 onTransfer={handleTransfer}
+                onModeChange={isOperator ? handleModeChange : undefined}
             />
         )
     }
@@ -211,15 +226,61 @@ export function LiveSessionControls({ churchId, compact = false }: LiveSessionCo
                             {sessionUsers.length}
                         </div>
                     )}
-                    {effectiveSession.collaborationMode && (
-                        <span
-                            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600/70 dark:text-emerald-400/70"
-                            title={MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.description}
-                        >
-                            {(() => { const ModeIcon = MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.icon; return ModeIcon ? <ModeIcon className="w-2.5 h-2.5" /> : null })()}
-                            {MODE_INFO[effectiveSession.collaborationMode as CollaborationMode]?.label}
-                        </span>
-                    )}
+                    {effectiveSession.collaborationMode && (() => {
+                        const current = effectiveSession.collaborationMode as CollaborationMode
+                        const ModeIcon = MODE_INFO[current]?.icon
+                        const chip = (
+                            <>
+                                {ModeIcon ? <ModeIcon className="w-2.5 h-2.5" /> : null}
+                                {MODE_INFO[current]?.label}
+                            </>
+                        )
+                        const chipClass = 'flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-medium bg-emerald-500/10 text-emerald-600/70 dark:text-emerald-400/70'
+                        if (!isOperator) {
+                            return <span className={chipClass} title={MODE_INFO[current]?.description}>{chip}</span>
+                        }
+                        return (
+                            <span className="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowModeMenu((v) => !v)}
+                                    aria-haspopup="menu"
+                                    aria-expanded={showModeMenu}
+                                    title={`${MODE_INFO[current]?.description} — change`}
+                                    className={`${chipClass} hover:bg-emerald-500/20`}
+                                >
+                                    {chip}
+                                    <ChevronDown className="w-2.5 h-2.5" />
+                                </button>
+                                {showModeMenu && (
+                                    <div className="fixed inset-0 z-40" onClick={() => setShowModeMenu(false)} aria-hidden />
+                                )}
+                                {showModeMenu && (
+                                    <div role="menu" className="absolute left-0 top-full mt-1 z-50 w-60 p-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-xl">
+                                        {(Object.keys(MODE_INFO) as CollaborationMode[]).map((mode) => {
+                                            const Icon = MODE_INFO[mode].icon
+                                            return (
+                                                <button
+                                                    key={mode}
+                                                    type="button"
+                                                    role="menuitemradio"
+                                                    aria-checked={mode === current}
+                                                    onClick={() => void handleModeChange(mode)}
+                                                    className={`w-full flex items-start gap-2 px-2 py-1.5 rounded-md text-left hover:bg-[var(--bg-tertiary)] ${mode === current ? 'text-[var(--accent-teal)]' : 'text-[var(--text-primary)]'}`}
+                                                >
+                                                    <Icon className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                                                    <span>
+                                                        <span className="block text-xs font-semibold">{MODE_INFO[mode].label}</span>
+                                                        <span className="block text-[11px] text-[var(--text-muted)]">{MODE_INFO[mode].description}</span>
+                                                    </span>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </span>
+                        )
+                    })()}
                 </div>
 
                 {isOperator ? (
@@ -367,6 +428,8 @@ interface CompactSessionProps {
     onLeave: () => void
     onEnd: () => void
     onTransfer: (userId: string) => void
+    /** The operator's: change who may drive the screen. */
+    onModeChange?: (mode: CollaborationMode) => void
 }
 
 /** The session on a phone: a chip in the live strip, and a sheet with the rest. */
@@ -447,6 +510,24 @@ function CompactSession(props: CompactSessionProps) {
                                             <modeInfo.icon className="w-3.5 h-3.5 flex-shrink-0" />
                                             <span><span className="font-semibold">{modeInfo.label}</span> · {modeInfo.description}</span>
                                         </p>
+                                    )}
+                                    {props.onModeChange && mode && (
+                                        <div className="flex gap-1 mt-2 p-1 rounded-xl bg-[var(--bg-tertiary)]" role="radiogroup" aria-label="Who can change slides">
+                                            {(Object.keys(MODE_INFO) as CollaborationMode[]).map((m) => (
+                                                <button
+                                                    key={m}
+                                                    type="button"
+                                                    role="radio"
+                                                    aria-checked={m === mode}
+                                                    onClick={() => props.onModeChange?.(m)}
+                                                    className={`flex-1 h-9 px-3 rounded-lg text-xs font-semibold transition-colors ${m === mode
+                                                        ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm'
+                                                        : 'text-[var(--text-secondary)]'}`}
+                                                >
+                                                    {MODE_INFO[m].label}
+                                                </button>
+                                            ))}
+                                        </div>
                                     )}
                                 </div>
                                 <button onClick={close} aria-label="Close" className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-full text-[var(--text-muted)] active:bg-[var(--bg-tertiary)]">

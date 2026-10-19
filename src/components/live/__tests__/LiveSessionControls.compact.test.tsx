@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { getFunctionName } from 'convex/server'
 
 const h = vi.hoisted(() => ({
@@ -69,6 +69,24 @@ describe('LiveSessionControls, compact (the phone)', () => {
         fireEvent.click(screen.getByRole('button', { name: /^Live session/ }))
         fireEvent.click(screen.getByRole('button', { name: /end session/i }))
         expect(h.mutations['liveSessions:endSession']).toHaveBeenCalledWith({ sessionId: 'sess1' })
+    })
+
+    it('lets the operator change who can drive the screen, mid-session', () => {
+        // The mode was fixed by Settings when the session started.
+        inSession('u1')
+        render(<LiveSessionControls churchId="c1" compact />)
+        fireEvent.click(screen.getByRole('button', { name: /^Live session/ }))
+        const modes = screen.getByRole('radiogroup', { name: 'Who can change slides' })
+        expect(screen.getByRole('radio', { name: 'Review' })).toHaveAttribute('aria-checked', 'true')
+        fireEvent.click(within(modes).getByRole('radio', { name: 'Open' }))
+        expect(h.mutations['liveSessions:updateCollaborationMode']).toHaveBeenCalledWith({ sessionId: 'sess1', collaborationMode: 'open' })
+    })
+
+    it("doesn't offer a contributor the mode switch", () => {
+        inSession('u9', [{ userId: 'u1', user: { fullname: 'Ama Mensah' }, sessionRole: 'contributor' }])
+        render(<LiveSessionControls churchId="c1" compact />)
+        fireEvent.click(screen.getByRole('button', { name: /you are Contributor/ }))
+        expect(screen.queryByRole('radiogroup', { name: 'Who can change slides' })).toBeNull()
     })
 
     it('lets a contributor leave', () => {
