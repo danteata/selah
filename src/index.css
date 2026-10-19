@@ -750,6 +750,10 @@ h6 {
        the right edge and the search, session and account controls were cut. */
     grid-template-columns: minmax(0, 1fr);
     height: 100vh;
+    /* The screen as shown. On a phone 100vh is the height with the address bar
+       hidden, so with it showing the studio ran a bar's height off the bottom
+       and Next sat under the fixed bottom nav. */
+    height: 100dvh;
     width: 100vw;
     overflow: hidden;
     position: relative;
@@ -1091,6 +1095,16 @@ h6 {
     .studio-workspace-split {
         flex-direction: column;
     }
+}
+
+/* A row that scrolls sideways by swipe, with no bar: chip rows. Used before
+   it was defined, so those rows showed a bar. */
+.no-scrollbar {
+    scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
 }
 
 /* Custom Scrollbar for Studio Mode */

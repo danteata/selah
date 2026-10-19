@@ -8,11 +8,13 @@
  *   3. What the session's sermon listener just heard (on the desk's computer),
  *      each verse a tap from the screen (HeardVersesStrip).
  *   4. Up next: the next few slides, each a tap away from going live, and
- *      the whole queue in a sheet (MobileQueueSheet).
+ *      the whole queue in a sheet (MobileQueueSheet). A live song's own
+ *      sections come first (mobileLiveNav).
  *   5. For the operator, contributors' suggestions to accept or dismiss.
  *   6. In thumb reach, the one action this person's role allows: Next (and
  *      Prev) for whoever controls the screen, with the previous / next verse
- *      above them while a Bible slide is live (MobileVerseStepper), "Suggest
+ *      above them while a Bible slide is live (MobileVerseStepper) or the
+ *      song's sections while a song is (MobileSongParts), "Suggest
  *      slides" for a contributor in review mode, nothing but a note for
  *      someone watching.
  *
@@ -31,6 +33,8 @@ import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { MobileQueueSheet } from './MobileQueueSheet'
 import { HeardVersesStrip } from './HeardVersesStrip'
 import { MobileVerseStepper } from './MobileVerseStepper'
+import { MobileSongParts } from './MobileSongParts'
+import { liveNavigation } from './mobileLiveNav'
 import { queueSlidesFor } from '../preview/groupQueueItems'
 import { slideText, slideTitle, songSectionOf, songTitleOf } from '../preview/slideLabels'
 import type { Slide } from '../../types'
@@ -84,11 +88,13 @@ export function MobileStudioWorkspace() {
     // The deck being projected: the operator's order when there is one, else
     // everything active, so there's always something to step through.
     const deck = liveOutputSlides.length > 0 ? liveOutputSlides : activeSlides
-    const liveIndex = deck.findIndex((slide) => slide.id === liveSlideId)
-    const liveSlide = liveIndex >= 0 ? deck[liveIndex] : activeSlides.find((s) => s.id === liveSlideId) ?? null
-    const prevSlide = liveIndex > 0 ? deck[liveIndex - 1] : null
-    // Nothing live yet: "next" is the start of the deck.
-    const upNext = deck.slice(liveIndex + 1, liveIndex + 1 + UP_NEXT)
+    const liveSlide = activeSlides.find((s) => s.id === liveSlideId) ?? null
+    // A live song steps through its own sections first, then the deck.
+    const { songParts, prevSlide, following, place } = useMemo(
+        () => liveNavigation(deck, activeSlides, liveSlideId),
+        [deck, activeSlides, liveSlideId],
+    )
+    const upNext = following.slice(0, UP_NEXT)
     const nextSlide = upNext[0] ?? null
 
     const queuedCount = useMemo(
@@ -118,7 +124,7 @@ export function MobileStudioWorkspace() {
         <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
             {/* What's live, by name, and the session. */}
             <div className="flex items-center gap-3 pl-4 pr-3 h-14 border-b border-[var(--border-subtle)] flex-shrink-0">
-                <LiveCaption slide={liveSlide} deck={deck} index={liveIndex} idleText={scheduleName || 'Ready when you are'} />
+                <LiveCaption slide={liveSlide} place={place} idleText={scheduleName || 'Ready when you are'} />
                 {churchId && <LiveSessionControls churchId={churchId} compact />}
             </div>
 
@@ -243,6 +249,9 @@ export function MobileStudioWorkspace() {
             {/* The action this person's role allows, in thumb reach. */}
             {deck.length > 0 && (
                 <div className="flex-shrink-0 px-4 pt-3 pb-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+                    {canControlLive && songParts.length > 1 && (
+                        <MobileSongParts parts={songParts} liveSlideId={liveSlideId} onGoLive={goLive} />
+                    )}
                     {canControlLive && liveSlide?.type === 'bible' && (
                         <MobileVerseStepper slide={liveSlide} onSlideChanged={(slide) => void syncSlideContent(slide)} />
                     )}
@@ -290,20 +299,9 @@ export function MobileStudioWorkspace() {
 }
 
 /** "● Live" over the live slide's name and place: "Amazing Grace · Chorus · 2 of 3". */
-function LiveCaption({ slide, deck, index, idleText }: { slide: Slide | null; deck: Slide[]; index: number; idleText: string }) {
-    let place = ''
+function LiveCaption({ slide, place, idleText }: { slide: Slide | null; place: string; idleText: string }) {
     const section = slide ? songSectionOf(slide) : null
-    if (slide && index >= 0) {
-        if (slide.songId) {
-            let start = index
-            while (start > 0 && deck[start - 1].songId === slide.songId) start--
-            let end = index
-            while (end < deck.length - 1 && deck[end + 1].songId === slide.songId) end++
-            if (end > start) place = `${index - start + 1} of ${end - start + 1}`
-        } else {
-            place = `${index + 1} of ${deck.length}`
-        }
-    }
+    if (!slide) place = ''
     return (
         <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">

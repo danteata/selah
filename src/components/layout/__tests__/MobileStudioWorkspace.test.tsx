@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { MobileStudioWorkspace } from '../MobileStudioWorkspace'
 import type { Slide } from '../../../types'
 
@@ -188,6 +188,27 @@ describe('MobileStudioWorkspace', () => {
         render(<MobileStudioWorkspace />)
         expect(screen.getByText('· Verse 1', { exact: false })).toBeInTheDocument()
         expect(screen.getByText('Chorus · Amazing Grace')).toBeInTheDocument()
+    })
+
+    it("steps through a live song that isn't in the deck, and offers its sections", () => {
+        const part = (id: string, verseLabel: string, words: string): Slide => ({
+            ...bibleSlide, id, type: 'song', songId: 'way', name: `Made a Way - ${verseLabel}`,
+            verseLabel, contents: [words],
+        })
+        const song = [part('w1', 'Verse 1', 'You made a way'), part('w2', 'Chorus 1', 'Made a way'), part('w3', 'Verse 2', 'When I was')]
+        setStore([bibleSlide, ...song], 'w2')
+        // The deck the phone has is the operator's, without the song.
+        mocks.store.current.liveOutputSlidesId = [bibleSlide.id]
+        render(<MobileStudioWorkspace />)
+
+        expect(screen.getByText('2 of 3', { exact: false })).toBeInTheDocument()
+        expect(screen.getByText('Verse 2 · Made a Way')).toBeInTheDocument()
+        fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+        expect(mocks.session.setLiveSlide).toHaveBeenCalledWith('w3')
+
+        const sections = screen.getByRole('group', { name: 'Song sections' })
+        fireEvent.click(within(sections).getByText('Verse 1'))
+        expect(mocks.session.setLiveSlide).toHaveBeenCalledWith('w1')
     })
 
     it('offers the previous / next verse while a Bible slide is live', () => {
