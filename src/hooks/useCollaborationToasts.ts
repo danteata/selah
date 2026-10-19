@@ -47,17 +47,10 @@ export function useCollaborationToasts(churchId?: string, liveSessionId?: Id<"li
 
         const selfId = currentUser?._id
 
-        // Someone changed the live slide
-        if (
-            sharedSession.liveSlideId !== prev.liveSlideId &&
-            sharedSession.liveSlideId &&
-            sharedSession.operatorId !== selfId
-        ) {
-            toast.info('Live slide updated', {
-                description: 'The current slide changed in the live session.',
-                duration: 3000,
-            })
-        }
+        // No toast when the live slide changes. Everyone but the operator got
+        // "Live slide updated" at every change, their own included: a
+        // contributor stepping through a song from their phone got one per
+        // Next, over the live view that already showed it.
 
         // Queue changed (handles both new `queue` and legacy `queuedSlideIds`)
         const currentQueue = sharedSession.queue || (sharedSession as SharedSession).queuedSlideIds || []
