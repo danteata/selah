@@ -21,6 +21,11 @@ export default function LoginPage() {
     const [showPassword, setShowPassword] = useState(false)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState('')
+    // A sign-in Clerk wants confirmed with a code (a device it hasn't seen
+    // before). The page used to log "needs additional steps" and stay put,
+    // with no code field and no message, so a new phone couldn't sign in.
+    const [codeSentTo, setCodeSentTo] = useState<string | null>(null)
+    const [code, setCode] = useState('')
 
     // Convex mutation to create user
     const upsertUser = useMutation(api.users.upsertUser)
@@ -32,6 +37,67 @@ export default function LoginPage() {
     useEffect(() => {
         trackPage('/login')
     }, [trackPage])
+
+    const finishSignIn = async (sessionId: string) => {
+        await setActive!({ session: sessionId })
+        trackEvent(AnalyticsEventType.USER_SIGNED_IN, { method: 'email' })
+        // Create/refresh the Convex user record, keyed by the Clerk
+        // USER id (`user_...`) — that's what the backend matches via
+        // `getUserIdentity().subject`. `createdSessionId` is a
+        // session id and would create an orphan row. `clerk.user`
+        // is populated once `setActive` resolves.
+        const clerkUserId = clerk.user?.id
+        if (clerkUserId) {
+            await upsertUser({
+                clerkId: clerkUserId,
+                fullname: email.split('@')[0], // Use email username as fallback
+                email,
+            })
+        }
+        // Redirect to the original destination (invite link) or dashboard
+        navigate(from || '/')
+    }
+
+    /** Email the code Clerk asks for, and show the field to type it in. */
+    const sendCode = async () => {
+        const factor = signIn?.supportedSecondFactors?.find((f) => f.strategy === 'email_code')
+        if (!signIn || !factor || !('emailAddressId' in factor)) {
+            setError('This account needs another sign-in step. Try Continue with Google, or reset your password.')
+            return
+        }
+        await signIn.prepareSecondFactor({ strategy: 'email_code', emailAddressId: factor.emailAddressId })
+        setCodeSentTo(('safeIdentifier' in factor && factor.safeIdentifier) || email)
+    }
+
+    const handleCode = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!signIn) return
+        setIsLoading(true)
+        setError('')
+        try {
+            const result = await signIn.attemptSecondFactor({ strategy: 'email_code', code })
+            if (result.status === 'complete' && result.createdSessionId) {
+                await finishSignIn(result.createdSessionId)
+            } else {
+                setError('That code didn\'t finish signing you in. Request a new one and try again.')
+            }
+        } catch (err: unknown) {
+            const errorMessage = friendlyAuthError(err, 'Invalid code.')
+            setError(errorMessage)
+            trackEvent(AnalyticsEventType.AUTH_FAILED, { method: 'email', error_category: sanitizeAuthError(errorMessage) })
+        } finally {
+            setIsLoading(false)
+        }
+    }
+
+    const resendCode = async () => {
+        setError('')
+        try {
+            await sendCode()
+        } catch (err: unknown) {
+            setError(friendlyAuthError(err, 'Could not send a new code.'))
+        }
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -48,25 +114,12 @@ export default function LoginPage() {
             })
 
             if (result.status === 'complete' && result.createdSessionId) {
-                await setActive({ session: result.createdSessionId })
-                trackEvent(AnalyticsEventType.USER_SIGNED_IN, { method: 'email' })
-                // Create/refresh the Convex user record, keyed by the Clerk
-                // USER id (`user_...`) — that's what the backend matches via
-                // `getUserIdentity().subject`. `createdSessionId` is a
-                // session id and would create an orphan row. `clerk.user`
-                // is populated once `setActive` resolves.
-                const clerkUserId = clerk.user?.id
-                if (clerkUserId) {
-                    await upsertUser({
-                        clerkId: clerkUserId,
-                        fullname: email.split('@')[0], // Use email username as fallback
-                        email,
-                    })
-                }
-                // Redirect to the original destination (invite link) or dashboard
-                navigate(from || '/')
+                await finishSignIn(result.createdSessionId)
+            } else if (result.status === 'needs_second_factor') {
+                await sendCode()
             } else {
                 console.log('Sign in needs additional steps:', result)
+                setError('This account needs another sign-in step. Try Continue with Google, or reset your password.')
             }
         } catch (err: unknown) {
             console.error('Sign in error:', err)
@@ -175,7 +228,50 @@ export default function LoginPage() {
                         </div>
                     )}
 
-                    {/* Email/Password Form */}
+                    {codeSentTo ? (
+                        <form onSubmit={handleCode} className="space-y-4">
+                            <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+                                To confirm it's you on this device, we sent a 6-digit code to <strong>{codeSentTo}</strong>.
+                            </p>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                value={code}
+                                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                placeholder="Enter 6-digit code"
+                                aria-label="Sign-in code"
+                                autoFocus
+                                required
+                                className="w-full px-4 py-3 text-center text-2xl tracking-widest border border-gray-300 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 font-mono focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            />
+                            <button
+                                type="submit"
+                                disabled={isLoading || code.length < 6}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-xl font-medium hover:from-primary-700 hover:to-primary-800 focus:ring-4 focus:ring-primary-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                            >
+                                {isLoading ? (
+                                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <>
+                                        Sign In
+                                        <ArrowRight className="w-4 h-4" />
+                                    </>
+                                )}
+                            </button>
+                            <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+                                Didn't get it?{' '}
+                                <button type="button" onClick={() => void resendCode()} className="text-primary-600 hover:text-primary-700">
+                                    Send a new code
+                                </button>
+                                {' · '}
+                                <button type="button" onClick={() => { setCodeSentTo(null); setCode(''); setError('') }} className="text-primary-600 hover:text-primary-700">
+                                    Use another account
+                                </button>
+                            </p>
+                        </form>
+                    ) : (
+                    /* Email/Password Form */
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -251,6 +347,7 @@ export default function LoginPage() {
                             )}
                         </button>
                     </form>
+                    )}
                 </div>
 
                 {/* Sign Up Link */}

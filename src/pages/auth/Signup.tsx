@@ -457,7 +457,16 @@ export default function SignupPage() {
 
                             <p className="text-center text-sm text-gray-500 dark:text-gray-400">
                                 Didn't receive the code?{' '}
-                                <button type="button" className="text-primary-600 hover:text-primary-700">
+                                {/* It had no handler: tapping it did nothing. */}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setError('')
+                                        signUp?.prepareEmailAddressVerification({ strategy: 'email_code' })
+                                            .catch((err: unknown) => setError(friendlyAuthError(err, 'Could not send a new code.')))
+                                    }}
+                                    className="text-primary-600 hover:text-primary-700"
+                                >
                                     Resend
                                 </button>
                             </p>
