@@ -3,6 +3,7 @@ import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2, Ali
 import { motion } from 'framer-motion'
 import { withScripture, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
 import { useSendToAlternate } from '../../hooks/useSendToAlternate'
+import { isMobileViewport } from '../../hooks/useIsMobile'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
@@ -279,6 +280,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const { createBibleSlide } = useSlideCreation()
     const alternate = useSendToAlternate()
     const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
+    const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     // NOTE: there are two setLiveSlide functions in play here.
     //   - useAppStore.setLiveSlide updates ONLY the local store (offline
     //     preview / fallback when no session is connected).
@@ -473,8 +475,13 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
         // live slide. The handler in AppShell updates the live preview
         // window in real time.
         window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: slide }))
+        // Only the operator's device shares its deck; anyone else's verse
+        // joins it through the session (see useGoLive).
+        if (isConnected && !isOperator) void addToSharedQueue([slide.id])
+        // On a phone the panel covers the live view: go back to it.
+        if (isMobileViewport()) setActiveNavSection(null)
         return true
-    }, [appendActiveSlide, setLiveSlide, isConnected, isOperator, isOpen])
+    }, [appendActiveSlide, setLiveSlide, isConnected, isOperator, isOpen, addToSharedQueue, setActiveNavSection])
 
     // Third peer of Add and Live: put this verse on the alternate output.
     const sendVerseToAlternate = useCallback(async (bookIndex: number, chapter: number, verse: number) => {

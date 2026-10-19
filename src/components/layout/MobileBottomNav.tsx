@@ -2,9 +2,11 @@
  * MobileBottomNav — bottom tab bar for narrow viewports.
  *
  * Renders only below the `md` breakpoint (768px) so it disappears on
- * tablet/desktop where the full NavRail takes over. Mirrors the rail's
- * most-used sections during a service (Bible, Music) plus a quick-add
- * button. Templates are setup work, so they live under More. So does the
+ * tablet/desktop where the full NavRail takes over. First comes Live, the
+ * remote-control view of what's on the screen: it was only what showed when
+ * no panel was open, with no tab, so after putting a verse up from Bible
+ * there was no evident way back to it. Then the rail's most-used sections
+ * during a service (Bible, Music) and a quick-add button. Templates are setup work, so they live under More. So does the
  * sermon listener: a phone browser stops listening at every pause (Android
  * beeps each time) and when the screen locks, so it belongs on the desk's
  * computer — but while it's running here it stays on the bar, recording
@@ -17,7 +19,7 @@ import { useCallback, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     BookOpen, BookA, Music, Layout, Mic, Settings, Zap, X, Image,
-    Clock, AlertCircle, Archive, Calendar
+    Clock, AlertCircle, Archive, Calendar, MonitorPlay
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
@@ -58,6 +60,7 @@ export function MobileBottomNav() {
     const activeNavSection = useAppStore((s) => s.activeNavSection)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
+    const somethingLive = useAppStore((s) => !!s.liveSlideId)
     const sermonListener = useSermonListenerContext()
     const [moreOpen, setMoreOpen] = useState(false)
     // A listener running on this phone keeps its tab, so it's never out of sight.
@@ -74,6 +77,11 @@ export function MobileBottomNav() {
         setMoreOpen(false)
     }, [activeNavSection, setActiveNavSection])
 
+    const showLive = useCallback(() => {
+        setActiveNavSection(null)
+        setMoreOpen(false)
+    }, [setActiveNavSection])
+
     const handleQuickAdd = useCallback(() => {
         setCommandBarOpen(true)
     }, [setCommandBarOpen])
@@ -85,6 +93,23 @@ export function MobileBottomNav() {
                 aria-label="Mobile navigation"
             >
                 <div className="flex items-stretch justify-around h-14">
+                    <button
+                        type="button"
+                        onClick={showLive}
+                        aria-pressed={activeNavSection === null}
+                        aria-label="Live"
+                        className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors ${
+                            activeNavSection === null ? 'text-[var(--accent-teal)]' : 'text-[var(--text-muted)]'
+                        }`}
+                    >
+                        <span className="relative">
+                            <MonitorPlay className="w-5 h-5" />
+                            {somethingLive && (
+                                <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-red-500 ring-2 ring-[var(--bg-elevated)]" />
+                            )}
+                        </span>
+                        <span>Live</span>
+                    </button>
                     {primaryItems.map((section) => {
                         const Icon = ICON[section]
                         const isActive = activeNavSection === section
@@ -121,9 +146,11 @@ export function MobileBottomNav() {
                         type="button"
                         onClick={handleQuickAdd}
                         aria-label="Quick add"
-                        className="flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-[var(--accent-teal)]"
+                        className="flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-[var(--text-muted)]"
                     >
-                        <Zap className="w-5 h-5" />
+                        {/* An action, not a place: tinted icon, plain label, so
+                            it never reads as the selected tab. */}
+                        <Zap className="w-5 h-5 text-[var(--accent-teal)]" />
                         <span>Add</span>
                     </button>
                     <button

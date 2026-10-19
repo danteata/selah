@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, act } from '@testing-library/react'
 import { MobileStudioWorkspace } from '../MobileStudioWorkspace'
 import type { Slide } from '../../../types'
 
@@ -228,6 +228,24 @@ describe('MobileStudioWorkspace', () => {
         setStore([bibleSlide], bibleSlide.id)
         render(<MobileStudioWorkspace />)
         expect(screen.queryByTestId('verse-stepper')).toBeNull()
+    })
+
+    it("waits for the session instead of saying there's none", () => {
+        vi.useFakeTimers()
+        try {
+            setSession({ isResolving: true } as SessionOverrides)
+            setStore([], '')
+            const { rerender } = render(<MobileStudioWorkspace />)
+            expect(screen.getByRole('status', { name: 'Joining the service' })).toBeInTheDocument()
+            expect(screen.queryByText('Nothing queued yet')).toBeNull()
+
+            // A session that never arrives doesn't hold the page forever.
+            act(() => { vi.advanceTimersByTime(8000) })
+            rerender(<MobileStudioWorkspace />)
+            expect(screen.getByText('Nothing queued yet')).toBeInTheDocument()
+        } finally {
+            vi.useRealTimers()
+        }
     })
 
     it('offers search from the empty state', () => {

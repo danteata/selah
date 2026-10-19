@@ -198,6 +198,12 @@ interface UseLiveSessionReturn {
     isStrict: boolean
     isModerated: boolean
     isConnected: boolean
+    /**
+     * Still finding out whether there's a session, or still loading the slide
+     * it has up. Until then a page would show "no session, nothing queued"
+     * and then jump to the session a moment later.
+     */
+    isResolving: boolean
     isStarting: boolean
     startSession: (scheduleId: string, churchId: string, collaborationMode?: CollaborationMode) => Promise<Id<"liveSessions"> | null>
     joinSession: (sessionId: Id<"liveSessions">, role?: 'contributor' | 'viewer') => Promise<boolean>
@@ -230,7 +236,7 @@ export interface UseLiveSessionOptions {
 export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptions = {}): UseLiveSessionReturn {
     const sync = options.sync === true
     const { isConvexConnected, isOffline } = useConvexConnection()
-    const { currentUser } = useUserRole()
+    const { currentUser, isLoading: userLoading } = useUserRole()
     const { trackEvent } = useAnalytics()
 
     const [sessionId, setSessionId] = useState<Id<"liveSessions"> | null>(null)
@@ -275,6 +281,15 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         (sessionId || resolvedActiveSession?._id)
             ? { sessionId: (sessionId || resolvedActiveSession?._id) as Id<"liveSessions"> }
             : 'skip'
+    )
+
+    const sessionLiveSlideId = liveSession?.liveSlideId ?? resolvedActiveSession?.liveSlideId
+    const liveSlideLoaded = useAppStore((s) => !sessionLiveSlideId || s.activeSlides.some((slide) => slide.id === sessionLiveSlideId))
+    const isResolving = !isOffline && (
+        userLoading
+        || (!!currentUser?.churchId && activeSessionsByChurch === undefined)
+        || (!!effectiveScheduleId && activeSession === undefined)
+        || (!!resolvedActiveSession && (liveSession === undefined || !liveSlideLoaded))
     )
 
     const startSessionMutation = useMutation(api.liveSessions.startSession)
@@ -983,6 +998,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
         isStrict: collaborationMode === 'strict',
         isModerated: collaborationMode === 'moderated',
         isConnected: !!resolvedSessionId && isConvexConnected && !isOffline,
+        isResolving,
         isStarting,
         startSession,
         joinSession,

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { useAppStore } from '../../../store/appStore'
 
 /**
  * The phone's tab bar holds what's reached for mid-service. The sermon
@@ -18,6 +19,17 @@ const { MobileBottomNav } = await import('../MobileBottomNav')
 describe('MobileBottomNav', () => {
     beforeEach(() => {
         h.isListening = false
+        useAppStore.setState({ activeNavSection: null, liveSlideId: null })
+    })
+
+    it('has a Live tab, the view of what is on the screen, to come back to', () => {
+        useAppStore.setState({ activeNavSection: 'bible' })
+        render(<MobileBottomNav />)
+        const live = screen.getByRole('button', { name: 'Live' })
+        expect(live).toHaveAttribute('aria-pressed', 'false')
+        fireEvent.click(live)
+        expect(useAppStore.getState().activeNavSection).toBeNull()
+        expect(live).toHaveAttribute('aria-pressed', 'true')
     })
 
     it('keeps Bible and Music on the bar, and the sermon listener and templates off it', () => {

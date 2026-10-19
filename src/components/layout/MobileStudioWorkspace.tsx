@@ -22,7 +22,7 @@
  * chrome (program output, multi-monitor, NDI) stays in StudioWorkspace.
  */
 
-import { useMemo, useCallback, useState } from 'react'
+import { useMemo, useCallback, useEffect, useState } from 'react'
 import { BookOpen, Check, ChevronLeft, ChevronRight, Lightbulb, ListOrdered, Music, Play, Search, X } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useLiveSession } from '../../hooks/useLiveSession'
@@ -41,6 +41,9 @@ import type { Slide } from '../../types'
 
 /** Rows shown under "Up next" before the queue sheet takes over. */
 const UP_NEXT = 3
+
+/** How long to wait for the session before showing what this device has. */
+const RESOLVE_TIMEOUT_MS = 8000
 
 export function MobileStudioWorkspace() {
     const activeSlides = useAppStore((s) => s.activeSlides)
@@ -65,6 +68,7 @@ export function MobileStudioWorkspace() {
         removeFromQueue,
         syncSlideContent,
         sessionScheduleId,
+        isResolving,
     } = useLiveSession()
     const { currentUser } = useUserRole()
     const churchId = currentUser?.churchId || ''
@@ -97,6 +101,17 @@ export function MobileStudioWorkspace() {
     const upNext = following.slice(0, UP_NEXT)
     const nextSlide = upNext[0] ?? null
 
+    // Opening the page, the session and its slides take a moment to arrive.
+    // Showing "Idle · Start session · Nothing queued" meanwhile told people
+    // there was no session, then jumped into it. Wait for it (within reason).
+    const [gaveUpWaiting, setGaveUpWaiting] = useState(false)
+    useEffect(() => {
+        if (!isResolving) return
+        const timer = setTimeout(() => setGaveUpWaiting(true), RESOLVE_TIMEOUT_MS)
+        return () => clearTimeout(timer)
+    }, [isResolving])
+    const loading = isResolving && !gaveUpWaiting && !liveSlide
+
     const queuedCount = useMemo(
         () => queueSlidesFor(activeSlides, sessionScheduleId || activeScheduleId).length,
         [activeSlides, sessionScheduleId, activeScheduleId],
@@ -119,6 +134,8 @@ export function MobileStudioWorkspace() {
         // search/add flow.
         window.dispatchEvent(new Event('selah:focus-quick-actions'))
     }, [])
+
+    if (loading) return <LoadingLive />
 
     return (
         <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
@@ -294,6 +311,29 @@ export function MobileStudioWorkspace() {
             )}
 
             <MobileQueueSheet open={queueOpen} onClose={() => setQueueOpen(false)} />
+        </div>
+    )
+}
+
+/** The live view's shape while the session arrives, so nothing jumps. */
+function LoadingLive() {
+    return (
+        <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]" role="status" aria-label="Joining the service">
+            <div className="flex items-center gap-3 pl-4 pr-3 h-14 border-b border-[var(--border-subtle)] flex-shrink-0">
+                <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="h-2.5 w-12 rounded bg-[var(--bg-tertiary)] animate-pulse" />
+                    <div className="h-3.5 w-40 rounded bg-[var(--bg-tertiary)] animate-pulse" />
+                </div>
+            </div>
+            <div className="px-4 pt-4 space-y-5">
+                <div className="w-full aspect-video rounded-xl bg-[var(--bg-secondary)] animate-pulse" />
+                <div className="space-y-1.5">
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="h-[52px] rounded-xl bg-[var(--bg-secondary)]/60 animate-pulse" />
+                    ))}
+                </div>
+                <p className="text-center text-xs text-[var(--text-muted)]">Joining the service…</p>
+            </div>
         </div>
     )
 }
