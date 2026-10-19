@@ -6,12 +6,30 @@
  *
  * Render once near the top of the authenticated app shell. Returns null when
  * there's nothing to say (active Pro with >7 days left, or free tier).
+ *
+ * Only for the church's admins, who are the ones who can upgrade: a helper on
+ * a phone lost a fifth of the screen to "Upgrade to Pro" with no way to act on
+ * it. Closing it holds for the rest of the day, not just until the next load.
  */
 
 import { useState } from 'react'
 import { useEntitlements } from '../../providers/LicenseProvider'
+import { useUserRole } from '../../hooks/useUserRole'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+const DISMISSED_KEY = 'selah.subscriptionBanner.dismissedOn'
+
+function today(): string {
+    return new Date().toISOString().slice(0, 10)
+}
+
+function dismissedToday(): boolean {
+    try {
+        return localStorage.getItem(DISMISSED_KEY) === today()
+    } catch {
+        return false
+    }
+}
 
 function daysUntil(iso: string | null): number | null {
     if (!iso) return null
@@ -30,8 +48,17 @@ export function SubscriptionBanner() {
         manageSubscription,
         startProCheckout,
     } = useEntitlements()
-    const [dismissed, setDismissed] = useState(false)
-    if (dismissed) return null
+    const { isAdmin } = useUserRole()
+    const [dismissed, setDismissedState] = useState(dismissedToday)
+    const setDismissed = (value: boolean) => {
+        setDismissedState(value)
+        try {
+            localStorage.setItem(DISMISSED_KEY, today())
+        } catch {
+            // Storage unavailable: closed for this visit only.
+        }
+    }
+    if (dismissed || !isAdmin) return null
 
     const days = daysUntil(expiresAt)
 
