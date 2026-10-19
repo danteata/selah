@@ -14,6 +14,8 @@ vi.mock('../../sermon-listener/SermonListenerContext', () => ({
     useSermonListenerContext: () => ({ isListening: h.isListening }),
 }))
 
+vi.mock('../../../hooks/useIsMobile', () => ({ useIsMobile: () => true }))
+
 const { MobileBottomNav } = await import('../MobileBottomNav')
 
 describe('MobileBottomNav', () => {

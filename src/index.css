@@ -3,6 +3,17 @@
 /* Enable class-based dark mode */
 @variant dark (&:where(.dark, .dark *));
 
+/* The phone layout: a narrow screen, or a touch screen too short for the
+   desk's (a phone on its side is ~844×390). Width alone sent a turned phone
+   to the desk layout, squeezed into 390px with nothing to scroll. Keep in
+   step with PHONE_QUERY in src/hooks/useIsMobile.ts and the @media blocks
+   below. */
+@custom-variant phone {
+    @media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
+        @slot;
+    }
+}
+
 /* Define theme colors for Tailwind v4 - Warm, reverent palette */
 @theme {
     /* Primary - Deep Teal (spiritual, calming) */
@@ -1063,7 +1074,7 @@ h6 {
     }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
     .studio-shell {
         /* On mobile: top bar (taller for touch) and workspace. The
             MobileBottomNav component floats over the workspace bottom
@@ -1227,7 +1238,7 @@ h6 {
 /* The context panel on a phone: a sheet between the top bar and the bottom
    nav (which stays tappable above it), full width and opaque — translucent,
    the live slide's lyrics showed through the panel. */
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
     .studio-context-panel.studio-context-panel--sheet {
         position: fixed;
         top: 44px;
@@ -1239,6 +1250,71 @@ h6 {
         border: 0;
         background: var(--bg-secondary);
         box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+    }
+}
+
+/* The phone's live view with slides (MobileStudioWorkspace). Portrait: the
+   live slide stays in view under the header while the list below it
+   scrolls. Landscape (a phone on its side, ~844×390): the stacked layout left
+   a sliver to scroll, so the slide takes the left at the largest 16:9 that
+   fits and the header, list and controls take the right. */
+.mobile-live-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-areas: "header" "slide" "list" "controls";
+}
+
+.mobile-live-slide-pane {
+    padding: 12px 16px 0;
+}
+
+.mobile-live-slide {
+    width: 100%;
+}
+
+@media (orientation: landscape) {
+    .mobile-live-grid {
+        grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-areas: "slide header" "slide list" "slide controls";
+    }
+
+    .mobile-live-slide-pane {
+        container-type: size;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        border-right: 1px solid var(--border-subtle);
+    }
+
+    .mobile-live-slide {
+        width: min(100cqw, calc(100cqh * 16 / 9));
+    }
+}
+
+/* A phone on its side: the bottom nav drops its labels to give the live
+   view back some of the screen's 390px. Keep in step with MobileBottomNav. */
+@media (max-height: 500px) and (pointer: coarse) and (orientation: landscape) {
+    .studio-workspace {
+        padding-bottom: 44px;
+    }
+
+    .studio-context-panel.studio-context-panel--sheet {
+        bottom: 44px;
+    }
+
+    .mobile-bottom-nav-row {
+        height: 44px;
+    }
+
+    .mobile-bottom-nav-label {
+        display: none;
+    }
+
+    .phone-panel-title {
+        display: none;
     }
 }
 

@@ -167,7 +167,9 @@ export function ContextPanel() {
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
                 aria-label={meta.title}
             >
-                <div className="flex items-center justify-between pl-4 pr-1.5 h-12 border-b border-[var(--border-subtle)] flex-shrink-0">
+                {/* Dropped on a phone on its side (index.css): the tab bar names
+                    the panel and Live closes it, and the 390px are the list's. */}
+                <div className="phone-panel-title flex items-center justify-between pl-4 pr-1.5 h-12 border-b border-[var(--border-subtle)] flex-shrink-0">
                     <div className="flex items-center gap-2 min-w-0">
                         <SectionIcon className="w-4 h-4 flex-shrink-0 text-[var(--accent-teal)]" />
                         <h3 className="text-[17px] text-[var(--text-primary)] truncate">

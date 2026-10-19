@@ -217,7 +217,7 @@ function QueueSheet({ onClose }: { onClose: () => void }) {
     return (
         <>
             <motion.div
-                className="md:hidden fixed inset-0 bg-black/50 z-40"
+                className="fixed inset-0 bg-black/50 z-40"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -226,7 +226,7 @@ function QueueSheet({ onClose }: { onClose: () => void }) {
             <motion.div
                 role="dialog"
                 aria-label="Slide queue"
-                className="md:hidden fixed bottom-0 left-0 right-0 z-50 max-h-[75vh] flex flex-col bg-[var(--bg-elevated)] border-t border-[var(--border-default)] rounded-t-2xl shadow-2xl"
+                className="fixed bottom-0 left-0 right-0 z-50 max-h-[75vh] flex flex-col bg-[var(--bg-elevated)] border-t border-[var(--border-default)] rounded-t-2xl shadow-2xl"
                 initial={{ y: '100%' }}
                 animate={{ y: 0 }}
                 exit={{ y: '100%' }}

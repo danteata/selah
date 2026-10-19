@@ -138,9 +138,12 @@ export function MobileStudioWorkspace() {
     if (loading) return <LoadingLive />
 
     return (
-        <div className="flex-1 flex flex-col h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
+        // With slides, a grid (index.css .mobile-live-grid): in portrait the
+        // live slide stays in view above the list; on a phone turned on its
+        // side the slide takes the left, the list and controls the right.
+        <div className={`flex-1 h-full min-h-0 overflow-hidden bg-[var(--bg-primary)] ${deck.length === 0 ? 'flex flex-col' : 'mobile-live-grid'}`}>
             {/* What's live, by name, and the session. */}
-            <div className="flex items-center gap-3 pl-4 pr-3 h-14 border-b border-[var(--border-subtle)] flex-shrink-0">
+            <div style={{ gridArea: 'header' }} className="flex items-center gap-3 pl-4 pr-3 h-14 border-b border-[var(--border-subtle)] flex-shrink-0">
                 <LiveCaption slide={liveSlide} place={place} idleText={scheduleName || 'Ready when you are'} />
                 {churchId && <LiveSessionControls churchId={churchId} compact />}
             </div>
@@ -158,28 +161,29 @@ export function MobileStudioWorkspace() {
                     />
                 </div>
             ) : (
-                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-                    {/* The live slide, in the projector's renderer and frame. */}
-                    <div className="px-4 pt-4">
-                        {liveSlide ? (
-                            <SlideView
-                                slide={liveSlide}
-                                settings={outputSettings}
-                                muted
-                                showMissingMedia
-                                minTextPx={12}
-                                className="w-full aspect-video rounded-xl border border-[var(--border-subtle)] shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
-                            />
-                        ) : (
-                            <div className="w-full aspect-video rounded-xl border border-dashed border-[var(--border-default)] flex flex-col items-center justify-center gap-1 text-center px-6">
-                                <span className="text-sm font-medium text-[var(--text-secondary)]">Nothing on the screen</span>
-                                <span className="text-xs text-[var(--text-muted)]">
-                                    {canControlLive ? 'Tap a slide below to put it up.' : 'The operator will put the first slide up.'}
-                                </span>
-                            </div>
-                        )}
-                    </div>
+                <>
+                {/* The live slide, in the projector's renderer and frame. */}
+                <div style={{ gridArea: 'slide' }} className="mobile-live-slide-pane">
+                    {liveSlide ? (
+                        <SlideView
+                            slide={liveSlide}
+                            settings={outputSettings}
+                            muted
+                            showMissingMedia
+                            minTextPx={12}
+                            className="mobile-live-slide aspect-video rounded-xl border border-[var(--border-subtle)] shadow-[0_8px_24px_rgba(0,0,0,0.25)]"
+                        />
+                    ) : (
+                        <div className="mobile-live-slide aspect-video rounded-xl border border-dashed border-[var(--border-default)] flex flex-col items-center justify-center gap-1 text-center px-6">
+                            <span className="text-sm font-medium text-[var(--text-secondary)]">Nothing on the screen</span>
+                            <span className="text-xs text-[var(--text-muted)]">
+                                {canControlLive ? 'Tap a slide below to put it up.' : 'The operator will put the first slide up.'}
+                            </span>
+                        </div>
+                    )}
+                </div>
 
+                <div style={{ gridArea: 'list' }} className="min-h-0 overflow-y-auto overscroll-contain">
                     {/* What the listener at the desk just heard. */}
                     <HeardVersesStrip canControlLive={canControlLive} canSuggest={canSuggest} />
 
@@ -262,11 +266,12 @@ export function MobileStudioWorkspace() {
                     )}
                     <div className="h-4" />
                 </div>
+                </>
             )}
 
             {/* The action this person's role allows, in thumb reach. */}
             {deck.length > 0 && (
-                <div className="flex-shrink-0 px-4 pt-3 pb-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+                <div style={{ gridArea: 'controls' }} className="flex-shrink-0 px-4 pt-3 pb-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]">
                     {canControlLive && songParts.length > 1 && (
                         <MobileSongParts parts={songParts} liveSlideId={liveSlideId} onGoLive={goLive} />
                     )}

@@ -1,8 +1,9 @@
 /**
  * MobileBottomNav — bottom tab bar for narrow viewports.
  *
- * Renders only below the `md` breakpoint (768px) so it disappears on
- * tablet/desktop where the full NavRail takes over. First comes Live, the
+ * Renders only in the phone layout (useIsMobile: a narrow screen, or a phone
+ * on its side) so it disappears on tablet/desktop where the NavRail takes
+ * over. First comes Live, the
  * remote-control view of what's on the screen: it was only what showed when
  * no panel was open, with no tab, so after putting a verse up from Bible
  * there was no evident way back to it. Then the rail's most-used sections
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import type { NavSection } from '../../types/studio'
 
 const PRIMARY_ITEMS: NavSection[] = ['bible', 'music']
@@ -61,6 +63,7 @@ export function MobileBottomNav() {
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const somethingLive = useAppStore((s) => !!s.liveSlideId)
+    const isPhone = useIsMobile()
     const sermonListener = useSermonListenerContext()
     const [moreOpen, setMoreOpen] = useState(false)
     // A listener running on this phone keeps its tab, so it's never out of sight.
@@ -86,13 +89,15 @@ export function MobileBottomNav() {
         setCommandBarOpen(true)
     }, [setCommandBarOpen])
 
+    if (!isPhone) return null
+
     return (
         <>
             <nav
-                className="md:hidden fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)]/95 backdrop-blur-md"
+                className="fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)]/95 backdrop-blur-md"
                 aria-label="Mobile navigation"
             >
-                <div className="flex items-stretch justify-around h-14">
+                <div className="mobile-bottom-nav-row flex items-stretch justify-around h-14">
                     <button
                         type="button"
                         onClick={showLive}
@@ -108,7 +113,7 @@ export function MobileBottomNav() {
                                 <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-red-500 ring-2 ring-[var(--bg-elevated)]" />
                             )}
                         </span>
-                        <span>Live</span>
+                        <span className="mobile-bottom-nav-label">Live</span>
                     </button>
                     {primaryItems.map((section) => {
                         const Icon = ICON[section]
@@ -138,7 +143,7 @@ export function MobileBottomNav() {
                                         </span>
                                     )}
                                 </span>
-                                <span>{LABELS[section]}</span>
+                                <span className="mobile-bottom-nav-label">{LABELS[section]}</span>
                             </button>
                         )
                     })}
@@ -151,7 +156,7 @@ export function MobileBottomNav() {
                         {/* An action, not a place: tinted icon, plain label, so
                             it never reads as the selected tab. */}
                         <Zap className="w-5 h-5 text-[var(--accent-teal)]" />
-                        <span>Add</span>
+                        <span className="mobile-bottom-nav-label">Add</span>
                     </button>
                     <button
                         type="button"
@@ -165,7 +170,7 @@ export function MobileBottomNav() {
                             <span className="w-1 h-1 rounded-full bg-current" />
                             <span className="w-1 h-1 rounded-full bg-current" />
                         </span>
-                        <span>More</span>
+                        <span className="mobile-bottom-nav-label">More</span>
                     </button>
                 </div>
             </nav>
@@ -176,14 +181,14 @@ export function MobileBottomNav() {
                 {moreOpen && (
                     <>
                         <motion.div
-                            className="md:hidden fixed inset-0 bg-black/50 z-40"
+                            className="fixed inset-0 bg-black/50 z-40"
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             onClick={() => setMoreOpen(false)}
                         />
                         <motion.div
-                            className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[var(--bg-elevated)] border-t border-[var(--border-default)] rounded-t-2xl shadow-2xl"
+                            className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--bg-elevated)] border-t border-[var(--border-default)] rounded-t-2xl shadow-2xl"
                             initial={{ y: '100%' }}
                             animate={{ y: 0 }}
                             exit={{ y: '100%' }}

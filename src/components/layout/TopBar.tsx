@@ -100,7 +100,7 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
 
             {/* Schedule selector dropdown — hidden on small screens, surfaced
                 via the more-menu on mobile */}
-            <div className="relative hidden md:block" ref={scheduleMenuRef}>
+            <div className="relative phone:hidden" ref={scheduleMenuRef}>
                 <button
                     onClick={() => setShowScheduleMenu(!showScheduleMenu)}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30 transition-colors text-xs"
@@ -196,7 +196,7 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
                     <span className="text-[var(--text-muted)] flex-1 text-left truncate">
                         Search bible, hymns, songs, actions...
                     </span>
-                    <kbd className="hidden sm:flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-muted)] font-mono">
+                    <kbd className="hidden sm:flex phone:hidden items-center gap-0.5 px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-muted)] font-mono">
                         <Command className="w-2.5 h-2.5" />K
                     </kbd>
                 </button>
@@ -221,7 +221,7 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
                 {/* Workspace Mode Toggle */}
                 <button
                     onClick={() => setWorkspaceMode(workspaceMode === 'studio' ? 'dashboard' : 'studio')}
-                    className={`hidden sm:inline-flex p-1.5 rounded-lg transition-all ${
+                    className={`hidden sm:inline-flex phone:hidden p-1.5 rounded-lg transition-all ${
                         workspaceMode === 'dashboard'
                             ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
                             : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
@@ -235,7 +235,7 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
                 {canAccessAdmin && onToggleAdminPanel && (
                     <motion.button
                         onClick={onToggleAdminPanel}
-                        className={`hidden md:inline-flex p-1.5 rounded-lg transition-all ${
+                        className={`inline-flex phone:hidden p-1.5 rounded-lg transition-all ${
                             showAdminPanel
                                 ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)]'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'

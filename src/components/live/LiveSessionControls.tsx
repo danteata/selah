@@ -477,8 +477,10 @@ function CompactSession(props: CompactSessionProps) {
                 className="flex items-center gap-1.5 h-8 pl-2 pr-2.5 rounded-full text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/12 active:scale-95 transition-transform"
             >
                 <RoleIcon className="w-3.5 h-3.5" />
-                <span>{ownRole ? ROLE_LABEL[ownRole] : 'Join'}</span>
-                <span className="text-emerald-700/50 dark:text-emerald-300/50" aria-hidden>·</span>
+                {/* On a phone on its side the words give way to what's live
+                    beside them; the icon and the label above still say it. */}
+                <span className={ownRole ? 'landscape:hidden' : undefined}>{ownRole ? ROLE_LABEL[ownRole] : 'Join'}</span>
+                <span className="landscape:hidden text-emerald-700/50 dark:text-emerald-300/50" aria-hidden>·</span>
                 <Users className="w-3 h-3 opacity-70" />
                 <span className="tabular-nums">{users.length}</span>
             </button>
