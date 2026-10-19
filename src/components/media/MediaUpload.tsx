@@ -22,7 +22,8 @@ interface MediaUploadProps {
     onCancel?: () => void
     accept?: string
     multiple?: boolean
-    maxSize?: number // in MB
+    /** In MB. None by default: adding a file only stores it on this device. */
+    maxSize?: number
     maxFiles?: number
     className?: string
 }
@@ -32,7 +33,7 @@ export function MediaUpload({
     onCancel,
     accept = 'image/*,video/*,audio/*',
     multiple = true,
-    maxSize = 50,
+    maxSize,
     maxFiles = 10,
     className = '',
 }: MediaUploadProps) {
@@ -71,7 +72,7 @@ export function MediaUpload({
             if (existingCount + index >= maxFiles) return
 
             // Check file size
-            if (file.size > maxSize * 1024 * 1024) {
+            if (maxSize !== undefined && file.size > maxSize * 1024 * 1024) {
                 newFiles.push({
                     id: `file_${Date.now()}_${index}`,
                     file,
@@ -247,7 +248,7 @@ export function MediaUpload({
                     or click to browse
                 </p>
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
-                    Max {maxSize}MB per file • {maxFiles} files max
+                    {maxSize !== undefined && <>Max {maxSize}MB per file • </>}{maxFiles} files max
                 </p>
             </div>
 

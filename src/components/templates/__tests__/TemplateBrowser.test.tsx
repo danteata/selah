@@ -33,6 +33,10 @@ vi.mock('@clerk/clerk-react', () => ({ useAuth: () => ({ isSignedIn: true }) }))
 vi.mock('../../modals', () => ({ CreateTemplateModal: () => null }))
 vi.mock('../../../hooks/useUserRole', () => ({ useUserRole: () => ({ isSuperadmin: false, currentUser: { _id: 'me' } }) }))
 vi.mock('../../../hooks/useLocalBackground', () => ({ useLocalBackground: () => '' }))
+vi.mock('../../../hooks/useTemplateMediaSync', () => ({
+    useTemplateMediaState: () => undefined,
+    useUploadTemplateBackground: () => vi.fn(),
+}))
 
 vi.mock('../../../hooks/useTemplates', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../../../hooks/useTemplates')>()

@@ -4,7 +4,7 @@ import { useScripture } from '../../hooks'
 import { useAppStore } from '../../store/appStore'
 import { BOOK_MAX_VERSES } from '../../services/sermon-listener/verseDetection'
 import type { Scripture, BibleVerse, Slide } from '../../types'
-import { bibleBooks } from '../../types'
+import { bibleSlideRange, steppedRange } from '../../utils/bibleSlideRange'
 
 interface BibleVerseNavigatorProps {
     currentSlide: Slide | null | undefined
@@ -82,41 +82,10 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
         }
     }, [currentSlide, defaultBibleVersion, selectedVersion])
 
-    // Parse current slide to get scripture reference
+    // The live slide's book, chapter and verses, read in the slide's version.
     const scriptureRef = useMemo(() => {
-        if (!currentSlide || currentSlide.type !== 'bible') return null
-
-        const data = currentSlide.data as Scripture | undefined
-        if (!data) return null
-
-        // Parse labelShortFormat (e.g., "43:3:16-18" for John 3:16-18)
-        const parts = data.labelShortFormat?.split(':')
-        if (!parts || parts.length < 3) return null
-
-        const bookIndex = parseInt(parts[0])
-        const chapter = parseInt(parts[1])
-        const versePart = parts[2]
-
-        let startVerse: number
-        let endVerse: number
-
-        if (versePart.includes('-')) {
-            const [start, end] = versePart.split('-')
-            startVerse = parseInt(start)
-            endVerse = parseInt(end)
-        } else {
-            startVerse = parseInt(versePart)
-            endVerse = startVerse
-        }
-
-        return {
-            bookIndex,
-            bookName: bibleBooks[bookIndex - 1] || '',
-            chapter,
-            startVerse,
-            endVerse,
-            version: data.version || selectedVersion,
-        }
+        const range = bibleSlideRange(currentSlide)
+        return range ? { ...range, version: range.version || selectedVersion } : null
     }, [currentSlide, selectedVersion])
 
     // Seed the selection from whatever the live slide actually shows —
@@ -330,17 +299,8 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
 
     // Navigate to previous/next verse
     const navigateVerse = useCallback((direction: 'prev' | 'next') => {
-        if (!scriptureRef) return
-
-        const { startVerse, endVerse } = scriptureRef
-        const range = endVerse - startVerse + 1
-
-        if (direction === 'prev') {
-            const newStart = Math.max(1, startVerse - range)
-            handleVerseRangeSelect(newStart, newStart + range - 1)
-        } else {
-            handleVerseRangeSelect(startVerse + range, endVerse + range)
-        }
+        const step = scriptureRef && steppedRange(scriptureRef, direction)
+        if (step) handleVerseRangeSelect(step.startVerse, step.endVerse)
     }, [scriptureRef, handleVerseRangeSelect])
 
     // Expose the navigateVerse function to the parent via ref so it can
@@ -547,7 +507,8 @@ export const BibleVerseNavigator = forwardRef<BibleVerseNavigatorHandle, BibleVe
                 </span>
                 <button
                     onClick={() => navigateVerse('next')}
-                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded shrink-0"
+                    disabled={!steppedRange(scriptureRef, 'next')}
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded disabled:opacity-30 shrink-0"
                     title="Next verses"
                 >
                     <ChevronRight className="w-4 h-4" />

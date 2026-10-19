@@ -18,7 +18,7 @@ import { Check, ChevronDown, ChevronRight, Lightbulb, Play, Trash2, X } from 'lu
 import { useAppStore } from '../../store/appStore'
 import { useLiveSession } from '../../hooks/useLiveSession'
 import { groupQueueItems, queueSlidesFor, type QueueItem } from '../preview/groupQueueItems'
-import { slideText, slideTitle } from '../preview/slideLabels'
+import { slideText, slideTitle, songSectionOf } from '../preview/slideLabels'
 import type { Slide } from '../../types'
 
 interface MobileQueueSheetProps {
@@ -184,6 +184,9 @@ function QueueSheet({ onClose }: { onClose: () => void }) {
                                 <li key={slide.id} className="flex items-center gap-2 pl-9 pr-3 py-1">
                                     <LiveDot live={verseLive} />
                                     <span className="flex-1 min-w-0 text-xs text-[var(--text-secondary)] truncate">
+                                        {songSectionOf(slide) && (
+                                            <span className="font-semibold text-[var(--text-primary)]">{songSectionOf(slide)} · </span>
+                                        )}
                                         {slideText(slide) || slideTitle(slide)}
                                     </span>
                                     {canGoLive && !verseLive && (

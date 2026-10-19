@@ -62,10 +62,10 @@ async function favoriteTemplateIds(ctx: QueryCtx, user: User | null): Promise<Se
 }
 
 /**
- * Template backgrounds a church may keep on the server, in total. Desktop
- * template backgrounds upload automatically (see templateMediaSync.ts); this
- * bounds what that costs. Past it, a background stays on the computer that
- * has it and the template says so.
+ * Template backgrounds a church may keep on the server, in total. A desktop
+ * template background uploads when someone syncs it (see templateMediaSync.ts),
+ * a web one when it is picked; this bounds what that costs. Past it, a
+ * background stays on the computer that has it and the template says so.
  */
 export const TEMPLATE_MEDIA_LIMIT_BYTES = 100 * 1024 * 1024;
 
@@ -163,13 +163,20 @@ async function deleteBackgroundIfUnused(ctx: MutationCtx, storageId: string) {
     }
 }
 
-/** The church's template background usage against its limit. */
+/**
+ * The church's template background usage against its limit. Leaving out the
+ * template being edited counts what a new background for it may use, since
+ * replacing one frees the old.
+ */
 export const backgroundUsage = query({
-    args: {},
-    handler: async (ctx) => {
+    args: { excludingTemplateId: v.optional(v.string()) },
+    handler: async (ctx, args) => {
         const user = await getCurrentUser(ctx);
         if (!user) return { usedBytes: 0, limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
-        return { usedBytes: await backgroundBytes(ctx, user), limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES };
+        return {
+            usedBytes: await backgroundBytes(ctx, user, args.excludingTemplateId),
+            limitBytes: TEMPLATE_MEDIA_LIMIT_BYTES,
+        };
     },
 });
 

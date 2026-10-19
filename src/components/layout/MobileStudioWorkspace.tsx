@@ -11,8 +11,10 @@
  *      the whole queue in a sheet (MobileQueueSheet).
  *   5. For the operator, contributors' suggestions to accept or dismiss.
  *   6. In thumb reach, the one action this person's role allows: Next (and
- *      Prev) for whoever controls the screen, "Suggest slides" for a
- *      contributor in review mode, nothing but a note for someone watching.
+ *      Prev) for whoever controls the screen, with the previous / next verse
+ *      above them while a Bible slide is live (MobileVerseStepper), "Suggest
+ *      slides" for a contributor in review mode, nothing but a note for
+ *      someone watching.
  *
  * Adding slides goes through the bottom nav (Bible, Music, Add). Desktop-only
  * chrome (program output, multi-monitor, NDI) stays in StudioWorkspace.
@@ -28,8 +30,9 @@ import { SlideView } from '../live/SlideView'
 import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { MobileQueueSheet } from './MobileQueueSheet'
 import { HeardVersesStrip } from './HeardVersesStrip'
+import { MobileVerseStepper } from './MobileVerseStepper'
 import { queueSlidesFor } from '../preview/groupQueueItems'
-import { slideText, slideTitle, songTitleOf } from '../preview/slideLabels'
+import { slideText, slideTitle, songSectionOf, songTitleOf } from '../preview/slideLabels'
 import type { Slide } from '../../types'
 
 /** Rows shown under "Up next" before the queue sheet takes over. */
@@ -56,6 +59,7 @@ export function MobileStudioWorkspace() {
         setLiveSlide,
         acceptFromQueue,
         removeFromQueue,
+        syncSlideContent,
         sessionScheduleId,
     } = useLiveSession()
     const { currentUser } = useUserRole()
@@ -239,6 +243,9 @@ export function MobileStudioWorkspace() {
             {/* The action this person's role allows, in thumb reach. */}
             {deck.length > 0 && (
                 <div className="flex-shrink-0 px-4 pt-3 pb-3 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+                    {canControlLive && liveSlide?.type === 'bible' && (
+                        <MobileVerseStepper slide={liveSlide} onSlideChanged={(slide) => void syncSlideContent(slide)} />
+                    )}
                     {canControlLive ? (
                         <div className="flex gap-2">
                             <button
@@ -282,9 +289,10 @@ export function MobileStudioWorkspace() {
     )
 }
 
-/** "● Live" over the live slide's name and place: "Amazing Grace · 2 of 3". */
+/** "● Live" over the live slide's name and place: "Amazing Grace · Chorus · 2 of 3". */
 function LiveCaption({ slide, deck, index, idleText }: { slide: Slide | null; deck: Slide[]; index: number; idleText: string }) {
     let place = ''
+    const section = slide ? songSectionOf(slide) : null
     if (slide && index >= 0) {
         if (slide.songId) {
             let start = index
@@ -310,6 +318,7 @@ function LiveCaption({ slide, deck, index, idleText }: { slide: Slide | null; de
             </div>
             <p className="text-sm font-medium text-[var(--text-primary)] truncate">
                 {slide ? slideTitle(slide) : idleText}
+                {section && <span className="text-[var(--text-secondary)]"> · {section}</span>}
                 {place && <span className="text-[var(--text-muted)] font-normal tabular-nums"> · {place}</span>}
             </p>
         </div>
@@ -319,7 +328,9 @@ function LiveCaption({ slide, deck, index, idleText }: { slide: Slide | null; de
 /** A slide coming up: its words first, then what it's from. */
 function UpNextRow({ slide, emphasis, onGoLive }: { slide: Slide; emphasis: boolean; onGoLive?: () => void }) {
     const text = slideText(slide)
-    const source = songTitleOf(slide) ?? (slide.type === 'bible' ? slide.name : null)
+    const song = songTitleOf(slide)
+    const section = songSectionOf(slide)
+    const source = song ? [section, song].filter(Boolean).join(' · ') : (slide.type === 'bible' ? slide.name : null)
     const body = (
         <>
             <span className="flex-1 min-w-0">

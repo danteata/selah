@@ -9,7 +9,7 @@ import type { PushStats } from '../../services/ndi-output/pushChannel'
 import { useEntitlements } from '../../providers/LicenseProvider'
 import { toast } from 'sonner'
 import { useLiveSession, useVerseNavigationShortcuts, useClaimLiveNavigation, shouldIgnoreShortcut, VERSE_NAV_PRIORITY } from '../../hooks'
-import { generateSlideContent, calculateScreenFontSize } from '../../hooks/useSlideCreation'
+import { withScripture } from '../../hooks/useSlideCreation'
 import { useFileUrl } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
@@ -503,30 +503,8 @@ export function LiveOutput() {
         if (!liveSlide || liveSlide.type !== 'bible') return
 
         // scripture.content already holds exactly the verses the navigator
-        // selected (single verse, shift-clicked set, or dragged span), so
-        // font size must be recomputed from it — otherwise a slide that
-        // previously held a whole illegible range would keep that tiny
-        // font size even after being narrowed down to one legible verse.
-        const contentString = typeof scripture.content === 'string'
-            ? scripture.content
-            : Array.isArray(scripture.content)
-                ? scripture.content.map((v) => v.scripture).join(' ')
-                : ''
-        const displayVerseNumbers = Array.isArray(scripture.content)
-            ? scripture.content.map((v) => Number(v.verse))
-            : undefined
-
-        const updatedSlide = {
-            ...liveSlide,
-            name: scripture.label || liveSlide.name,
-            data: scripture,
-            contents: generateSlideContent(liveSlide, scripture),
-            displayVerseNumbers,
-            slideStyle: {
-                ...liveSlide.slideStyle,
-                fontSize: Number(calculateScreenFontSize(contentString)),
-            },
-        }
+        // selected (single verse, shift-clicked set, or dragged span).
+        const updatedSlide = withScripture(liveSlide, scripture)
 
         const updateActiveSlide = useAppStore.getState().updateActiveSlide
         updateActiveSlide(updatedSlide)

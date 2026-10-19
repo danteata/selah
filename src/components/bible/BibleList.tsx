@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2, AlignJustify, Layers } from 'lucide-react'
 import { motion } from 'framer-motion'
-import { generateSlideContent, calculateScreenFontSize, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
+import { withScripture, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
 import { useSendToAlternate } from '../../hooks/useSendToAlternate'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
@@ -333,29 +333,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
 
         if (!liveSlide || liveSlide.type !== 'bible') return false
 
-        // Recompute font size from the new scripture's own content — a slide
-        // that previously held a long, illegible range must not keep that
-        // tiny font size after being narrowed to fewer verses.
-        const contentString = typeof scripture.content === 'string'
-            ? scripture.content
-            : Array.isArray(scripture.content)
-                ? scripture.content.map((v) => v.scripture).join(' ')
-                : ''
-        const displayVerseNumbers = Array.isArray(scripture.content)
-            ? scripture.content.map((v) => Number(v.verse))
-            : undefined
-
-        const updatedSlide = {
-            ...liveSlide,
-            name: scripture.label || liveSlide.name,
-            data: scripture,
-            contents: generateSlideContent(liveSlide, scripture),
-            displayVerseNumbers,
-            slideStyle: {
-                ...liveSlide.slideStyle,
-                fontSize: Number(calculateScreenFontSize(contentString)),
-            },
-        }
+        const updatedSlide = withScripture(liveSlide, scripture)
 
         updateActiveSlide(updatedSlide)
         window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))

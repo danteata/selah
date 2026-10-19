@@ -5,7 +5,7 @@ import { useSermonListenerContext } from '../components/sermon-listener/SermonLi
 import { SongPositionTracker, type TrackerUpdate } from '../services/sermon-listener/songTracker'
 import { TranscriptLagEstimator, leadDelayMs } from '../services/sermon-listener/songLead'
 import type { Slide, Song } from '../types'
-import { sectionsForSong } from '../lib/songSections'
+import { sectionsForSong, songSlideBlocks } from '../lib/songSections'
 
 /**
  * Live wiring for the predictive song-lyric tracker (Phase 2 + 3).
@@ -113,14 +113,18 @@ export function useSongTracker() {
             // itself agree on the same section list and indices.
             const song: Song = { ...stored, sections: sectionsForSong(stored) }
 
+            // A slide is matched to its section by its words, not its place:
+            // a chorus written twice is two slides but one section, so the
+            // place drifted by one for every slide after it.
+            const blocks = songSlideBlocks(stored)
             const sectionToSlide = new Map<string, string>()
             const slideToSection = new Map<string, string>()
             for (const sl of group) {
                 if (sl.verseIndex == null) continue
-                const section = song.sections?.[sl.verseIndex]
-                if (!section) continue
-                sectionToSlide.set(section.id, sl.id)
-                slideToSection.set(sl.id, section.id)
+                const sectionId = blocks[sl.verseIndex]?.sectionId
+                if (!sectionId) continue
+                if (!sectionToSlide.has(sectionId)) sectionToSlide.set(sectionId, sl.id)
+                slideToSection.set(sl.id, sectionId)
             }
             const sectionLabels = new Map<string, string>()
             for (const section of song.sections ?? []) {

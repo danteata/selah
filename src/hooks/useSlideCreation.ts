@@ -24,7 +24,7 @@ import {
 import { saveMedia } from './useIndexedDB'
 import type { TemplateItem } from './useTemplates'
 import { useTemplates } from './useTemplates'
-import { sectionsForSong } from '../lib/songSections'
+import { songSlideBlocks } from '../lib/songSections'
 import { buildPptxSlides, type PptxImportMode, type PptxImportResult } from '../lib/import/pptxToSlides'
 
 function applyTemplateToSlide(tempSlide: Slide, template: TemplateItem | null, defaultBg: string, defaultBgType: string, defaultBgVideoKey?: string): void {
@@ -262,6 +262,34 @@ export function generateSlideContent(
         }
         default:
             return slide.contents || []
+    }
+}
+
+/**
+ * A Bible slide showing different verses: its content, name and verse
+ * numbers, and a font size recomputed from the new verses — a slide that held
+ * a long, illegible range must not keep that tiny size once narrowed down.
+ */
+export function withScripture(slide: Slide, scripture: Scripture): Slide {
+    const contentString = typeof scripture.content === 'string'
+        ? scripture.content
+        : Array.isArray(scripture.content)
+            ? scripture.content.map((v) => v.scripture).join(' ')
+            : ''
+    const displayVerseNumbers = Array.isArray(scripture.content)
+        ? scripture.content.map((v) => Number(v.verse))
+        : undefined
+
+    return {
+        ...slide,
+        name: scripture.label || slide.name,
+        data: scripture,
+        contents: generateSlideContent(slide, scripture),
+        displayVerseNumbers,
+        slideStyle: {
+            ...slide.slideStyle,
+            fontSize: Number(calculateScreenFontSize(contentString)),
+        },
     }
 }
 
@@ -632,7 +660,7 @@ export function useSlideCreation() {
         return slides
     }, [createHymnSlide])
 
-    const createSongSlide = useCallback((song: Song, verseIndex?: number, options?: { template?: TemplateItem | null }): Slide => {
+    const createSongSlide = useCallback((song: Song, verseIndex?: number, options?: { template?: TemplateItem | null }, label?: string): Slide => {
         const tempSlide = preSlideCreation()
         tempSlide.layout = slideLayoutTypes.bible
         tempSlide.type = slideTypes.song
@@ -657,8 +685,8 @@ export function useSlideCreation() {
         const totalVerses = song.verses?.length || 0
         const actualVerseIndex = verseIndex ?? 0
 
-        // Determine verse label
-        const verseLabel = `Verse ${actualVerseIndex + 1}`
+        // The section it is ("Chorus"), else its place.
+        const verseLabel = label ?? `Verse ${actualVerseIndex + 1}`
 
         tempSlide.title = verseLabel
         tempSlide.verseIndex = actualVerseIndex
@@ -695,10 +723,11 @@ export function useSlideCreation() {
         // recognisable failure to an operator, just a song that inexplicably
         // stopped being multi-slide. Derive it here so it cannot depend on
         // which path reached us.
-        const verses = song.verses?.length
-            ? song.verses
-            : sectionsForSong(song).map((section) => section.lines.join('\n'))
-        const source: Song = verses.length ? { ...song, verses } : song
+        //
+        // Each block is named for its section, with any heading line taken out
+        // of the words (see songSlideBlocks).
+        const blocks = songSlideBlocks(song)
+        const source: Song = blocks.length ? { ...song, verses: blocks.map((b) => b.text) } : song
 
         const slides: Slide[] = []
         const totalVerses = source.verses?.length || 0
@@ -713,7 +742,7 @@ export function useSlideCreation() {
             slides.push(slide)
         } else {
             for (let i = 0; i < totalVerses; i++) {
-                slides.push(createSongSlide(source, i, options))
+                slides.push(createSongSlide(source, i, options, blocks[i]?.label))
             }
         }
 

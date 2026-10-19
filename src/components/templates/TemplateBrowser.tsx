@@ -16,10 +16,12 @@
 
 import { MotionCanvas } from '../motion/MotionCanvas'
 import { motionBackgroundFor } from '../motion/motionBackgrounds'
-import { useTemplateMediaState } from '../../hooks/useTemplateMediaSync'
+import { useTemplateMediaState, useUploadTemplateBackground } from '../../hooks/useTemplateMediaSync'
+import { canUploadBackground } from '../../services/templates/templateMediaSync'
+import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
-import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video, Star, Save } from 'lucide-react'
+import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video, Star, Save, CloudUpload } from 'lucide-react'
 import {
     useTemplates,
     TEMPLATE_SLIDE_TYPE_OPTIONS,
@@ -136,6 +138,11 @@ function TemplateCard({
         isVideoBackground ? (slideData?.localFilePath || '') : '',
     )
     const mediaState = useTemplateMediaState(template._id)
+    const uploadBackground = useUploadTemplateBackground()
+    const { isOffline } = useConvexConnection()
+    // Sending the background to the church is asked for, never automatic.
+    const canSync = !isOffline && canUploadBackground(template)
+        && (mediaState === 'local' || mediaState === 'failed' || mediaState === 'over-limit')
     // A background known to be on another computer would play as black; the
     // thumbnail below stands in for it.
     const videoUrl = mediaState === 'missing' && !fileUrl ? '' : fileUrl || localBg
@@ -225,11 +232,13 @@ function TemplateCard({
             <div className={`relative ${isCompact ? 'aspect-[4/3]' : 'aspect-video'}`}>
                 {renderThumbnail()}
 
-                {mediaState && mediaState !== 'uploaded' && mediaState !== 'failed' && (
+                {mediaState && mediaState !== 'uploaded' && (
                     <div className="absolute bottom-1.5 left-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded bg-black/70 text-white text-[9px] font-medium truncate">
+                        {mediaState === 'local' && 'Background is on this computer only'}
                         {mediaState === 'uploading' && 'Uploading background…'}
                         {mediaState === 'missing' && 'Background is on another computer'}
                         {mediaState === 'over-limit' && "Over your church's 100 MB limit: this computer only"}
+                        {mediaState === 'failed' && "Background didn't upload: this computer only"}
                     </div>
                 )}
 
@@ -262,6 +271,16 @@ function TemplateCard({
                     >
                         <Heart className={`w-3 h-3 ${isFavorite ? 'fill-current text-red-400' : ''}`} />
                     </button>
+                    {canSync && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); void uploadBackground(template) }}
+                            className="p-1 rounded bg-black/40 backdrop-blur-sm hover:bg-black/60 text-white"
+                            title="Sync background to the cloud, so the church's other computers have it"
+                            aria-label="Sync background to cloud"
+                        >
+                            <CloudUpload className="w-3 h-3" />
+                        </button>
+                    )}
                     {canEdit && (
                         <>
                             <button

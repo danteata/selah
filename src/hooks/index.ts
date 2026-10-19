@@ -11,7 +11,8 @@ export {
     buildDictionaryContents,
     buildDictionaryLabel,
     DEFINITION_CHARS_PER_SLIDE,
-    firstVerseOnly
+    firstVerseOnly,
+    withScripture,
 } from './useSlideCreation'
 export { useScripture, formatVerseGroups } from './useScripture'
 export { useHymn } from './useHymn'

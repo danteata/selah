@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { useConvex, useConvexAuth, useQuery } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
@@ -7,6 +7,7 @@ import {
     syncTemplateMedia,
     templateMediaState,
     templateMediaVersion,
+    uploadTemplateBackground,
     type TemplateLike,
     type TemplateMediaState,
 } from '../services/templates/templateMediaSync'
@@ -15,10 +16,11 @@ import {
 const DEBOUNCE_MS = 2000
 
 /**
- * Upload template backgrounds this computer has and download the rest (see
- * templateMediaSync.ts). Mount once, inside the Convex provider. Runs when the
- * template list changes — a template created or edited anywhere in the church
- * — and when the app comes online.
+ * Note which template backgrounds this computer has and download the uploaded
+ * ones (see templateMediaSync.ts). Uploads nothing: that is the template
+ * card's "Sync to cloud". Mount once, inside the Convex provider. Runs when
+ * the template list changes — a template created or edited anywhere in the
+ * church — and when the app comes online.
  */
 export function useTemplateMediaSync(): void {
     const convex = useConvex()
@@ -39,4 +41,10 @@ export function useTemplateMediaSync(): void {
 export function useTemplateMediaState(templateId: string | undefined): TemplateMediaState | undefined {
     useSyncExternalStore(subscribeTemplateMedia, templateMediaVersion)
     return templateId ? templateMediaState(templateId) : undefined
+}
+
+/** Upload a template's background from this computer, when someone asks to. */
+export function useUploadTemplateBackground(): (template: TemplateLike) => Promise<void> {
+    const convex = useConvex()
+    return useCallback((template: TemplateLike) => uploadTemplateBackground(convex, template), [convex])
 }

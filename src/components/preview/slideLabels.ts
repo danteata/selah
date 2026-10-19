@@ -16,6 +16,11 @@ export function songTitleOf(slide: Slide): string | null {
     return (slide.data as Song | undefined)?.title || slide.name?.split(' - ')[0] || null
 }
 
+/** Which part of its song a slide is: "Chorus", "Verse 2". */
+export function songSectionOf(slide: Slide): string | null {
+    return slide.songId ? slide.verseLabel || null : null
+}
+
 /** What a slide is: its song, its reference, or its name. */
 export function slideTitle(slide: Slide): string {
     return songTitleOf(slide) || slide.name || slideText(slide) || 'Untitled'

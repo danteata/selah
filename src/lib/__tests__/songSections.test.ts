@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    songSlideBlocks,
     parseLyricsIntoSections,
     parseSectionLabel,
     buildDefaultArrangement,
@@ -184,5 +185,40 @@ describe('songSections', () => {
             const sections = parseLyricsIntoSections('Verse 1\na\n\nChorus\nb\n\nVerse 2\nc')
             expect(buildDefaultArrangement(sections)).toEqual(['v1', 'c1', 'v2'])
         })
+    })
+})
+
+describe('songSlideBlocks', () => {
+    const V1 = 'Amazing grace how sweet the sound\nThat saved a wretch like me'
+    const C = 'My chains are gone\nI have been set free'
+    const V2 = 'Twas grace that taught my heart to fear\nAnd grace my fears relieved'
+
+    it('names each block for its section, a repeated chorus included', () => {
+        const verses = [V1, C, V2, C]
+        const blocks = songSlideBlocks({ lyrics: verses.join('\n\n'), verses })
+        expect(blocks.map((b) => b.label)).toEqual(['Verse 1', 'Chorus', 'Verse 2', 'Chorus'])
+        expect(blocks.map((b) => b.sectionId)).toEqual(['v1', 'c1', 'v2', 'c1'])
+        expect(blocks[1].text).toBe(C)
+    })
+
+    it('takes a heading line out of the words', () => {
+        const blocks = songSlideBlocks({ lyrics: `Verse 1\n${V1}\n\nChorus\n${C}` })
+        expect(blocks).toEqual([
+            // One verse: the parser names it plainly, as it does a lone chorus.
+            { text: V1, label: 'Verse', sectionId: 'v1' },
+            { text: C, label: 'Chorus', sectionId: 'c1' },
+        ])
+    })
+
+    it('makes a heading on its own the section it names, and drops one naming nothing', () => {
+        const lyrics = `Verse 1\n${V1}\n\nChorus\n${C}\n\nVerse 2\n${V2}\n\nChorus\n\nBridge`
+        const blocks = songSlideBlocks({ lyrics, verses: lyrics.split('\n\n') })
+        expect(blocks.map((b) => b.label)).toEqual(['Verse 1', 'Chorus', 'Verse 2', 'Chorus'])
+        expect(blocks[3]).toEqual({ text: C, label: 'Chorus', sectionId: 'c1' })
+    })
+
+    it('reads the blocks a song was already split into', () => {
+        const blocks = songSlideBlocks({ lyrics: '', verses: [`Chorus\n${C}`, V1] })
+        expect(blocks.map((b) => [b.label, b.text])).toEqual([['Chorus', C], ['Verse', V1]])
     })
 })

@@ -25,6 +25,7 @@ vi.mock('../../components/sermon-listener/SermonListenerContext', () => ({
 // Real store — we assert against actual setLiveSlide / status behaviour.
 import { useAppStore, DEFAULT_SONG_TRACKING } from '../../store/appStore'
 import { useSongTracker } from '../useSongTracker'
+import { songSlideBlocks } from '../../lib/songSections'
 
 const SONG: Song = {
     id: 'song1',
@@ -313,5 +314,36 @@ describe('useSongTracker (live wiring)', () => {
             act(() => { vi.advanceTimersByTime(600_000) })
             expect(useAppStore.getState().liveSlideId).toBe('slide-v2')
         })
+    })
+
+    it('finds the slide for a section after a chorus written out twice', () => {
+        // V1, C, V2, C, V3: five slides, three sections. By place, the second
+        // chorus slide stood for Verse 3, and Verse 3's own slide for nothing.
+        const v3 = 'Through many dangers toils and snares\nI have already come'
+        const song: Song = {
+            id: 'song2', _id: 'song2', title: 'Grace', artist: '',
+            lyrics: [
+                SONG.sections![0].lines.join('\n'),
+                SONG.sections![1].lines.join('\n'),
+                SONG.sections![2].lines.join('\n'),
+                SONG.sections![1].lines.join('\n'),
+                v3,
+            ].join('\n\n'),
+        }
+        // Split as the search path splits it (useSong.getSong).
+        const blocks = songSlideBlocks({ ...song, verses: song.lyrics.split('\n\n') })
+        const data: Song = { ...song, verses: blocks.map((b) => b.text) }
+        const slides: Slide[] = blocks.map((b, i) => ({
+            id: `slide-${i}`, index: i, name: `Grace - ${b.label}`, type: 'song', layout: 'default',
+            userId: 'u', churchId: 'c', scheduleId: 's', contents: [b.text],
+            songId: 'song2', verseIndex: i, verseLabel: b.label, data,
+        }))
+        useAppStore.setState({ activeSlides: slides, liveSlideId: null })
+
+        renderHook(() => useSongTracker())
+        const arr = useAppStore.getState().songTracking.status.arrangement
+        expect(arr.map((step) => [step.sectionId, step.slideId])).toEqual([
+            ['v1', 'slide-0'], ['c1', 'slide-1'], ['v2', 'slide-2'], ['v3', 'slide-4'],
+        ])
     })
 })
