@@ -3,7 +3,8 @@ import { Search, ChevronLeft, ChevronRight, BookOpen, Zap, Plus, X, Loader2, Ali
 import { motion } from 'framer-motion'
 import { withScripture, useScripture, useSlideCreation, useSemanticVerseSearch, useLiveSession } from '../../hooks'
 import { useSendToAlternate } from '../../hooks/useSendToAlternate'
-import { isMobileViewport } from '../../hooks/useIsMobile'
+import { isMobileViewport, useIsMobile } from '../../hooks/useIsMobile'
+import { bibleSlideRange } from '../../utils/bibleSlideRange'
 import { useVoiceSearch } from '../../hooks/useVoiceSearch'
 import { VoiceSearchButton } from '../common/VoiceSearchButton'
 import { useAppStore } from '../../store/appStore'
@@ -279,6 +280,21 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     const { fetchScripture } = useScripture()
     const { createBibleSlide } = useSlideCreation()
     const alternate = useSendToAlternate()
+    // The alternate output is the desk's (a second screen or NDI feed); a
+    // phone has none to send to.
+    const isPhone = useIsMobile()
+    // What's actually on the screen. A row was marked LIVE when it was only
+    // the verse last searched for or clicked, while a song was up.
+    const liveSlide = useAppStore((s) => s.activeSlides.find((slide) => slide.id === s.liveSlideId))
+    const liveRange = bibleSlideRange(liveSlide)
+    // Numbers compared as numbers: rows built from the Bible data carry them
+    // as strings, whatever their type says.
+    const isOnScreen = (bookIndex: number, chapter: number, verse: number) => {
+        const [b, c, v] = [Number(bookIndex), Number(chapter), Number(verse)]
+        if (!liveRange || liveRange.bookIndex !== b || liveRange.chapter !== c) return false
+        const shown = liveSlide?.displayVerseNumbers?.map(Number)
+        return shown?.length ? shown.includes(v) : v >= liveRange.startVerse && v <= liveRange.endVerse
+    }
     const appendActiveSlide = useAppStore((s) => s.appendActiveSlide)
     const setActiveNavSection = useAppStore((s) => s.setActiveNavSection)
     // NOTE: there are two setLiveSlide functions in play here.
@@ -308,6 +324,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
     // broadcast version (which also updates the local store as a side
     // effect). Otherwise we fall back to the local-only setter.
     const setLiveSlide = isConnected ? setLiveSlideShared : setLiveSlideLocal
+    const canPutUp = !isConnected || isOperator || isOpen
 
     const {
         results: semanticResults,
@@ -1212,6 +1229,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                         {verseRows.map((row, index) => {
                             const verseKey = `${row.bookIndex}:${row.chapter}:${row.verse}`
                             const isActive = activeVerseKey === verseKey
+                            const isLive = isOnScreen(row.bookIndex, row.chapter, row.verse)
                             const isHovered = focusedIndex === index
                             const handleRowClick = () => loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
                             return (
@@ -1247,10 +1265,10 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                 {row.source === 'semantic' && row.score !== undefined && (
                                                     <span className="text-[10px] text-[var(--accent-teal)] font-medium opacity-80">{Math.round(row.score * 100)}% Match</span>
                                                 )}
-                                                {isActive && (
-                                                    <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-teal)] text-white rounded font-medium">LIVE</span>
+                                                {isLive && (
+                                                    <span className="text-[9px] px-1.5 py-0.5 bg-red-500 text-white rounded font-medium">LIVE</span>
                                                 )}
-                                                {row.isCurrent && !isActive && (
+                                                {row.isCurrent && !isLive && (
                                                     <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-teal)]/15 text-[var(--accent-teal)] rounded font-medium">CURRENT</span>
                                                 )}
                                                 <div className={`ml-auto flex items-center gap-1 shrink-0 ${row.isCurrent || isActive || isHovered ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -1259,9 +1277,10 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                         onClick={(e) => { e.stopPropagation(); addToQueue(row.bookIndex, row.chapter, row.verse, row.scripture) }}
                                                         className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium bg-[var(--bg-tertiary)] hover:bg-[var(--accent-teal)]/10 text-[var(--text-secondary)] rounded-md transition-colors"
                                                     >
-                                                        <Plus className="w-3 h-3" /> Add
+                                                        {/* For a contributor in review, Add is a suggestion to the operator. */}
+                                                        <Plus className="w-3 h-3" /> {canPutUp ? 'Add' : 'Suggest'}
                                                     </button>
-                                                    {alternate.canSend && (
+                                                    {alternate.canSend && !isPhone && (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); void sendVerseToAlternate(row.bookIndex, row.chapter, row.verse) }}
                                                             title="Send to the alternate output"
@@ -1272,19 +1291,24 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                                                             <Layers className="w-3 h-3" /> Alt
                                                         </button>
                                                     )}
+                                                    {/* Only for whoever may put slides up, as in the
+                                                        Songs panel: in a review session a contributor's
+                                                        Live did nothing at all. */}
+                                                    {canPutUp && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation()
                                                             goLiveWithScripture(row.bookIndex, row.chapter, row.verse, row.scripture)
                                                             if (row.source === 'semantic') loadVerseWithNeighbors(row.bookIndex, row.chapter, row.verse)
                                                         }}
-                                                        className={`flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium rounded transition-all ${isActive
+                                                        className={`flex items-center gap-0.5 px-1.5 py-1 text-[10px] font-medium rounded transition-all ${isLive
                                                             ? 'bg-red-500 text-white hover:brightness-110'
                                                             : 'bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white'
                                                             }`}
                                                     >
                                                         <Zap className="w-3 h-3" /> Live
                                                     </button>
+                                                    )}
                                                 </div>
                                             </div>
                                             <p className={`text-xs ${compact ? 'leading-snug line-clamp-2' : 'leading-relaxed'} ${isActive || row.isCurrent ? 'text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)]'}`}>
