@@ -37,6 +37,8 @@ function QueueSheet({ onClose }: { onClose: () => void }) {
     const activeScheduleId = useAppStore((s) => s.activeSchedule?._id)
     const liveSlideId = useAppStore((s) => s.liveSlideId)
     const removeActiveSlide = useAppStore((s) => s.removeActiveSlide)
+    const deckIds = useAppStore((s) => s.liveOutputSlidesId)
+    const suggestedIds = useAppStore((s) => s.sharedQueueSlideIds)
     const {
         isConnected,
         isOperator,
@@ -90,9 +92,13 @@ function QueueSheet({ onClose }: { onClose: () => void }) {
         })
     }, [])
 
+    // Already on the operator's deck, or already suggested: nothing to send.
+    // Every row offered Add, the deck's own slides included.
+    const shared = useMemo(() => new Set([...(deckIds ?? []), ...(suggestedIds ?? [])]), [deckIds, suggestedIds])
+
     const renderActions = (key: string, slides: Slide[], label: string) => (
         <div className="flex items-center gap-1 flex-shrink-0">
-            {canSuggest && (
+            {canSuggest && (sent.has(key) || !slides.every((s) => shared.has(s.id))) && (
                 sent.has(key) ? (
                     <span className="flex items-center gap-1 h-9 px-2 text-xs font-medium text-blue-500">
                         <Check className="w-3.5 h-3.5" />

@@ -305,6 +305,8 @@ describe('MobileStudioWorkspace', () => {
     it('gives a contributor in review mode the queue to suggest from, not Next', () => {
         setSession({ isContributor: true, isConnected: true }) // moderated: not open, not strict
         setStore([slideA, slideB], 's1')
+        // Slide B is this contributor's own, not yet on the operator's deck.
+        mocks.store.current.liveOutputSlidesId = ['s1']
 
         render(<MobileStudioWorkspace />)
         expect(screen.queryByRole('button', { name: /^Next$/ })).toBeNull()
@@ -322,12 +324,22 @@ describe('MobileStudioWorkspace', () => {
         const v1: Slide = { ...bibleSlide, id: 'v1', type: 'song', songId: 'song-1', name: 'Cornerstone - Verse 1', data: { title: 'Cornerstone' } } as Slide
         const v2: Slide = { ...v1, id: 'v2', name: 'Cornerstone - Verse 2' }
         setStore([slideA, v1, v2], 's1')
+        mocks.store.current.liveOutputSlidesId = ['s1']
 
         render(<MobileStudioWorkspace />)
         fireEvent.click(screen.getByRole('button', { name: /suggest slides/i }))
         fireEvent.click(screen.getByRole('button', { name: 'Suggest: Cornerstone' }))
 
         expect(mocks.session.addToQueue).toHaveBeenCalledWith(['v1', 'v2'])
+    })
+
+    it("offers no Add for what's already on the operator's deck", () => {
+        // Every row offered Add, the deck's own slides included.
+        setSession({ isContributor: true, isConnected: true, isOpen: true })
+        setStore([slideA, slideB], 's1')
+        render(<MobileStudioWorkspace />)
+        fireEvent.click(screen.getByRole('button', { name: /Queue/ }))
+        expect(screen.queryByRole('button', { name: /^Add to deck:/ })).toBeNull()
     })
 
     it('offers no Suggest affordance in strict mode', () => {

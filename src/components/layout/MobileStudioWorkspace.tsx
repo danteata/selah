@@ -151,6 +151,7 @@ export function MobileStudioWorkspace() {
                     <HeardVersesStrip canControlLive={canControlLive} canSuggest={canSuggest} />
                     <EmptyDeck
                         waitingForOperator={isConnected && !isOperator}
+                        canPutUp={canControlLive}
                         onSongs={() => setActiveNavSection('music')}
                         onBible={() => setActiveNavSection('bible')}
                         onSearch={openSearch}
@@ -338,7 +339,7 @@ function LoadingLive() {
     )
 }
 
-/** "● Live" over the live slide's name and place: "Amazing Grace · Chorus · 2 of 3". */
+/** "● Live · Chorus · 2 of 3" over the live slide's name, "Amazing Grace". */
 function LiveCaption({ slide, place, idleText }: { slide: Slide | null; place: string; idleText: string }) {
     const section = slide ? songSectionOf(slide) : null
     if (!slide) place = ''
@@ -353,11 +354,16 @@ function LiveCaption({ slide, place, idleText }: { slide: Slide | null; place: s
                 <span className={`text-[11px] font-bold uppercase tracking-[0.14em] ${slide ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
                     {slide ? 'Live' : 'Idle'}
                 </span>
+                {/* Where in it, beside LIVE: on the name's line, next to the
+                    session chip, it was cut to "Verse 1 · 1 o…". */}
+                {(section || place) && (
+                    <span className="min-w-0 truncate text-[11px] font-medium text-[var(--text-secondary)] tabular-nums">
+                        · {[section, place].filter(Boolean).join(' · ')}
+                    </span>
+                )}
             </div>
             <p className="text-sm font-medium text-[var(--text-primary)] truncate">
                 {slide ? slideTitle(slide) : idleText}
-                {section && <span className="text-[var(--text-secondary)]"> · {section}</span>}
-                {place && <span className="text-[var(--text-muted)] font-normal tabular-nums"> · {place}</span>}
             </p>
         </div>
     )
@@ -391,8 +397,10 @@ function UpNextRow({ slide, emphasis, onGoLive }: { slide: Slide; emphasis: bool
     )
 }
 
-function EmptyDeck({ waitingForOperator, onSongs, onBible, onSearch }: {
+function EmptyDeck({ waitingForOperator, canPutUp, onSongs, onBible, onSearch }: {
     waitingForOperator: boolean
+    /** In an open session a contributor puts slides up, not only suggests. */
+    canPutUp: boolean
     onSongs: () => void
     onBible: () => void
     onSearch: () => void
@@ -404,9 +412,11 @@ function EmptyDeck({ waitingForOperator, onSongs, onBible, onSearch }: {
                     {waitingForOperator ? 'Waiting for the first slide' : 'Nothing queued yet'}
                 </h2>
                 <p className="text-sm text-[var(--text-secondary)]">
-                    {waitingForOperator
-                        ? 'The operator’s slides appear here. You can find songs and readings to suggest meanwhile.'
-                        : 'Find a song or a reading to put on the screen.'}
+                    {!waitingForOperator
+                        ? 'Find a song or a reading to put on the screen.'
+                        : canPutUp
+                            ? 'The operator’s slides appear here. You can also find a song or a reading and put it up yourself.'
+                            : 'The operator’s slides appear here. You can find songs and readings to suggest meanwhile.'}
                 </p>
             </div>
             <div className="w-full max-w-xs grid grid-cols-2 gap-2">
