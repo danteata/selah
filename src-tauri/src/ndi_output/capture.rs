@@ -16,6 +16,7 @@ use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::ndi_lib::FOURCC_BGRX;
 use super::sender::NdiSender;
 use super::types::NdiOutputConfig;
 
@@ -299,7 +300,8 @@ fn run_capture(
                 height: h,
                 bytes_per_row,
             }) => {
-                if let Err(e) = sender.send_frame(&data, w, h, bytes_per_row as i32) {
+                // A captured window is opaque: BGRX, as on Windows and Linux.
+                if let Err(e) = sender.send_frame_with_fourcc(&data, w, h, bytes_per_row as i32, FOURCC_BGRX) {
                     eprintln!("NDI send_frame error: {e}");
                     break;
                 }

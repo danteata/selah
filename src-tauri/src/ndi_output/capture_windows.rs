@@ -46,6 +46,7 @@ use windows::Win32::System::WinRT::Direct3D11::{
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
 
+use super::ndi_lib::FOURCC_BGRX;
 use super::sender::NdiSender;
 use super::types::NdiOutputConfig;
 
@@ -63,7 +64,7 @@ pub fn start_capture(
 ) -> Result<(), String> {
     std::thread::spawn(move || {
         if let Err(e) = capture_loop(sender, &stop) {
-            eprintln!("NDI capture error: {e}");
+            tracing::error!("NDI capture error: {e}");
         }
     });
 
@@ -73,16 +74,16 @@ pub fn start_capture(
 /// `stop` is really "keep running" — set true on start, false on stop. Named for
 /// the macOS path it is shared with.
 fn capture_loop(sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Result<(), String> {
-    eprintln!("NDI capture: waiting for '{LIVE_WINDOW_TITLE}' window...");
+    tracing::info!("NDI capture: waiting for '{LIVE_WINDOW_TITLE}' window...");
 
     let mut waited_logged = false;
     while stop.load(Ordering::SeqCst) {
         match find_live_window() {
             Some(hwnd) => {
-                eprintln!("NDI capture: found '{LIVE_WINDOW_TITLE}' window");
+                tracing::info!("NDI capture: found '{LIVE_WINDOW_TITLE}' window");
                 waited_logged = false;
                 if let Err(e) = run_capture(hwnd, sender.clone(), stop) {
-                    eprintln!("NDI capture stream ended: {e:?}, will retry if the window reappears...");
+                    tracing::warn!("NDI capture stream ended: {e:?}, will retry if the window reappears...");
                 }
                 if stop.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_secs(1));
@@ -90,7 +91,7 @@ fn capture_loop(sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Result<(), St
             }
             None => {
                 if !waited_logged {
-                    eprintln!("NDI capture: waiting for '{LIVE_WINDOW_TITLE}' window...");
+                    tracing::info!("NDI capture: waiting for '{LIVE_WINDOW_TITLE}' window...");
                     waited_logged = true;
                 }
                 std::thread::sleep(Duration::from_secs(2));
@@ -98,7 +99,7 @@ fn capture_loop(sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Result<(), St
         }
     }
 
-    eprintln!("NDI capture loop exited");
+    tracing::info!("NDI capture loop exited");
     Ok(())
 }
 
@@ -193,7 +194,7 @@ fn run_capture(hwnd: HWND, sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Wi
     let _ = session.SetIsBorderRequired(false);
     session.StartCapture()?;
 
-    eprintln!("NDI capture started: {}x{}", size.Width, size.Height);
+    tracing::info!("NDI capture started: {}x{}", size.Width, size.Height);
 
     let mut staging: Option<(ID3D11Texture2D, u32, u32)> = None;
     let mut last_frame: Vec<u8> = Vec::new();
@@ -256,14 +257,19 @@ fn run_capture(hwnd: HWND, sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Wi
                     context.Unmap(staging_texture, 0);
                 }
 
-                if let Err(e) = sender.send_frame(&last_frame, width, height, last_dims.2 as i32) {
-                    eprintln!("NDI send_frame error: {e}");
+                // BGRX: a captured window is opaque, and the alpha WGC returns
+                // for web-view content is often zero. Sent as BGRA, receivers
+                // that honour alpha showed the main output as a dark, empty
+                // frame while the alternate feed (its own opaque frames) was
+                // fine. The Linux capture already sends BGRX.
+                if let Err(e) = sender.send_frame_with_fourcc(&last_frame, width, height, last_dims.2 as i32, FOURCC_BGRX) {
+                    tracing::warn!("NDI send_frame error: {e}");
                     break;
                 }
                 last_sent = Instant::now();
                 frame_count += 1;
                 if frame_count <= 5 || frame_count % 300 == 0 {
-                    eprintln!("NDI frame #{frame_count}: {width}x{height} stride={stride}", stride = last_dims.2);
+                    tracing::info!("NDI frame #{frame_count}: {width}x{height} stride={stride}", stride = last_dims.2);
                 }
             }
             // No new frame: the slide is static. Repeat the last one at a low rate
@@ -272,7 +278,7 @@ fn run_capture(hwnd: HWND, sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Wi
                 if !last_frame.is_empty() && last_sent.elapsed() >= IDLE_RESEND {
                     let (width, height, stride) = last_dims;
                     if sender
-                        .send_frame(&last_frame, width, height, stride as i32)
+                        .send_frame_with_fourcc(&last_frame, width, height, stride as i32, FOURCC_BGRX)
                         .is_err()
                     {
                         break;
@@ -286,7 +292,7 @@ fn run_capture(hwnd: HWND, sender: Arc<NdiSender>, stop: &Arc<AtomicBool>) -> Wi
 
     let _ = session.Close();
     let _ = frame_pool.Close();
-    eprintln!("NDI capture stopped after {frame_count} frames");
+    tracing::info!("NDI capture stopped after {frame_count} frames");
     Ok(())
 }
 
