@@ -76,9 +76,23 @@ describe('built-in templates', () => {
     it('say which slide types they suit', async () => {
         const { asAlice } = await setup()
         const builtins = await asAlice.query(api.templates.getTemplates, {})
-        expect(builtins.find((tpl) => tpl.name === 'Welcome Slide')?.appliesTo).toEqual(['text'])
-        expect(builtins.find((tpl) => tpl.name === 'Scripture Verse')?.appliesTo).toEqual(['bible', 'dictionary'])
+        expect(builtins.find((tpl) => tpl.name === 'Galaxy')?.appliesTo).toEqual(['any'])
         expect(builtins.every((tpl) => tpl.appliesTo)).toBe(true)
+    })
+
+    it('are the motion backgrounds, the photo built-ins retired where seeded before', async () => {
+        // The photo built-ins linked Unsplash images; one was removed there and
+        // its card showed a broken image.
+        const { t, asAlice } = await setup()
+        await t.run((ctx) => ctx.db.insert('templates', {
+            name: 'Prayer Slide', category: 'prayer', slideId: '{}', createdAt: '', updatedAt: '',
+            thumbnail: 'https://images.unsplash.com/photo-1508962924756-ee9b9f294d52?q=80&w=1740',
+        }))
+        await asAlice.mutation(api.templates.seedDefaultTemplates, {})
+        const builtins = await asAlice.query(api.templates.getTemplates, {})
+        expect(builtins.map((tpl) => tpl.name)).not.toContain('Prayer Slide')
+        expect(builtins.every((tpl) => !String(tpl.thumbnail ?? '').includes('unsplash'))).toBe(true)
+        expect(builtins.every((tpl) => JSON.parse(tpl.slideId as string).backgroundType === 'motion')).toBe(true)
     })
 
     it('are scoped when seeded before they said so', async () => {

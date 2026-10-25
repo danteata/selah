@@ -95,10 +95,11 @@ describe('CreateTemplateModal', () => {
         expect(screen.getByText('Color')).toBeInTheDocument()
     })
 
-    it('defaults to image background type', () => {
+    it('starts a new template on a motion background', () => {
+        // The stock photos it started from were Unsplash links, one since removed.
         render(<CreateTemplateModal {...baseProps} />)
-        const imageBtn = screen.getByText('Image').closest('button')!
-        expect(imageBtn.className).toContain('ring-2')
+        const motionBtn = screen.getByText('Motion').closest('button')!
+        expect(motionBtn.className).toContain('ring-2')
     })
 
     it('switches to gradient background type', () => {
@@ -333,6 +334,7 @@ describe('CreateTemplateModal', () => {
 
     it('shows image upload section when image type is selected', () => {
         render(<CreateTemplateModal {...baseProps} />)
+        fireEvent.click(screen.getByText('Image'))
         expect(screen.getByText('Upload Image')).toBeInTheDocument()
     })
 
@@ -362,10 +364,12 @@ describe('CreateTemplateModal', () => {
         expect(screen.getByText('Custom content')).toBeInTheDocument()
     })
 
-    it('shows preset image options for image background type', () => {
+    it("starts a picture template empty, and won't save it without a picture", () => {
         render(<CreateTemplateModal {...baseProps} />)
-        // The preset images section should exist (it renders background image buttons)
+        fireEvent.change(screen.getByPlaceholderText('My Template'), { target: { value: 'Photo' } })
+        fireEvent.click(screen.getByText('Image'))
         expect(screen.getByText('Background Image')).toBeInTheDocument()
+        expect(screen.getByText('Create Template').closest('button')).toBeDisabled()
     })
 
     it('renders X close button', () => {

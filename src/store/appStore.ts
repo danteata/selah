@@ -16,7 +16,7 @@ import type {
 } from '../types'
 import { DEFAULT_ALTERNATE_OUTPUT, type AlternateOutputConfig } from '../types/alternateOutput'
 import { bibleVersionObjects } from '../types'
-import { DEFAULT_BACKGROUNDS } from '../constants/backgrounds'
+import { DEFAULT_BACKGROUNDS, RETIRED_DEFAULT_PHOTOS } from '../constants/backgrounds'
 import type { NavSection, SplitPanelMode } from '../types/studio'
 import { readStoredTheme, storeTheme } from '../utils/theme'
 import { startCountdown } from '../utils/countdown'
@@ -328,6 +328,26 @@ export function mergeWithDefaults<T>(defaults: T, saved: unknown): T {
         merged[key] = key in defaults ? mergeWithDefaults((defaults as Record<string, unknown>)[key], value) : value
     }
     return merged as T
+}
+
+/**
+ * Default backgrounds still set to the Unsplash photos the defaults used to
+ * be were never chosen, so they move to today's motion defaults. One photo
+ * had been removed from Unsplash. A background someone picked stays.
+ */
+export function retireDefaultPhotos(settings: AppSettings, defaults: AppSettings): AppSettings {
+    const saved = settings.defaultBackground as Record<string, { background?: string }> | undefined
+    if (!saved) return settings
+    const current = defaults.defaultBackground as Record<string, unknown>
+    let changed = false
+    const next: Record<string, unknown> = { ...saved }
+    for (const [type, bg] of Object.entries(saved)) {
+        if (bg?.background && RETIRED_DEFAULT_PHOTOS.has(bg.background)) {
+            next[type] = current[type] ?? DEFAULT_BACKGROUNDS[type] ?? DEFAULT_BACKGROUNDS.general
+            changed = true
+        }
+    }
+    return changed ? { ...settings, defaultBackground: next as AppSettings['defaultBackground'] } : settings
 }
 
 function ensureUniqueIds(arr: Slide[]): Slide[] {
@@ -1532,7 +1552,7 @@ export const useAppStore = create<AppStore>()(
                     ...current,
                     ...saved,
                     bibleVersions: current.bibleVersions,
-                    settings: mergeWithDefaults(current.settings, saved.settings),
+                    settings: retireDefaultPhotos(mergeWithDefaults(current.settings, saved.settings), current.settings),
                     alternateOutput: mergeWithDefaults(current.alternateOutput, saved.alternateOutput),
                     songTracking: mergeWithDefaults(current.songTracking, saved.songTracking),
                 }

@@ -125,8 +125,9 @@ describe('built-in templates', () => {
         const names = (await asAlice.query(api.templates.getTemplates, {})).filter((t) => !t.createdBy).map((t) => t.name)
         expect(names).not.toContain('Ocean')
         expect(names).toContain('Silk')
-        expect(names).toEqual(expect.arrayContaining(['Welcome Slide', 'Galaxy', 'Aurora', 'Light Rays']))
-        expect(names.filter((n) => n === 'Welcome Slide')).toHaveLength(1)
+        expect(names).toEqual(expect.arrayContaining(['Galaxy', 'Aurora', 'Light Rays']))
+        // The old photo built-ins are retired too.
+        expect(names).not.toContain('Welcome Slide')
 
         const again = await asAlice.mutation(api.templates.seedDefaultTemplates, {})
         expect(again.seeded).toBe(false)

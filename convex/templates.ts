@@ -256,42 +256,6 @@ export const getFileUrl = query({
     },
 });
 
-// Default backgrounds - must match src/constants/backgrounds.ts
-const DEFAULT_BACKGROUNDS = {
-    hymn: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1506056820413-f8fa4de15de6?q=80&w=1740',
-    },
-    bible: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1504052434569-70ad5836ab65?q=80&w=1740',
-    },
-    text: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=1740',
-    },
-    worship: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1506056820413-f8fa4de15de6?q=80&w=1740',
-    },
-    sermon: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1504052434569-70ad5836ab65?q=80&w=1740',
-    },
-    announcement: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=1740',
-    },
-    prayer: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=1740',
-    },
-    general: {
-        backgroundType: 'image' as const,
-        background: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=1740',
-    }
-};
-
 // Get all templates
 export const getTemplates = query({
     args: {},
@@ -496,102 +460,6 @@ type SlideTypeList = Infer<typeof appliesToValidator>;
 
 function defaultTemplates(now: string) {
     return [
-        {
-            name: "Welcome Slide",
-            description: "A welcoming slide for church services",
-            slideId: JSON.stringify({
-                type: "text",
-                layout: "full-text",
-                contents: ["Welcome to Church"],
-                background: DEFAULT_BACKGROUNDS.general.background,
-                backgroundType: DEFAULT_BACKGROUNDS.general.backgroundType
-            }),
-            category: "general" as const,
-            thumbnail: DEFAULT_BACKGROUNDS.general.background,
-            appliesTo: ["text"] as SlideTypeList,
-            createdAt: now,
-            updatedAt: now,
-        },
-        {
-            name: "Announcement",
-            description: "General announcement template",
-            slideId: JSON.stringify({
-                type: "text",
-                layout: "full-text",
-                contents: ["Announcement Title", "Details go here"],
-                background: DEFAULT_BACKGROUNDS.announcement.background,
-                backgroundType: DEFAULT_BACKGROUNDS.announcement.backgroundType
-            }),
-            category: "announcement" as const,
-            thumbnail: DEFAULT_BACKGROUNDS.announcement.background,
-            appliesTo: ["text"] as SlideTypeList,
-            createdAt: now,
-            updatedAt: now,
-        },
-        {
-            name: "Worship Lyrics",
-            description: "Template for song lyrics",
-            slideId: JSON.stringify({
-                type: "text",
-                layout: "full-text",
-                contents: ["Song lyrics here"],
-                background: DEFAULT_BACKGROUNDS.worship.background,
-                backgroundType: DEFAULT_BACKGROUNDS.worship.backgroundType
-            }),
-            category: "worship" as const,
-            thumbnail: DEFAULT_BACKGROUNDS.worship.background,
-            appliesTo: ["song", "hymn"] as SlideTypeList,
-            createdAt: now,
-            updatedAt: now,
-        },
-        {
-            name: "Sermon Title",
-            description: "Template for sermon titles",
-            slideId: JSON.stringify({
-                type: "text",
-                layout: "full-text",
-                contents: ["Sermon Title", "Scripture Reference"],
-                background: DEFAULT_BACKGROUNDS.sermon.background,
-                backgroundType: DEFAULT_BACKGROUNDS.sermon.backgroundType
-            }),
-            category: "sermon" as const,
-            thumbnail: DEFAULT_BACKGROUNDS.sermon.background,
-            appliesTo: ["text"] as SlideTypeList,
-            createdAt: now,
-            updatedAt: now,
-        },
-        {
-            name: "Prayer Slide",
-            description: "Template for prayer points",
-            slideId: JSON.stringify({
-                type: "text",
-                layout: "full-text",
-                contents: ["Prayer Point"],
-                background: DEFAULT_BACKGROUNDS.prayer.background,
-                backgroundType: DEFAULT_BACKGROUNDS.prayer.backgroundType
-            }),
-            category: "prayer" as const,
-            thumbnail: DEFAULT_BACKGROUNDS.prayer.background,
-            appliesTo: ["text"] as SlideTypeList,
-            createdAt: now,
-            updatedAt: now,
-        },
-        {
-            name: "Scripture Verse",
-            description: "Template for Bible verses",
-            slideId: JSON.stringify({
-                type: "text",
-                layout: "full-text",
-                contents: ["Bible verse text here", "- Reference"],
-                background: DEFAULT_BACKGROUNDS.bible.background,
-                backgroundType: DEFAULT_BACKGROUNDS.bible.backgroundType
-            }),
-            category: "general" as const,
-            thumbnail: DEFAULT_BACKGROUNDS.bible.background,
-            appliesTo: ["bible", "dictionary"] as SlideTypeList,
-            createdAt: now,
-            updatedAt: now,
-        },
         ...MOTION_TEMPLATES.map(([name, description, motionId, category, contents]) => ({
             name,
             description,
@@ -612,8 +480,18 @@ function defaultTemplates(now: string) {
 }
 
 /** Built-in templates since withdrawn: seeding removes them. ("Ocean" was
- *  replaced by "Silk"; slides already using its background still draw.) */
-const RETIRED_SYSTEM_TEMPLATES = new Set(["Ocean"]);
+ *  replaced by "Silk"; slides already using its background still draw.) The
+ *  photo templates linked Unsplash images, one since removed from Unsplash;
+ *  the motion built-ins replace them. */
+const RETIRED_SYSTEM_TEMPLATES = new Set([
+    "Ocean",
+    "Welcome Slide",
+    "Announcement",
+    "Worship Lyrics",
+    "Sermon Title",
+    "Prayer Slide",
+    "Scripture Verse",
+]);
 
 /**
  * Built-in motion backgrounds, drawn by the app itself (see

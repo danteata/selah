@@ -137,6 +137,7 @@ function TemplateCard({
     // moment the panel opened, which is what made it slow to open. A video
     // card without a saved thumbnail still loads its video for a first frame.
     const [hovered, setHovered] = useState(false)
+    const [pictureFailed, setPictureFailed] = useState(false)
     const active = isSelected || hovered
     const showVideo = isVideoBackground && (active || !template.thumbnail)
     const storageId = template.backgroundStorageId || (slideData?.backgroundStorageId as string | undefined) || null
@@ -178,7 +179,7 @@ function TemplateCard({
                 </div>
             )
         }
-        if (isVideoBackground && (videoUrl || template.thumbnail)) {
+        if (isVideoBackground && (videoUrl || (template.thumbnail && !pictureFailed))) {
             return (
                 <div className="absolute inset-0">
                     {showVideo && videoUrl ? (
@@ -193,7 +194,7 @@ function TemplateCard({
                             playsInline
                         />
                     ) : (
-                        <img src={template.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" />
+                        <img src={template.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" onError={() => setPictureFailed(true)} />
                     )}
                     <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-1.5 py-0.5 bg-black/50 backdrop-blur-sm rounded text-white text-[9px] font-medium">
                         <Video className="w-2.5 h-2.5" />
@@ -204,10 +205,12 @@ function TemplateCard({
             )
         }
 
-        if (template.thumbnail) {
+        // A picture that won't load (a removed stock photo) shows the
+        // placeholder below rather than a broken-image icon.
+        if (template.thumbnail && !pictureFailed) {
             return (
                 <div className="absolute inset-0">
-                    <img src={template.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" />
+                    <img src={template.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" onError={() => setPictureFailed(true)} />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                 </div>
             )
@@ -258,19 +261,28 @@ function TemplateCard({
                 )}
 
                 {/* What it's the default for — top left. */}
+                {/* One badge each for the operator's and yours, slots listed on
+                    one line: a badge per slot wrapped down the card over the
+                    template's name ("Warm Glow" with three of them). */}
                 {(defaultFor.length > 0 || operatorDefaultFor.length > 0) && (
-                    <div className="absolute top-1.5 left-1.5 right-14 z-10 flex flex-wrap gap-0.5">
-                        {operatorDefaultFor.map((slot) => (
-                            <span key={`op-${slot}`} className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-600 text-white" title={`The operator's default for ${SLOT_SHORT_LABELS[slot]}`}>
-                                Operator · {SLOT_SHORT_LABELS[slot]}
+                    <div className="absolute top-1.5 left-1.5 right-14 z-10 flex flex-col items-start gap-0.5">
+                        {operatorDefaultFor.length > 0 && (
+                            <span
+                                className="max-w-full truncate px-1.5 py-0.5 rounded text-[9px] font-semibold bg-blue-600 text-white"
+                                title={`The operator's default for ${operatorDefaultFor.map((slot) => SLOT_SHORT_LABELS[slot]).join(', ')}`}
+                            >
+                                Operator · {operatorDefaultFor.map((slot) => SLOT_SHORT_LABELS[slot]).join(', ')}
                             </span>
-                        ))}
-                        {defaultFor.map((slot) => (
-                            <span key={slot} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--accent-teal)] text-white" title={`Your default for ${SLOT_SHORT_LABELS[slot]}`}>
-                                <Star className="w-2.5 h-2.5 fill-current" />
-                                {SLOT_SHORT_LABELS[slot]}
+                        )}
+                        {defaultFor.length > 0 && (
+                            <span
+                                className="max-w-full inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-[var(--accent-teal)] text-white"
+                                title={`Your default for ${defaultFor.map((slot) => SLOT_SHORT_LABELS[slot]).join(', ')}`}
+                            >
+                                <Star className="w-2.5 h-2.5 flex-shrink-0 fill-current" />
+                                <span className="truncate">{defaultFor.map((slot) => SLOT_SHORT_LABELS[slot]).join(', ')}</span>
                             </span>
-                        ))}
+                        )}
                     </div>
                 )}
 

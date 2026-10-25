@@ -6,7 +6,6 @@ import {
 } from 'lucide-react'
 import { api } from '../../../convex/_generated/api'
 import { useTemplates, TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
-import { DEFAULT_BACKGROUNDS } from '../../constants/backgrounds'
 import { openFileDialog } from '../../utils/fileDialog'
 import { isDesktop } from '../../platform'
 import { generateThumbnail } from '../../utils/templateThumbnail'
@@ -56,7 +55,9 @@ interface CreateTemplateModalProps {
     editingTemplate?: TemplateItem | null
 }
 
-const DEFAULT_BACKGROUND_IMAGE = DEFAULT_BACKGROUNDS.general.background
+// A new template starts on a motion background: drawn by the app, so it
+// can't go missing the way a stock photo link can.
+const NEW_TEMPLATE_BACKGROUND = `${MOTION_PREFIX}${OFFERED_MOTION_BACKGROUNDS[0].id}`
 
 const GRADIENT_OPTIONS = [
     { name: 'Purple Dream', value: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
@@ -65,13 +66,6 @@ const GRADIENT_OPTIONS = [
     { name: 'Forest', value: 'linear-gradient(135deg, #1a472a 0%, #2d5a3d 100%)' },
     { name: 'Night Sky', value: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)' },
     { name: 'Warm Glow', value: 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)' },
-]
-
-const PRESET_IMAGES = [
-    { name: 'Hymn', url: DEFAULT_BACKGROUNDS.hymn.background },
-    { name: 'Bible', url: DEFAULT_BACKGROUNDS.bible.background },
-    { name: 'Text', url: DEFAULT_BACKGROUNDS.text.background },
-    { name: 'Prayer', url: DEFAULT_BACKGROUNDS.prayer.background },
 ]
 
 /**
@@ -113,8 +107,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     const [appliesTo, setAppliesTo] = useState<SlideType[]>(['any'])
     const [description, setDescription] = useState('')
     const [content, setContent] = useState('')
-    const [backgroundType, setBackgroundType] = useState<'image' | 'gradient' | 'color' | 'video' | 'motion'>('image')
-    const [background, setBackground] = useState(DEFAULT_BACKGROUNDS.general.background)
+    const [backgroundType, setBackgroundType] = useState<'image' | 'gradient' | 'color' | 'video' | 'motion'>('motion')
+    const [background, setBackground] = useState(NEW_TEMPLATE_BACKGROUND)
     const [customImageUrl, setCustomImageUrl] = useState('')
     const [customColor, setCustomColor] = useState('#667eea')
     const [isSaving, setIsSaving] = useState(false)
@@ -175,8 +169,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 }
 
                 setContent(slideData?.contents?.[0] || '')
-                setBackground(slideData?.background || editingTemplate.thumbnail || DEFAULT_BACKGROUNDS.general.background)
-                setBackgroundType(slideData?.backgroundType || 'image')
+                setBackground(slideData?.background || editingTemplate.thumbnail || NEW_TEMPLATE_BACKGROUND)
+                setBackgroundType(slideData?.backgroundType || (slideData?.background || editingTemplate.thumbnail ? 'image' : 'motion'))
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
                 setLocalFilePath(slideData?.localFilePath || null)
@@ -198,8 +192,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                 setAppliesTo(['any'])
                 setDescription('')
                 setContent('')
-                setBackgroundType('image')
-                setBackground(DEFAULT_BACKGROUNDS.general.background)
+                setBackgroundType('motion')
+                setBackground(NEW_TEMPLATE_BACKGROUND)
                 setCustomImageUrl('')
                 setCustomColor('#667eea')
                 setLocalFilePath(null)
@@ -221,7 +215,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     // with the stock one for its type.
     const chooseBackgroundType = (type: 'image' | 'gradient' | 'color') => {
         setBackgroundType(type)
-        if (type === 'image') setBackground(DEFAULT_BACKGROUND_IMAGE)
+        // No stock photo to start from: the picture is uploaded or linked.
+        if (type === 'image') setBackground('')
         else if (type === 'gradient') setBackground(GRADIENT_OPTIONS[0].value)
         else setBackground(customColor)
     }
@@ -424,12 +419,18 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
     // in place, and the saved template played it as a black <video>.
     const missingVideo = backgroundType === 'video' && !backgroundStorageId && !localFilePath
         && (!background || isImageUrl(background) || background.startsWith('linear-gradient') || background.startsWith('#'))
+    // Likewise a picture template needs a picture, now that "Image" starts empty.
+    const missingPicture = backgroundType === 'image' && !background && !backgroundStorageId && !localFilePath
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!name.trim()) return
         if (missingVideo) {
             alert('Choose a video for this template, or pick another background type.')
+            return
+        }
+        if (missingPicture) {
+            alert('Choose a picture for this template, or pick another background type.')
             return
         }
 
@@ -879,26 +880,6 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
 
                             <FindFreeBackgrounds />
 
-                            {/* Preset Images */}
-                            <div className="grid grid-cols-4 gap-2">
-                                {PRESET_IMAGES.map((img) => (
-                                    <button
-                                        key={img.name}
-                                        type="button"
-                                        onClick={() => setBackground(img.url)}
-                                        className={`aspect-video rounded-lg overflow-hidden border-2 transition-all ${background === img.url
-                                            ? 'border-[var(--accent-teal)] ring-2 ring-[var(--accent-teal)]/20'
-                                            : 'border-[var(--border-subtle)] hover:border-gray-300 dark:hover:border-gray-600'
-                                            }`}
-                                    >
-                                        <div
-                                            className="w-full h-full bg-cover bg-center"
-                                            style={{ backgroundImage: `url(${img.url})` }}
-                                        />
-                                    </button>
-                                ))}
-                            </div>
-
                             {/* Custom Image URL */}
                             <div className="relative">
                                 <Upload className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
@@ -1159,8 +1140,8 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
                     </button>
                     <button
                         type="submit"
-                        disabled={isSaving || !name.trim() || missingVideo}
-                        title={missingVideo ? 'Choose a video first' : undefined}
+                        disabled={isSaving || !name.trim() || missingVideo || missingPicture}
+                        title={missingVideo ? 'Choose a video first' : missingPicture ? 'Choose a picture first' : undefined}
                         className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[var(--accent-teal)] hover:brightness-110 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
                     >
                         {isSaving ? (
