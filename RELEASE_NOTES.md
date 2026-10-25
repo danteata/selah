@@ -1,38 +1,43 @@
-## Selah 0.1.41
+## Selah 0.1.42
 
-Run a service from your phone: step through verses and songs, and see what the sermon listener at the desk just heard. Song slides now say what they are, templates are your church's own, and your own videos no longer hit a size limit.
+The sermon listener keeps going on slower computers, the main NDI output shows the slide again, and phones work properly as remote controls: on their side, as contributors and when signing in on a new device. Built-in templates are now all motion backgrounds, and the desk now announces itself on the Wi-Fi for the new Android app (preview).
+
+### Sermon listener
+
+- **No more silent sermons on slower computers.** On a computer transcribing on its processor, a live stream that couldn't keep up held the model, so nothing at all was transcribed and the listener stopped with "The live stream has held the transcription model". A stream that falls behind is now dropped within a second or two of speech, and that model then transcribes each sentence in one pass on this computer, remembered across restarts.
+- **One dropped sentence no longer stops listening.** If the model is briefly busy, that sentence is skipped and the listener carries on. Only if it keeps happening does it stop, with a suggestion to choose a smaller model.
+- **Tip:** on a computer without a separate graphics card, **Parakeet Tiny (English)** (Settings → Sermon Listener) is the fastest choice.
+
+### NDI
+
+- **The main NDI output shows the slide again.** Receivers that respect transparency showed it as a dark, empty picture, while the alternate output was fine. It's now sent as a solid picture.
 
 ### Selah on a phone
 
-- **Previous and next verse.** While a Bible reading is on the screen, the bar under your thumb has **‹ Verse · Psalms 23:3 · Verse ›**, the same step the desktop's verse navigator makes. A range keeps its size (16–18 steps to 19–21) and stops at the end of the chapter.
-- **Songs, section by section.** While a song is up, its sections sit above **Next** (Verse 1, Chorus, Verse 2…), each one tap from the screen. Next and Up next go through the rest of the song first, then on to what follows it, and the top of the screen shows where you are ("Made a Way · Chorus · 2 of 5").
-- **Heard just now.** The verses the sermon listener on the desk's computer just heard appear on your phone, ready to put up (or to suggest, for contributors).
-- **Next is always in reach.** In a phone browser, Prev and Next could sit hidden under the bottom bar. They now stay above it.
-- **The sermon listener moves to More.** A phone browser can't listen without breaks (Android beeps at every pause, and it stops when the screen locks), so the listener explains this and suggests running it on the desk's computer. It keeps its tab while it's running on your phone, so you can always stop it.
+- **Turn your phone sideways.** The live slide fills the left of the screen, with what's next and the controls on the right. Before, a phone on its side got the desk layout, squeezed into a few centimetres with nothing able to scroll.
+- **A Live tab.** The first tab is now **Live**, with a red dot while something's on the screen. Putting a verse or song up from Bible or Music brings you back to it.
+- **Songs a helper puts up reach everyone.** A contributor's song used to send only its first slide to the session; the rest stayed on their phone. Now the whole song joins the operator's deck, so every section can be stepped through, on every device and after a reload.
+- **No "no session" flash on opening.** The phone shows "Joining the service…" until it has the session, instead of "Idle, start a session, nothing queued" and then jumping.
+- **Clearer and quieter:** "Verse 1 · 2 of 5" sits beside LIVE where it fits; no "Live slide updated" pop-up at every change; Add isn't offered for slides already on the deck; the Bible list marks the verse that is actually on the screen as LIVE; and the trial banner is for admins only.
 
-### Songs
+### Android app (preview)
 
-- **Song slides are named for their section.** Slides were "Verse 1, Verse 2, Verse 3…" in order, choruses included. They now say **Chorus**, **Bridge**, **Verse 2**, on the desktop and the phone.
-- **Headings stay off the screen.** A "Chorus" or "[Verse 2]" line in the lyrics was shown with the words. It now only names the slide, and a "Chorus" on its own between verses brings the chorus back.
-- **Following a song by ear stays on the right slide** after a chorus that's written out twice. It used to drift one slide behind.
-- Songs already in a service keep their old names until they're added again.
+- **Selah as an Android app.** The same Selah you use in a phone's browser, as an app. For now it's installed by hand from a file; it isn't in the Play Store yet.
+- **It finds the desk on the Wi-Fi.** The desk app now announces itself on the local network for your church, and the Android app lists it under **More → On this Wi-Fi**. This is the first step towards phones talking to the desk directly, without going through the internet. Church guest networks that keep devices apart will show nothing, and everything carries on as before.
+- **Voice search works in the app**, using Android's own speech recognition.
 
-### Templates
+### Signing in
 
-- **Organised by what they're for.** The Templates panel groups templates by what they work with (Bible verses, Songs…), and each card shows and sets the slide types it's your default for.
-- **Favourites are your church's**, not one list shared by everyone, and they come first in the Bible and Songs pickers.
-- **The operator's templates are the session's house style.** A slide a helper adds without picking a template uses the operator's default.
-- **Your template videos stay on your computer until you choose to share them.** A template whose video is only on this computer says so and offers **Sync to cloud**. Nothing uploads just because you're online.
-- Built-in templates say which slides they suit, and resetting them keeps your defaults and favourites.
+- **Signing in on a new phone or computer works.** When a code was needed to confirm a new device, the sign-in page did nothing at all. It now asks for the emailed code. "Resend" on sign-up sends a new code too.
 
-### Your own media
+### Live sessions
 
-- **No size limit on files that stay with you.** Adding a video to the media library took nothing over 50 MB, even though it never leaves your device. Any size works now. The limit only applies when you sync a file to the cloud.
-- **Template videos in the browser** are checked against your church's remaining template space before they upload, not after.
+- **Change who can drive the screen mid-service.** The operator can switch the session between Strict, Review and Open from the session badge, on the desk or a phone.
+- **The service order opens itself.** A computer with no schedule chosen opens the running session's, and a new schedule opens as soon as it's created.
 
-### Fixes
+### Templates and media
 
-- **Going live from search is as quick as from the queue** in a live session.
-- **A payment upgrades the church it was made for**, even after moving church.
-- Church data stays with its church: templates, uploaded files, sermon-listener patterns and transcripts can no longer be read or deleted across churches.
-- Invite emails are capped at 30 a day per church.
+- **Motion backgrounds for everything built in.** The stock-photo templates are gone (one photo had been removed from its site and showed as broken), new slides and new templates start on a motion background, and saved defaults that were still the old photos move to motion. Backgrounds you chose stay.
+- **Templates and Media open faster.** Cards animate or play only when you hover over or pick them, and media files are read once rather than every time the panel opens.
+- **Media that won't play says why:** the file is on another computer, or this computer can't play its format.
+- A template card with several defaults no longer covers its own name.
