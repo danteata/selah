@@ -1,3 +1,4 @@
+import { useLanAnnounce } from '../hooks/useLanAnnounce'
 import { useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react'
 import { Shield, Book, X, Mic, Ticket } from 'lucide-react'
@@ -90,6 +91,7 @@ export default function Dashboard() {
 
     // Collaboration toast notifications
     useCollaborationToasts(currentUser?.churchId || undefined, sessionId || undefined)
+    useLanAnnounce(currentUser?.churchId)
 
     // Sync live state to other windows (for multi-monitor support)
     useLiveSync()

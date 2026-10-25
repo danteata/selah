@@ -100,3 +100,5 @@ src-tauri/linux-runtime/*
 
 # Golden-image diffs written when a comparison fails (bun run test:golden)
 test-results/
+mobile/src-tauri/target
+crates/*/target

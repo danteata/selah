@@ -31,6 +31,7 @@ tauri::embed_plist::embed_info_plist!(concat!(env!("CARGO_MANIFEST_DIR"), "/Info
 mod audio_capture;
 mod dictation_pill;
 mod embeddings;
+mod lan;
 mod license;
 mod logging;
 mod memory;
@@ -323,7 +324,10 @@ pub fn run() {
         .manage(ShortcutRegistry::default())
         .manage(multi_monitor_state.clone())
         .manage(ndi_manager.clone())
+        .manage(lan::LanState::default())
         .invoke_handler(tauri::generate_handler![
+            lan::lan_announce,
+            lan::lan_stop,
             embeddings::embed_texts,
             embeddings::embeddings_unload,
             list_audio_devices,
