@@ -29,6 +29,11 @@ const TEMPLATES: TemplateItem[] = [
 
 const h = vi.hoisted(() => ({ slideTypeProp: undefined as SlideType | undefined }))
 
+// Which way each motion card is drawn: still, or animating.
+vi.mock('../../motion/MotionCanvas', () => ({
+    MotionCanvas: ({ still }: { still?: boolean }) => <div data-testid="motion-canvas" data-still={String(!!still)} />,
+}))
+
 vi.mock('@clerk/clerk-react', () => ({ useAuth: () => ({ isSignedIn: true }) }))
 vi.mock('../../modals', () => ({ CreateTemplateModal: () => null }))
 vi.mock('../../../hooks/useUserRole', () => ({ useUserRole: () => ({ isSuperadmin: false, currentUser: { _id: 'me' } }) }))
@@ -73,6 +78,29 @@ const onSelect = vi.fn()
 function renderBrowser() {
     return render(<TemplateBrowser isInline onSelect={onSelect} slideType={h.slideTypeProp} />)
 }
+
+describe('TemplateBrowser cards', () => {
+    it('keeps motion cards still until one is hovered', async () => {
+        // Every motion card ran its own animation as the panel opened.
+        const { OFFERED_MOTION_BACKGROUNDS, MOTION_PREFIX } = await import('../../motion/motionBackgrounds')
+        const motion = template({
+            _id: 'm', name: 'Moving', category: 'worship',
+            slideId: JSON.stringify({ background: `${MOTION_PREFIX}${OFFERED_MOTION_BACKGROUNDS[0].id}` }),
+        })
+        TEMPLATES.push(motion)
+        try {
+            renderBrowser()
+            const card = screen.getByRole('button', { name: 'Moving' })
+            expect(within(card).getByTestId('motion-canvas')).toHaveAttribute('data-still', 'true')
+            fireEvent.mouseEnter(card)
+            expect(within(card).getByTestId('motion-canvas')).toHaveAttribute('data-still', 'false')
+            fireEvent.mouseLeave(card)
+            expect(within(card).getByTestId('motion-canvas')).toHaveAttribute('data-still', 'true')
+        } finally {
+            TEMPLATES.pop()
+        }
+    })
+})
 
 describe('TemplateBrowser', () => {
     beforeEach(() => {

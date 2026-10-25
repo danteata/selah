@@ -559,7 +559,7 @@ function MediaTile({ item, variant, selected, onSelect, onDelete, onSyncToCloud 
                 {videoFileUrl ? (
                     <VideoThumbnail src={videoFileUrl} className="w-full h-full object-contain bg-gray-100 dark:bg-gray-800" />
                 ) : thumbnailUrl ? (
-                    <img src={thumbnailUrl} alt={item.name} className="w-full h-full object-contain bg-gray-100 dark:bg-gray-800" />
+                    <img src={thumbnailUrl} alt={item.name} loading="lazy" decoding="async" className="w-full h-full object-contain bg-gray-100 dark:bg-gray-800" />
                 ) : (
                     <div className="w-full h-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center">
                         {item.type === 'video' && <Film className="w-6 h-6 text-gray-400" />}
@@ -611,7 +611,7 @@ function MediaTile({ item, variant, selected, onSelect, onDelete, onSyncToCloud 
             {videoFileUrl ? (
                 <VideoThumbnail src={videoFileUrl} className="w-12 h-10 object-contain bg-gray-100 dark:bg-gray-800 rounded flex-shrink-0" />
             ) : thumbnailUrl ? (
-                <img src={thumbnailUrl} alt={item.name} className="w-12 h-10 object-contain bg-gray-100 dark:bg-gray-800 rounded flex-shrink-0" />
+                <img src={thumbnailUrl} alt={item.name} loading="lazy" decoding="async" className="w-12 h-10 object-contain bg-gray-100 dark:bg-gray-800 rounded flex-shrink-0" />
             ) : (
                 <div className="w-12 h-10 flex-shrink-0 rounded bg-gray-200 dark:bg-gray-800 flex items-center justify-center">
                     <Film className="w-4 h-4 text-gray-400" />

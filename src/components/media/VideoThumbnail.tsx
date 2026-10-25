@@ -24,7 +24,9 @@ export function VideoThumbnail({ src, className, style }: VideoThumbnailProps) {
             style={style}
             muted
             playsInline
-            preload="auto"
+            // The first frame, not the film: "auto" buffered every video in
+            // the media panel at once when it opened.
+            preload="metadata"
             onLoadedMetadata={(e) => {
                 const video = e.currentTarget
                 if (video.currentTime === 0) {

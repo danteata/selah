@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
+import { forgetLocalMediaBlobUrl } from './useLocalMediaBlobUrl'
 import { useEntitlements } from '../providers/LicenseProvider'
 import { isDesktop } from '../platform'
 import { saveFileToLocalMediaLibrary, readLocalMediaFile, deleteLocalMediaFile } from '../services/localMediaFiles'
@@ -183,7 +184,10 @@ export function useMediaLibrary(): UseMediaLibraryReturn {
 
         if (local) {
             if (local.localFilePath) await deleteLocalMediaFile(local.localFilePath)
-            if (local.hasBlob) await deleteLocalMediaBlob(local.id)
+            if (local.hasBlob) {
+                await deleteLocalMediaBlob(local.id)
+                forgetLocalMediaBlobUrl(local.id)
+            }
             await deleteLocalMediaItem(local.id)
             if (local.syncedMediaId && !isOffline) {
                 await deleteItemMutation({ mediaId: local.syncedMediaId })

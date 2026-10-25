@@ -20,6 +20,7 @@ import { useTemplateMediaState, useUploadTemplateBackground } from '../../hooks/
 import { canUploadBackground } from '../../services/templates/templateMediaSync'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useProgressiveList } from '../../hooks/useProgressiveList'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { X, Search, Grid, List, Plus, Sparkles, Heart, Check, Trash2, Loader2, RefreshCw, Edit2, LayoutTemplate, Video, Star, Save, CloudUpload } from 'lucide-react'
 import {
@@ -131,11 +132,18 @@ function TemplateCard({
     }, [template.slideId])
 
     const isVideoBackground = slideData?.backgroundType === 'video'
+    // Animate and play only the card in hand. Every motion card ran its own
+    // animation and every video card fetched and played its whole file the
+    // moment the panel opened, which is what made it slow to open. A video
+    // card without a saved thumbnail still loads its video for a first frame.
+    const [hovered, setHovered] = useState(false)
+    const active = isSelected || hovered
+    const showVideo = isVideoBackground && (active || !template.thumbnail)
     const storageId = template.backgroundStorageId || (slideData?.backgroundStorageId as string | undefined) || null
-    const fileUrl = useFileUrl(isVideoBackground ? storageId : null)
+    const fileUrl = useFileUrl(showVideo ? storageId : null)
     const localBg = useLocalBackground(
-        isVideoBackground ? (slideData?.background || '') : '',
-        isVideoBackground ? (slideData?.localFilePath || '') : '',
+        showVideo ? (slideData?.background || '') : '',
+        showVideo ? (slideData?.localFilePath || '') : '',
     )
     const mediaState = useTemplateMediaState(template._id)
     const uploadBackground = useUploadTemplateBackground()
@@ -161,7 +169,7 @@ function TemplateCard({
         if (motion) {
             return (
                 <div className="absolute inset-0">
-                    <MotionCanvas background={motion} className="absolute inset-0" />
+                    <MotionCanvas background={motion} className="absolute inset-0" still={!active} />
                     <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-1.5 py-0.5 bg-black/50 backdrop-blur-sm rounded text-white text-[9px] font-medium">
                         <Sparkles className="w-2.5 h-2.5" />
                         Motion
@@ -170,18 +178,23 @@ function TemplateCard({
                 </div>
             )
         }
-        if (isVideoBackground && videoUrl) {
+        if (isVideoBackground && (videoUrl || template.thumbnail)) {
             return (
                 <div className="absolute inset-0">
-                    <video
-                        ref={videoRef}
-                        src={videoUrl}
-                        className="w-full h-full object-cover"
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                    />
+                    {showVideo && videoUrl ? (
+                        <video
+                            ref={videoRef}
+                            src={videoUrl}
+                            className="w-full h-full object-cover"
+                            autoPlay={active}
+                            preload={active ? 'auto' : 'metadata'}
+                            loop
+                            muted
+                            playsInline
+                        />
+                    ) : (
+                        <img src={template.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" />
+                    )}
                     <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-1.5 py-0.5 bg-black/50 backdrop-blur-sm rounded text-white text-[9px] font-medium">
                         <Video className="w-2.5 h-2.5" />
                         Video
@@ -194,7 +207,7 @@ function TemplateCard({
         if (template.thumbnail) {
             return (
                 <div className="absolute inset-0">
-                    <img src={template.thumbnail} className="w-full h-full object-cover" alt="" />
+                    <img src={template.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                 </div>
             )
@@ -223,6 +236,8 @@ function TemplateCard({
             aria-pressed={isSelected}
             aria-label={template.name}
             onClick={onSelect}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect() } }}
             className={`group relative rounded-lg overflow-hidden border-2 transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-teal)] ${isSelected
                 ? 'border-[var(--accent-teal)] shadow-lg shadow-[var(--accent-teal)]/10'
@@ -450,6 +465,8 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
             return t.name.toLowerCase().includes(query) || !!t.description?.toLowerCase().includes(query)
         })
     }, [templates, activeSlideType, getTemplatesForSlideType, searchQuery, showFavorites])
+    // The first cards first, the rest just after, as the songs list does.
+    const shownTemplates = useProgressiveList(filteredTemplates, 24)
 
     const selectedTemplate = filteredTemplates.find((t) => t._id === selectedId) ?? null
     const selectedSlots = selectedTemplate ? slotsFor(selectedTemplate) : []
@@ -615,7 +632,7 @@ export function TemplateBrowser({ isOpen = true, onClose, onSelect, onCreateCust
                     </div>
                 ) : (
                     <div className={`grid ${isInline ? 'grid-cols-2' : viewMode === 'list' ? 'grid-cols-1' : 'grid-cols-2 sm:grid-cols-3'} gap-2`}>
-                        {filteredTemplates.map((template) => (
+                        {shownTemplates.map((template) => (
                             <TemplateCard
                                 key={template._id}
                                 template={template}
