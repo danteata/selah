@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import type { Slide, Song } from '../../types'
 import type { TranscriptSegment } from '../../types/sermon-listener'
 
@@ -113,6 +113,9 @@ function feed(rerender: () => void, text: string) {
 
 /** Sing enough of a song for the confirmation tracker to commit to it, then
  *  let the pending index build and slide creation settle. */
+// Detection finishes asynchronously, after the index is built. One microtask
+// per line is usually enough but not on a busy machine, so a test that expects
+// a detection waits for it rather than checking straight away.
 async function singUntilDetected(rerender: () => void, lines: string[]) {
     for (const line of lines) {
         feed(rerender, line)
@@ -149,7 +152,7 @@ describe('useSongAutoDetect (library index freshness)', () => {
             'I once was lost but now am found',
         ])
 
-        expect(useAppStore.getState().liveSlideId).toBe('slide-grace-v1')
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-grace-v1'))
     })
 
     it('detects a song imported mid-session, once the library signals the change', async () => {
@@ -182,7 +185,7 @@ describe('useSongAutoDetect (library index freshness)', () => {
             'I dare not trust the sweetest frame',
         ])
 
-        expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1')
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
     })
 })
 
@@ -230,7 +233,7 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
         // the old song on screen for minutes.
         const { useAppStore, rerender } = await withGraceLive(0.4)
         await singUntilDetected(rerender, CORNERSTONE_LINES)
-        expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1')
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
     })
 
     it('leaves a song the tracker is following well alone', async () => {
