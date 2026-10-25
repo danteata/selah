@@ -341,4 +341,23 @@ describe('nativeTranscriptionService', () => {
         await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('Transcription is failing: decode failed'))
         expect(invokeMock).toHaveBeenCalledWith('stop_capture')
     })
+
+    it("drops a segment the busy model couldn't take, without stopping the listener", async () => {
+        // The live stream can hold the model past the second pass's 15s wait.
+        // Three of those stopped the listener mid-service, though only those
+        // segments were lost.
+        invokeMock.mockImplementation((cmd: string) =>
+            Promise.resolve(cmd === 'get_loaded_native_model' ? null : undefined))
+        const onError = vi.fn()
+        await nativeTranscriptionService.start({ language: 'en-US', onResult: vi.fn(), onError })
+        const failed = listenMock.mock.calls.find(([event]) => event === 'native-transcription-error')?.[1] as (e: { payload: unknown }) => void
+        const busy = 'The live stream has held the transcription model for 15s without releasing it'
+
+        for (let i = 0; i < 9; i++) failed({ payload: busy })
+        expect(onError).not.toHaveBeenCalled()
+
+        // Ten in a row with nothing heard: this computer can't keep up.
+        failed({ payload: busy })
+        await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(expect.stringContaining("can't keep up on this computer")))
+    })
 })

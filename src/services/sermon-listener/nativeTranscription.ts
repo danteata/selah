@@ -21,6 +21,19 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 // Consecutive failed segments before the operator is told transcription is failing.
 const NATIVE_FAILURES_BEFORE_ERROR = 3
+// Segments dropped in a row because the model was busy before that's a
+// computer that can't keep up rather than a passing backlog (see below).
+const BUSY_DROPS_BEFORE_ERROR = 10
+
+/**
+ * A segment that waited its turn for the model and didn't get it: the live
+ * stream held the model (src-tauri engine.rs, `take_engine_for_batch`). Only
+ * that segment is lost; the engine is fine. Counted with real failures, three
+ * of them stopped the sermon listener in the middle of a service.
+ */
+export function isModelBusyDrop(message: string): boolean {
+    return /held the transcription model/i.test(message)
+}
 import { isDesktop } from '@/platform'
 import { useAppStore } from '../../store/appStore'
 import { DEFAULT_NATIVE_MODEL_ID } from './nativeModelManager'
@@ -156,9 +169,11 @@ class NativeTranscriptionService {
             // fluke; several in a row mean the engine is broken, and the
             // operator needs to know rather than watch an empty transcript.
             let consecutiveFailures = 0
+            let consecutiveBusyDrops = 0
 
             this.unlisten = await listen<TranscriptionResultEvent>('transcription-result', (event) => {
                 consecutiveFailures = 0
+                consecutiveBusyDrops = 0
                 if (this.isBusy() && event.payload.text) {
                     const { text, segments } = event.payload
                     options.onResult(text, true, segments?.length ? segments : undefined)
@@ -188,6 +203,15 @@ class NativeTranscriptionService {
 
             this.unlistenError = await listen<string>('native-transcription-error', (event) => {
                 if (!this.isRunning) return
+                if (isModelBusyDrop(event.payload)) {
+                    consecutiveBusyDrops += 1
+                    console.warn('[nativeWhisper] segment dropped, the model was busy:', event.payload)
+                    if (consecutiveBusyDrops === BUSY_DROPS_BEFORE_ERROR) {
+                        const message = "Transcription can't keep up on this computer. Choose a smaller model in Settings → Sermon Listener."
+                        void this.stop().catch(() => {}).finally(() => options.onError(message))
+                    }
+                    return
+                }
                 consecutiveFailures += 1
                 console.warn('[nativeWhisper] segment failed:', event.payload)
                 if (consecutiveFailures === NATIVE_FAILURES_BEFORE_ERROR) {
