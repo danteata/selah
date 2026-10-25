@@ -2742,7 +2742,7 @@ dependencies = [
 
 [[package]]
 name = "selah-mobile"
-version = "0.1.41"
+version = "0.1.42"
 dependencies = [
  "selah-lan",
  "serde",
