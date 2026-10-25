@@ -3,6 +3,7 @@ import type { Slide, ExternalVideo } from '../../types'
 import { backgroundTypes } from '../../types'
 import { getEmbedUrl } from '../../utils/externalVideo'
 import { getObjectFit } from '../../utils/mediaFit'
+import { explainMediaFailure, mediaFailureText, type MediaFailure } from '../../utils/mediaFailure'
 
 export interface MediaProgress {
     currentTime: number
@@ -32,8 +33,21 @@ interface MediaContentProps {
 function MediaContentImpl({ slide, src, muted, className, style, onProgress }: MediaContentProps) {
     const videoRef = useRef<HTMLVideoElement | null>(null)
     // Which source failed to load, so a new one gets a fresh chance.
-    const [failedSrc, setFailedSrc] = useState<string | null>(null)
-    const failed = !!src && failedSrc === src
+    const [failure, setFailure] = useState<{ src: string; why: MediaFailure } | null>(null)
+    const failed = !!src && failure?.src === src
+    const onMediaError = useCallback((source: string, error: MediaError | null) => {
+        console.warn('[MediaContent] media failed to load:', source, 'error code:', error?.code ?? 'none', error?.message ?? '')
+        setFailure({ src: source, why: 'unavailable' })
+        void explainMediaFailure(source, error).then((why) => {
+            console.warn(`[MediaContent] ${source} failed: ${why}`)
+            setFailure((current) => (current?.src === source ? { src: source, why } : current))
+        })
+    }, [])
+    // A video whose sound plays but whose picture this computer can't decode:
+    // no error fires, the timer runs, and the screen stays black. Which src it
+    // was found on, as with failure.
+    const [noPictureSrc, setNoPictureSrc] = useState<string | null>(null)
+    const noPicture = !!src && noPictureSrc === src
     const lastAppliedSeekRef = useRef<number | undefined>(undefined)
 
     const isPlaying = slide.slideStyle?.isMediaPlaying ?? true
@@ -100,15 +114,16 @@ function MediaContentImpl({ slide, src, muted, className, style, onProgress }: M
     // to tell the operator. Their preview (the `muted` panels) now says so;
     // the projector stays black rather than show an error to the room.
     if (failed) {
+        const kind = slide.backgroundType === backgroundTypes.video ? 'video' : 'picture'
         return muted ? (
-            <div className={`${className ?? ''} flex items-center justify-center bg-black text-xs text-white/70`} style={style}>
-                Couldn't load this media
+            <div className={`${className ?? ''} flex items-center justify-center bg-black px-6 text-center text-xs text-white/70`} style={style}>
+                {mediaFailureText(failure!.why, kind)}
             </div>
         ) : null
     }
 
     if (slide.backgroundType === backgroundTypes.video && src) {
-        return (
+        const video = (
             <video
                 ref={videoRef}
                 src={src}
@@ -125,16 +140,28 @@ function MediaContentImpl({ slide, src, muted, className, style, onProgress }: M
                 onLoadedMetadata={(e) => {
                     const v = e.currentTarget
                     onProgress?.({ currentTime: v.currentTime, duration: v.duration || 0, paused: v.paused })
+                    if (v.videoWidth === 0 && v.duration > 0) {
+                        console.warn('[MediaContent] video plays but has no picture this computer can decode:', src)
+                        setNoPictureSrc(src)
+                    }
                 }}
                 onEnded={(e) => {
                     const v = e.currentTarget
                     onProgress?.({ currentTime: v.currentTime, duration: v.duration || 0, paused: true })
                 }}
-                onError={() => {
-                    console.warn('[MediaContent] video failed to load:', src)
-                    setFailedSrc(src)
-                }}
+                onError={(e) => onMediaError(src, e.currentTarget.error)}
             />
+        )
+        // The room keeps the sound; the operator's preview says why there's
+        // no picture.
+        if (!noPicture || !muted) return video
+        return (
+            <div className={`${className ?? ''} relative`} style={style}>
+                {video}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/80 px-6 text-center text-xs text-white/80">
+                    {mediaFailureText('format', 'video')}
+                </div>
+            </div>
         )
     }
 
@@ -145,10 +172,7 @@ function MediaContentImpl({ slide, src, muted, className, style, onProgress }: M
                 className={className}
                 style={{ objectFit: getObjectFit(slide.slideStyle?.backgroundFillType), ...style }}
                 alt={slide.name || 'Media'}
-                onError={() => {
-                    console.warn('[MediaContent] image failed to load:', src)
-                    setFailedSrc(src)
-                }}
+                onError={() => onMediaError(src, null)}
             />
         )
     }
