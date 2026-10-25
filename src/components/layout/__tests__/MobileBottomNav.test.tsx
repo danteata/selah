@@ -15,6 +15,7 @@ vi.mock('../../sermon-listener/SermonListenerContext', () => ({
 }))
 
 vi.mock('../../../hooks/useIsMobile', () => ({ useIsMobile: () => true }))
+vi.mock('../../../hooks/useUserRole', () => ({ useUserRole: () => ({ currentUser: { churchId: 'c1' } }) }))
 
 const { MobileBottomNav } = await import('../MobileBottomNav')
 

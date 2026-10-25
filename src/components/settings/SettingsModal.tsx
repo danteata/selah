@@ -21,7 +21,7 @@ import { SongMigrationWizard } from '../admin/SongMigrationWizard'
 import { BibleVersionUploader, GlobalSermonListenerSettingsPanel } from '../admin'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useAppUpdater } from '../../hooks/useAppUpdater'
-import { isDesktop } from '../../platform'
+import { isDesktop, isDesktop as isDesktopApp } from '../../platform'
 import {
     listGlobalShortcuts,
     DEFAULT_DICTATION_HOTKEY,
@@ -1922,7 +1922,8 @@ function ShortcutsSettings() {
 function UpdatesSettings() {
     const { state, message, available, install, runCheck } = useAppUpdater()
 
-    const isDesktop = typeof window !== 'undefined' && !!(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
+    // The desk app; the phone app (Tauri on Android/iOS) has none of its settings.
+    const isDesktop = isDesktopApp()
 
     // The old `window.__TAURI__.metadata.version` path isn't populated in
     // Tauri v2, so it always fell through to the hardcoded "0.1.0". Read the

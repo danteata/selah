@@ -25,6 +25,9 @@ import {
 import { useAppStore } from '../../store/appStore'
 import { useSermonListenerContext } from '../sermon-listener/SermonListenerContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useUserRole } from '../../hooks/useUserRole'
+import { isTauriMobile } from '../../platform'
+import { NearbyDesks } from '../live/NearbyDesks'
 import type { NavSection } from '../../types/studio'
 
 const PRIMARY_ITEMS: NavSection[] = ['bible', 'music']
@@ -64,6 +67,7 @@ export function MobileBottomNav() {
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const somethingLive = useAppStore((s) => !!s.liveSlideId)
     const isPhone = useIsMobile()
+    const { currentUser } = useUserRole()
     const sermonListener = useSermonListenerContext()
     const [moreOpen, setMoreOpen] = useState(false)
     // A listener running on this phone keeps its tab, so it's never out of sight.
@@ -230,6 +234,13 @@ export function MobileBottomNav() {
                                     )
                                 })}
                             </div>
+                            {/* The phone app finds the desk on the Wi-Fi (a browser
+                                can't): always here, session or not. */}
+                            {isTauriMobile() && (
+                                <div className="border-t border-[var(--border-subtle)] pt-3">
+                                    <NearbyDesks churchId={currentUser?.churchId} />
+                                </div>
+                            )}
                             <div className="h-14" /> {/* Spacer so the bottom
                                 nav doesn't overlap the sheet's last row. */}
                         </motion.div>
