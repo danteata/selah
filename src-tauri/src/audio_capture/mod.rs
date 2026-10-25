@@ -924,7 +924,7 @@ fn handle_speech_segment(
                 // frontend. Batch transcribing costs one decode and cannot come
                 // up empty for audio that actually contained words.
                 let streamed = finalize
-                    .and_then(crate::transcription::TranscriptionManager::await_finalize)
+                    .and_then(|rx| tm.await_finalize(rx))
                     .filter(|text| !text.trim().is_empty());
                 let via_stream = streamed.is_some();
                 let result = match streamed {

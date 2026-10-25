@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tracing::{debug, error, info, warn};
 
 use transcribe_cpp::{
@@ -60,6 +60,20 @@ const MAX_STREAM_LAG: Duration = Duration::from_secs(3);
 /// How long a batch transcription waits for a live stream to hand the engine
 /// back before giving up on the segment.
 const ENGINE_LEASE_WAIT: Duration = Duration::from_secs(15);
+
+/// Audio a stream must have decoded before its speed is judged.
+const STREAM_SPEED_SAMPLE: Duration = Duration::from_secs(1);
+
+/// Whether a live stream is too slow to keep: decoding takes longer than the
+/// audio lasts once it has seen [`STREAM_SPEED_SAMPLE`] of it, or the frame
+/// just decoded is [`MAX_STREAM_LAG`] behind real time.
+///
+/// Judged after every decode, not only when the next frame is taken: the lag
+/// check used to run between frames alone, so one decode that blocked for a
+/// minute held the engine all that time and the stream was found 94 s behind.
+fn stream_too_slow(audio: Duration, decoding: Duration, lag: Duration) -> bool {
+    lag > MAX_STREAM_LAG || (audio >= STREAM_SPEED_SAMPLE && decoding > audio)
+}
 
 /// Per-session transcription configuration, set from the frontend.
 #[derive(Clone, Debug, Default)]
@@ -339,11 +353,11 @@ pub struct TranscriptionManager {
     /// with the `engine` mutex. Batch transcription waits on it rather than
     /// failing a segment because a stream happened to hold the engine.
     engine_returned: Arc<Condvar>,
-    /// Set when a live stream on the loaded model fell too far behind real
-    /// time (see [`MAX_STREAM_LAG`]). No further streams open until the next
-    /// model load: one that could not keep up once will not keep up on the
-    /// next utterance either, and every attempt holds the engine away from
-    /// batch transcription while it tries.
+    /// Set when a live stream on the loaded model couldn't keep up (see
+    /// [`Self::give_up_streaming`]). No further streams open: one that could
+    /// not keep up once will not on the next utterance either, and every
+    /// attempt holds the engine away from batch transcription while it tries.
+    /// Remembered for this computer across restarts (`streaming_memory`).
     streaming_unusable: Arc<AtomicBool>,
 }
 
@@ -527,7 +541,16 @@ impl TranscriptionManager {
         if let Ok(mut m) = self.current_model_id.lock() {
             *m = Some(model_id.to_string());
         }
-        self.streaming_unusable.store(false, Ordering::Release);
+        let remembered = self.streaming_memory_dir().is_some_and(|dir| {
+            super::streaming_memory::is_unusable(&dir, model_id, env!("CARGO_PKG_VERSION"))
+        });
+        if remembered {
+            info!(
+                "[transcription] {} couldn't stream live on this computer before; transcribing each segment in one pass",
+                model_id
+            );
+        }
+        self.streaming_unusable.store(remembered, Ordering::Release);
         self.touch_activity();
         self.emit_state("loading_completed", Some(model_id), None);
         info!(
@@ -721,26 +744,25 @@ impl TranscriptionManager {
             // that simply found no words in real audio.
             let mut fed_frames: u64 = 0;
             let mut fed_samples: u64 = 0;
+            // How long decoding has taken against how much audio it covered.
+            let mut decoding = Duration::ZERO;
 
             while let Ok(cmd) = rx.recv() {
                 match cmd {
                     StreamCmd::Feed(pcm, sent_at) => {
                         let lag = sent_at.elapsed();
                         if sent_at >= began && lag > MAX_STREAM_LAG {
-                            warn!(
-                                "[transcription] live stream on {:?} fell {:.1}s behind real time; \
-                                 abandoning live streaming for this model and transcribing each \
-                                 segment in one pass instead",
-                                model_id,
-                                lag.as_secs_f32()
+                            self.give_up_streaming(
+                                model_id.as_deref(),
+                                &format!("live stream fell {:.1}s behind real time", lag.as_secs_f32()),
                             );
-                            self.streaming_unusable.store(true, Ordering::Release);
                             abandoned = true;
                             break;
                         }
                         self.touch_activity();
                         fed_frames += 1;
                         fed_samples += pcm.len() as u64;
+                        let decode_began = Instant::now();
                         match stream.feed(&pcm) {
                             Ok(update) => {
                                 if update.committed_changed || update.tentative_changed {
@@ -749,6 +771,22 @@ impl TranscriptionManager {
                                 }
                             }
                             Err(e) => warn!("[transcription] stream feed failed: {}", e),
+                        }
+                        decoding += decode_began.elapsed();
+                        let audio = Duration::from_millis(fed_samples * 1000 / 16_000);
+                        let lag = if sent_at >= began { sent_at.elapsed() } else { Duration::ZERO };
+                        if stream_too_slow(audio, decoding, lag) {
+                            self.give_up_streaming(
+                                model_id.as_deref(),
+                                &format!(
+                                    "live stream decoded {:.1}s of audio in {:.1}s and is {:.1}s behind real time",
+                                    audio.as_secs_f32(),
+                                    decoding.as_secs_f32(),
+                                    lag.as_secs_f32()
+                                ),
+                            );
+                            abandoned = true;
+                            break;
                         }
                     }
                     StreamCmd::Finalize(reply) => {
@@ -855,14 +893,42 @@ impl TranscriptionManager {
     /// `None` means the stream produced nothing usable — it never began, the
     /// model does not stream, or it timed out — and the caller should batch
     /// transcribe the buffered samples instead.
-    pub fn await_finalize(rx: mpsc::Receiver<Option<String>>) -> Option<String> {
+    ///
+    /// A finalize that times out means the stream is far behind, so streaming
+    /// is given up for this model (see [`Self::give_up_streaming`]).
+    pub fn await_finalize(&self, rx: mpsc::Receiver<Option<String>>) -> Option<String> {
         match rx.recv_timeout(Duration::from_secs(30)) {
             Ok(text) => text,
             Err(_) => {
                 warn!("[transcription] stream finalize timed out; falling back to batch");
+                self.give_up_streaming(self.get_current_model().as_deref(), "stream finalize timed out after 30s");
                 None
             }
         }
+    }
+
+    /// Stop opening live streams for the loaded model, and remember on this
+    /// computer that it can't stream here. Every segment is then transcribed
+    /// in one pass. Streams that can't keep up hold the engine away from that
+    /// pass: on a CPU-only Core Ultra, Parakeet Unified's stream fell 94 s
+    /// behind and not one word of a sermon was transcribed.
+    fn give_up_streaming(&self, model_id: Option<&str>, reason: &str) {
+        if self.streaming_unusable.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        warn!(
+            "[transcription] {}; live streaming off for {:?} on this computer, transcribing each segment in one pass",
+            reason, model_id
+        );
+        if let (Some(model_id), Some(dir)) = (model_id, self.streaming_memory_dir()) {
+            if let Err(e) = super::streaming_memory::remember_unusable(&dir, model_id, env!("CARGO_PKG_VERSION")) {
+                warn!("[transcription] couldn't remember that {} can't stream here: {}", model_id, e);
+            }
+        }
+    }
+
+    fn streaming_memory_dir(&self) -> Option<PathBuf> {
+        self.app_handle.path().app_config_dir().ok()
     }
 
     fn emit_stream_text(&self, committed: &str, tentative: &str) {
@@ -1076,6 +1142,13 @@ impl TranscriptionManager {
             }
             let now = Instant::now();
             if now >= deadline {
+                // A stream that keeps the one-pass transcription waiting this
+                // long can't keep up; no more of them for this model.
+                drop(guard);
+                self.give_up_streaming(
+                    self.get_current_model().as_deref(),
+                    &format!("live stream held the model for {}s", ENGINE_LEASE_WAIT.as_secs()),
+                );
                 return Err(anyhow::anyhow!(
                     "The live stream has held the transcription model for {}s without releasing it",
                     ENGINE_LEASE_WAIT.as_secs()
@@ -1358,5 +1431,32 @@ pub fn init_transcribe_cpp_backend() {
             }
         }
         Err(e) => warn!("[transcription] failed to initialize transcribe-cpp backends: {}", e),
+    }
+}
+
+#[cfg(test)]
+mod stream_speed_tests {
+    use super::*;
+
+    const S: fn(f32) -> Duration = Duration::from_secs_f32;
+
+    #[test]
+    fn keeps_a_stream_that_decodes_faster_than_speech() {
+        // 1.9x real time, as Parakeet Unified ran on the CPU in the benchmark.
+        assert!(!stream_too_slow(S(4.0), S(2.1), S(0.2)));
+        // Too early to judge speed from a fraction of a second.
+        assert!(!stream_too_slow(S(0.5), S(0.9), S(0.4)));
+    }
+
+    #[test]
+    fn drops_a_stream_slower_than_speech_after_a_second_of_audio() {
+        // What the sermon's stream did: ~2 s of audio in ~96 s.
+        assert!(stream_too_slow(S(1.0), S(48.0), S(0.0)));
+        assert!(stream_too_slow(S(2.0), S(2.5), S(1.0)));
+    }
+
+    #[test]
+    fn drops_a_stream_that_has_fallen_behind() {
+        assert!(stream_too_slow(S(0.2), S(0.1), S(3.5)));
     }
 }

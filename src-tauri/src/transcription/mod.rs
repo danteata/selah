@@ -8,6 +8,9 @@
 
 pub mod commands;
 pub mod models;
+/// Which models can't stream live on this computer, across restarts. No
+/// native dependencies, so it builds and tests without the inference stack.
+pub mod streaming_memory;
 
 #[cfg(feature = "native-transcription")]
 pub mod engine;
