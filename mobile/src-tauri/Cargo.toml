@@ -1,0 +1,23 @@
+# Selah on a phone, as an app: the same React frontend as the web and desk
+# builds, wrapped for Android and iOS, with the one thing a browser page
+# can't do: find the desk on the local network. Kept apart from the desk's
+# crate (src-tauri), whose audio capture, ONNX Runtime and NDI don't belong
+# on a phone.
+[package]
+name = "selah-mobile"
+version = "0.1.41"
+description = "Selah for phones"
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "selah_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+serde = { version = "1.0", features = ["derive"] }
+selah-lan = { path = "../../crates/selah-lan" }

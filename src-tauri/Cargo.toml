@@ -33,6 +33,7 @@ tar = "0.4"  # tar extraction for Parakeet model tarballs
 scopeguard = "1.2.0"  # For RAII guards (COM cleanup, etc.)
 anyhow = "1"  # Ergonomic error handling in the native transcription engine
 tiny_http = "0.12"  # One-shot HTTP listener for the OAuth callback (port 19888)
+selah-lan = { path = "../crates/selah-lan" }  # The desk announces itself on the local network (src/lan.rs)
 ort = "2.0.0-rc.11"  # ONNX Runtime for Silero VAD
 ndarray = "0.17"  # For tensor operations with ort (must match ort's ndarray version)
 # EmbeddingGemma's tokenizer for native embeddings (src/embeddings.rs). No

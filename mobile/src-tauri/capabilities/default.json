@@ -1,0 +1,7 @@
+{
+    "$schema": "../gen/schemas/mobile-schema.json",
+    "identifier": "default",
+    "description": "Selah for phones",
+    "windows": ["main"],
+    "permissions": ["core:default"]
+}

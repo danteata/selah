@@ -1,0 +1,10 @@
+[package]
+name = "selah-lan"
+version = "0.1.0"
+edition = "2021"
+description = "Selah on the local network: the desk announces itself, phones find it"
+license = "MIT"
+
+[dependencies]
+mdns-sd = "0.21"
+serde = { version = "1.0", features = ["derive"] }

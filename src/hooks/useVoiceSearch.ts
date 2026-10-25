@@ -54,6 +54,7 @@ import {
     startNativeVoiceSearch,
     type NativeVoiceSearchSession,
 } from '../services/dictation/nativeVoiceSearch'
+import { listenOnPhone, phoneSpeechAvailable, stopListeningOnPhone } from '../services/dictation/phoneSpeech'
 
 // The sermon-listener service already declares `SpeechRecognition` /
 // `webkitSpeechRecognition` on the global Window (see
@@ -163,6 +164,8 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
     const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
     /** Non-null while a local-engine session is in flight. */
     const nativeSessionRef = useRef<NativeVoiceSearchSession | null>(null)
+    /** True while the phone app's recognizer is listening. */
+    const phoneListeningRef = useRef(false)
     const onFinalRef = useRef(onFinal)
     // Refreshed after commit, not during render (render must stay pure). It's
     // only read in `onend`, which fires long after any commit.
@@ -173,7 +176,7 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
     // The local engine needs no browser support at all, so on desktop the mic
     // button must not be hidden just because this WebView lacks Web Speech —
     // which WKWebView and WebView2 both, at times, do.
-    const isSupported = getSpeechRecognitionCtor() !== null || isDesktop()
+    const isSupported = getSpeechRecognitionCtor() !== null || isDesktop() || phoneSpeechAvailable()
 
     // One-shot startup probe so DevTools shows the platform-reported
     // mic permission state before the user ever clicks the mic. On
@@ -192,7 +195,7 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
         // sermon listener already uses — reporting a browser-level denial
         // before the operator has clicked anything would be an error about a
         // path we are not going to take.
-        if (nativeVoiceSearchAvailability() !== 'unsupported') return
+        if (nativeVoiceSearchAvailability() !== 'unsupported' || phoneSpeechAvailable()) return
         if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
         navigator.permissions
             .query({ name: 'microphone' as PermissionName })
@@ -238,6 +241,10 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
             if (nativeSessionRef.current) {
                 void nativeSessionRef.current.stop()
                 nativeSessionRef.current = null
+            }
+            if (phoneListeningRef.current) {
+                phoneListeningRef.current = false
+                void stopListeningOnPhone().catch(() => {})
             }
         }
     }, [])
@@ -485,6 +492,36 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
     }, [continuous])
 
     /**
+     * Run the utterance on the phone's own recognizer (the phone app; its web
+     * view has no Web Speech). One phrase, then the text.
+     */
+    const startPhone = useCallback(() => {
+        setError(null)
+        setFinalText('')
+        setInterimText('')
+        finalTextRef.current = ''
+        setIsListening(true)
+        phoneListeningRef.current = true
+        listenOnPhone()
+            .then((heard) => {
+                const text = normalizeQuery(heard)
+                if (text) {
+                    finalTextRef.current = text
+                    setFinalText(text)
+                    onFinalRef.current?.(text)
+                }
+            })
+            .catch((err: unknown) => {
+                const message = err instanceof Error ? err.message : String(err)
+                if (message !== 'Stopped') setError(message)
+            })
+            .finally(() => {
+                phoneListeningRef.current = false
+                setIsListening(false)
+            })
+    }, [])
+
+    /**
      * Pick an engine and go.
      *
      * Availability is read here rather than at render because `busy` changes
@@ -493,6 +530,10 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
      * of a service.
      */
     const start = useCallback(() => {
+        if (phoneSpeechAvailable()) {
+            startPhone()
+            return
+        }
         if (nativeVoiceSearchAvailability() === 'available') {
             void startNative().then((ok) => {
                 // The engine was free a moment ago and is not now — another
@@ -503,9 +544,13 @@ export function useVoiceSearch(options: UseVoiceSearchOptions = {}): UseVoiceSea
             return
         }
         startWebSpeech()
-    }, [startNative, startWebSpeech])
+    }, [startNative, startPhone, startWebSpeech])
 
     const stop = useCallback(() => {
+        if (phoneListeningRef.current) {
+            void stopListeningOnPhone().catch(() => {})
+            return
+        }
         if (nativeSessionRef.current) {
             const session = nativeSessionRef.current
             nativeSessionRef.current = null

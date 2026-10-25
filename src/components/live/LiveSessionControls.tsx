@@ -8,6 +8,8 @@ import { useUserRole } from '../../hooks/useUserRole'
 import { useSchedules } from '../../hooks/useSchedules'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { selectDiscoveredSession } from '../../hooks/liveSessionUtils'
+import { isTauriMobile } from '../../platform'
+import { NearbyDesks } from './NearbyDesks'
 import { useAppStore } from '../../store/appStore'
 
 type CollaborationMode = 'strict' | 'open' | 'moderated'
@@ -190,6 +192,7 @@ export function LiveSessionControls({ churchId, compact = false }: LiveSessionCo
                 ownRole={isInSession || isOperator ? ownRole : null}
                 users={(sessionUsers as SessionUser[] | undefined) ?? []}
                 currentUserId={currentUser?._id}
+                churchId={churchId}
                 error={error}
                 onStart={handleStartSession}
                 onJoin={handleJoin}
@@ -422,6 +425,7 @@ interface CompactSessionProps {
     ownRole: 'operator' | 'contributor' | 'viewer' | null
     users: SessionUser[]
     currentUserId: string | undefined
+    churchId: string
     error: string | null
     onStart: () => void
     onJoin: (role: 'contributor' | 'viewer') => void
@@ -536,6 +540,9 @@ function CompactSession(props: CompactSessionProps) {
                                     <X className="w-5 h-5" />
                                 </button>
                             </div>
+
+                            {/* The phone app can find the desk on the Wi-Fi; a browser can't. */}
+                            {isTauriMobile() && <div className="pt-3"><NearbyDesks churchId={props.churchId} /></div>}
 
                             <ul className="flex-1 min-h-0 overflow-y-auto px-2 py-2" aria-label="People in the session">
                                 {users.map((u) => {

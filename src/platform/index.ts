@@ -23,12 +23,25 @@ import { tauriPlatform } from './tauri';
 // permanently misdetected as web — which routed desktop Google sign-in
 // through `authenticateWithRedirect` and navigated the webview to Clerk's
 // hosted portal.
-export const isTauri = (): boolean => {
+const hasTauriBridge = (): boolean => {
     if (typeof window === 'undefined') return false;
     if ('__TAURI_INTERNALS__' in window || '__TAURI__' in window) return true;
     const { protocol, hostname } = window.location;
     return protocol === 'tauri:' || hostname === 'tauri.localhost';
 };
+
+/**
+ * The phone app: the same frontend wrapped by Tauri for Android or iOS
+ * (mobile/src-tauri). It has Tauri's bridge but none of the desk's commands
+ * (monitors, NDI, audio capture), so it takes the web paths everywhere and
+ * the bridge only for what a browser can't do, like finding the desk on the
+ * local network.
+ */
+export const isTauriMobile = (): boolean =>
+    hasTauriBridge() && typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+/** The desk app: Tauri on a computer. Every caller was written for it. */
+export const isTauri = (): boolean => hasTauriBridge() && !isTauriMobile();
 
 // The platform implementation object (filesystem/window/updater APIs).
 // Selecting this once is fine — its methods are only ever called inside
