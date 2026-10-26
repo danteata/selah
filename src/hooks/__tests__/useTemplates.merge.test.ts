@@ -67,4 +67,20 @@ describe('useTemplates merge', () => {
         const { result } = renderHook(() => useTemplates())
         await waitFor(() => expect(result.current.templates?.map((t) => t.name).sort()).toEqual(['Made offline', 'Server A']))
     })
+
+    it("doesn't overwrite the church's templates with the offline client's empty answer", async () => {
+        const online = renderHook(() => useTemplates())
+        await waitFor(() => expect(online.result.current.templates?.map((t) => t._id)).toEqual(['a']))
+        online.unmount()
+
+        // Offline, every query answers with an empty list.
+        connection.isOffline = true
+        server.list = []
+        const first = renderHook(() => useTemplates())
+        await waitFor(() => expect(first.result.current.templates?.map((t) => t._id)).toEqual(['a']))
+        first.unmount()
+
+        const again = renderHook(() => useTemplates())
+        await waitFor(() => expect(again.result.current.templates?.map((t) => t._id)).toEqual(['a']))
+    })
 })

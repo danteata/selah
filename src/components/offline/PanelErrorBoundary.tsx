@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { analytics, AnalyticsEventType } from '../../services/analytics'
+import { isConvexOutage } from '../../utils/convexOutage'
+import { ConvexOutageRecovery } from './ConvexOutageRecovery'
 
 interface Props {
     children: ReactNode
@@ -15,7 +17,11 @@ interface Props {
 
 interface State {
     failed: boolean
+    outage: boolean
 }
+
+/** See RouteErrorBoundary's OUTAGE_RECOVERIES. */
+const OUTAGE_RECOVERIES = 2
 
 /**
  * Contains a failure to one panel instead of one route.
@@ -30,15 +36,24 @@ interface State {
  * threw usually throws again, and a button that appears to do nothing is worse
  * during a service than an honest note that one panel is unavailable. The
  * route-level reload is still there for anyone who wants it.
+ *
+ * The exception is a Convex outage (plan limit, disabled deployment): that
+ * goes away once the app is offline, so the panel is put back then
+ * (ConvexOutageRecovery).
  */
 export class PanelErrorBoundary extends Component<Props, State> {
-    state: State = { failed: false }
+    state: State = { failed: false, outage: false }
+    private outageRecoveries = 0
 
-    static getDerivedStateFromError(): State {
-        return { failed: true }
+    static getDerivedStateFromError(error: Error): State {
+        return { failed: true, outage: isConvexOutage(error) }
     }
 
     componentDidCatch(error: Error, info: ErrorInfo): void {
+        if (isConvexOutage(error) && this.outageRecoveries < OUTAGE_RECOVERIES) {
+            console.warn(`[PanelErrorBoundary] ${this.props.name}: Convex is unavailable; carrying on offline`)
+            return
+        }
         console.error(`[PanelErrorBoundary] ${this.props.name}`, error, info.componentStack)
         analytics.trackEvent(AnalyticsEventType.ERROR_OCCURRED, {
             error_category: 'panel_error',
@@ -48,8 +63,16 @@ export class PanelErrorBoundary extends Component<Props, State> {
         })
     }
 
+    private handleOutageRecovered = () => {
+        this.outageRecoveries++
+        this.setState({ failed: false, outage: false })
+    }
+
     render(): ReactNode {
         if (!this.state.failed) return this.props.children
+        if (this.state.outage && this.outageRecoveries < OUTAGE_RECOVERIES) {
+            return <ConvexOutageRecovery onRecovered={this.handleOutageRecovered} />
+        }
         if (this.props.silent) return null
 
         return (

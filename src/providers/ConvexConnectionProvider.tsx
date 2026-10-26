@@ -6,6 +6,7 @@ import { useOnlineStatus } from '../hooks/offline/useOnlineStatus'
 import { useAnalytics } from '../hooks/useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { nullClient } from './NullConvexProvider'
+import { CONVEX_OUTAGE_EVENT, isConvexOutage } from '../utils/convexOutage'
 import { createContext, useContext } from 'react'
 
 export interface ConvexConnectionState {
@@ -58,7 +59,7 @@ async function checkConvexHealth(convexUrl: string, isOnline: boolean): Promise<
         })
 
         const body = await response.text().catch(() => '')
-        if (body.includes('exceeded the free plan') || body.includes('deployments have been disabled')) {
+        if (isConvexOutage(body)) {
             return { connected: false, planLimit: true }
         }
 
@@ -153,8 +154,12 @@ export function ConvexConnectionProvider({
             try { localStorage.removeItem(PLAN_LIMIT_KEY) } catch { /* storage unavailable; the state above already cleared the flag */ }
         } else {
             setConsecutiveFailures((n) => n + 1)
-            setIsPlanLimit(result.planLimit)
+            // A probe that fails for another reason (a timeout, a network
+            // error) says nothing about the plan, so it doesn't clear it:
+            // that sent the app back to a disabled deployment, whose queries
+            // threw again. Only a probe that gets through clears it.
             if (result.planLimit) {
+                setIsPlanLimit(true)
                 try { localStorage.setItem(PLAN_LIMIT_KEY, 'true') } catch { /* storage unavailable: the banner still shows this session */ }
             }
             // Confirm a first failure soon, rather than waiting a full interval.
@@ -168,6 +173,17 @@ export function ConvexConnectionProvider({
 
         setInitialCheckDone(true)
     }, [convexUrl, isOnline])
+
+    // A query that meets the outage first goes offline at once, rather than
+    // after the next probe (convexOutage.ts).
+    useEffect(() => {
+        const goOffline = () => {
+            setIsPlanLimit(true)
+            try { localStorage.setItem(PLAN_LIMIT_KEY, 'true') } catch { /* storage unavailable: offline for this session */ }
+        }
+        window.addEventListener(CONVEX_OUTAGE_EVENT, goOffline)
+        return () => window.removeEventListener(CONVEX_OUTAGE_EVENT, goOffline)
+    }, [])
 
     const checkConnectionRef = useRef(checkConnection)
     useEffect(() => {

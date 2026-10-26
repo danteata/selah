@@ -514,9 +514,11 @@ export function useTemplates(): UseTemplatesReturn {
         })
     }, [isOffline, createTemplateMutation, updateTemplateMutation, refreshLocalTemplates])
 
+    // Offline, the stand-in client answers every query with an empty list;
+    // caching that wiped the very templates the offline list reads.
     useEffect(() => {
-        if (templates) cacheServerTemplates(templates as TemplateItem[])
-    }, [templates])
+        if (templates && !isOffline) cacheServerTemplates(templates as TemplateItem[])
+    }, [templates, isOffline])
 
     const effectiveTemplates: TemplateItem[] | undefined = useMemo(() => {
         const localList = localTemplates.map(localTemplateToTemplateItem)

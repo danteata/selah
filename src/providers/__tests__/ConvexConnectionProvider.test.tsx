@@ -41,6 +41,7 @@ vi.mock('../../hooks/offline/useOnlineStatus', () => ({
 
 import { ConvexConnectionProvider, useConvexConnection } from '../ConvexConnectionProvider'
 import { nullClient } from '../NullConvexProvider'
+import { reportConvexOutage } from '../../utils/convexOutage'
 
 let mounts = 0
 
@@ -157,6 +158,25 @@ describe('ConvexConnectionProvider', () => {
         act(() => retry())
         expect(screen.queryByText('Checking connection...')).not.toBeInTheDocument()
         await flush()
+        expect(mounts).toBe(1)
+    })
+    it('goes offline as soon as a query meets a disabled deployment, and stays there through a failed probe', async () => {
+        await renderConnected()
+
+        // The websocket is up and the last probe passed, but a query was refused.
+        act(() => reportConvexOutage())
+        expect(screen.getByText(/^offline/)).toBeInTheDocument()
+        expect(clientsSeen.at(-1)).toBe(nullClient)
+
+        // A probe that times out says nothing about the plan.
+        healthResponds(false)
+        await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+        expect(screen.getByText(/^offline/)).toBeInTheDocument()
+
+        // One that gets through brings Selah back.
+        healthResponds(true)
+        await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+        expect(screen.getByText(/^online/)).toBeInTheDocument()
         expect(mounts).toBe(1)
     })
 })

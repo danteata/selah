@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, RotateCcw } from 'lucide-react'
 import { analytics, AnalyticsEventType } from '../../services/analytics'
+import { isConvexOutage } from '../../utils/convexOutage'
+import { ConvexOutageRecovery } from './ConvexOutageRecovery'
 
 interface Props {
     children: ReactNode
@@ -13,6 +15,13 @@ interface State {
 }
 
 /**
+ * Times a boundary will put its screen back after a Convex outage. The
+ * offline client can't throw one, so a second is already odd; a cap keeps a
+ * misfire from looping.
+ */
+const OUTAGE_RECOVERIES = 2
+
+/**
  * Generic top-level error boundary used to wrap every route. Catches runtime
  * exceptions that would otherwise leave the user staring at a white screen.
  *
@@ -20,11 +29,20 @@ interface State {
  * correct answer for the operator standing in front of a congregation. It
  * deliberately does not try to render a clever diagnostic; that belongs in
  * dev tools and a future Sentry integration.
+ *
+ * A Convex outage (plan limit, disabled deployment) is not a crash: the
+ * screen is put back on the offline client instead (ConvexOutageRecovery).
  */
 export class RouteErrorBoundary extends Component<Props, State> {
+    private outageRecoveries = 0
+
     constructor(props: Props) {
         super(props)
         this.state = { error: null }
+    }
+
+    private recoversFrom(error: Error): boolean {
+        return isConvexOutage(error) && this.outageRecoveries < OUTAGE_RECOVERIES
     }
 
     static getDerivedStateFromError(error: Error): State {
@@ -32,6 +50,11 @@ export class RouteErrorBoundary extends Component<Props, State> {
     }
 
     componentDidCatch(error: Error, info: ErrorInfo) {
+        if (this.recoversFrom(error)) {
+            console.warn('[RouteErrorBoundary] Convex is unavailable; carrying on offline:', error.message.slice(0, 120))
+            return
+        }
+
         // Always surface in console.error so it is visible in production logs
         // (esbuild's `pure` list only drops console.log/debug/info).
         console.error('[RouteErrorBoundary]', this.props.name ?? 'app', error, info.componentStack)
@@ -63,12 +86,27 @@ export class RouteErrorBoundary extends Component<Props, State> {
         return 'runtime_error'
     }
 
+    private handleOutageRecovered = () => {
+        this.outageRecoveries++
+        this.setState({ error: null })
+    }
+
     private handleReload = () => {
         window.location.reload()
     }
 
     render() {
         if (!this.state.error) return this.props.children
+
+        if (this.recoversFrom(this.state.error)) {
+            return (
+                <ConvexOutageRecovery onRecovered={this.handleOutageRecovered}>
+                    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Switching to offline mode…</p>
+                    </div>
+                </ConvexOutageRecovery>
+            )
+        }
 
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-6">
