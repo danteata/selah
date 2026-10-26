@@ -1,36 +1,61 @@
 # Live sessions on the local network
 
-Every change in a live session goes phone → Convex (US) → desk today, even
-when the phone sits beside the desk on the same Wi-Fi. The aim: devices in
-the room talk to each other directly, with Convex as the record and the
-fallback.
+A phone in the phone app and the desk on the same Wi-Fi run the live
+session between themselves: the phone follows the desk's screen and drives it
+(as the session's mode allows) with no internet at all. Convex is the record
+and the fallback: when the desk is also in a Convex session and Convex is
+reachable, what phones do over Wi-Fi reaches it too, and a phone that isn't
+on the desk's Wi-Fi uses Convex as before.
 
-- **Phone app (Android/iOS):** finds the desk over mDNS and connects to it
-  directly. Works with the internet down.
+- **Phone app (Android):** finds the desk over mDNS and connects to it.
 - **Web app (browser):** can't reach a LAN address from an HTTPS page
-  (mixed content, Private Network Access), so it would use WebRTC data
-  channels signalled through Convex. Not started.
+  (mixed content, Private Network Access), so it stays on Convex. WebRTC data
+  channels signalled through Convex would be the way; not started.
 
-## Where the spike is (branch `spike/android-lan`)
+## How it fits together
 
-Done:
+- **Transport** (`crates/selah-lan`): the desk announces `_selah._tcp.local.`
+  over mDNS with its id, version and church; `link.rs` is a TCP connection
+  carrying one JSON object per line, with pings (a phone gone quiet for 30 s
+  is dropped) and a 16 MB line limit. Plain TCP, because both ends are Rust:
+  the desk app and the phone app, not a web view.
+- **Trust** (`link.rs`): the operator opens a pairing window on the desk
+  (Phones → Pair a phone), which shows a six-digit code for two minutes; five
+  wrong codes close it. A phone that sends the code gets a 32-byte token, and
+  later connections answer a fresh challenge with HMAC-SHA256(token, nonce),
+  so the token never crosses the network again. Pairings live in
+  `lan-devices.json` in the desk's config folder; Forget removes one.
+- **Desk** (`src-tauri/src/lan.rs`, `useLanHost`, `services/lan/host.ts`):
+  listens on 17494 for the life of the app. The desk's store *is* the
+  session: phones get a snapshot on joining, then changed slides and session
+  fields as they change. A phone's request is checked against Convex's rules
+  (`protocol.ts` `refusal`, mirroring `convex/liveSessions.ts`) and applied
+  through the desk's own live-session actions when it's in a Convex session,
+  or to its store alone when it isn't.
+- **Phone** (`mobile/src-tauri` `lan_connect`, `services/lan/link.ts`,
+  `useLanSession`, `useLanAutoConnect`): connects to a paired desk on its
+  own (found by discovery, or where it was last time if discovery is
+  blocked), mirrors the desk into its store, and while connected
+  `useLiveSession` returns the Wi-Fi session: no Convex subscriptions, and
+  actions become requests to the desk. On the operator's own phone, slides
+  added or edited there and the deck order go to the desk as well.
+- **Who drives the screen:** a phone signed in as the desk's user, or as an
+  admin of its church, runs the screen; any other paired phone contributes,
+  by the mode. That's the Convex session's mode when there is one, else the
+  desk's own (Phones panel), remembered.
 
-- `crates/selah-lan`: announce and discover `_selah._tcp.local.` over mDNS
-  (`mdns-sd`). Its test announces a desk and finds it on the same machine.
-- Desk (`src-tauri/src/lan.rs`): `lan_announce` / `lan_stop` commands; the
-  desk announces itself for its church once signed in (`useLanAnnounce`).
-  Port 17494 is reserved for the session server; nothing listens yet.
-- Phone app (`mobile/src-tauri`): the same React frontend wrapped by Tauri
-  for Android, with one command, `discover_desks`. Kept apart from the desk
-  crate, whose audio capture, ONNX Runtime and NDI don't belong on a phone.
-- Frontend: `isTauriMobile()` tells the phone app from the desk (`isTauri()`
-  still means the desk), so the phone app takes the web paths. The session
-  sheet lists desks on the Wi-Fi in the phone app (`NearbyDesks`).
-- Android: multicast lock in `MainActivity` (many phones drop multicast
-  without it) and the network permissions in the manifest.
+Not done: iOS, WebRTC for the web app, handing over the operator over Wi-Fi.
 
-Not done: the desk's session server on 17494, the transport layer under
-`useLiveSession`, pairing, iOS, WebRTC for the web app.
+## When a phone doesn't find the desk
+
+- **Windows Firewall.** The first time Selah listens, Windows asks whether
+  to allow it. If that was dismissed, or the network is set to Public,
+  phones can't reach the desk. Windows Security → Firewall & network
+  protection → Allow an app through firewall → Selah, on Private (and
+  Public, if the church network is marked Public).
+- **Guest or "isolated" Wi-Fi** keeps devices apart; nothing gets through.
+- **Discovery blocked, connections not** (common on church networks): the
+  desk's Phones panel shows its address; the phone can connect by address.
 
 ## Building the Android app
 
@@ -52,11 +77,11 @@ Tauri version as `@tauri-apps/api` (the CLI refuses a mismatch). Gradle's
 The debug APK is ~164 MB: the frontend build carries `public/` (bundled
 Bibles, media). A release build should fetch those instead.
 
-## Trying discovery
+## Trying it
 
-1. Run the desk app (with this branch) on a computer, signed in.
-2. Install the APK on a phone on the same Wi-Fi, sign in to the same church.
-3. Open the session chip on the Live view: "On this Wi-Fi" lists the desk.
-
-Church guest networks often isolate devices from each other; then nothing
-is found, and the session carries on through Convex as today.
+1. Run the desk app on a computer. Open **Phones** in the top bar and choose
+   **Pair a phone**.
+2. In the phone app on the same Wi-Fi: the **Desk** chip on the Live view
+   (or More → On this Wi-Fi) → **Pair**, and enter the code.
+3. The phone follows the desk; turn the Wi-Fi router's internet off and it
+   still does. Next time it connects on its own.

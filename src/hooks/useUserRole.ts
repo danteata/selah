@@ -4,6 +4,7 @@ import { api } from '../../convex/_generated/api'
 import type { Doc } from '../../convex/_generated/dataModel'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import { getCachedAuthSession, cacheAuthSession, type CachedAuthSession } from './useIndexedDB'
+import { rememberLanUser } from '../services/lan/identity'
 import { useState, useEffect } from 'react'
 
 export type UserRole = 'superadmin' | 'admin' | 'member'
@@ -71,6 +72,7 @@ export function useUserRole(): UseUserRoleReturn {
         if (!clerkId || !currentUser || Array.isArray(currentUser) || !currentUser._id) return
 
         const user = currentUser
+        rememberLanUser({ id: user._id, name: user.fullname, role: user.role, churchId: user.churchId || undefined })
         Promise.resolve(cacheAuthSession({
             id: `session_${clerkId}`,
             clerkId,

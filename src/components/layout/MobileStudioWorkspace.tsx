@@ -28,6 +28,10 @@ import { useAppStore } from '../../store/appStore'
 import { useLiveSession } from '../../hooks/useLiveSession'
 import { useUserRole } from '../../hooks/useUserRole'
 import { LiveSessionControls } from '../live/LiveSessionControls'
+import { DeskLinkChip } from '../live/DeskLinkChip'
+import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
+import { useLanLink } from '../../services/lan/link'
+import { isTauriMobile } from '../../platform'
 import { SlideView } from '../live/SlideView'
 import { useLiveOutputSettings } from '../../hooks/useLiveSync'
 import { MobileQueueSheet } from './MobileQueueSheet'
@@ -72,6 +76,9 @@ export function MobileStudioWorkspace() {
     } = useLiveSession()
     const { currentUser } = useUserRole()
     const churchId = currentUser?.churchId || ''
+    const { isOffline } = useConvexConnection()
+    const phoneApp = isTauriMobile()
+    const deskLinked = useLanLink((s) => s.status === 'connected')
     const outputSettings = useLiveOutputSettings()
     const [queueOpen, setQueueOpen] = useState(false)
 
@@ -145,7 +152,10 @@ export function MobileStudioWorkspace() {
             {/* What's live, by name, and the session. */}
             <div style={{ gridArea: 'header' }} className="flex items-center gap-3 pl-4 pr-3 h-14 border-b border-[var(--border-subtle)] flex-shrink-0">
                 <LiveCaption slide={liveSlide} place={place} idleText={scheduleName || 'Ready when you are'} />
-                {churchId && <LiveSessionControls churchId={churchId} compact />}
+                {/* In the phone app the desk on this Wi-Fi comes first; the
+                    Convex session is the way in from anywhere else. */}
+                {phoneApp && (deskLinked || isOffline) && <DeskLinkChip churchId={churchId || undefined} />}
+                {churchId && !deskLinked && !(phoneApp && isOffline) && <LiveSessionControls churchId={churchId} compact />}
             </div>
 
             {deck.length === 0 ? (

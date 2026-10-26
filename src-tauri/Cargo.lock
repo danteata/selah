@@ -4760,8 +4760,13 @@ dependencies = [
 name = "selah-lan"
 version = "0.1.0"
 dependencies = [
+ "if-addrs",
  "mdns-sd",
+ "rand 0.8.5",
  "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]

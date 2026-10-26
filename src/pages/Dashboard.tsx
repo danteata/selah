@@ -1,4 +1,5 @@
-import { useLanAnnounce } from '../hooks/useLanAnnounce'
+import { useLanHost } from '../hooks/useLanHost'
+import { useLanAutoConnect } from '../hooks/useLanAutoConnect'
 import { useClerk } from '@clerk/clerk-react'
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react'
 import { Shield, Book, X, Mic, Ticket } from 'lucide-react'
@@ -88,11 +89,15 @@ export default function Dashboard() {
     const { isSuperadmin, currentUser } = useUserRole()
 
     // Shared live session for collaboration
-    const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession, toggleBlank: toggleSharedBlank } = useLiveSession(undefined, { sync: true })
+    const liveSession = useLiveSession(undefined, { sync: true })
+    const { sessionId, sessionRole, setLiveSlide: setSharedLiveSlide, leaveSession, toggleBlank: toggleSharedBlank } = liveSession
 
     // Collaboration toast notifications
     useCollaborationToasts(currentUser?.churchId || undefined, sessionId || undefined)
-    useLanAnnounce(currentUser?.churchId)
+    // Phones on this Wi-Fi follow and drive the session through the desk.
+    useLanHost(liveSession, currentUser)
+    // ...and the phone app finds its desk and connects on its own.
+    useLanAutoConnect()
 
     // Sync live state to other windows (for multi-monitor support)
     useLiveSync()

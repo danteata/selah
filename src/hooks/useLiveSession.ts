@@ -9,8 +9,9 @@ import { useUserRole } from './useUserRole'
 import { useAnalytics } from './useAnalytics'
 import { AnalyticsEventType } from '../services/analytics/types'
 import { canClientPushLiveSlide, selectDiscoveredSession } from './liveSessionUtils'
-import { diffScheduleSlides, removedOnServer, slideKey, type SlideKey } from './liveSlideSync'
-import type { Schedule, SessionDefaultTemplates, Slide } from '../types'
+import { diffScheduleSlides, removedOnServer, sessionTemplatesFrom, slideKey, toSyncableSlide, type SlideKey } from './liveSlideSync'
+import { useLanSession } from './useLanSession'
+import type { Schedule, Slide } from '../types'
 
 type SessionRole = 'operator' | 'contributor' | 'viewer'
 type CollaborationMode = 'strict' | 'open' | 'moderated'
@@ -41,56 +42,6 @@ function mergePendingQueue(serverQueue: string[], pendingQueue: string[]) {
     return {
         stillPending,
         displayQueue: [...serverQueue, ...stillPending],
-    }
-}
-
-/**
- * Builds the exact shape Convex's slide mutations accept. Their argument
- * validators are exact/closed: any undeclared key throws an
- * `ArgumentValidationError` and fails the whole call. A `blob:`/`asset://`
- * `background` is meaningless on another device, so for local-only media
- * (no `backgroundStorageId`) it's omitted; `backgroundType` still travels so
- * a placeholder can show the right icon, and `localMediaId`/`localFilePath`
- * travel so the device that has the file still finds it after a reload.
- */
-function toSyncableSlide(slide: Slide, index: number) {
-    const isLocalOnlyMedia = !slide.backgroundStorageId && !!(slide.localFilePath || slide.localMediaId)
-    return {
-        id: slide.id,
-        index: typeof slide.index === 'number' ? slide.index : index,
-        name: slide.name || 'Untitled',
-        type: slide.type,
-        layout: slide.layout,
-        contents: slide.contents || [],
-        backgroundType: slide.backgroundType,
-        background: isLocalOnlyMedia ? undefined : slide.background,
-        backgroundVideoKey: slide.backgroundVideoKey ?? undefined,
-        backgroundStorageId: slide.backgroundStorageId ?? undefined,
-        title: slide.title,
-        songId: slide.songId,
-        hasChorus: slide.hasChorus,
-        // Kept so this device finds its own upload after a reload; another
-        // device just doesn't have it.
-        localMediaId: slide.localMediaId,
-        localFilePath: slide.localFilePath,
-        data: slide.data,
-        slideStyle: slide.slideStyle,
-        saved: slide.saved,
-        verseIndex: slide.verseIndex,
-        totalVerses: slide.totalVerses,
-        verseLabel: slide.verseLabel,
-    }
-}
-
-/** The slide types a session shares a default template for, every key
- *  present so two copies compare equal however they were written. */
-function sessionTemplatesFrom(templates: SessionDefaultTemplates | null | undefined): Required<SessionDefaultTemplates> {
-    return {
-        scripture: templates?.scripture ?? null,
-        song: templates?.song ?? null,
-        hymn: templates?.hymn ?? null,
-        dictionary: templates?.dictionary ?? null,
-        text: templates?.text ?? null,
     }
 }
 
@@ -187,7 +138,7 @@ function reportSessionError(message: string, err?: unknown) {
     toast.error(message, reason ? { description: reason } : undefined)
 }
 
-interface UseLiveSessionReturn {
+export interface UseLiveSessionReturn {
     sessionId: Id<"liveSessions"> | null
     sessionScheduleId: string | null
     sessionRole: SessionRole
@@ -235,7 +186,12 @@ export interface UseLiveSessionOptions {
 }
 
 export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptions = {}): UseLiveSessionReturn {
-    const sync = options.sync === true
+    // Connected to the desk on this Wi-Fi (the phone app), the session goes
+    // through the desk and Convex sits this one out: no subscriptions, and
+    // none of the sync owner's mirroring or pushing.
+    const lanSession = useLanSession()
+    const viaLan = lanSession !== null
+    const sync = options.sync === true && !viaLan
     const { isConvexConnected, isOffline } = useConvexConnection()
     const { currentUser, isLoading: userLoading } = useUserRole()
     const { trackEvent } = useAnalytics()
@@ -263,12 +219,12 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
 
     const activeSession = useQuery(
         api.liveSessions.getActiveSession,
-        effectiveScheduleId ? { scheduleId: effectiveScheduleId } : 'skip'
+        effectiveScheduleId && !viaLan ? { scheduleId: effectiveScheduleId } : 'skip'
     )
 
     const activeSessionsByChurch = useQuery(
         api.liveSessions.getActiveSessionByChurch,
-        currentUser?.churchId && !isOffline ? { churchId: currentUser.churchId } : 'skip'
+        currentUser?.churchId && !isOffline && !viaLan ? { churchId: currentUser.churchId } : 'skip'
     )
 
     const discoveredSession = selectDiscoveredSession({
@@ -292,7 +248,7 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
 
     const liveSession = useQuery(
         api.liveSessions.getSession,
-        (sessionId || resolvedActiveSession?._id)
+        (sessionId || resolvedActiveSession?._id) && !viaLan
             ? { sessionId: (sessionId || resolvedActiveSession?._id) as Id<"liveSessions"> }
             : 'skip'
     )
@@ -999,6 +955,8 @@ export function useLiveSession(scheduleId?: string, options: UseLiveSessionOptio
             }
         }
     }, [sync, isConvexConnected, isOffline, resolvedSessionId, sessionRole, addToQueueMutation])
+
+    if (lanSession) return lanSession
 
     return {
         sessionId: resolvedSessionId,

@@ -2,9 +2,14 @@
 //!
 //! The desk's computer announces itself over mDNS (Bonjour) as a
 //! `_selah._tcp` service, and a phone on the same Wi-Fi finds it without
-//! anyone typing an address. This is the discovery half of a local transport
-//! for live sessions: Convex stays the record and the fallback, while a phone
-//! next to the desk talks to it directly (see docs/LAN_SESSIONS.md).
+//! anyone typing an address. `link` is the other half: the connection the
+//! phone then opens to the desk for the live session. Convex stays the record
+//! and the fallback, while a phone next to the desk talks to it directly (see
+//! docs/LAN_SESSIONS.md).
+
+mod link;
+
+pub use link::{Auth, Connected, DeviceSummary, Host, HostEvent, Link, LinkError, LinkEvent, Pairings, PAIRING_WINDOW};
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -72,6 +77,31 @@ pub fn announce(name: &str, port: u16, properties: &[(&str, &str)]) -> Result<An
     let fullname = info.get_fullname().to_string();
     daemon.register(info)?;
     Ok(Announcement { daemon, fullname })
+}
+
+/// This computer's IPv4 addresses on its networks, for typing into a phone
+/// when discovery can't get through (a network that blocks multicast).
+/// Loopback, link-local and virtual adapters (WSL, Hyper-V, Docker) are left
+/// out: no phone reaches those.
+pub fn local_addresses() -> Vec<String> {
+    let virtual_adapter = |name: &str| {
+        let name = name.to_ascii_lowercase();
+        ["vethernet", "wsl", "hyper-v", "docker", "virtualbox", "vmware", "veth", "br-", "virbr"]
+            .iter()
+            .any(|v| name.contains(v))
+    };
+    let mut found: Vec<String> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|iface| !iface.is_loopback() && !virtual_adapter(&iface.name))
+        .filter_map(|iface| match iface.ip() {
+            IpAddr::V4(ip) if !ip.is_link_local() => Some(ip.to_string()),
+            _ => None,
+        })
+        .collect();
+    found.sort();
+    found.dedup();
+    found
 }
 
 /// Look for desks for up to `timeout`, returning what answered, by name.

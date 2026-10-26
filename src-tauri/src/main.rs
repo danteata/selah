@@ -326,8 +326,14 @@ pub fn run() {
         .manage(ndi_manager.clone())
         .manage(lan::LanState::default())
         .invoke_handler(tauri::generate_handler![
-            lan::lan_announce,
+            lan::lan_start,
             lan::lan_stop,
+            lan::lan_send,
+            lan::lan_broadcast,
+            lan::lan_pair_begin,
+            lan::lan_pair_end,
+            lan::lan_devices,
+            lan::lan_forget,
             embeddings::embed_texts,
             embeddings::embeddings_unload,
             list_audio_devices,

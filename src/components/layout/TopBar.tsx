@@ -10,6 +10,8 @@ import { api } from '../../../convex/_generated/api'
 import { LiveSessionControls } from '../live/LiveSessionControls'
 import { UpdatePrompt } from '../updates/UpdatePrompt'
 import { PresenceAvatars } from '../live/PresenceAvatars'
+import { DeskPhones } from '../live/DeskPhones'
+import { isTauri } from '../../platform'
 import type { Schedule } from '../../types'
 
 interface TopBarProps {
@@ -213,6 +215,8 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
                         <LiveSessionControls churchId={churchId} />
                     </div>
                 )}
+                {/* Phones on the desk's Wi-Fi: no church or internet needed. */}
+                {isTauri() && <div className="hidden lg:flex"><DeskPhones /></div>}
 
                 {/* Update available — sits in the always-visible chrome because
                     Settings was the only place an update could be discovered. */}
