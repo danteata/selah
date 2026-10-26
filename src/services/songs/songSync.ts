@@ -21,7 +21,7 @@ import { api } from '../../../convex/_generated/api'
 import { getIndexedDB } from '../../hooks/useIndexedDB'
 import { notifySongsChanged } from '../../hooks/useSongs'
 import type { Song } from '../../types'
-import { getServerSongs, refreshServerSongs } from './serverSongs'
+import { getServerSongs, isDeviceId, refreshServerSongs } from './serverSongs'
 
 /** Songs per `syncSongs` call; the server refuses more than 50. */
 export const SYNC_BATCH = 50
@@ -60,11 +60,6 @@ export function requestSongSync(): void {
 export function subscribeSyncRequests(listener: () => void): () => void {
     requestTarget.addEventListener('sync', listener)
     return () => requestTarget.removeEventListener('sync', listener)
-}
-
-/** Ids this device creates itself; anything else came from the server. */
-export function isDeviceId(id: string): boolean {
-    return id.startsWith('local_') || id.startsWith('ew_')
 }
 
 function normalTitle(title: string): string {

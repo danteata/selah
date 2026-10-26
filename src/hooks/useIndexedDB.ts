@@ -184,6 +184,26 @@ export interface OfflineTranscriptRecord {
     updatedAt: string
 }
 
+/** Where this device's copy of the server's song library stands (see `songs.syncLibrary`). */
+export interface SongLibraryCursor {
+    scope: string
+    church: number
+    own: number
+    changedAt: number
+}
+
+/**
+ * The server's song library as this device last synced it, with the cursor
+ * that says how current it is. One row: the cursor and the songs it describes
+ * are always written together.
+ */
+export interface ServerSongLibraryRecord {
+    id: 'current'
+    cursor: SongLibraryCursor
+    songs: Song[]
+    savedAt: string
+}
+
 class SelahDatabase extends Dexie {
     songs!: Table<Song>
     media!: Table<Media>
@@ -209,6 +229,7 @@ class SelahDatabase extends Dexie {
     localMediaBlobs!: Table<LocalMediaBlob, string>
     dictionaries!: Table<CachedDictionaryFile, string>
     sermonRecordingMeta!: Table<SermonRecordingMetaRecord, string>
+    serverSongLibrary!: Table<ServerSongLibraryRecord, 'current'>
 
     constructor() {
         super('SelahDatabase')
@@ -267,6 +288,9 @@ class SelahDatabase extends Dexie {
         })
         this.version(10).stores({
             sermonRecordingMeta: 'sessionId,starred,createdAt'
+        })
+        this.version(11).stores({
+            serverSongLibrary: 'id'
         })
     }
 }

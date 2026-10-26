@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Save } from 'lucide-react'
 import type { Slide } from '../../types'
-import { generateThumbnail } from '../../utils/templateThumbnail'
+import { generateThumbnail, isEmbeddedImage } from '../../utils/templateThumbnail'
 import { TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type SlideType } from '../../hooks/useTemplates'
 import { useLocalBackground } from '../../hooks/useLocalBackground'
 import { Modal } from './Modal'
@@ -48,7 +48,9 @@ export function SaveAsTemplateModal({ isOpen, slide, onClose, onSave }: SaveAsTe
             const bg = slide?.background || ''
 
             if (bgType === 'image' && bg) {
-                thumbnail = bg
+                // An embedded picture gets a small thumbnail of its own; a
+                // linked one is its own thumbnail.
+                thumbnail = isEmbeddedImage(bg) ? await generateThumbnail(bg, 'image', name) : bg
             } else if (bgType === 'gradient' || bgType === 'color') {
                 thumbnail = await generateThumbnail(bg, bgType, name)
             } else if (bgType === 'video' && bg) {

@@ -37,7 +37,10 @@ vi.mock('../../motion/MotionCanvas', () => ({
 vi.mock('@clerk/clerk-react', () => ({ useAuth: () => ({ isSignedIn: true }) }))
 vi.mock('../../modals', () => ({ CreateTemplateModal: () => null }))
 vi.mock('../../../hooks/useUserRole', () => ({ useUserRole: () => ({ isSuperadmin: false, currentUser: { _id: 'me' } }) }))
-vi.mock('../../../hooks/useLocalBackground', () => ({ useLocalBackground: () => '' }))
+vi.mock('../../../hooks/useLocalBackground', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../hooks/useLocalBackground')>()),
+    useLocalBackground: () => '',
+}))
 vi.mock('../../../hooks/useTemplateMediaSync', () => ({
     useTemplateMediaState: () => undefined,
     useUploadTemplateBackground: () => vi.fn(),
@@ -96,6 +99,18 @@ describe('TemplateBrowser cards', () => {
             expect(within(card).getByTestId('motion-canvas')).toHaveAttribute('data-still', 'false')
             fireEvent.mouseLeave(card)
             expect(within(card).getByTestId('motion-canvas')).toHaveAttribute('data-still', 'true')
+        } finally {
+            TEMPLATES.pop()
+        }
+    })
+
+    it('shows a picture template its embedded picture when it has no thumbnail', () => {
+        const picture = 'data:image/jpeg;base64,AAAA'
+        TEMPLATES.push(template({ _id: 'p', name: 'Photo', slideId: JSON.stringify({ backgroundType: 'image', background: picture }) }))
+        try {
+            renderBrowser()
+            const card = screen.getByRole('button', { name: 'Photo' })
+            expect(card.querySelector('img')).toHaveAttribute('src', picture)
         } finally {
             TEMPLATES.pop()
         }

@@ -16,8 +16,8 @@ import {
 const DEBOUNCE_MS = 2000
 
 /**
- * Note which template backgrounds this computer has and download the uploaded
- * ones (see templateMediaSync.ts). Uploads nothing: that is the template
+ * Note which template backgrounds this computer has and, on the desktop app,
+ * download the uploaded ones (see templateMediaSync.ts). Uploads nothing: that is the template
  * card's "Sync to cloud". Mount once, inside the Convex provider. Runs when
  * the template list changes — a template created or edited anywhere in the
  * church — and when the app comes online.

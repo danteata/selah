@@ -8,7 +8,7 @@ import { api } from '../../../convex/_generated/api'
 import { useTemplates, TEMPLATE_SLIDE_TYPE_OPTIONS, TEMPLATE_CATEGORIES, type TemplateItem, type SlideType } from '../../hooks/useTemplates'
 import { openFileDialog } from '../../utils/fileDialog'
 import { isDesktop } from '../../platform'
-import { generateThumbnail } from '../../utils/templateThumbnail'
+import { generateThumbnail, isEmbeddedImage } from '../../utils/templateThumbnail'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
 import { isImageUrl, useLocalBackground } from '../../hooks/useLocalBackground'
 import { copyIntoMediaLibrary } from '../../services/localMediaFiles'
@@ -438,10 +438,10 @@ export function CreateTemplateModal({ isOpen, onClose, editingTemplate }: Create
         try {
             let thumbnail: string | undefined
             if (backgroundType === 'image' && background) {
-                if (localFilePath) {
+                // A local file or an embedded picture gets a small thumbnail
+                // of its own; a linked picture is its own thumbnail.
+                if (localFilePath || isEmbeddedImage(background)) {
                     thumbnail = await generateThumbnail(background, 'image', content || name)
-                } else if (background.startsWith('data:')) {
-                    thumbnail = background
                 } else {
                     thumbnail = background
                 }

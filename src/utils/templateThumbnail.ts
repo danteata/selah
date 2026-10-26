@@ -1,5 +1,6 @@
 const THUMB_WIDTH = 320
 const THUMB_HEIGHT = 180
+const THUMB_QUALITY = 0.75
 
 function drawBackgroundToCanvas(
     ctx: CanvasRenderingContext2D,
@@ -189,8 +190,21 @@ export async function generateThumbnail(
     }
 
     try {
-        return canvas.toDataURL('image/png', 0.8)
+        // JPEG, not PNG: the thumbnail lives in the template's row, which every
+        // device reads with the template list, again whenever a template in the
+        // church changes. A PNG of a photo or video frame ran to 100 KB or more;
+        // this is a tenth of that, and at 320×180 looks the same.
+        return canvas.toDataURL('image/jpeg', THUMB_QUALITY)
     } catch {
         return ''
     }
+}
+
+/**
+ * Whether a background is a picture embedded in the template itself (a data
+ * URL), rather than a link to one. Such a picture must not also be stored as
+ * the thumbnail: it made the template's row twice the size of the picture.
+ */
+export function isEmbeddedImage(background: string | null | undefined): boolean {
+    return !!background && background.startsWith('data:')
 }

@@ -119,3 +119,34 @@ describe('built-in templates', () => {
         expect(after.isFavorite).toBe(true)
     })
 })
+
+describe('template thumbnails', () => {
+    it('drops a thumbnail that is a second copy of the embedded picture, and keeps the rest', async () => {
+        const { t, asAlice } = await setup()
+        const picture = `data:image/jpeg;base64,${'A'.repeat(2000)}`
+        await asAlice.mutation(api.templates.createTemplate, {
+            name: 'Twice', category: 'general', thumbnail: picture,
+            slideId: JSON.stringify({ backgroundType: 'image', background: picture }),
+        })
+        await asAlice.mutation(api.templates.createTemplate, {
+            name: 'Own thumbnail', category: 'general', thumbnail: 'data:image/jpeg;base64,small',
+            slideId: JSON.stringify({ backgroundType: 'image', background: picture }),
+        })
+        await asAlice.mutation(api.templates.createTemplate, {
+            name: 'Linked', category: 'general', thumbnail: 'https://example.org/a.jpg',
+            slideId: JSON.stringify({ backgroundType: 'image', background: 'https://example.org/a.jpg' }),
+        })
+
+        const result = await t.mutation(internal.migrations.dropDuplicateTemplateThumbnails, {})
+        expect(result).toEqual({ dropped: 1, done: true })
+
+        const thumbnails = Object.fromEntries(
+            (await asAlice.query(api.templates.getTemplates, {})).filter((tpl) => tpl.createdBy).map((tpl) => [tpl.name, tpl.thumbnail]),
+        )
+        expect(thumbnails).toEqual({
+            Twice: undefined,
+            'Own thumbnail': 'data:image/jpeg;base64,small',
+            Linked: 'https://example.org/a.jpg',
+        })
+    })
+})

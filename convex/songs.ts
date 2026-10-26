@@ -1,4 +1,4 @@
-import { query, mutation, type QueryCtx } from "./_generated/server";
+import { query, mutation, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { songSectionValidator } from "./schema";
 import { getById, getCurrentUser, isMemberOf, requireUser, type User } from "./lib/auth";
@@ -40,6 +40,139 @@ async function songsVisibleTo(ctx: QueryCtx, user: User, limit: number) {
         return true;
     });
 }
+
+/**
+ * The caller's songs changed since `since` (an ISO time): through the
+ * `updatedAt` indexes, so a library that hasn't changed costs no song reads.
+ */
+async function songsChangedSince(ctx: QueryCtx, user: User, since: string, limit: number) {
+    const own = await ctx.db
+        .query("songs")
+        .withIndex("by_creator_and_updatedAt", (q) => q.eq("createdBy", user._id).gt("updatedAt", since))
+        .take(limit);
+    const church = user.churchId
+        ? await ctx.db
+            .query("songs")
+            .withIndex("by_church_and_updatedAt", (q) => q.eq("churchId", user.churchId).gt("updatedAt", since))
+            .take(limit)
+        : [];
+    const seen = new Set<string>();
+    return [...church, ...own].filter((song) => {
+        if (seen.has(song._id)) return false;
+        seen.add(song._id);
+        return true;
+    });
+}
+
+async function libraryVersion(ctx: QueryCtx, scope: string) {
+    return await ctx.db
+        .query("songLibraryVersions")
+        .withIndex("by_scope", (q) => q.eq("scope", scope))
+        .unique();
+}
+
+/**
+ * Note a write to these songs on their libraries' counters: their church's,
+ * and their creator's (see `songLibraryVersions` in the schema). Every
+ * mutation that writes a song calls this, in the same transaction.
+ */
+async function bumpLibraryVersions(
+    ctx: MutationCtx,
+    songs: Array<{ churchId?: string; createdBy?: string }>,
+    change: { now: number; deleted?: boolean },
+) {
+    const scopes = new Set<string>();
+    for (const song of songs) {
+        if (song.churchId) scopes.add(song.churchId);
+        if (song.createdBy) scopes.add(song.createdBy);
+    }
+    for (const scope of scopes) {
+        const row = await libraryVersion(ctx, scope);
+        const version = (row?.version ?? 0) + 1;
+        const fields = {
+            version,
+            changedAt: Math.max(row?.changedAt ?? 0, change.now),
+            ...(change.deleted ? { lastDeleteVersion: version } : {}),
+        };
+        if (row) await ctx.db.patch(row._id, fields);
+        else await ctx.db.insert("songLibraryVersions", { scope, ...fields });
+    }
+}
+
+/** Most songs `syncLibrary` returns, as `searchSongs` allows. */
+const LIBRARY_LIMIT = 5000;
+
+/**
+ * How far before the last change a device asks for changes from. A song's
+ * `updatedAt` is when its mutation started, which can be a moment before a
+ * mutation that committed first; the overlap catches it, at the cost of
+ * sending a few songs the device already has.
+ */
+const CHANGE_OVERLAP_MS = 5 * 60 * 1000;
+
+/** Where a device's copy of the library stands; `syncLibrary` hands back a new one each time. */
+const libraryCursorValidator = v.object({
+    /** Whose library it is: the user and their church. Either changing means a different set of songs. */
+    scope: v.string(),
+    /** The church's and the user's counters when the device last synced. */
+    church: v.number(),
+    own: v.number(),
+    /** The later of their `changedAt`s. */
+    changedAt: v.number(),
+});
+
+/**
+ * Bring a device's copy of the caller's song library up to date. Given the
+ * cursor from its last sync, answers with as little as will do:
+ *
+ *  - `unchanged`: nothing was written since; no songs are read at all.
+ *  - `changes`: only the songs created or edited since.
+ *  - `full`: every song, when the device has no copy yet, the caller's church
+ *    changed, or a song was deleted since (what's gone can't be told from the
+ *    songs that are left).
+ *
+ * This replaces fetching the whole library (`searchSongs`) on every refresh,
+ * which read every song with its lyrics each time a device opened, came back
+ * online or regained focus — most of the deployment's database reads.
+ * `searchSongs` stays for older clients.
+ */
+export const syncLibrary = query({
+    args: { cursor: v.optional(libraryCursorValidator) },
+    handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
+        if (!user) return null;
+
+        const church = user.churchId ? await libraryVersion(ctx, user.churchId) : null;
+        const own = await libraryVersion(ctx, user._id);
+        const cursor = {
+            scope: `${user._id}:${user.churchId}`,
+            church: church?.version ?? 0,
+            own: own?.version ?? 0,
+            changedAt: Math.max(church?.changedAt ?? 0, own?.changedAt ?? 0),
+        };
+
+        const last = args.cursor;
+        if (last && last.scope === cursor.scope && last.church === cursor.church && last.own === cursor.own) {
+            return { kind: "unchanged" as const, cursor };
+        }
+
+        const canCatchUp = !!last
+            && last.scope === cursor.scope
+            // Zero: the device synced before any counter existed, so there's
+            // no time to ask for changes from.
+            && last.changedAt > 0
+            && last.church <= cursor.church
+            && last.own <= cursor.own
+            && (church?.lastDeleteVersion ?? 0) <= last.church
+            && (own?.lastDeleteVersion ?? 0) <= last.own;
+        if (!canCatchUp) {
+            return { kind: "full" as const, songs: await songsVisibleTo(ctx, user, LIBRARY_LIMIT), cursor };
+        }
+
+        const since = new Date(last.changedAt - CHANGE_OVERLAP_MS).toISOString();
+        return { kind: "changes" as const, songs: await songsChangedSince(ctx, user, since, LIBRARY_LIMIT), cursor };
+    },
+});
 
 // Get all songs for current user (fallback when no churchId)
 export const getAllSongsForUser = query({
@@ -108,9 +241,10 @@ export const createSong = mutation({
     handler: async (ctx, args) => {
         const user = await requireUser(ctx);
 
-        const now = new Date().toISOString();
+        const nowMs = Date.now();
+        const now = new Date(nowMs).toISOString();
         const songId = await ctx.db.insert("songs", {
-            id: `song_${Date.now()}`,
+            id: `song_${nowMs}`,
             lyrics: args.lyrics,
             title: args.title,
             artist: args.artist,
@@ -126,6 +260,7 @@ export const createSong = mutation({
             createdAt: now,
             updatedAt: now,
         });
+        await bumpLibraryVersions(ctx, [{ churchId: user.churchId, createdBy: user._id }], { now: nowMs });
 
         return songId;
     },
@@ -151,10 +286,12 @@ export const updateSong = mutation({
     handler: async (ctx, args) => {
         const { song } = await requireOwnSong(ctx, args.songId);
 
+        const now = Date.now();
         await ctx.db.patch(song._id, {
             ...args.updates,
-            updatedAt: new Date().toISOString(),
+            updatedAt: new Date(now).toISOString(),
         });
+        await bumpLibraryVersions(ctx, [song], { now });
 
         return args.songId;
     },
@@ -197,17 +334,20 @@ export const syncSongs = mutation({
             throw new Error(`At most ${SYNC_BATCH_LIMIT} songs per sync`);
         }
 
-        const now = new Date().toISOString();
+        const nowMs = Date.now();
+        const now = new Date(nowMs).toISOString();
         const results: Array<{ clientId: string; serverId: string }> = [];
+        const written: Array<{ churchId?: string; createdBy?: string }> = [];
         for (const { clientId, serverId, ...fields } of args.songs) {
             const existing = serverId ? await getById(ctx, "songs", serverId) : null;
             if (existing && canAccessSong(user, existing)) {
                 await ctx.db.patch(existing._id, { ...fields, updatedAt: now });
                 results.push({ clientId, serverId: existing._id });
+                written.push(existing);
                 continue;
             }
             const id = await ctx.db.insert("songs", {
-                id: `song_${Date.now()}`,
+                id: `song_${nowMs}`,
                 ...fields,
                 isPublic: false,
                 createdBy: user._id!,
@@ -216,7 +356,9 @@ export const syncSongs = mutation({
                 updatedAt: now,
             });
             results.push({ clientId, serverId: id });
+            written.push({ churchId: user.churchId, createdBy: user._id });
         }
+        await bumpLibraryVersions(ctx, written, { now: nowMs });
         return results;
     },
 });
@@ -230,6 +372,7 @@ export const deleteSong = mutation({
         const { song } = await requireOwnSong(ctx, args.songId);
 
         await ctx.db.delete(song._id);
+        await bumpLibraryVersions(ctx, [song], { now: Date.now(), deleted: true });
         return true;
     },
 });

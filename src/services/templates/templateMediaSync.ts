@@ -1,6 +1,6 @@
 /**
  * Template backgrounds: uploaded from the computer that has them, downloaded
- * ahead of time by every other.
+ * ahead of time by every other desktop.
  *
  * The desktop app used to save a template's background as a path on the
  * computer it was made on (`C:\\Users\\…\\Downloads\\clip.mp4`). The template
@@ -15,9 +15,14 @@
  *    the app is online. The church's total is capped (100 MB); past it the
  *    template is marked over the limit and keeps working on the computer that
  *    has the file.
- *  - prefetch: on every device, uploaded backgrounds are downloaded into the
- *    template cache while online, so a template works offline and doesn't
- *    wait on the network when it goes live.
+ *  - prefetch: on the desktop app, uploaded backgrounds are downloaded into
+ *    the template cache while online, so a template works offline and doesn't
+ *    wait on the network when it goes live. Only there: the desk is where a
+ *    service runs, and it may lose the network mid-service. Every phone and
+ *    browser used to download every background too, up to the church's
+ *    100 MB each, and that was nearly all of the deployment's file traffic.
+ *    Elsewhere a background is fetched when it is shown (`useFileUrl`), and
+ *    cached from then on.
  *
  * Per-template outcomes are kept for the template picker's badges.
  */
@@ -203,23 +208,26 @@ export async function uploadTemplateBackground(convex: ConvexReactClient, templa
 const ASKED: ReadonlySet<TemplateMediaState | undefined> = new Set(['uploading', 'over-limit', 'failed'])
 
 /**
- * Mark which local backgrounds this computer has, then download the uploaded
- * ones it lacks. Uploads nothing: see `uploadTemplateBackground`. Single-flight.
+ * Mark which local backgrounds this computer has, then, on the desktop app,
+ * download the uploaded ones it lacks. Uploads nothing: see
+ * `uploadTemplateBackground`. Single-flight.
  */
 export function syncTemplateMedia(convex: ConvexReactClient, templates: TemplateLike[]): Promise<void> {
     if (running) return running
     running = (async () => {
         try {
-            if (isDesktop()) {
-                for (const t of templates) {
-                    if (!canUploadBackground(t) || ASKED.has(states.get(t._id))) continue
-                    setState(t._id, (await hasLocal(localSourceOf(t)!)) ? 'local' : 'missing')
-                }
-            } else {
-                // The web can't read files on disk: such a background is elsewhere.
+            if (!isDesktop()) {
+                // The web can't read files on disk: such a background is
+                // elsewhere. Nothing is downloaded ahead either (see above).
                 for (const t of templates) {
                     if (!storageIdOf(t) && localSourceOf(t)) setState(t._id, 'missing')
                 }
+                return
+            }
+
+            for (const t of templates) {
+                if (!canUploadBackground(t) || ASKED.has(states.get(t._id))) continue
+                setState(t._id, (await hasLocal(localSourceOf(t)!)) ? 'local' : 'missing')
             }
 
             const ids = new Set(templates.map(storageIdOf).filter((id): id is string => !!id))

@@ -7,8 +7,11 @@
  * (Point the CLI at prod with `--prod` when you're ready.)
  */
 
+import { v } from 'convex/values'
 import { internalMutation } from './_generated/server'
+import { internal } from './_generated/api'
 import type { Id } from './_generated/dataModel'
+import { syncTranscriptSummary } from './transcripts'
 
 /**
  * Backfill `churchId` on legacy per-email subscription rows so billing becomes
@@ -136,5 +139,78 @@ export const backfillTemplateChurchIds = internalMutation({
             }
         }
         return { total: templates.length, updated, churchless }
+    },
+})
+
+/** Transcripts per batch: each is read whole, segments and all. */
+const TRANSCRIPT_BACKFILL_BATCH = 25
+
+/**
+ * Give every transcript its summary row (`transcriptSummaries`), which the
+ * saved-transcripts list now reads instead of the transcripts themselves.
+ * Transcripts saved since the summaries were added have one already; older
+ * ones don't appear in the list until this runs. A batch at a time, each
+ * scheduling the next, so a long history never outgrows one transaction.
+ * Idempotent: rerunning rewrites the same summaries.
+ *
+ *   npx convex run migrations:backfillTranscriptSummaries
+ */
+export const backfillTranscriptSummaries = internalMutation({
+    args: { cursor: v.optional(v.union(v.string(), v.null())) },
+    handler: async (ctx, args) => {
+        const page = await ctx.db
+            .query('transcripts')
+            .paginate({ numItems: TRANSCRIPT_BACKFILL_BATCH, cursor: args.cursor ?? null })
+        for (const transcript of page.page) await syncTranscriptSummary(ctx, transcript._id)
+        if (!page.isDone) {
+            await ctx.scheduler.runAfter(0, internal.migrations.backfillTranscriptSummaries, { cursor: page.continueCursor })
+        }
+        return { summarized: page.page.length, done: page.isDone }
+    },
+})
+
+/** Templates per batch: an embedded picture can make one most of a megabyte. */
+const TEMPLATE_THUMBNAIL_BATCH = 25
+
+/** The background a template's slide snapshot holds, whichever shape it was saved in. */
+function snapshotBackground(slideId: unknown): unknown {
+    let snapshot = slideId
+    if (typeof snapshot === 'string') {
+        try {
+            snapshot = JSON.parse(snapshot)
+        } catch {
+            return undefined
+        }
+    }
+    return snapshot && typeof snapshot === 'object' ? (snapshot as { background?: unknown }).background : undefined
+}
+
+/**
+ * Drop each template thumbnail that is a second copy of the template's own
+ * embedded picture. A picture picked in the browser is embedded in the
+ * template as a data URL, and was stored again, whole, as its thumbnail; every
+ * device read both copies with the template list each time any template in
+ * the church changed. The picker now shows such a template its picture, and
+ * new ones get a small thumbnail instead. Idempotent; a batch at a time.
+ *
+ *   npx convex run migrations:dropDuplicateTemplateThumbnails
+ */
+export const dropDuplicateTemplateThumbnails = internalMutation({
+    args: { cursor: v.optional(v.union(v.string(), v.null())) },
+    handler: async (ctx, args) => {
+        const page = await ctx.db
+            .query('templates')
+            .paginate({ numItems: TEMPLATE_THUMBNAIL_BATCH, cursor: args.cursor ?? null })
+        let dropped = 0
+        for (const template of page.page) {
+            const thumbnail = template.thumbnail
+            if (!thumbnail?.startsWith('data:') || snapshotBackground(template.slideId) !== thumbnail) continue
+            await ctx.db.patch(template._id, { thumbnail: undefined })
+            dropped++
+        }
+        if (!page.isDone) {
+            await ctx.scheduler.runAfter(0, internal.migrations.dropDuplicateTemplateThumbnails, { cursor: page.continueCursor })
+        }
+        return { dropped, done: page.isDone }
     },
 })

@@ -4,7 +4,25 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { getCurrentUser, isMemberOf, requireUser } from "./lib/auth";
 
 /**
- * Presence is a heartbeat: it fires every 15 seconds whether or not the auth
+ * How long after its last ping an entry still counts as present: a few pings'
+ * worth of the client's interval (usePresence.ts), 30 seconds in a live
+ * session and 2 minutes outside one. Every ping re-runs every presence list in
+ * the church for everyone watching one, so outside a session, where it only
+ * says who's around, it pings far less often than in one, where the avatars
+ * show who is there.
+ */
+const LIVE_TIMEOUT_MS = 90_000;
+const IDLE_TIMEOUT_MS = 5 * 60_000;
+
+/** A ping that changes nothing but `lastSeen` sooner than this after the last isn't written. */
+const MIN_PING_GAP_MS = 20_000;
+
+function isPresent(entry: Doc<"presence">, now: number): boolean {
+    return entry.lastSeen >= now - (entry.location === "live" ? LIVE_TIMEOUT_MS : IDLE_TIMEOUT_MS);
+}
+
+/**
+ * Presence is a heartbeat: it fires every so often whether or not the auth
  * token happens to be mid-refresh. Throwing made Convex log an uncaught
  * "Not authenticated" error with a full stack trace on every tick during a
  * reconnect — pages of noise in the console that would bury a real error
@@ -48,15 +66,15 @@ export const getPresenceByChurch = query({
             throw new Error("Unauthorized: not a member of this church");
         }
 
-        const cutoff = Date.now() - 60_000;
+        const now = Date.now();
 
         const presenceEntries = await ctx.db
             .query("presence")
             .withIndex("by_church", (q) => q.eq("churchId", args.churchId))
-            .filter((q) => q.gte(q.field("lastSeen"), cutoff))
+            .filter((q) => q.gte(q.field("lastSeen"), now - IDLE_TIMEOUT_MS))
             .take(200);
 
-        return await withUsers(ctx, presenceEntries);
+        return await withUsers(ctx, presenceEntries.filter((entry) => isPresent(entry, now)));
     },
 });
 
@@ -76,15 +94,15 @@ export const getPresenceBySession = query({
             throw new Error("Unauthorized: not a member of this church");
         }
 
-        const cutoff = Date.now() - 60_000;
+        const now = Date.now();
 
         const presenceEntries = await ctx.db
             .query("presence")
             .withIndex("by_session", (q) => q.eq("liveSessionId", args.sessionId))
-            .filter((q) => q.gte(q.field("lastSeen"), cutoff))
+            .filter((q) => q.gte(q.field("lastSeen"), now - IDLE_TIMEOUT_MS))
             .take(200);
 
-        return await withUsers(ctx, presenceEntries);
+        return await withUsers(ctx, presenceEntries.filter((entry) => isPresent(entry, now)));
     },
 });
 
@@ -122,7 +140,7 @@ export const heartbeat = mutation({
             // named the old church's session, so the user stayed listed in it
             // (as its operator) for as long as they worked in the new one.
             const kept = existingPresence.churchId === user.churchId ? existingPresence : undefined;
-            await ctx.db.patch(existingPresence._id, {
+            const fields = {
                 // Follow the user if they have switched churches since.
                 churchId: user.churchId,
                 location: args.location || existingPresence.location,
@@ -130,8 +148,18 @@ export const heartbeat = mutation({
                 liveSessionId: args.liveSessionId ?? kept?.liveSessionId,
                 sessionRole: args.sessionRole ?? kept?.sessionRole,
                 selectedSlideId: args.selectedSlideId ?? kept?.selectedSlideId,
-                lastSeen: Date.now(),
-            });
+            };
+            const now = Date.now();
+            // A repeat of the last ping, moments after it (older clients ping
+            // every 15 seconds, and a window coming back into view pings on
+            // top of the interval's): every write re-runs the church's
+            // presence lists, and this one would change nothing anyone sees.
+            const unchanged = (Object.keys(fields) as Array<keyof typeof fields>)
+                .every((key) => fields[key] === existingPresence[key]);
+            if (unchanged && now - existingPresence.lastSeen < MIN_PING_GAP_MS) {
+                return existingPresence._id;
+            }
+            await ctx.db.patch(existingPresence._id, { ...fields, lastSeen: now });
             return existingPresence._id;
         }
 

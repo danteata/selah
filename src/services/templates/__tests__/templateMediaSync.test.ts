@@ -125,4 +125,13 @@ describe('template backgrounds', () => {
         await syncTemplateMedia(client, [template('t1', { localFilePath: '/Users/me/a.mp4' })])
         expect(templateMediaState('t1')).toBe('missing')
     })
+
+    it("on a phone or in a browser, downloads no background ahead of time", async () => {
+        // Every device downloaded every uploaded background: each new phone or
+        // browser fetched up to the church's 100 MB, most of it never shown.
+        desktop.value = false
+        const { client } = convex()
+        await syncTemplateMedia(client, [template('t1', {}, { backgroundStorageId: 'kg2a8s' })])
+        expect(prefetch).not.toHaveBeenCalled()
+    })
 })

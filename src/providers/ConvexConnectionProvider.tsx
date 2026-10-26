@@ -40,6 +40,9 @@ export function useConvexConnection() {
 }
 
 const CONNECTION_CHECK_INTERVAL = 30_000
+// While the plan-limit flag is set the app is offline whatever the websocket
+// does, so only a probe notices the deployment is back: a slow one will do.
+const PLAN_LIMIT_CHECK_INTERVAL = 5 * 60_000
 const INITIAL_TIMEOUT = 8_000
 const PLAN_LIMIT_KEY = 'selah-convex-plan-limit'
 
@@ -128,12 +131,17 @@ export function ConvexConnectionProvider({
     })
     const [everHealthy, setEverHealthy] = useState(false)
     const recheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    // For the probe timers, which outlive the render that set them.
+    const socketConnectedRef = useRef(socket.connected)
+    const planLimitRef = useRef(isPlanLimit)
+    const lastProbeAtRef = useRef(0)
 
     // The websocket is the ground truth for "connected": while it is up we
     // are online whatever a health probe says, and it coming back ends an
     // outage at once rather than at the next 30s check.
     useEffect(() => {
         return realClient.subscribeToConnectionState((state) => {
+            socketConnectedRef.current = state.isWebSocketConnected
             setSocket((prev) =>
                 prev.connected === state.isWebSocketConnected && prev.everConnected === state.hasEverConnected
                     ? prev
@@ -143,6 +151,7 @@ export function ConvexConnectionProvider({
     }, [realClient])
 
     const checkConnection = useCallback(async () => {
+        lastProbeAtRef.current = Date.now()
         setChecking(true)
         const result = await checkConvexHealth(convexUrl, isOnline)
         setChecking(false)
@@ -162,11 +171,13 @@ export function ConvexConnectionProvider({
                 setIsPlanLimit(true)
                 try { localStorage.setItem(PLAN_LIMIT_KEY, 'true') } catch { /* storage unavailable: the banner still shows this session */ }
             }
-            // Confirm a first failure soon, rather than waiting a full interval.
-            if (!recheckRef.current) {
+            // Confirm a first failure soon, rather than waiting a full interval:
+            // a blip, while the websocket is down too. Not the plan limit,
+            // which no recheck in ten seconds will see lifted.
+            if (!recheckRef.current && !result.planLimit) {
                 recheckRef.current = setTimeout(() => {
                     recheckRef.current = null
-                    void checkConnectionRef.current()
+                    if (!socketConnectedRef.current) void checkConnectionRef.current()
                 }, RECHECK_AFTER_FAILURE_MS)
             }
         }
@@ -191,12 +202,26 @@ export function ConvexConnectionProvider({
     }, [checkConnection])
 
     useEffect(() => {
+        planLimitRef.current = isPlanLimit
+    }, [isPlanLimit])
+
+    useEffect(() => {
         if (isBrowserOffline) {
             setInitialCheckDone(true)
             return
         }
         void checkConnection()
-        const interval = setInterval(() => void checkConnection(), CONNECTION_CHECK_INTERVAL)
+        // Each tick probes only while the websocket is down, or, slowly, while
+        // the plan limit holds (nothing else will notice it lift). A connected
+        // websocket already proves Convex is reachable: every device posting a
+        // query every 30s regardless was a steady load of calls for nothing.
+        const interval = setInterval(() => {
+            if (planLimitRef.current) {
+                if (Date.now() - lastProbeAtRef.current >= PLAN_LIMIT_CHECK_INTERVAL) void checkConnection()
+            } else if (!socketConnectedRef.current) {
+                void checkConnection()
+            }
+        }, CONNECTION_CHECK_INTERVAL)
         return () => {
             clearInterval(interval)
             if (recheckRef.current) {
@@ -205,6 +230,14 @@ export function ConvexConnectionProvider({
             }
         }
     }, [isBrowserOffline, checkConnection])
+
+    // The websocket connecting is as good as a successful check: with no
+    // probes while it is up, failures counted before it connected would
+    // otherwise still stand when it next drops, and take the app offline at
+    // once.
+    useEffect(() => {
+        if (socket.connected) setConsecutiveFailures(0)
+    }, [socket.connected])
 
     // Before we have ever reached Convex, one failure is enough (a cold start
     // with no network should go straight to the offline tree). After that, it

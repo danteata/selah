@@ -350,7 +350,27 @@ export default defineSchema({
         updatedAt: v.optional(v.string()),
     })
         .index("by_church", ["churchId"])
-        .index("by_creator", ["createdBy"]),
+        .index("by_creator", ["createdBy"])
+        // The songs changed since a device last looked (songs.syncLibrary).
+        .index("by_church_and_updatedAt", ["churchId", "updatedAt"])
+        .index("by_creator_and_updatedAt", ["createdBy", "updatedAt"]),
+
+    // A counter per song library, bumped by every song write: one per church,
+    // and one per user for the songs they made (theirs wherever they are
+    // filed). A device compares it with the one it last saw to tell, in a
+    // read or two, whether its copy of the library is current — instead of
+    // downloading every song, lyrics and all, to find out.
+    songLibraryVersions: defineTable({
+        // A church id, or a user id.
+        scope: v.string(),
+        version: v.number(),
+        // When the last write happened (ms since epoch).
+        changedAt: v.number(),
+        // The version the last delete made. A device that saw an older one
+        // can't learn what went from the songs that are left, so it fetches
+        // the whole library again.
+        lastDeleteVersion: v.optional(v.number()),
+    }).index("by_scope", ["scope"]),
 
     // Templates table
     templates: defineTable({
@@ -560,6 +580,32 @@ export default defineSchema({
         // church filing transcripts under the same schedule id could push a
         // church's own out of the listed window.
         .index("by_church_and_schedule", ["churchId", "scheduleId"]),
+
+    // What the saved-transcripts list shows of each transcript, kept beside
+    // it by every transcript mutation (transcripts.ts). The list used to read
+    // up to 200 whole transcripts — text, segments, utterances — and, being
+    // live, read them all again for everyone watching each time the sermon in
+    // progress was saved. Backfilled by migrations:backfillTranscriptSummaries.
+    transcriptSummaries: defineTable({
+        transcriptId: v.id("transcripts"),
+        churchId: v.string(),
+        scheduleId: v.optional(v.string()),
+        title: v.string(),
+        // The start of the text, and how long all of it is.
+        preview: v.string(),
+        length: v.number(),
+        // The detected verses' references, at most MAX_SUMMARY_VERSES of them,
+        // and how many there are in all.
+        verseReferences: v.array(v.string()),
+        verseCount: v.number(),
+        provider: v.string(),
+        language: v.optional(v.string()),
+        createdBy: v.string(),
+        createdAt: v.string(),
+        updatedAt: v.string(),
+    })
+        .index("by_transcript", ["transcriptId"])
+        .index("by_church_and_createdAt", ["churchId", "createdAt"]),
 
     // Speaker profiles — learned phonetic patterns per speaker
     speakerProfiles: defineTable({

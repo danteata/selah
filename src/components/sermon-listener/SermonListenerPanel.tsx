@@ -22,7 +22,7 @@ import type { DetectedVerse } from '../../services/sermon-listener/verseDetectio
 import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, Copy, MoreHorizontal, Music, Sparkles } from 'lucide-react'
 import type { Scripture } from '../../types'
 import type { VoiceCommand } from '../../services/sermon-listener/voiceCommandDetection'
-import type { Transcript } from '../../hooks/useTranscripts'
+import type { TranscriptSummary } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
 import { classifyTranscriptionError, getUserAction, transcriptionErrorCodes, isRetryableError } from '../../services/sermon-listener/transcriptionErrors'
 import { generateSermonNotes } from '../../services/sermon-listener/sermonNotes'
@@ -37,6 +37,9 @@ import { DevAccuracyPanel } from './DevAccuracyPanel'
 import { useAudioLevel } from '../../services/sermon-listener/audioLevel'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { isDesktop } from '../../platform'
+
+/** How often the transcript in progress is saved to the server while listening. */
+const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000
 
 interface SermonListenerPanelProps {
     autoDisplay?: boolean
@@ -117,7 +120,7 @@ function SermonListenerPanelInner({
     const [transcriptTitle, setTranscriptTitle] = useState('')
     const [isSaving, setIsSaving] = useState(false)
     const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error' | 'offline'; text: string } | null>(null)
-    const [selectedTranscript, setSelectedTranscript] = useState<Transcript | null>(null)
+    const [selectedTranscript, setSelectedTranscript] = useState<TranscriptSummary | null>(null)
     const [autoSaveTranscriptId, setAutoSaveTranscriptId] = useState<string | null>(null)
     const [sermonNotes, setSermonNotes] = useState('')
     const [isGeneratingNotes, setIsGeneratingNotes] = useState(false)
@@ -277,39 +280,44 @@ function SermonListenerPanelInner({
         createTranscript,
         updateTranscript,
         deleteTranscript,
-    } = useTranscripts()
+    } = useTranscripts({ list: showSavedTranscripts })
 
-    // Autosave while listening.
+    // Autosave while listening, to the church's saved transcripts.
     //
     // The latest values live in a ref so the interval depends only on whether
     // we're listening. Keyed on the transcript itself, it was torn down and
     // re-armed with every new sentence, so it only ever fired after fifteen
-    // seconds of silence — and a crash mid-sermon lost everything since the
-    // last long pause.
+    // seconds of silence.
+    //
+    // Every few minutes, and once more when listening stops, rather than every
+    // fifteen seconds: the sermon in progress is already kept on this device
+    // as it comes (useSermonListener's live state, which a reload or a crash
+    // restores), so this copy is for the team, not for safety. Each save
+    // rewrote the whole transcript on the server, hundreds of times a service.
     const autoSaveRef = useRef({
         transcript, transcriptSegments, detectedVerses, transcriptTitle,
         provider, language, scheduleId: activeSchedule?._id,
-        autoSaveTranscriptId, createTranscript, updateTranscript,
+        createTranscript, updateTranscript,
     })
     useEffect(() => {
         autoSaveRef.current = {
             transcript, transcriptSegments, detectedVerses, transcriptTitle,
             provider, language, scheduleId: activeSchedule?._id,
-            autoSaveTranscriptId, createTranscript, updateTranscript,
+            createTranscript, updateTranscript,
         }
     })
-    const autoSaveInFlightRef = useRef(false)
+    // The id in a ref too: a save right after the create (the one at Stop)
+    // must update what it made, not make another before the state lands.
+    const autoSaveIdRef = useRef<string | null>(null)
+    const autoSaveChainRef = useRef<Promise<void>>(Promise.resolve())
     const lastAutoSavedRef = useRef('')
 
     useEffect(() => {
         if (!isListening) return
-        const timer = setInterval(async () => {
-            const current = autoSaveRef.current
+        const save = async (current: typeof autoSaveRef.current) => {
             const text = current.transcript
-            // One save at a time (a slow create racing the next tick made two
-            // transcripts), and none when nothing new has been said.
-            if (!text.trim() || autoSaveInFlightRef.current || text === lastAutoSavedRef.current) return
-            autoSaveInFlightRef.current = true
+            // None when nothing new has been said.
+            if (!text.trim() || text === lastAutoSavedRef.current) return
             try {
                 const title = current.transcriptTitle.trim() || `Sermon Transcript ${new Date().toLocaleDateString()}`
                 const payload = {
@@ -319,20 +327,35 @@ function SermonListenerPanelInner({
                     detectedVerses: current.detectedVerses,
                     scheduleId: current.scheduleId,
                 }
-                if (!current.autoSaveTranscriptId) {
+                if (!autoSaveIdRef.current) {
                     const id = await current.createTranscript({ ...payload, provider: current.provider, language: current.language })
-                    if (id) setAutoSaveTranscriptId(id)
+                    if (id) {
+                        autoSaveIdRef.current = id
+                        setAutoSaveTranscriptId(id)
+                    }
                 } else {
-                    await current.updateTranscript(current.autoSaveTranscriptId, payload)
+                    await current.updateTranscript(autoSaveIdRef.current, payload)
                 }
                 lastAutoSavedRef.current = text
             } catch (err) {
                 console.warn('[SermonListenerPanel] autosave failed; will retry:', err)
-            } finally {
-                autoSaveInFlightRef.current = false
             }
-        }, 15000)
-        return () => clearInterval(timer)
+        }
+        // One save at a time, in order: a slow create racing the next save
+        // made two transcripts. What to save is taken now, not when its turn
+        // comes, so the save at Stop has the text as it was when listening
+        // stopped.
+        const queueSave = () => {
+            const current = autoSaveRef.current
+            autoSaveChainRef.current = autoSaveChainRef.current.then(() => save(current))
+        }
+        const timer = setInterval(queueSave, AUTOSAVE_INTERVAL_MS)
+        return () => {
+            clearInterval(timer)
+            // Listening stopped (or the panel closed): save what was said
+            // since the last save.
+            queueSave()
+        }
     }, [isListening])
 
     const handleGenerateNotes = async () => {
@@ -1073,11 +1096,11 @@ function SermonListenerPanelInner({
                                             <p className="text-[10px] text-gray-500 dark:text-gray-400">
                                                 {formatDate(t.createdAt)}
                                             </p>
-                                            {t.detectedVerses && t.detectedVerses.length > 0 && (
+                                            {t.verseCount > 0 && (
                                                 <div className="flex items-center gap-1 mt-1">
                                                     <Book className="w-2.5 h-2.5 text-[var(--accent-teal)]" />
                                                     <span className="text-[10px] text-[var(--accent-teal)]">
-                                                        {t.detectedVerses.length} verse{t.detectedVerses.length !== 1 ? 's' : ''}
+                                                        {t.verseCount} verse{t.verseCount !== 1 ? 's' : ''}
                                                     </span>
                                                 </div>
                                             )}
@@ -1093,17 +1116,17 @@ function SermonListenerPanelInner({
                                     {selectedTranscript?._id === t._id && (
                                         <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                                             <p className="text-[10px] text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">
-                                                {t.transcript.substring(0, 500)}
-                                                {t.transcript.length > 500 && '...'}
+                                                {t.preview}
+                                                {t.length > t.preview.length && '...'}
                                             </p>
-                                            {t.detectedVerses && t.detectedVerses.length > 0 && (
+                                            {t.verseReferences.length > 0 && (
                                                 <div className="mt-2 flex flex-wrap gap-1">
-                                                    {t.detectedVerses.map((v, idx) => (
+                                                    {t.verseReferences.map((reference, idx) => (
                                                         <span
                                                             key={idx}
                                                             className="px-1.5 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded"
                                                         >
-                                                            {v.reference}
+                                                            {reference}
                                                         </span>
                                                     ))}
                                                 </div>

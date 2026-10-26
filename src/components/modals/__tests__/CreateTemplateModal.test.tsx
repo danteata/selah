@@ -37,8 +37,9 @@ vi.mock('../../../hooks/useLocalBackground', async (importOriginal) => ({
     useLocalBackground: vi.fn().mockImplementation((bg: string) => bg || ''),
 }))
 
-vi.mock('../../../utils/templateThumbnail', () => ({
-    generateThumbnail: vi.fn().mockResolvedValue('data:image/png;base64,fake'),
+vi.mock('../../../utils/templateThumbnail', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../../utils/templateThumbnail')>()),
+    generateThumbnail: vi.fn().mockResolvedValue('data:image/jpeg;base64,thumb'),
 }))
 
 vi.mock('../../../platform', () => ({
@@ -291,6 +292,21 @@ describe('CreateTemplateModal', () => {
         })
         const slide = JSON.parse(mockUpdateTemplate.mock.calls[0][1].slideId)
         expect(slide.backgroundStorageId).toBe('kg2a8s')
+    })
+
+    it("gives an embedded picture a small thumbnail, rather than storing the picture twice", async () => {
+        const picture = `data:image/jpeg;base64,${'A'.repeat(1000)}`
+        const template: Partial<TemplateItem> = {
+            _id: 'tpl-1',
+            name: 'Photo',
+            category: 'general',
+            slideId: JSON.stringify({ backgroundType: 'image', background: picture }),
+        }
+        render(<CreateTemplateModal {...baseProps} editingTemplate={template as TemplateItem} />)
+        fireEvent.click(screen.getByText('Update Template').closest('button')!)
+        await waitFor(() => expect(mockUpdateTemplate).toHaveBeenCalled())
+        expect(mockUpdateTemplate.mock.calls[0][1].thumbnail).toBe('data:image/jpeg;base64,thumb')
+        expect(JSON.parse(mockUpdateTemplate.mock.calls[0][1].slideId).background).toBe(picture)
     })
 
     it("won't save a video template that has no video", () => {

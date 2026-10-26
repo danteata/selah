@@ -137,6 +137,50 @@ describe('ConvexConnectionProvider', () => {
         expect(mounts).toBe(1)
     })
 
+    it("doesn't probe over HTTP while the websocket is connected", async () => {
+        await renderConnected()
+        expect(fetch).toHaveBeenCalledTimes(1) // the check before the app shows
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000) })
+
+        expect(fetch).toHaveBeenCalledTimes(1)
+        expect(screen.getByText(/^online/)).toBeInTheDocument()
+    })
+
+    it('probes again once the websocket drops, and stops when it is back', async () => {
+        await renderConnected()
+
+        act(() => socket.set({ isWebSocketConnected: false, hasEverConnected: true }))
+        await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+        expect(fetch).toHaveBeenCalledTimes(2)
+
+        act(() => socket.set({ isWebSocketConnected: true, hasEverConnected: true }))
+        await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
+        expect(fetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('checks for the plan limit lifting every few minutes, not every few seconds', async () => {
+        localStorage.setItem('selah-convex-plan-limit', 'true')
+        socket.state = { isWebSocketConnected: false, hasEverConnected: false }
+        vi.mocked(fetch).mockImplementation(async () =>
+            new Response('You have exceeded the free plan limits', { status: 400 }),
+        )
+        render(
+            <ConvexConnectionProvider convexUrl="https://example.convex.cloud">
+                <Studio />
+            </ConvexConnectionProvider>,
+        )
+        await flush()
+        expect(screen.getByText(/^offline/)).toBeInTheDocument()
+        expect(fetch).toHaveBeenCalledTimes(1)
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(4 * 60_000) })
+        expect(fetch).toHaveBeenCalledTimes(1)
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+        expect(fetch).toHaveBeenCalledTimes(2)
+    })
+
     it('retrying never blanks the app with the connection check screen', async () => {
         let retry: () => void = () => {}
         function Grab() {
@@ -170,12 +214,12 @@ describe('ConvexConnectionProvider', () => {
 
         // A probe that times out says nothing about the plan.
         healthResponds(false)
-        await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+        await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
         expect(screen.getByText(/^offline/)).toBeInTheDocument()
 
-        // One that gets through brings Selah back.
+        // One that gets through (they're minutes apart now) brings Selah back.
         healthResponds(true)
-        await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+        await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
         expect(screen.getByText(/^online/)).toBeInTheDocument()
         expect(mounts).toBe(1)
     })

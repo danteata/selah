@@ -35,7 +35,7 @@ import { DEFAULT_TEMPLATE_SLOTS, templateWorksWith, useDefaultTemplates, type De
 import { CreateTemplateModal } from '../modals'
 import { useAuth } from '@clerk/clerk-react'
 import { useUserRole } from '../../hooks/useUserRole'
-import { useLocalBackground } from '../../hooks/useLocalBackground'
+import { isImageUrl, useLocalBackground } from '../../hooks/useLocalBackground'
 import { useAppStore } from '../../store/appStore'
 import { Modal } from '../modals/Modal'
 
@@ -205,12 +205,18 @@ function TemplateCard({
             )
         }
 
+        // A picture template with no thumbnail of its own shows its picture:
+        // one embedded in the template isn't stored again as its thumbnail
+        // (see migrations:dropDuplicateTemplateThumbnails).
+        const picture = template.thumbnail
+            || (slideData?.backgroundType !== 'video' && isImageUrl(slideData?.background) ? slideData.background as string : undefined)
+
         // A picture that won't load (a removed stock photo) shows the
         // placeholder below rather than a broken-image icon.
-        if (template.thumbnail && !pictureFailed) {
+        if (picture && !pictureFailed) {
             return (
                 <div className="absolute inset-0">
-                    <img src={template.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" onError={() => setPictureFailed(true)} />
+                    <img src={picture} className="w-full h-full object-cover" alt="" loading="lazy" decoding="async" onError={() => setPictureFailed(true)} />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                 </div>
             )

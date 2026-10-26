@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 const heartbeatMutation = vi.fn().mockResolvedValue('presence-1')
@@ -88,5 +88,39 @@ describe('usePresence auth gating', () => {
 
         expect(warn).toHaveBeenCalled()
         warn.mockRestore()
+    })
+})
+
+describe('usePresence heartbeat interval', () => {
+    beforeEach(() => {
+        vi.clearAllMocks()
+        vi.useFakeTimers()
+        authState = { isLoading: false, isAuthenticated: true }
+        offline = false
+        currentUser = { _id: 'user-1', churchId: 'church-1' }
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
+    it('pings every couple of minutes outside a live session', () => {
+        renderHook(() => usePresence('church-1'))
+        expect(heartbeatMutation).toHaveBeenCalledTimes(1)
+
+        act(() => { vi.advanceTimersByTime(60_000) })
+        expect(heartbeatMutation).toHaveBeenCalledTimes(1)
+
+        act(() => { vi.advanceTimersByTime(60_000) })
+        expect(heartbeatMutation).toHaveBeenCalledTimes(2)
+    })
+
+    it('pings every half minute in a live session', () => {
+        renderHook(() => usePresence('church-1', 'session-1' as never, 'operator'))
+        expect(heartbeatMutation).toHaveBeenCalledTimes(1)
+
+        act(() => { vi.advanceTimersByTime(60_000) })
+        expect(heartbeatMutation).toHaveBeenCalledTimes(3)
+        expect(heartbeatMutation).toHaveBeenLastCalledWith(expect.objectContaining({ location: 'live', liveSessionId: 'session-1' }))
     })
 })

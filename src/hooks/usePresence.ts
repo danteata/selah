@@ -5,7 +5,14 @@ import type { Id } from '../../convex/_generated/dataModel'
 import { useUserRole } from './useUserRole'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 
-const HEARTBEAT_INTERVAL = 15_000
+// How often this device says it's here. In a live session the avatars show
+// who is there, so every half minute; outside one, presence only says who's
+// around in the church, and every couple of minutes will do. Each ping re-runs
+// every presence list in the church for everyone watching one, and it was
+// every 15 seconds from every device, session or not. The server's timeouts
+// (convex/presence.ts) allow a few missed pings of each.
+const SESSION_HEARTBEAT_INTERVAL = 30_000
+const IDLE_HEARTBEAT_INTERVAL = 2 * 60_000
 
 interface PresenceUser {
     _id: string
@@ -114,7 +121,7 @@ export function usePresence(
                 liveSessionId,
                 sessionRole,
             )
-        }, HEARTBEAT_INTERVAL)
+        }, liveSessionId ? SESSION_HEARTBEAT_INTERVAL : IDLE_HEARTBEAT_INTERVAL)
 
         return () => {
             if (heartbeatTimerRef.current) {

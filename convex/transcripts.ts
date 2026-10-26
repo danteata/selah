@@ -1,6 +1,6 @@
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getCurrentUser, isMemberOf, requireUser } from "./lib/auth";
 
 // Transcripts carry every segment of a sermon, so a church's full history can
@@ -16,7 +16,73 @@ export async function requireOwnTranscript(ctx: QueryCtx, id: Id<"transcripts">)
     return { user, transcript };
 }
 
-// Get all transcripts for a church
+/** How much of a transcript's text its summary keeps: what the list's preview shows. */
+export const SUMMARY_PREVIEW_CHARS = 500;
+/** Most verse references a summary keeps. */
+export const MAX_SUMMARY_VERSES = 100;
+
+/** What the saved-transcripts list needs of a transcript (see `transcriptSummaries`). */
+export function summaryOf(transcript: Doc<"transcripts">) {
+    const verses = transcript.detectedVerses ?? [];
+    return {
+        transcriptId: transcript._id,
+        churchId: transcript.churchId,
+        scheduleId: transcript.scheduleId,
+        title: transcript.title,
+        preview: transcript.transcript.slice(0, SUMMARY_PREVIEW_CHARS),
+        length: transcript.transcript.length,
+        verseReferences: verses.slice(0, MAX_SUMMARY_VERSES).map((verse) => verse.reference),
+        verseCount: verses.length,
+        provider: transcript.provider,
+        language: transcript.language,
+        createdBy: transcript.createdBy,
+        createdAt: transcript.createdAt,
+        updatedAt: transcript.updatedAt,
+    };
+}
+
+async function summaryRow(ctx: QueryCtx, transcriptId: Id<"transcripts">) {
+    return await ctx.db
+        .query("transcriptSummaries")
+        .withIndex("by_transcript", (q) => q.eq("transcriptId", transcriptId))
+        .first();
+}
+
+/** Bring a transcript's summary in line with it, or remove it with the transcript. */
+export async function syncTranscriptSummary(ctx: MutationCtx, transcriptId: Id<"transcripts">) {
+    const [transcript, existing] = await Promise.all([ctx.db.get(transcriptId), summaryRow(ctx, transcriptId)]);
+    if (!transcript) {
+        if (existing) await ctx.db.delete(existing._id);
+        return;
+    }
+    const summary = summaryOf(transcript);
+    if (existing) await ctx.db.replace(existing._id, summary);
+    else await ctx.db.insert("transcriptSummaries", summary);
+}
+
+/**
+ * The church's saved transcripts, newest first, as summaries: the list shows a
+ * title, the start of the text and the verses, and that is all this reads.
+ * The whole transcript is `getById`.
+ */
+export const listSummaries = query({
+    args: {
+        churchId: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const user = await getCurrentUser(ctx);
+        if (!user || !isMemberOf(user, args.churchId)) return [];
+
+        return await ctx.db
+            .query("transcriptSummaries")
+            .withIndex("by_church_and_createdAt", (q) => q.eq("churchId", args.churchId))
+            .order("desc")
+            .take(MAX_LISTED);
+    },
+});
+
+// Get all transcripts for a church. Older clients' list; newer ones read
+// `listSummaries`.
 export const getByChurch = query({
     args: {
         churchId: v.string(),
@@ -143,6 +209,7 @@ export const create = mutation({
             createdAt: now,
             updatedAt: now,
         });
+        await syncTranscriptSummary(ctx, transcriptId);
 
         return transcriptId;
     },
@@ -181,6 +248,7 @@ export const update = mutation({
             ...updates,
             updatedAt: new Date().toISOString(),
         });
+        await syncTranscriptSummary(ctx, id);
 
         return id;
     },
@@ -195,6 +263,7 @@ export const remove = mutation({
         await requireOwnTranscript(ctx, args.id);
 
         await ctx.db.delete(args.id);
+        await syncTranscriptSummary(ctx, args.id);
         return args.id;
     },
 });
@@ -212,6 +281,7 @@ export const updateSchedule = mutation({
             scheduleId: args.scheduleId,
             updatedAt: new Date().toISOString(),
         });
+        await syncTranscriptSummary(ctx, args.id);
 
         return args.id;
     },

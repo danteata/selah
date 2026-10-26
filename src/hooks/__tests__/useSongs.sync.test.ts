@@ -23,7 +23,8 @@ import type { Song } from '../../types'
 const T0 = '2026-10-07T10:00:00.000Z'
 
 async function serverHas(songs: Song[]) {
-    const client = { query: vi.fn(async () => songs) } as unknown as ConvexReactClient
+    const cursor = { scope: 'user_1:church_1', church: 1, own: 0, changedAt: Date.parse(T0) }
+    const client = { query: vi.fn(async () => ({ kind: 'full', songs, cursor })) } as unknown as ConvexReactClient
     await act(async () => { await refreshServerSongs(client) })
 }
 
@@ -33,6 +34,7 @@ describe('useSongs with device and server libraries', () => {
         resetDeviceSongs()
         deleteSongMutation.mockClear()
         await getIndexedDB().library.clear()
+        await getIndexedDB().serverSongLibrary.clear()
     })
 
     it('imports to the device only, marking songs for upload', async () => {

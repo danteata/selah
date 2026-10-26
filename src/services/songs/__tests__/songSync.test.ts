@@ -20,12 +20,18 @@ function row(id: string, title: string, extra: Partial<Song> = {}) {
     return { id, type: 'song', content, createdAt: T0, updatedAt: T0 }
 }
 
+/** A song as the server sends it: with its `_creationTime`. */
+const serverSong = (id: string, extra: Partial<Song> = {}) =>
+    ({ _id: id, id, title: id, artist: 'x', lyrics: 'la', _creationTime: 1, ...extra }) as Song
+
+const CURSOR = { scope: 'user_1:church_1', church: 1, own: 0, changedAt: Date.parse(T0) }
+
 /** A fake Convex client: a server song list, and a syncSongs that assigns ids. */
 function fakeConvex(serverSongs: Song[]) {
     let next = 1
     const calls: Array<Array<{ clientId: string; serverId?: string; title: string }>> = []
     const client = {
-        query: vi.fn(async () => serverSongs),
+        query: vi.fn(async () => ({ kind: 'full', songs: serverSongs, cursor: CURSOR })),
         mutation: vi.fn(async (_fn: unknown, args: { songs: Array<{ clientId: string; serverId?: string; title: string }> }) => {
             calls.push(args.songs)
             return args.songs.map((s) => ({ clientId: s.clientId, serverId: s.serverId ?? `srv_new_${next++}` }))
@@ -69,6 +75,7 @@ describe('syncPendingSongs', () => {
     beforeEach(async () => {
         resetServerSongs()
         await getIndexedDB().library.clear()
+        await getIndexedDB().serverSongLibrary.clear()
     })
 
     it('uploads pending songs in batches of 50 and links each to its server song', async () => {
@@ -154,6 +161,7 @@ describe('server song list', () => {
     beforeEach(async () => {
         resetServerSongs()
         await getIndexedDB().library.clear()
+        await getIndexedDB().serverSongLibrary.clear()
     })
 
     it("doesn't mirror the server copy of a song this device keeps", async () => {
@@ -174,6 +182,67 @@ describe('server song list', () => {
         const { client } = fakeConvex([])
         await Promise.all([refreshServerSongs(client), refreshServerSongs(client), refreshServerSongs(client)])
         expect(client.query).toHaveBeenCalledTimes(1)
+    })
+
+    it('asks only for what changed since the last sync, and keeps the list for next time', async () => {
+        const hymn = serverSong('srv_a', { lyrics: 'old' })
+        const other = serverSong('srv_b')
+        const next = { ...CURSOR, church: 2 }
+        const query = vi.fn()
+            .mockResolvedValueOnce({ kind: 'full', songs: [hymn, other], cursor: CURSOR })
+            .mockResolvedValueOnce({ kind: 'changes', songs: [{ ...hymn, lyrics: 'new' }], cursor: next })
+        const client = { query } as unknown as ConvexReactClient
+
+        await refreshServerSongs(client)
+        await refreshServerSongs(client)
+
+        expect(query.mock.calls[0][1]).toEqual({ cursor: undefined })
+        expect(query.mock.calls[1][1]).toEqual({ cursor: CURSOR })
+        expect(getServerSongs()?.map((s) => [s._id, s.lyrics])).toEqual([['srv_a', 'new'], ['srv_b', 'la']])
+        const saved = await getIndexedDB().serverSongLibrary.get('current')
+        expect(saved?.cursor).toEqual(next)
+        expect(saved?.songs).toHaveLength(2)
+    })
+
+    it('starts from the saved list after a restart, and downloads nothing when nothing changed', async () => {
+        const hymn = serverSong('srv_a')
+        await getIndexedDB().serverSongLibrary.put({ id: 'current', cursor: CURSOR, songs: [hymn], savedAt: T0 })
+        const query = vi.fn(async () => ({ kind: 'unchanged', cursor: CURSOR }))
+
+        await refreshServerSongs({ query } as unknown as ConvexReactClient)
+
+        expect(query).toHaveBeenCalledWith(expect.anything(), { cursor: CURSOR })
+        expect(getServerSongs()).toEqual([hymn])
+    })
+
+    it('drops songs deleted on the server from the device, and nothing only this device has', async () => {
+        const db = getIndexedDB()
+        const server = (id: string, extra: Partial<Song> = {}) => row(id, id, { _creationTime: 1, ...extra } as Partial<Song>)
+        await db.library.bulkPut([
+            server('srv_kept'),
+            server('srv_deleted'),
+            server('srv_edited', { syncState: 'pending' }),
+            row('ext_123', 'Looked up online'),
+            row('local_1', 'Made here'),
+        ])
+        const { client } = fakeConvex([serverSong('srv_kept')])
+
+        await refreshServerSongs(client)
+
+        expect((await db.library.toArray()).map((r) => r.id).sort()).toEqual(['ext_123', 'local_1', 'srv_edited', 'srv_kept'])
+    })
+
+    it('falls back to the whole list on a deployment from before syncLibrary', async () => {
+        const hymn = { _id: 'srv_a', id: 'srv_a', title: 'Hymn' } as Song
+        const query = vi.fn()
+            .mockRejectedValueOnce(new Error("Could not find public function for 'songs:syncLibrary'"))
+            .mockResolvedValueOnce([hymn])
+
+        await refreshServerSongs({ query } as unknown as ConvexReactClient)
+
+        expect(query.mock.calls[1][1]).toEqual({ limit: 5000 })
+        expect(getServerSongs()).toEqual([hymn])
+        expect(await getIndexedDB().serverSongLibrary.get('current')).toBeUndefined()
     })
 
     it('treats pending server-id rows as shadowing their server copy', () => {

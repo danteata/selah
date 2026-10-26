@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { useConvex, useConvexAuth } from 'convex/react'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
-import { refreshServerSongs, serverSongsAge, STALE_AFTER_MS } from '../services/songs/serverSongs'
+import { refreshServerSongs, restoreServerSongs, serverSongsAge, STALE_AFTER_MS } from '../services/songs/serverSongs'
 import {
     adoptUnsyncedLocalSongs,
     getSongSyncStatus,
@@ -18,9 +18,9 @@ import { subscribeSongsChanged } from './useSongs'
 const SYNC_DEBOUNCE_MS = 3000
 
 /**
- * Keeps this device's song library and the server's in step: fetches the
- * server's list when online and signed in (and again when it has gone stale),
- * and uploads songs saved here. Mount once, inside the Convex provider.
+ * Keeps this device's song library and the server's in step: brings the
+ * server's list up to date when online and signed in (and again when it has
+ * gone stale), and uploads songs saved here. Mount once, inside the Convex provider.
  */
 export function useSongLibrarySync(): void {
     const convex = useConvex()
@@ -30,6 +30,9 @@ export function useSongLibrarySync(): void {
 
     useEffect(() => {
         void adoptUnsyncedLocalSongs().then(() => refreshPendingCount())
+        // The list from the last sync, offline too; online, the fetch below
+        // then asks only what changed since.
+        void restoreServerSongs()
     }, [])
 
     useEffect(() => {

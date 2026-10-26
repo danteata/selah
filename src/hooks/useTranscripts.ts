@@ -1,6 +1,12 @@
 /**
  * useTranscripts Hook
  * Manages sermon transcripts with Convex persistence and offline IndexedDB fallback
+ *
+ * The list is of summaries (`transcripts.listSummaries`): a title, the start
+ * of the text and the verses, which is all the saved-transcripts list shows.
+ * It used to subscribe to the church's last 200 whole transcripts, segments
+ * and all, re-read for everyone each time the sermon in progress was saved.
+ * The whole of one transcript is `transcripts.getById`.
  */
 
 import { useState, useEffect } from 'react'
@@ -57,17 +63,21 @@ function offlineToRecord(t: OfflineTranscript) {
     }
 }
 
-export interface Transcript {
+/** How much of a transcript a summary previews; the server keeps as much. */
+const PREVIEW_CHARS = 500
+
+/** A saved transcript as the list shows it. */
+export interface TranscriptSummary {
     _id: string
     title: string
-    transcript: string
-    segments?: TranscriptSegment[]
-    detectedVerses?: TranscriptVerse[]
+    /** The start of the text; `length` is all of it. */
+    preview: string
+    length: number
+    verseReferences: string[]
+    verseCount: number
     provider: string
     language?: string
     scheduleId?: string
-    churchId: string
-    createdBy: string
     createdAt: string
     updatedAt: string
     _isOffline?: boolean
@@ -75,7 +85,7 @@ export interface Transcript {
 
 export interface UseTranscriptsReturn {
     // Queries
-    transcripts: Transcript[] | undefined
+    transcripts: TranscriptSummary[] | undefined
     isLoading: boolean
 
     // Mutations
@@ -138,9 +148,10 @@ async function removeOffline(id: string) {
 }
 
 /**
- * Hook for managing sermon transcripts
+ * Hook for managing sermon transcripts. `list: false` leaves the saved list
+ * unread (and unsubscribed) while nothing shows it; saving works either way.
  */
-export function useTranscripts(): UseTranscriptsReturn {
+export function useTranscripts({ list = true }: { list?: boolean } = {}): UseTranscriptsReturn {
     const { currentUser } = useUserRole()
 
     // Mirror of the IDB-backed offline queue so synchronous reads work.
@@ -173,9 +184,10 @@ export function useTranscripts(): UseTranscriptsReturn {
     }, [])
 
     // Queries
-    const transcripts = useQuery(
-        api.transcripts.getByChurch,
-        currentUser?.churchId ? { churchId: currentUser.churchId } : 'skip'
+    const listing = list && !!currentUser?.churchId
+    const summaries = useQuery(
+        api.transcripts.listSummaries,
+        listing ? { churchId: currentUser.churchId } : 'skip'
     )
 
     // Mutations
@@ -326,32 +338,39 @@ export function useTranscripts(): UseTranscriptsReturn {
     }
 
     // Merge online + offline transcripts
-    const onlineTranscripts = transcripts as Transcript[] | undefined
-    const offlineTranscriptsList = readOfflineTranscripts()
-    const combinedTranscripts: Transcript[] = [
-        ...(onlineTranscripts ?? []),
-        ...offlineTranscriptsList.map(t => ({
-            _id: t.id,
+    const combinedTranscripts: TranscriptSummary[] = [
+        ...(summaries ?? []).map((t): TranscriptSummary => ({
+            _id: t.transcriptId,
             title: t.title,
-            transcript: t.transcript,
-            segments: t.segments,
-            detectedVerses: t.detectedVerses,
+            preview: t.preview,
+            length: t.length,
+            verseReferences: t.verseReferences,
+            verseCount: t.verseCount,
             provider: t.provider,
             language: t.language,
             scheduleId: t.scheduleId,
-            churchId: '',
-            createdBy: '',
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+        })),
+        ...readOfflineTranscripts().map((t): TranscriptSummary => ({
+            _id: t.id,
+            title: t.title,
+            preview: t.transcript.slice(0, PREVIEW_CHARS),
+            length: t.transcript.length,
+            verseReferences: (t.detectedVerses ?? []).map(v => v.reference),
+            verseCount: t.detectedVerses?.length ?? 0,
+            provider: t.provider,
+            language: t.language,
+            scheduleId: t.scheduleId,
             createdAt: t.createdAt,
             updatedAt: t.updatedAt,
             _isOffline: true,
         })),
     ]
 
-    const displayTranscripts = combinedTranscripts
-
     return {
-        transcripts: displayTranscripts,
-        isLoading: currentUser === undefined,
+        transcripts: combinedTranscripts,
+        isLoading: currentUser === undefined || (listing && summaries === undefined),
         createTranscript,
         updateTranscript,
         deleteTranscript,

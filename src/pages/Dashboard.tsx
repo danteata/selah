@@ -30,6 +30,7 @@ import { prewarmSemanticSearch } from '../services/sermon-listener/localEmbeddin
 import { keepMusicSearchWarm } from '../services/songs/musicSearchWarmup'
 import { useScheduleOutboxSync } from '../hooks/useScheduleOutboxSync'
 import { countdownSlideFromForm } from '../utils/countdown'
+import { isEmbeddedImage } from '../utils/templateThumbnail'
 
 // Modals and the admin panel load on first open, keeping them out of the
 // Dashboard chunk every operator downloads before the studio appears.
@@ -429,7 +430,9 @@ export default function Dashboard() {
             category: data.category as 'announcement' | 'worship' | 'sermon' | 'prayer' | 'general',
             description: data.description,
             slideId: slideToSaveAsTemplate,
-            thumbnail: data.thumbnail || slideToSaveAsTemplate.background,
+            // Never the background itself when it's an embedded picture: the
+            // template would carry it twice.
+            thumbnail: data.thumbnail || (isEmbeddedImage(slideToSaveAsTemplate.background) ? undefined : slideToSaveAsTemplate.background),
             appliesTo: data.appliesTo as SlideType[] | undefined,
         })
 
