@@ -36,8 +36,11 @@ export function BibleVersionSettings() {
     const convexBibleVersions = useQuery(api.bibleVersions.listBibleVersions)
     const staticBibleVersions = useAppStore((state) => state.bibleVersions) as BibleVersion[]
 
+    // The bundled list unless Convex has one. Offline, its stand-in answers
+    // every query with an empty list, which took the place of the bundled
+    // versions and left this page loading forever.
     const bibleVersions = useMemo(() => {
-        return (convexBibleVersions || staticBibleVersions) as BibleVersion[]
+        return (convexBibleVersions?.length ? convexBibleVersions : staticBibleVersions) as BibleVersion[]
     }, [convexBibleVersions, staticBibleVersions])
 
     const defaultBibleVersion = useAppStore((state) => state.settings.defaultBibleVersion)
@@ -143,7 +146,7 @@ export function BibleVersionSettings() {
         await clearEmbeddings(versionId)
     }, [clearEmbeddings])
 
-    const isLoading = !convexBibleVersions && !staticBibleVersions?.length
+    const isLoading = !bibleVersions?.length
 
     const pct = (s: { progress: number; total: number }) =>
         s.total > 0 ? Math.round((s.progress / s.total) * 100) : undefined
