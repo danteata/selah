@@ -28,6 +28,10 @@ const cached = (id: string, name: string, synced: boolean) => ({
     id, name, slideId: '{}', category: 'general', createdBy: 'u1', createdAt: '', updatedAt: '2030-01-01', synced,
 })
 
+/** Leaving out the built-ins the app lists offline. */
+const theChurchs = (templates: Array<{ _id: string; name: string }> | undefined) =>
+    (templates ?? []).filter((t) => !t._id.startsWith('builtin:'))
+
 describe('useTemplates merge', () => {
     beforeEach(() => {
         server.list = [serverTemplate('a', 'Server A')]
@@ -65,7 +69,7 @@ describe('useTemplates merge', () => {
         connection.isOffline = true
         locals.rows = [cached('local_1', 'Made offline', false)]
         const { result } = renderHook(() => useTemplates())
-        await waitFor(() => expect(result.current.templates?.map((t) => t.name).sort()).toEqual(['Made offline', 'Server A']))
+        await waitFor(() => expect(theChurchs(result.current.templates).map((t) => t.name).sort()).toEqual(['Made offline', 'Server A']))
     })
 
     it("doesn't overwrite the church's templates with the offline client's empty answer", async () => {
@@ -77,10 +81,19 @@ describe('useTemplates merge', () => {
         connection.isOffline = true
         server.list = []
         const first = renderHook(() => useTemplates())
-        await waitFor(() => expect(first.result.current.templates?.map((t) => t._id)).toEqual(['a']))
+        await waitFor(() => expect(theChurchs(first.result.current.templates).map((t) => t._id)).toEqual(['a']))
         first.unmount()
 
         const again = renderHook(() => useTemplates())
-        await waitFor(() => expect(again.result.current.templates?.map((t) => t._id)).toEqual(['a']))
+        await waitFor(() => expect(theChurchs(again.result.current.templates).map((t) => t._id)).toEqual(['a']))
+    })
+
+    it('lists the built-in motion templates offline, even with nothing cached', async () => {
+        connection.isOffline = true
+        server.list = []
+        const { result } = renderHook(() => useTemplates())
+        await waitFor(() => expect(result.current.templates?.map((t) => t.name)).toEqual(
+            expect.arrayContaining(['Galaxy', 'Aurora', 'Warm Glow', 'Embers', 'Silk', 'Light Rays']),
+        ))
     })
 })

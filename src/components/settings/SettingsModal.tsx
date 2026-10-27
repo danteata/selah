@@ -37,6 +37,7 @@ import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { Modal } from '../modals/Modal'
 import { SLIDE_FONTS, cssFontStack } from '../../lib/fonts'
+import { findTemplate } from '../../constants/motionTemplates'
 
 
 interface SettingsModalProps {
@@ -951,10 +952,7 @@ function TemplatesSettings({ onClose }: { onClose: () => void }) {
     // templates panel, which sets the same defaults from each card).
     const templateCategories = DEFAULT_TEMPLATE_SLOTS.map(({ slot, slideType, label }) => ({ key: slot, slideType, label }))
 
-    const getTemplateName = (templateId: string | null | undefined) => {
-        if (!templateId) return null
-        return templates?.find(t => t._id === templateId)?.name || null
-    }
+    const getTemplateName = (templateId: string | null | undefined) => findTemplate(templates, templateId)?.name ?? null
 
     const getFilteredTemplates = (slideType: SlideType) => {
         if (!templates) return []
@@ -1002,9 +1000,14 @@ function TemplatesSettings({ onClose }: { onClose: () => void }) {
                                     {label}
                                 </label>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                    {selectedId
-                                        ? `Using: ${getTemplateName(selectedId)}`
-                                        : 'Using default background'}
+                                    {!selectedId
+                                        ? 'Using default background'
+                                        : getTemplateName(selectedId)
+                                            ? `Using: ${getTemplateName(selectedId)}`
+                                            // Set to a template this device can't
+                                            // list (offline, made on another
+                                            // computer): it read "Using: null".
+                                            : "Its template isn't available here, so the default background is used"}
                                 </p>
                             </div>
                             <div className="w-48 flex-shrink-0">

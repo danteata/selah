@@ -497,9 +497,10 @@ const RETIRED_SYSTEM_TEMPLATES = new Set([
  * Built-in motion backgrounds, drawn by the app itself (see
  * src/components/motion/motionBackgrounds.ts; the ids must match). Every church
  * gets them with nothing to upload, download or license. No thumbnail: the
- * template picker draws them live.
+ * template picker draws them live. The app keeps its own copy for offline
+ * (src/constants/motionTemplates.ts); a test keeps the two the same.
  */
-const MOTION_TEMPLATES: Array<[string, string, string, "worship" | "general" | "prayer" | "sermon" | "announcement", string[]]> = [
+export const MOTION_TEMPLATES: Array<[string, string, string, "worship" | "general" | "prayer" | "sermon" | "announcement", string[]]> = [
     ["Galaxy", "Drifting stars and a slow-turning nebula", "galaxy", "worship", ["Your content here"]],
     ["Aurora", "Soft green and violet light", "aurora", "worship", ["Your content here"]],
     ["Warm Glow", "Gold and rose light leaks", "warm-glow", "worship", ["Your content here"]],

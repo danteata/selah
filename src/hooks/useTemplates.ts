@@ -4,6 +4,7 @@ import type { ConvexReactClient } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useConvexConnection } from '../providers/ConvexConnectionProvider'
 import { stripEphemeralBackground } from './useLocalBackground'
+import { withBuiltInTemplates } from '../constants/motionTemplates'
 import {
     saveLocalTemplate,
     getLocalTemplates,
@@ -533,7 +534,9 @@ export function useTemplates(): UseTemplatesReturn {
             const offline = new Map<string, TemplateItem>()
             for (const t of readCachedServerTemplates()) offline.set(t._id, t)
             for (const t of localList) offline.set(t._id, t)
-            return Array.from(offline.values())
+            // The built-ins need no server; the cache lacks them on a device
+            // that was never online (or lost them, see the cache effect above).
+            return withBuiltInTemplates(Array.from(offline.values()))
         }
 
         // Online, the server's list is the truth, and a cached copy only

@@ -24,6 +24,7 @@ import {
 import { saveMedia } from './useIndexedDB'
 import type { TemplateItem } from './useTemplates'
 import { useTemplates } from './useTemplates'
+import { findTemplate } from '../constants/motionTemplates'
 import { songSlideBlocks } from '../lib/songSections'
 import { buildPptxSlides, type PptxImportMode, type PptxImportResult } from '../lib/import/pptxToSlides'
 
@@ -334,7 +335,7 @@ export function useSlideCreation() {
     // they haven't set one for, or a template this device can't see.
     const defaultTemplateFor = useCallback((type: 'scripture' | 'song' | 'hymn' | 'dictionary' | 'text'): TemplateItem | null => {
         if (!templates) return null
-        const find = (id: string | null | undefined) => (id ? templates.find((t) => t._id === id) ?? null : null)
+        const find = (id: string | null | undefined) => findTemplate(templates, id)
         return find(sessionDefaultTemplates?.[type]) ?? find(settings.defaultTemplates?.[type])
     }, [templates, sessionDefaultTemplates, settings.defaultTemplates])
 
