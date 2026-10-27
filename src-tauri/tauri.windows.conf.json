@@ -3,6 +3,7 @@
   "bundle": {
     "resources": {
       "assets/": "assets/",
+      "semantic-packs/": "semantic-packs/",
       "windows-runtime/": "",
       "ndi-runtime/windows/": "ndi-runtime/"
     }

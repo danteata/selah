@@ -749,7 +749,10 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                 if (!navigatingRef.current) handleSearch()
             }, 500)
             // Don't clear semantic results when regex matches — let both display
-        } else if (trimmed.length >= 3 && hasEmbeddings && isEmbedderReady) {
+        } else if (trimmed.length >= 3 && (hasEmbeddings ? isEmbedderReady : hasEmbeddings === false)) {
+            // Without a meaning index, the search still finds verses by their
+            // words (the hook's lexical pass over the bundled text). It used
+            // to run only with one, so a desk missing its pack found nothing.
             semanticSearch(trimmed)
         } else {
             clearSemanticResults()
@@ -1360,6 +1363,7 @@ export function BibleList({ initialQuery = '', onClose, isInline = false }: Bibl
                         <div className="mt-4 text-xs text-[var(--text-muted)] space-y-0.5">
                             <p>Examples: John 3:16, Jn 3:16-18, Ps 23:1</p>
                             {hasEmbeddings && isEmbedderReady && <p className="text-[var(--accent-teal)] mt-2">Or search by meaning, e.g. &quot;God so loved the world&quot;</p>}
+                            {hasEmbeddings === false && <p className="text-[var(--accent-teal)] mt-2">Or type words from the verse, e.g. &quot;God so loved the world&quot;</p>}
                             {hasEmbeddings && !isEmbedderReady && (
                                 <p className="text-[var(--accent-amber)] mt-2 flex items-center justify-center gap-1.5">
                                     <Loader2 className="w-3 h-3 animate-spin" /> Warming up semantic search...
