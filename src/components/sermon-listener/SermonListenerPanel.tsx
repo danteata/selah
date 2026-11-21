@@ -16,9 +16,7 @@ import { SermonListenerWizard, isSermonListenerWizardComplete } from './SermonLi
 import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
 import { formatVerseForDisplay } from '../../services/sermon-listener/verseDetection'
-import type { DetectedVerse } from '../../services/sermon-listener/verseDetection'
 import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp, X, Calendar, Book, Trash2, NotebookPen, Minimize2, AlertCircle, Check, Cloud, CloudOff, Download, Copy, MoreHorizontal, Music, Sparkles } from 'lucide-react'
-import type { Scripture } from '../../types'
 import type { VoiceCommand } from '../../services/sermon-listener/voiceCommandDetection'
 import type { TranscriptSummary } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
@@ -39,7 +37,6 @@ interface SermonListenerPanelProps {
     autoDisplay?: boolean
     autoLookup?: boolean
     language?: string
-    onVerseDetected?: (verse: DetectedVerse, scripture: Scripture | null) => void
     compact?: boolean
     onHide?: () => void
 }
@@ -85,7 +82,6 @@ function SermonListenerPanelStandalone(props: SermonListenerPanelProps) {
         language: props.language,
         autoLookup: props.autoLookup,
         autoDisplay: props.autoDisplay,
-        onVerseDetected: props.onVerseDetected,
     })
 
     return <SermonListenerPanelInner {...props} sermonListener={sermonListener} />
