@@ -13,9 +13,9 @@ import { useAppStore } from '../../store/appStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { MobileStudioWorkspace } from '../layout/MobileStudioWorkspace'
 import { DESK_PANELS, isDeskPanelId, isLibraryPanelId, type DeskPanelId } from './deskPanels'
-import { buildDefaultLayout, panelOptions } from './deskLayouts'
+import { buildDefaultLayout } from './deskLayouts'
 import { loadDeskLayout, saveDeskLayout, removeRetiredLayoutKeys } from './layoutStorage'
-import { attachDeskApi, rememberPanelGroup, showDeskPanel, useDeskStore } from './deskStore'
+import { attachDeskApi, initLayouts, normalizeDeskPanels, refreshModified, rememberPanelGroup, showDeskPanel, useDeskStore } from './deskStore'
 
 const SAVE_DELAY_MS = 400
 
@@ -86,14 +86,9 @@ function DockedDesk() {
             }
         }
         if (!restored) buildDefaultLayout(api)
-        // Older saves may predate a panel's current limits or renderer.
-        for (const panel of api.panels) {
-            if (!isDeskPanelId(panel.id)) continue
-            const opts = panelOptions(DESK_PANELS[panel.id])
-            panel.api.setRenderer(opts.renderer ?? 'onlyWhenVisible')
-        }
-        // Live is never missing, whatever was saved.
-        if (!api.getPanel('live')) showDeskPanel('live')
+        // Older saves may predate a panel's renderer; Live is never missing.
+        normalizeDeskPanels(api)
+        initLayouts(!restored)
 
         const syncOpen = () => setOpenPanels(api.panels.map((p) => p.id).filter(isDeskPanelId))
         syncOpen()
@@ -101,7 +96,10 @@ function DockedDesk() {
         let saveTimer: ReturnType<typeof setTimeout> | null = null
         api.onDidLayoutChange(() => {
             if (saveTimer) clearTimeout(saveTimer)
-            saveTimer = setTimeout(() => saveDeskLayout(api.toJSON()), SAVE_DELAY_MS)
+            saveTimer = setTimeout(() => {
+                saveDeskLayout(api.toJSON())
+                refreshModified()
+            }, SAVE_DELAY_MS)
         })
         api.onDidAddPanel(syncOpen)
         api.onDidRemovePanel((panel) => {

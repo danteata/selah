@@ -24,9 +24,7 @@ export function loadDeskLayout(): SerializedDockview | null {
     if (!raw) return null
     try {
         const layout = JSON.parse(raw) as SerializedDockview
-        const ids = Object.keys(layout?.panels ?? {})
-        if (!layout?.grid || ids.length === 0) return null
-        if (!ids.every(isDeskPanelId) || !ids.includes('live')) {
+        if (!isShowableLayout(layout)) {
             console.warn('[desk] saved layout names panels this version lacks, or no Live; using the default')
             return null
         }
@@ -35,6 +33,12 @@ export function loadDeskLayout(): SerializedDockview | null {
         console.warn('[desk] saved layout unreadable; using the default', err)
         return null
     }
+}
+
+/** A layout this version can show: only panels that exist, Live among them. */
+export function isShowableLayout(layout: SerializedDockview | null | undefined): layout is SerializedDockview {
+    const ids = Object.keys(layout?.panels ?? {})
+    return !!layout?.grid && ids.length > 0 && ids.every(isDeskPanelId) && ids.includes('live')
 }
 
 /** Best effort: storage can be full, blocked or missing (private windows). */

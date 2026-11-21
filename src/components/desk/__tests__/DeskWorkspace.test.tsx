@@ -12,7 +12,10 @@ vi.mock('dockview-react/dist/styles/dockview.css', () => ({}))
 vi.mock('../desk.css', () => ({}))
 
 import { DeskWorkspace } from '../DeskWorkspace'
-import { getDeskApi, hideDeskPanel, resetDeskLayout, showDeskPanel, useDeskStore } from '../deskStore'
+import {
+    applyBuiltInLayout, applySavedLayout, deleteSavedLayout, getDeskApi, hideDeskPanel, renameSavedLayout,
+    resetDeskLayout, saveLayout, saveLayoutAs, showDeskPanel, useDeskStore,
+} from '../deskStore'
 import { DESK_LAYOUT_KEY } from '../layoutStorage'
 
 function openIds() {
@@ -25,7 +28,7 @@ describe('DeskWorkspace', () => {
     beforeEach(() => {
         localStorage.clear()
         useAppStore.getState().signOut()
-        useDeskStore.setState({ editing: false, openPanels: [] })
+        useDeskStore.setState({ editing: false, openPanels: [], savedLayouts: [], loaded: null, modified: false })
     })
     afterEach(() => {
         cleanup()
@@ -99,5 +102,112 @@ describe('DeskWorkspace', () => {
         expect(screen.getByText(/editing layout/i)).toBeTruthy()
         act(() => screen.getByRole('button', { name: 'Done' }).click())
         expect(useDeskStore.getState().editing).toBe(false)
+    })
+
+    describe('layouts', () => {
+        // dockview reports layout changes on a microtask; the desk then
+        // checks for changes on a timer.
+        async function settle() {
+            await act(async () => { await Promise.resolve() })
+            act(() => { vi.advanceTimersByTime(1000) })
+        }
+        const groupOf = (id: string) => getDeskApi()?.getPanel(id)?.api.group.id
+
+        beforeEach(() => vi.useFakeTimers())
+
+        it('starts with Default loaded and unchanged', async () => {
+            render(<DeskWorkspace />)
+            await settle()
+            expect(useDeskStore.getState().loaded).toMatchObject({ kind: 'builtin', id: 'default' })
+            expect(useDeskStore.getState().modified).toBe(false)
+        })
+
+        it('builds Classic: the library and sermon stacked in one tab strip, apart from Preview and Live', async () => {
+            render(<DeskWorkspace />)
+            act(() => applyBuiltInLayout('classic'))
+            await settle()
+            expect(openIds()).toEqual(DEFAULT_PANELS)
+            const library = groupOf('bible')
+            for (const id of ['music', 'media', 'sermon', 'dictionary', 'templates', 'countdown', 'alerts']) {
+                expect(groupOf(id)).toBe(library)
+            }
+            const separate = new Set([groupOf('serviceOrder'), groupOf('preview'), groupOf('live'), library])
+            expect(separate.size).toBe(4)
+            expect(useDeskStore.getState().loaded).toMatchObject({ kind: 'builtin', id: 'classic' })
+        })
+
+        it('marks a change as modified, and a built-in can only be saved as a copy', async () => {
+            render(<DeskWorkspace />)
+            await settle()
+            await act(async () => { hideDeskPanel('templates') })
+            await settle()
+            expect(useDeskStore.getState().modified).toBe(true)
+            expect(saveLayout()).toBe(false)
+
+            let error: string | null = 'unset'
+            act(() => { error = saveLayoutAs('Sunday') })
+            expect(error).toBeNull()
+            expect(useDeskStore.getState().savedLayouts.map((l) => l.name)).toEqual(['Sunday'])
+            expect(useDeskStore.getState().loaded?.kind).toBe('saved')
+            expect(useDeskStore.getState().modified).toBe(false)
+        })
+
+        it('saves over a saved layout, and switches back to it', async () => {
+            render(<DeskWorkspace />)
+            await settle()
+            act(() => { saveLayoutAs('Sunday') })
+            const id = useDeskStore.getState().savedLayouts[0].id
+            await settle()
+            await act(async () => { hideDeskPanel('alerts') })
+            await settle()
+            expect(useDeskStore.getState().modified).toBe(true)
+            act(() => { saveLayout() })
+            expect(useDeskStore.getState().modified).toBe(false)
+
+            act(() => applyBuiltInLayout('classic'))
+            expect(openIds()).toContain('alerts')
+            act(() => { applySavedLayout(id) })
+            expect(openIds()).not.toContain('alerts')
+            expect(useDeskStore.getState().loaded).toMatchObject({ kind: 'saved', id })
+        })
+
+        it('remembers saved layouts and which was loaded across restarts', async () => {
+            const first = render(<DeskWorkspace />)
+            await settle()
+            act(() => { saveLayoutAs('Evening') })
+            await settle()
+            first.unmount()
+            useDeskStore.setState({ savedLayouts: [], loaded: null })
+
+            render(<DeskWorkspace />)
+            await settle()
+            expect(useDeskStore.getState().savedLayouts.map((l) => l.name)).toEqual(['Evening'])
+            expect(useDeskStore.getState().loaded?.kind).toBe('saved')
+            expect(useDeskStore.getState().modified).toBe(false)
+        })
+
+        it('renames, and deleting the loaded layout leaves the desk as it is', async () => {
+            render(<DeskWorkspace />)
+            await settle()
+            act(() => { saveLayoutAs('Morning') })
+            const id = useDeskStore.getState().savedLayouts[0].id
+            act(() => { renameSavedLayout(id, 'Early') })
+            expect(useDeskStore.getState().savedLayouts[0].name).toBe('Early')
+            const before = openIds()
+            act(() => deleteSavedLayout(id))
+            expect(useDeskStore.getState().savedLayouts).toEqual([])
+            expect(useDeskStore.getState().loaded).toBeNull()
+            expect(openIds()).toEqual(before)
+        })
+
+        it('refuses a duplicate name', async () => {
+            render(<DeskWorkspace />)
+            await settle()
+            act(() => { saveLayoutAs('Sunday') })
+            let error: string | null = null
+            act(() => { error = saveLayoutAs('sunday') })
+            expect(error).toMatch(/already/)
+            expect(useDeskStore.getState().savedLayouts).toHaveLength(1)
+        })
     })
 })
