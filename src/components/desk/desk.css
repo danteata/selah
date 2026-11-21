@@ -118,3 +118,10 @@
 .dockview-theme-selah .dv-tab {
     gap: 6px;
 }
+
+/* While a panel is dragged, let the pointer through the layer dockview draws
+   always-rendered panels in, so the grid beneath — and the desk's edge drop
+   zones — see the drag (see usePanelDragFlag in DeskWorkspace). */
+.desk-dock[data-dragging] .dv-render-overlay {
+    pointer-events: none;
+}

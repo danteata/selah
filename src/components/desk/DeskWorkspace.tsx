@@ -46,6 +46,37 @@ function DeskTab(props: IDockviewPanelHeaderProps) {
 const tabComponents = { desk: DeskTab }
 
 /**
+ * Marks the dock with data-dragging while a tab or tab strip is dragged.
+ *
+ * dockview draws always-rendered panels (Live, Preview, the service order) in
+ * a layer above the grid and forwards drags over them to their own group only,
+ * so the desk's edge drop zones never see them: with Live along the bottom,
+ * nothing could be docked across the whole bottom edge. desk.css lets the
+ * pointer through that layer while the flag is set.
+ */
+function usePanelDragFlag(dockRef: React.RefObject<HTMLDivElement | null>) {
+    useEffect(() => {
+        const dock = dockRef.current
+        if (!dock) return
+        const onDragStart = (e: DragEvent) => {
+            const el = e.target
+            if (el instanceof Element && dock.contains(el) && el.closest('.dv-tab, .dv-void-container')) {
+                dock.dataset.dragging = 'true'
+            }
+        }
+        const onDragDone = () => { delete dock.dataset.dragging }
+        document.addEventListener('dragstart', onDragStart, true)
+        document.addEventListener('dragend', onDragDone, true)
+        document.addEventListener('drop', onDragDone, true)
+        return () => {
+            document.removeEventListener('dragstart', onDragStart, true)
+            document.removeEventListener('dragend', onDragDone, true)
+            document.removeEventListener('drop', onDragDone, true)
+        }
+    }, [dockRef])
+}
+
+/**
  * The docked desk: panels that fill the window, resized by their splitters,
  * and moved, stacked, closed and reopened in Edit layout mode. The
  * arrangement is this device's own and is saved as it changes.
@@ -119,14 +150,22 @@ function DockedDesk() {
         })
     }, [setOpenPanels, setActiveNavSection])
 
-    useEffect(() => () => attachDeskApi(null), [])
+    // onReady fires once, but StrictMode (in development) runs this effect,
+    // its cleanup, and the effect again: put the api back on the second run,
+    // or the Layout menu, Reset and the modified marker all lose the desk.
+    useEffect(() => {
+        if (apiRef.current) attachDeskApi(apiRef.current)
+        return () => attachDeskApi(null)
+    }, [])
 
     const className = useMemo(() => `desk ${editing ? 'desk--editing' : ''}`, [editing])
+    const dockRef = useRef<HTMLDivElement>(null)
+    usePanelDragFlag(dockRef)
 
     return (
         <div className={className}>
             {editing && <EditLayoutBar />}
-            <div className="desk-dock">
+            <div className="desk-dock" ref={dockRef}>
                 <DockviewReact
                     components={components}
                     tabComponents={tabComponents}
