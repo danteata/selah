@@ -6,7 +6,7 @@
 > as `[KNOWN BUG]` so that fixing the bug in the future requires
 > intentionally updating the test.
 
-## Summary: 31 Confirmed Bugs (8 historical + 23 newly discovered)
+## Summary: 31 Confirmed Bugs (8 historical + 23 newly discovered; #24–31 fixed)
 
 | # | Component | Bug | Severity | File |
 |---|-----------|-----|----------|------|
@@ -36,7 +36,7 @@
 | 24 | `voiceCommandDetection` / `scriptureFollower` | (FIXED) A `change_version` command's matched text ran to the end of the transcript, and command text is cut from the whole detection window — so nothing said after "read it in the NIV" was detected until it scrolled out of the window | ~~**High**~~ | `src/services/sermon-listener/voiceCommandDetection.ts` |
 | 25 | `verseDetection` | (FIXED) "The Lord is my shepherd" (and "Better is one day") were detected as "Psalm …" — a book name no lookup knows — so they were listed but never shown, beside the semantic path's "Psalms …" | ~~Medium~~ | `src/services/sermon-listener/verseDetection.ts` |
 | 26 | `voiceCommandDetection` / `scriptureFollower` | (FIXED) Almost any spoken reference ("John 3:16 says…") also reads as a go-to command, and commands put the passage up whatever auto-display said, with no guard against reverting a specific verse to verse 1; a bare chapter came out as verse 1, so it was never treated as a placeholder | ~~Medium~~ | `src/services/sermon-listener/scriptureFollower.ts` |
-| 27 | `useSongTracker` / `useSongAutoDetect` | **NEW** New segments are found by count ("fewer than before means a new session"), so after a clear while stopped the first new segments are skipped, and segments restored after a reload are ingested again as new | Medium | `src/hooks/useSongTracker.ts`, `src/hooks/useSongAutoDetect.ts` |
+| 27 | `useSongTracker` / `useSongAutoDetect` | (FIXED) New segments were found by count ("fewer than before means a new session"), so after a clear while stopped the first new segments were skipped, and segments restored after a reload were ingested again as new | ~~Medium~~ | `src/hooks/useSongTracker.ts`, `src/hooks/useSongAutoDetect.ts` |
 | 28 | `SermonListenerPanel` | (FIXED) The error banner's "Dismiss" called `reset()`, which cleared the whole transcript and the heard verses | ~~**High**~~ | `src/components/sermon-listener/SermonListenerPanel.tsx` |
 | 29 | `useSermonListener` | (FIXED on the web) `isSpeechDetected` was always false: web speech reports speech start/end but nothing forwarded it. The native engine still has no such event | ~~Low~~ | `src/services/sermon-listener/webSpeechEngine.ts` |
 | 30 | `SermonListenerProvider` | (FIXED) The `sermon_listener` feature flag never turned the listener off (every panel made its own listener when it was off). It is a real off switch now: no listener, no engine, no tray toggle | ~~Low~~ | `src/components/sermon-listener/SermonListenerContext.tsx` |

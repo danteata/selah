@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { SegmentCursor } from '../services/sermon-listener/segmentCursor'
 import { useAppStore } from '../store/appStore'
 import { DEFAULT_SONG_TRACKING, type SongTrackingStep, type SongTrackingStatus } from '../store/appStore'
 import { useSermonListenerContext } from '../components/sermon-listener/SermonListenerContext'
@@ -53,7 +54,8 @@ export function useSongTracker() {
 
     const trackerRef = useRef<SongPositionTracker | null>(null)
     const trackedSongIdRef = useRef<string | null>(null)
-    const processedCountRef = useRef(0)
+    // Which transcript segments the tracker has already been fed.
+    const cursorRef = useRef(new SegmentCursor())
     // The live slide the tracker itself last drove — used to tell tracker-driven
     // changes apart from manual operator changes.
     const trackerDrivenSlideRef = useRef<string | null>(null)
@@ -238,11 +240,11 @@ export function useSongTracker() {
             const tracker = new SongPositionTracker(trackedSong, trackedSong.defaultArrangement)
             tracker.start()
             trackerRef.current = tracker
-            processedCountRef.current = segmentsRef.current?.length ?? 0
+            // A new song starts from what is said next.
+            cursorRef.current.markSeen(segmentsRef.current)
             apply(tracker.getState())
         } else {
             trackerRef.current = null
-            processedCountRef.current = 0
             setStatus({ ...DEFAULT_SONG_TRACKING.status })
         }
         // setStatus intentionally omitted — this runs on song change only.
@@ -269,23 +271,27 @@ export function useSongTracker() {
     useEffect(() => {
         const tracker = trackerRef.current
         const segs = transcriptSegments
-        if (!tracker || !isListening || !segs) return
+        if (!tracker || !segs) return
+        // Segments that arrive while not listening — restored after a reload,
+        // or the last of a run already stopped — aren't singing to follow.
+        if (!isListening) {
+            cursorRef.current.markSeen(segs)
+            return
+        }
 
-        if (segs.length < processedCountRef.current) {
-            // A fresh capture session — sermon time restarted, so the origin
-            // anchored to the previous one is meaningless.
-            processedCountRef.current = 0
+        const { fresh, cleared } = cursorRef.current.take(segs)
+        if (cleared) {
+            // A cleared transcript is a new session — its time restarted, so
+            // the origin anchored to the previous one is meaningless.
             lagRef.current.start(Date.now())
         }
-        if (segs.length === processedCountRef.current) return
+        if (fresh.length === 0) return
 
         let last: TrackerUpdate | null = null
-        for (let i = processedCountRef.current; i < segs.length; i++) {
-            const seg = segs[i]
+        for (const seg of fresh) {
             if (!seg?.text) continue
             last = tracker.ingest({ text: seg.text, timeMs: seg.startMs })
         }
-        processedCountRef.current = segs.length
         // A final for this utterance supersedes whatever interim text we last
         // fed, so the next interim (even if textually identical) is new again.
         lastInterimRef.current = ''
