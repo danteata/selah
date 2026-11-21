@@ -729,13 +729,27 @@ describe('sermon listener: carrying out commands and wiring', () => {
         const s = await listen()
         const st = useAppStore.getState()
         useAppStore.setState({
-            songTracking: { ...st.songTracking, autoDetect: true, status: { ...st.songTracking.status, songId: 'song', phase: 'tracking' } },
+            songTracking: { ...st.songTracking, autoDetect: true, status: { ...st.songTracking.status, songId: 'song', phase: 'tracking', singing: true } },
         })
         s.semanticWillMatch({ reference: 'John 3:16', score: 0.82, text: 'for god so loved the world, the scripture says' })
         await s.say('The scripture says for God so loved the world that he gave his only son.')
 
         expect(s.heard()).toEqual([])
         expect(h.semanticQueue).toHaveLength(1)
+    })
+
+    // The regression: the song tracker held on through the sermon after a
+    // song, and while it did, a paraphrased verse was never searched for.
+    it('a paraphrase is heard once the song is no longer being sung, though still tracked', async () => {
+        const s = await listen()
+        const st = useAppStore.getState()
+        useAppStore.setState({
+            songTracking: { ...st.songTracking, autoDetect: true, status: { ...st.songTracking.status, songId: 'song', phase: 'tracking', singing: false } },
+        })
+        s.semanticWillMatch({ reference: 'John 3:16', score: 0.82, text: 'for god so loved the world, the scripture says' })
+        await s.say('The scripture says for God so loved the world that he gave his only son.')
+
+        expect(s.heard()).toEqual(['John 3:16'])
     })
 
     it('the LLM pass adds and shows a verse the local detectors missed', async () => {

@@ -495,6 +495,62 @@ describe('far jumps need real evidence', () => {
     })
 })
 
+describe('the singing runs out', () => {
+    // Same scripting as above: the marker word scores `weight` against the
+    // song's first line, far from the chorus the tests sing.
+    const MARK = 'zzmarker'
+    const scripted = (weight: number) => (query: string, line: string) =>
+        query.includes(MARK)
+            ? line === 'Amazing grace how sweet the sound' ? weight : 0
+            : normalizeLine(query) === normalizeLine(line) ? 1 : 0
+
+    // The regression: preaching after a song is weak far matches, which were
+    // neither hits nor misses, so the tracker called a sermon singing.
+    it('stops calling it singing when nothing has been heard sung for the gap', () => {
+        const t = newTracker({ scorer: scripted(0.5) })
+        expect(t.ingest({ text: 'And like a flood His mercy reigns', timeMs: 0 }).singing).toBe(true)
+        expect(t.ingest({ text: MARK, timeMs: 6000 }).singing).toBe(true)
+        const u = t.ingest({ text: MARK, timeMs: 12_000 })
+        expect(u.singing).toBe(false)
+        // It keeps its place, to carry on from when the singing resumes.
+        expect(u.phase).toBe('tracking')
+        expect(u.singer?.sectionId).toBe('c1')
+        expect(t.ingest({ text: 'Unending love amazing grace', timeMs: 15_000 }).singing).toBe(true)
+    })
+
+    it('does not count middling matches near the singers as singing', () => {
+        // Lines placed at 0.45 move the cursor but aren't heard being sung.
+        const scorer = (query: string, line: string) =>
+            normalizeLine(query) === normalizeLine(line) ? 1 : line === 'Unending love amazing grace' ? 0.45 : 0
+        const t = newTracker({ scorer })
+        t.ingest({ text: 'And like a flood His mercy reigns', timeMs: 0 })
+        expect(t.ingest({ text: 'something else', timeMs: 8000 }).reason).toBe('tracking')
+        expect(t.ingest({ text: 'something more', timeMs: 13_000 }).singing).toBe(false)
+    })
+
+    it('counts a clear line elsewhere in the song as singing', () => {
+        // A far jump waiting for confirmation is still the song, sung clearly.
+        const t = newTracker({ scorer: scripted(0.7) })
+        t.ingest({ text: 'And like a flood His mercy reigns', timeMs: 0 })
+        const u = t.ingest({ text: MARK, timeMs: 11_000 })
+        expect(u.reason).toBe('jump-pending')
+        expect(t.ingest({ text: MARK.slice(1), timeMs: 20_000 }).singing).toBe(true)
+    })
+
+    it('says which windows were heard being sung', () => {
+        const t = newTracker({ scorer: scripted(0.5) })
+        expect(t.ingest({ text: 'And like a flood His mercy reigns', timeMs: 0 }).sung).toBe(true)
+        expect(t.ingest({ text: MARK, timeMs: 1000 }).sung).toBe(false)
+    })
+
+    it('is not singing after an operator seek until a line is heard', () => {
+        const t = newTracker({ scorer: scripted(0.5) })
+        t.ingest({ text: 'And like a flood His mercy reigns', timeMs: 0 })
+        expect(t.seekToSection('v2').singing).toBe(false)
+        expect(t.ingest({ text: 'And grace my fears relieved', timeMs: 3000 }).singing).toBe(true)
+    })
+})
+
 // A song in short display lines, as EasyWorship slides split them, with a line
 // that appears in its first and last verse. Invented lyrics.
 const SHORT_LINES: Song = {

@@ -11,8 +11,14 @@ function state(patch: Partial<SongTrackingState['status']>, autoDetect = true): 
 }
 
 describe('isCongregationSinging', () => {
-    it('is true only while the tracker is actively following a song', () => {
-        expect(isCongregationSinging(state({ songId: 'a', phase: 'tracking' }))).toBe(true)
+    it('is true only while the tracker is following a song it hears sung', () => {
+        expect(isCongregationSinging(state({ songId: 'a', phase: 'tracking', singing: true }))).toBe(true)
+    })
+
+    it('is false while the tracker holds its place but nothing is heard sung', () => {
+        // The regression: a sermon after a song kept the tracker Tracking on a
+        // few shared words, and scripture detection stayed muted.
+        expect(isCongregationSinging(state({ songId: 'a', phase: 'tracking', singing: false }))).toBe(false)
     })
 
     it('is false once the tracker loses the song', () => {
@@ -33,10 +39,10 @@ describe('isCongregationSinging', () => {
     })
 
     it('is false with no song at all', () => {
-        expect(isCongregationSinging(state({ songId: null, phase: 'tracking' }))).toBe(false)
+        expect(isCongregationSinging(state({ songId: null, phase: 'tracking', singing: true }))).toBe(false)
     })
 
     it('is false when the operator has not enabled song auto-detect', () => {
-        expect(isCongregationSinging(state({ songId: 'a', phase: 'tracking' }, false))).toBe(false)
+        expect(isCongregationSinging(state({ songId: 'a', phase: 'tracking', singing: true }, false))).toBe(false)
     })
 })

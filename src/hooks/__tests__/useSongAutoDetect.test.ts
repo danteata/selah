@@ -209,7 +209,7 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
         vi.resetModules()
     })
 
-    async function withGraceLive(confidence: number, phase: 'searching' | 'tracking' = 'tracking') {
+    async function withGraceLive(confidence: number, phase: 'searching' | 'tracking' = 'tracking', singing = phase === 'tracking') {
         const { useAppStore, DEFAULT_SONG_TRACKING } = await import('../../store/appStore')
         const { useSongAutoDetect } = await import('../useSongAutoDetect')
         useAppStore.setState({
@@ -218,7 +218,7 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
             songTracking: {
                 ...DEFAULT_SONG_TRACKING,
                 autoDetect: true,
-                status: { ...DEFAULT_SONG_TRACKING.status, songId: 'grace', phase, confidence },
+                status: { ...DEFAULT_SONG_TRACKING.status, songId: 'grace', phase, confidence, singing },
             },
         })
         const { rerender } = renderHook(() => useSongAutoDetect())
@@ -266,6 +266,14 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
             CORNERSTONE_LINES[1],
             CORNERSTONE_LINES[2],
         ])
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
+    })
+
+    it('looks again when the song on air is held but not heard sung', async () => {
+        // The tracker keeps its place, and its confidence, through whatever
+        // follows a song; that alone used to keep auto-detect quiet.
+        const { useAppStore, rerender } = await withGraceLive(0.9, 'tracking', false)
+        await singUntilDetected(rerender, CORNERSTONE_LINES)
         await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
     })
 

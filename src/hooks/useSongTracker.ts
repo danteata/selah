@@ -65,6 +65,9 @@ export function useSongTracker() {
     const segmentsRef = useRef<typeof transcriptSegments>(transcriptSegments)
     const lastInterimRef = useRef('')
     const leadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    // When the current stretch of singing began (see SongTrackingStatus).
+    const singingSinceRef = useRef<number | null>(null)
+    const wasSingingRef = useRef(false)
 
     // How far behind the audio the transcript runs — see TranscriptLagEstimator.
     // Anchored on the rising edge of `isListening`: slightly early if anything
@@ -196,6 +199,8 @@ export function useSongTracker() {
      *  the live slide to the step the tracker wants shown. */
     const apply = useCallback((u: TrackerUpdate) => {
         const deps = applyDepsRef.current
+        if (u.singing && !wasSingingRef.current) singingSinceRef.current = Date.now()
+        wasSingingRef.current = u.singing
         const status: SongTrackingStatus = {
             songId: deps.songKey,
             songTitle: deps.trackedSong?.title ?? null,
@@ -207,6 +212,8 @@ export function useSongTracker() {
             singerStepIndex: u.singer?.stepIndex ?? null,
             singerLabel: u.singer?.sectionId ? deps.sectionLabels.get(u.singer.sectionId) ?? null : null,
             arrangement: deps.arrangement,
+            singing: u.singing,
+            singingSince: singingSinceRef.current,
         }
         deps.setStatus(status)
 

@@ -209,7 +209,36 @@ export interface TrackerUpdate {
     /** Rolling estimate of how long one line takes to sing (ms), or null until
      *  enough line-to-line timings have been observed to be worth trusting. */
     estimatedLineMs: number | null
+    /** True on the ingest of finalized text that placed a line at or above
+     *  {@link SUNG_LINE_SCORE}: evidence the song is being sung right now. */
+    sung: boolean
+    /** Whether the song is being sung: tracking, with a line heard sung (or
+     *  the song acquired) within {@link SINGING_GAP_MS} of the latest
+     *  finalized text. Says nothing about *where* — the cursor stays put
+     *  through a gap, so the tracker carries on from there when singing
+     *  resumes. */
+    singing: boolean
 }
+
+/** Score a finalized line must reach to count as heard being sung. */
+export const SUNG_LINE_SCORE = 0.6
+
+/**
+ * How long without a line heard being sung before the singing is over.
+ *
+ * Tracking alone used to stand for singing, and leaving it took three misses
+ * in a row. A miss needs a window that matches no line of the song at 0.4,
+ * and preaching rarely manages that: a few shared words reach 0.4 against
+ * some line, and a weak match far away counted as neither a hit nor a miss.
+ * So a sermon read as singing, muting the scripture follower and keeping
+ * auto-detect from looking for the next song.
+ *
+ * It ends the singing, not the tracking. Losing the song on the clock was
+ * tried: a vamp or ad-lib runs past 12 s inside a song, and re-acquiring from
+ * nothing then lands on the wrong repeat of a line — the recorded service
+ * went from 90% to 76% of the time on the right slide.
+ */
+export const SINGING_GAP_MS = 12_000
 
 /**
  * How much of the section must still be left, by the line-timing model, for a
@@ -261,6 +290,10 @@ export interface TrackerConfig {
     defaultLineMs: number | null
     /** Line timings needed before the measured estimate is trusted. */
     minLineSamples: number
+    /** See {@link SUNG_LINE_SCORE}. */
+    sungScore: number
+    /** See {@link SINGING_GAP_MS}. */
+    singingGapMs: number
 }
 
 export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
@@ -278,6 +311,8 @@ export const DEFAULT_TRACKER_CONFIG: TrackerConfig = {
     holdAfterRetract: true,
     defaultLineMs: null,
     minLineSamples: MIN_LINE_TIMING_SAMPLES,
+    sungScore: SUNG_LINE_SCORE,
+    singingGapMs: SINGING_GAP_MS,
 }
 
 /** Words at the end of a transcript used to place the singers on a later
@@ -351,6 +386,14 @@ export class SongPositionTracker {
      *  see {@link reviewLead}. */
     private noPredictStep = -1
 
+    /** Audio time (ms) of the last line heard being sung, or of acquiring
+     *  the song; null when unknown (after a seek, before acquiring). */
+    private lastSungMs: number | null = null
+    /** Whether the ingest in progress placed a line heard being sung. */
+    private sungNow = false
+    /** Audio time (ms) of the latest finalized text. */
+    private lastHeardMs: number | null = null
+
     // Pending non-adjacent jump target awaiting hysteresis confirmation.
     private pendingJump: { stepIndex: number; lineIndex: number; count: number } | null = null
 
@@ -385,6 +428,9 @@ export class SongPositionTracker {
         this.buffer = []
         this.predictedLeadStep = -1
         this.noPredictStep = -1
+        this.lastSungMs = null
+        this.sungNow = false
+        this.lastHeardMs = null
     }
 
     getPhase(): TrackerPhase {
@@ -428,6 +474,9 @@ export class SongPositionTracker {
         // measurement — the next gap would span the operator's jump.
         this.lastMatchMs = null
         this.lastMatchAbsLine = null
+        // The operator's click says where the singers are, not when they were
+        // last heard; the clock restarts at the next line heard.
+        this.lastSungMs = null
         const changed = this.recomputeDisplay()
         return this.snapshot(changed, 'seek')
     }
@@ -511,6 +560,12 @@ export class SongPositionTracker {
 
     /** Feed a transcript chunk; returns the resulting display decision. */
     ingest(chunk: TrackerChunk): TrackerUpdate {
+        this.sungNow = false
+        if (!chunk.interim && chunk.timeMs !== undefined) this.lastHeardMs = chunk.timeMs
+        return this.ingestChunk(chunk)
+    }
+
+    private ingestChunk(chunk: TrackerChunk): TrackerUpdate {
         if (this.phase === 'idle') this.start()
         if (this.steps.length === 0) return this.snapshot(false, 'no-steps')
 
@@ -569,6 +624,7 @@ export class SongPositionTracker {
             this.noteMatchTime(chunk, best.stepIndex, best.lineIndex, false)
             this.pendingJump = null
             this.phase = 'tracking'
+            this.noteSung(chunk, best.score, true)
             const changed = this.recomputeDisplay()
             return this.snapshot(changed, 'acquired')
         }
@@ -619,7 +675,10 @@ export class SongPositionTracker {
                 this.pendingJump = { stepIndex: best.stepIndex, lineIndex: best.lineIndex, count: 1 }
             }
             if (this.pendingJump.count < this.config.jumpHysteresis) {
-                // Not yet confirmed — treat as a soft miss, hold position.
+                // Not yet confirmed — treat as a soft miss, hold position. It
+                // is still a line of this song sung clearly, somewhere else in
+                // it: a leader doubling back is still singing.
+                this.noteSung(chunk, best.score, false)
                 return this.snapshot(false, 'jump-pending')
             }
         }
@@ -632,6 +691,7 @@ export class SongPositionTracker {
         this.confidence = best.score
         if (!interim) this.consecutiveMisses = 0
         this.noteMatchTime(chunk, best.stepIndex, best.lineIndex, interim)
+        if (!interim) this.noteSung(chunk, best.score, false)
         this.phase = 'tracking'
 
         const changed = this.recomputeDisplay()
@@ -723,6 +783,15 @@ export class SongPositionTracker {
         return Math.max(0, step.lines.length - 1 - Math.max(this.singerLine, this.tailLine))
     }
 
+    /** Note a finalized line placed at `score`. Acquiring starts the singing
+     *  clock whatever the score, so a song acquired on a middling line and
+     *  never heard clearly again still runs out. */
+    private noteSung(chunk: TrackerChunk, score: number, acquired: boolean): void {
+        const sung = score >= this.config.sungScore
+        if (sung) this.sungNow = true
+        if ((sung || acquired) && chunk.timeMs !== undefined) this.lastSungMs = chunk.timeMs
+    }
+
     private handleMiss(): TrackerUpdate {
         // A miss means transcript arrived that didn't match the current song.
         // (Real instrumental breaks produce no transcript, so the tracker isn't
@@ -737,6 +806,7 @@ export class SongPositionTracker {
             this.pendingJump = null
             this.lastMatchMs = null
             this.lastMatchAbsLine = null
+            this.lastSungMs = null
             // Nothing confident is playing anymore — clear the display target so
             // callers stop re-asserting this section onto the live output (which
             // otherwise fights any other detector, e.g. Bible-verse auto-detect,
@@ -746,6 +816,15 @@ export class SongPositionTracker {
             return this.snapshot(changed, 'lost')
         }
         return this.snapshot(false, 'miss')
+    }
+
+    private isSinging(): boolean {
+        return (
+            this.phase === 'tracking' &&
+            this.lastSungMs !== null &&
+            this.lastHeardMs !== null &&
+            this.lastHeardMs - this.lastSungMs < this.config.singingGapMs
+        )
     }
 
     /**
@@ -905,6 +984,8 @@ export class SongPositionTracker {
             reason,
             linesRemaining: this.linesRemaining(),
             estimatedLineMs: this.estimatedLineMs(),
+            sung: this.sungNow,
+            singing: this.isSinging(),
         }
     }
 }
