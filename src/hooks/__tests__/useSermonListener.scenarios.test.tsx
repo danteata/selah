@@ -266,6 +266,10 @@ beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
+function setSermonSettings(patch: Record<string, unknown>) {
+    const s = useAppStore.getState()
+    useAppStore.setState({ settings: { ...s.settings, sermonListener: { ...s.settings.sermonListener, ...patch } } as typeof s.settings })
+}
 
 describe('sermon listener: starting and stopping', () => {
     // The one path into start()'s own readiness check: no provider was
@@ -287,6 +291,42 @@ describe('sermon listener: starting and stopping', () => {
         })
         expect(started).toBe(true)
         expect(hook.result.current.isListening).toBe(true)
+    })
+
+    it('archives the session when listening stops by voice, not only from the panel', async () => {
+        setSermonSettings({ recordSessions: true })
+        const s = await listen()
+        expect(h.recordings.started).toHaveLength(1)
+
+        await s.say('Turn with me to John 3:16.')
+        await s.say('Stop listening.')
+
+        expect(s.state.isListening).toBe(false)
+        expect(h.recordings.stopped).toBe(1)
+        expect(h.recordings.attached).toEqual([[h.recordings.started[0], 'Turn with me to John 3:16. Stop listening.']])
+    })
+
+    it('archives the session when stop() is called directly, as the tray does', async () => {
+        setSermonSettings({ recordSessions: true })
+        const s = await listen()
+        await s.say('Turn with me to John 3:16.')
+        await act(async () => {
+            s.state.stop()
+        })
+        await s.wait(0)
+
+        expect(h.recordings.stopped).toBe(1)
+        expect(h.recordings.attached).toHaveLength(1)
+    })
+
+    it('records nothing unless the church turned recording on', async () => {
+        const s = await listen()
+        await act(async () => {
+            s.state.stop()
+        })
+        await s.wait(0)
+        expect(h.recordings.started).toHaveLength(0)
+        expect(h.recordings.stopped).toBe(0)
     })
 })
 

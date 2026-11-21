@@ -71,7 +71,12 @@ import {
     deleteSavedSermonTranscript as deleteSavedTranscriptFromIDB,
     clearSavedSermonTranscripts as clearSavedTranscriptsInIDB,
     migrateLegacySermonStorage,
+    setSermonRecordingTranscript,
 } from './useIndexedDB'
+import {
+    startRecording as startSermonRecording,
+    stopRecording as stopSermonRecording,
+} from '../services/sermon-listener/sessionRecordings'
 
 const MAX_DETECTED_VERSES_PER_QUERY = 3 // Max verses per semantic search query
 const LLM_EXTRACTION_DEBOUNCE_MS = 3500 // Wait for speech to settle before an LLM pass
@@ -547,6 +552,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // Ref for start function to avoid TDZ issues (start is defined after processTranscript)
     const startRef = useRef<() => Promise<boolean>>(async () => false)
     const stopRef = useRef<() => void>(() => {})
+    // Stops capture without ending the listening session — the watchdog's
+    // restart. `stop` ends the session too (see finishSessionRecording).
+    const stopCaptureRef = useRef<() => void>(() => {})
+    // The archive recording for this listening session, if the church keeps
+    // one. Owned here rather than by the panel so that every way a session
+    // ends — the panel, the tray, "stop listening", the free-plan cap — ends
+    // the recording with it; the panel was only one of those.
+    const recordingSessionIdRef = useRef<string | null>(null)
     // Synchronous mutex for `start()`. `isListening`/`isStarting` are React state
     // and don't commit until after several `await`s inside `start()` (provider
     // check, semantic detector warm-up, AudioContext unlock), so a second call
@@ -2608,6 +2621,46 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     ])
 
     /**
+     * Begin the session's archive recording, when the church turned recording
+     * on. A capture restarted mid-session keeps the recording it already has.
+     */
+    const beginSessionRecording = useCallback(() => {
+        if (recordingSessionIdRef.current) return
+        if (!useAppStore.getState().settings.sermonListener?.recordSessions) return
+        const sessionId = crypto.randomUUID()
+        recordingSessionIdRef.current = sessionId
+        void startSermonRecording(sessionId).then((path) => {
+            if (path) return
+            if (recordingSessionIdRef.current === sessionId) recordingSessionIdRef.current = null
+            // Recording failed but the service is running anyway. Say so once
+            // rather than letting the operator believe there is an archive —
+            // finding out weeks later that the sermon was never captured is
+            // the failure this feature exists to prevent.
+            toast.error('Session recording could not start', {
+                description: 'The service will still be transcribed, but no audio is being saved.',
+            })
+        })
+    }, [])
+
+    /**
+     * End the session's archive recording and keep the live transcript with
+     * it, so the archive shows what was heard and a later re-transcription has
+     * something to be judged against.
+     */
+    const finishSessionRecording = useCallback(() => {
+        const sessionId = recordingSessionIdRef.current
+        if (!sessionId) return
+        recordingSessionIdRef.current = null
+        const liveText = transcriptBufferRef.current.trim()
+        void stopSermonRecording().then(() => {
+            if (!liveText) return
+            void setSermonRecordingTranscript(sessionId, liveText).catch((err: unknown) => {
+                console.warn('[recordings] could not attach transcript:', err)
+            })
+        })
+    }, [])
+
+    /**
      * Start listening
      */
     const start = useCallback(async (): Promise<boolean> => {
@@ -2926,6 +2979,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // Safety net: if the provider resolved without ever firing onStart
             // (e.g. it failed silently), don't leave the button stuck on "Starting".
             setIsStarting(false)
+            if (success) beginSessionRecording()
             return success
         } catch (err) {
             // If anything above throws (e.g. unifiedTranscriptionService.start()
@@ -2961,6 +3015,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         initSemanticDetector,
         enableSemanticDetection,
         trackEvent,
+        beginSessionRecording,
     ])
 
     // Keep ref in sync so processTranscript can call start without TDZ issues
@@ -2969,9 +3024,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [start])
 
     /**
-     * Stop listening
+     * Stop capture. Ends listening but not the listening session's archive —
+     * see `stop`, which does both, and the watchdog, which restarts capture.
      */
-    const stop = useCallback(() => {
+    const stopCapture = useCallback(() => {
         if (llmDebounceRef.current) {
             clearTimeout(llmDebounceRef.current)
             llmDebounceRef.current = null
@@ -3006,10 +3062,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
     }, [provider, trackEvent])
 
-    // Keep stopRef current for the watchdog (stop is defined just above).
+    /**
+     * Stop listening, ending the listening session.
+     */
+    const stop = useCallback(() => {
+        stopCapture()
+        finishSessionRecording()
+    }, [stopCapture, finishSessionRecording])
+
+    // Keep the refs current for the voice command, the free-plan cap and the
+    // watchdog (all defined before these callbacks exist).
     useEffect(() => {
         stopRef.current = stop
-    }, [stop])
+        stopCaptureRef.current = stopCapture
+    }, [stop, stopCapture])
 
     useEffect(() => {
         isListeningRef.current = isListening
@@ -3038,7 +3104,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             lastRecoveryMs = nowMs
             seenSignal = false
             console.warn('[useSermonListener] Audio signal lost mid-session — restarting capture')
-            stopRef.current()
+            stopCaptureRef.current()
             setTimeout(() => { void startRef.current() }, 400)
         }, 2500)
         return () => clearInterval(timer)
