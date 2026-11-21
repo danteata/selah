@@ -147,6 +147,27 @@ describe('SongConfirmationTracker', () => {
             expect(t.update(1000, { songId: 'a', confidence: 0.9, windowId: 110 })).toBe('a')
         })
 
+        it("doesn't count a line still in the window as sung again", () => {
+            const t = new SongConfirmationTracker()
+            expect(t.update(0, { songId: 'a', confidence: 1, windowId: 100, lineKey: 'v1:0' })).toBeNull()
+            // Seven new words: past minWindowAdvance, but the 14-word window
+            // still holds the line it matched last time.
+            expect(t.update(3000, { songId: 'a', confidence: 1, windowId: 107, lineKey: 'v1:0' })).toBeNull()
+            expect(t.scoreFor('a')).toBeLessThan(1)
+        })
+
+        it('counts the same line again once it has left the window and come back', () => {
+            const t = new SongConfirmationTracker()
+            expect(t.update(0, { songId: 'a', confidence: 1, windowId: 100, lineKey: 'c1:0' })).toBeNull()
+            expect(t.update(3000, { songId: 'a', confidence: 1, windowId: 114, lineKey: 'c1:0' })).toBe('a')
+        })
+
+        it('counts a different line of the same song at the usual advance', () => {
+            const t = new SongConfirmationTracker()
+            expect(t.update(0, { songId: 'a', confidence: 1, windowId: 100, lineKey: 'v1:0' })).toBeNull()
+            expect(t.update(3000, { songId: 'a', confidence: 1, windowId: 107, lineKey: 'v1:1' })).toBe('a')
+        })
+
         it('never confirms from a phrase stuck in the window across many ticks', () => {
             const t = new SongConfirmationTracker()
             let res: string | null = null

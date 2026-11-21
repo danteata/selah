@@ -43,6 +43,11 @@ export interface SongEvidence {
      *  accumulated hit; otherwise it's ignored (decay still applies). This is
      *  the primary defense against the sliding-buffer false positive. */
     windowId?: number
+    /** Which line of the song the window matched (e.g. `sectionId:lineIndex`).
+     *  A window that matches the same line as this song's last hit, before
+     *  the window has moved {@link SongConfirmationConfig.sameLineWindowAdvance}
+     *  words on, is that line still sitting in the window — not a new hit. */
+    lineKey?: string
 }
 
 export interface SongConfirmationConfig {
@@ -93,6 +98,18 @@ export interface SongConfirmationConfig {
      *  phrase can't masquerade as independent corroboration. Only enforced
      *  when evidence carries a `windowId`. */
     minWindowAdvance: number
+    /**
+     * Window advance (in `windowId` units) needed before a hit on the *same
+     * line* counts again. A whole window's worth, so the line has to have
+     * left the window and come back — sung again, not re-scored.
+     *
+     * {@link minWindowAdvance} alone let one line count two or three times:
+     * a 14-word window that moves 7 words still holds the line it matched.
+     * When a new song starts, the old song's last line lingers like that, and
+     * each re-score of it counted as the old song being sung — enough to
+     * confirm it and wipe out the new song's progress.
+     */
+    sameLineWindowAdvance: number
 }
 
 export const DEFAULT_SONG_CONFIRMATION_CONFIG: SongConfirmationConfig = {
@@ -103,6 +120,7 @@ export const DEFAULT_SONG_CONFIRMATION_CONFIG: SongConfirmationConfig = {
     emitThreshold: 1.3,
     pruneBelow: 0.05,
     minWindowAdvance: 6,
+    sameLineWindowAdvance: 14,
 }
 
 /** Weight given to the newest observed interval when updating the cadence
@@ -116,6 +134,8 @@ interface Hypothesis {
     lastUpdatedAt: number
     /** windowId of the last accumulated hit for this song (if any). */
     lastWindowId?: number
+    /** Line the last accumulated hit matched (if given). */
+    lastLineKey?: string
 }
 
 export class SongConfirmationTracker {
@@ -206,12 +226,24 @@ export class SongConfirmationTracker {
         ) {
             return null
         }
+        // The same line still in the window: re-scored, not sung again.
+        if (
+            existing &&
+            evidence.windowId !== undefined &&
+            existing.lastWindowId !== undefined &&
+            evidence.lineKey !== undefined &&
+            evidence.lineKey === existing.lastLineKey &&
+            evidence.windowId - existing.lastWindowId < this.config.sameLineWindowAdvance
+        ) {
+            return null
+        }
 
         const score = (existing?.score ?? 0) + evidence.confidence
         this.hypotheses.set(evidence.songId, {
             score,
             lastUpdatedAt: now,
             lastWindowId: evidence.windowId ?? existing?.lastWindowId,
+            lastLineKey: evidence.lineKey ?? existing?.lastLineKey,
         })
 
         if (score >= this.config.emitThreshold) {

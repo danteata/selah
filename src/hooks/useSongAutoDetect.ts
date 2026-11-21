@@ -295,18 +295,23 @@ export function useSongAutoDetect() {
 
             if (match) {
                 unmatchedRef.current = 0
-                // Same song that's already up (tracker briefly went 'lost' on a
-                // hard passage) — let the tracker re-acquire it; don't reload.
-                if (match.songId === liveSongKey) {
-                    confirmationRef.current.reset()
-                    return
-                }
+                // The song on air competes for the evidence like any other.
+                // A window matching it used to wipe every rival's progress,
+                // so one scrap of the old song — they share words — sent the
+                // right one back to zero, and the wrong song held on.
                 const confirmed = confirmationRef.current.update(Date.now(), {
                     songId: match.songId,
                     confidence: match.confidence,
                     windowId: wordsSeenRef.current,
+                    lineKey: `${match.sectionId}:${match.lineIndex}`,
                 })
                 if (!confirmed) return
+                // The song on air won: it is what's being sung, and the
+                // tracker will find its place in it. Rivals start again.
+                if (confirmed === liveSongKey) {
+                    confirmationRef.current.reset()
+                    return
+                }
 
                 const song = cachedSongs.get(confirmed)
                 if (song) loadAndDisplay(song, match.sectionId)
