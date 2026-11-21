@@ -181,7 +181,15 @@ export function classifyTranscriptionError(error: unknown): TranscriptionErrorCo
     if (lower.includes('notfounderror') || lower.includes('no audio') || lower.includes('requested device not found')) {
         return transcriptionErrorCodes.MICROPHONE_NOT_FOUND
     }
-    if (lower.includes('model not found') || lower.includes('no model') || lower.includes('model not loaded')) {
+    // The native engine's wording (src-tauri transcription commands/engine):
+    // "Model base.en is not downloaded", "Unknown model …", "No transcription
+    // model is loaded".
+    if (
+        lower.includes('model not found') || lower.includes('no model') || lower.includes('model not loaded')
+        || (lower.includes('model') && lower.includes('not downloaded'))
+        || lower.includes('unknown model')
+        || lower.includes('no transcription model')
+    ) {
         return transcriptionErrorCodes.MODEL_NOT_FOUND
     }
     if (lower.includes('vad') && (lower.includes('load') || lower.includes('failed') || lower.includes('timeout'))) {
