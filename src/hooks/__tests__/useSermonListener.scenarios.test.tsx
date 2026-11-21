@@ -19,12 +19,9 @@ import type { Scripture, Slide } from '../../types'
 import type { SemanticVerseMatch } from '../../services/sermon-listener'
 
 const h = vi.hoisted(() => {
-    type Opts = {
-        onStart?: () => void
-        onResult?: (text: string, isFinal: boolean) => void
-    }
     const transcription = {
-        opts: null as Opts | null,
+        /** Events from the fake engine reach the listener through this. */
+        emit: null as ((event: import('../../services/sermon-listener/transcriptionEngine').EngineEvent) => void) | null,
         listening: false,
     }
     return {
@@ -62,25 +59,29 @@ vi.mock('../../services/sermon-listener', async (importOriginal) => {
     }
     return {
         ...actual,
-        unifiedTranscriptionService: {
-            isProviderAvailable: async () => h.providerAvailable,
-            setProvider: async () => true,
-            getStatus: () => ({ isListening: h.transcription.listening }),
-            getMediaStream: () => null,
-            clearTranscript: () => {},
-            start: async (opts: { onStart?: () => void }) => {
-                h.transcription.opts = opts
-                h.transcription.listening = true
-                opts.onStart?.()
-                return true
-            },
-            stop: async () => {
-                h.transcription.listening = false
-            },
-        },
         getSemanticDetector: () => fakeDetector,
         initializeEmbedder: async () => {},
     }
+})
+
+// One fake engine stands in for both: it starts at once and delivers whatever
+// the test says through `h.transcription.emit`.
+vi.mock('../../services/sermon-listener/engines', () => {
+    const fake = (provider: 'web-speech' | 'native') => ({
+        provider,
+        isAvailable: async () => h.providerAvailable,
+        start: async (_options: unknown, onEvent: NonNullable<typeof h.transcription.emit>) => {
+            h.transcription.emit = onEvent
+            h.transcription.listening = true
+            onEvent({ type: 'started' })
+            return true
+        },
+        stop: async () => {
+            h.transcription.listening = false
+        },
+        isBusy: () => h.transcription.listening,
+    })
+    return { transcriptionEngines: { 'web-speech': fake('web-speech'), native: fake('native') } }
 })
 
 vi.mock('../useScripture', async () => {
@@ -214,7 +215,7 @@ async function listen(options: SermonListenerOptions = {}, { strict = false } = 
         /** One committed utterance, as the transcriber delivers it. */
         async say(text: string) {
             await act(async () => {
-                h.transcription.opts!.onResult!(text, true)
+                h.transcription.emit!({ type: 'result', text, isFinal: true })
             })
             await flush()
             if (process.env.SCENARIO_DEBUG) {
@@ -224,7 +225,7 @@ async function listen(options: SermonListenerOptions = {}, { strict = false } = 
         /** A provisional (interim) result, which is acted on after a short debounce. */
         async sayInterim(text: string) {
             await act(async () => {
-                h.transcription.opts!.onResult!(text, false)
+                h.transcription.emit!({ type: 'result', text, isFinal: false })
             })
             await flush()
         },
@@ -284,7 +285,7 @@ beforeEach(() => {
         settings: initial.settings,
         songTracking: initial.songTracking,
     })
-    h.transcription.opts = null
+    h.transcription.emit = null
     h.transcription.listening = false
     h.semanticQueue = []
     h.readingContexts = []
@@ -407,6 +408,46 @@ describe('sermon listener: starting and stopping', () => {
         await s.say('We see in Joshua chapter 24 that they served the Lord.')
 
         expect(s.live()).toBe('Joshua 24:1')
+    })
+})
+
+describe('sermon listener: what the capture stream reports', () => {
+    async function capture(event: Record<string, unknown>) {
+        const s = await listen()
+        await act(async () => {
+            h.transcription.emit!({ type: 'capture', ...event } as Parameters<NonNullable<typeof h.transcription.emit>>[0])
+        })
+        return s
+    }
+
+    it('a microphone that dropped and is being rebuilt shows as retrying', async () => {
+        const s = await capture({ status: 'lost', attempt: 2, message: 'device unplugged' })
+        expect(s.state.error).toMatchObject({ code: 'capture_stream_lost', retryable: true })
+        expect(s.state.error?.message).toBe('Lost the input stream (attempt 2): device unplugged')
+    })
+
+    // Its message says "input stream", which used to make the banner promise an
+    // automatic retry after the supervisor had already given up.
+    it('a microphone that could not be reopened is not shown as retrying', async () => {
+        const s = await capture({ status: 'fatal', message: 'Failed to build input stream: device gone' })
+        expect(s.state.error).toMatchObject({ code: 'capture_stream_lost', retryable: false })
+    })
+
+    it('a fallback to the default microphone forgets the chosen one', async () => {
+        setSermonSettings({ selectedMicrophoneId: 'Desk feed', inputChannel: 2 })
+        const s = await capture({ status: 'fell-back', from: 'Desk feed', message: 'gone' })
+        expect(s.state.error).toBeNull()
+        expect(useAppStore.getState().settings.sermonListener?.selectedMicrophoneId).toBeUndefined()
+        expect(useAppStore.getState().settings.sermonListener?.inputChannel).toBeUndefined()
+    })
+
+    it('an engine failure ends listening and says what kind it was', async () => {
+        const s = await listen()
+        await act(async () => {
+            h.transcription.emit!({ type: 'failed', error: { code: 'model_not_found', message: 'Model base.en is not downloaded', retryable: false } })
+        })
+        expect(s.state.isListening).toBe(false)
+        expect(s.state.error?.code).toBe('model_not_found')
     })
 })
 

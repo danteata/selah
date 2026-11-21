@@ -19,12 +19,20 @@ import { useScripture } from './useScripture'
 import { useSlideCreation, firstVerseOnly } from './useSlideCreation'
 import { useAppStore } from '../store/appStore'
 import { useGlobalSermonListenerSettings } from './useGlobalAppSettings'
-import { unifiedTranscriptionService } from '../services/sermon-listener'
-import { onCaptureStreamError } from '../services/sermon-listener/nativeAudioCapture'
+import { transcriptionEngines } from '../services/sermon-listener/engines'
+import {
+    errorFromMessage,
+    listeningError,
+    type CaptureStatus,
+    type EngineEvent,
+    type EngineSegment,
+    type ListeningError,
+} from '../services/sermon-listener/transcriptionEngine'
+import { transcriptionErrorCodes } from '../services/sermon-listener/transcriptionErrors'
 import { saveSelectedDeviceLabel } from './useAudioDevices'
 import { audioFeatures, bandsForSampleRate } from '../services/visualizer/audioFeatures'
 import { startNativeAudioFeatures } from '../services/visualizer/nativeAudioFeatures'
-import type { TranscriptionProvider, TranscriptionStatus } from '../services/sermon-listener'
+import type { TranscriptionProvider } from '../services/sermon-listener'
 import {
     verseToLabel,
     getSemanticDetector,
@@ -114,8 +122,8 @@ export interface SermonListenerState {
     currentVerse: DetectedVerse | null
     /** Scripture content for current verse */
     currentScripture: Scripture | null
-    /** Any error that occurred */
-    error: string | null
+    /** What went wrong, as a kind the panel can act on */
+    error: ListeningError | null
     /** Whether a verse lookup is in progress */
     isLoading: boolean
     /** Current transcription provider */
@@ -249,7 +257,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([])
     const [interimTranscript, setInterimTranscript] = useState('')
     const [currentScripture, setCurrentScripture] = useState<Scripture | null>(null)
-    const [error, setError] = useState<string | null>(null)
+    const [error, setError] = useState<ListeningError | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [provider, setProvider] = useState<TranscriptionProvider>(getInitialProvider)
     const [isModelLoading, setIsModelLoading] = useState(false)
@@ -413,26 +421,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // Web, or a desktop sidecar/cloud provider using a browser stream:
             // use a getUserMedia AnalyserNode (feeds both the level meter and
             // the visualizer bus — see the analyser poll below).
-            let stream = unifiedTranscriptionService.getMediaStream()
-
-            if (!stream) {
-                if (userCaptureSource === 'system') {
-                    setCaptureSource('system')
-                    console.log('[useSermonListener] System audio active — mic analyser disabled')
-                    return
-                }
-
-                // Retry for up to 3s waiting for the primary stream to appear
-                // (VAD/web-audio capture initializes asynchronously)
-                const retryDelay = 200
-                const maxRetries = 15
-                for (let i = 0; i < maxRetries; i++) {
-                    await new Promise(r => setTimeout(r, retryDelay))
-                    if (isStale()) return
-                    stream = unifiedTranscriptionService.getMediaStream()
-                    if (stream) break
-                }
+            if (userCaptureSource === 'system') {
+                setCaptureSource('system')
+                console.log('[useSermonListener] System audio active — mic analyser disabled')
+                return
             }
+
+            // Neither engine shares its stream (web speech opens its own; the
+            // native engine captures in Rust), so the meter opens a lightweight
+            // one of its own. It used to wait three seconds for a shared stream
+            // that never came.
+            let stream: MediaStream | null = null
 
             if (!stream) {
                 // Still no stream after retries — fall back to a separate getUserMedia.
@@ -565,7 +564,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     }, [isListening, startAudioAnalyser, stopAudioAnalyser])
 
     /**
-     * Surface native capture-stream failures while listening.
+     * Surface what happened to the native capture stream while listening.
      *
      * Nothing else can: the VAD thread keeps its `audio-features` heartbeat
      * running through delivery gaps on purpose, so a microphone that dropped
@@ -573,14 +572,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      * rebuilds the stream itself with backoff — these events are what tell the
      * operator it is happening, and when it has given up.
      */
-    useEffect(() => {
-        if (!isListening || !isDesktop()) return
-
-        let unlisten: (() => void) | null = null
-        let cancelled = false
-
-        onCaptureStreamError((event) => {
-            if (event.fell_back_from) {
+    const handleCaptureStatus = useCallback((capture: CaptureStatus) => {
+        switch (capture.status) {
+            case 'fell-back': {
                 // Capture is already running on the default device. Forget the
                 // stored choice so Settings stops naming a microphone that is
                 // not the one recording — an operator checking mid-service
@@ -601,34 +595,34 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     })
                 }
                 saveSelectedDeviceLabel(null)
-                toast.warning(`${event.fell_back_from} is unavailable`, {
+                toast.warning(`${capture.from} is unavailable`, {
                     description: 'Recording from the default microphone instead.',
                     duration: 10000,
                 })
                 return
             }
-            if (event.recovered) {
+            case 'recovered':
                 setError(null)
                 toast.success('Microphone reconnected')
                 return
-            }
-            if (event.fatal) {
-                setError(`Microphone disconnected and could not be reopened: ${event.message}`)
+            case 'fatal':
+                // The supervisor has given up, so this is not retrying — even
+                // though its message often says "input stream", which is what
+                // used to make the banner promise an automatic retry.
+                setError(listeningError(
+                    transcriptionErrorCodes.CAPTURE_STREAM_LOST,
+                    `Microphone disconnected and could not be reopened: ${capture.message}`,
+                    false,
+                ))
                 return
-            }
-            // Retryable: classifyTranscriptionError maps "input stream" to
-            // CAPTURE_STREAM_LOST, which renders as the amber auto-retry banner.
-            setError(`Lost the input stream (attempt ${event.attempt}): ${event.message}`)
-        }).then((fn) => {
-            if (cancelled) fn()
-            else unlisten = fn
-        })
-
-        return () => {
-            cancelled = true
-            unlisten?.()
+            case 'lost':
+                setError(listeningError(
+                    transcriptionErrorCodes.CAPTURE_STREAM_LOST,
+                    `Lost the input stream (attempt ${capture.attempt}): ${capture.message}`,
+                    true,
+                ))
         }
-    }, [isListening])
+    }, [])
 
     /**
      * Check if text is a duplicate or near-duplicate of recent chunks.
@@ -818,7 +812,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         let cancelled = false
 
         const initialize = async () => {
-            const available = await unifiedTranscriptionService.isProviderAvailable(targetProvider)
+            const available = await transcriptionEngines[targetProvider].isAvailable()
             if (cancelled) return
 
             // Cross-platform fallback to web-speech if the chosen native provider
@@ -828,14 +822,14 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // flag the fallback if the sidecar genuinely failed (dev without
             // whisper.cpp running, for example).
             if (!available && targetProvider === 'native') {
-                const webSpeechAvailable = await unifiedTranscriptionService.isProviderAvailable('web-speech')
+                const webSpeechAvailable = await transcriptionEngines['web-speech'].isAvailable()
                 if (cancelled) return
                 if (webSpeechAvailable) {
                     setProvider('web-speech')
                     setIsSupported(true)
                     setProviderReady(true)
                     if (isDesktop()) {
-                        setError('Native transcription unavailable. Falling back to Web Speech API.')
+                        setError(errorFromMessage('Native transcription unavailable. Falling back to Web Speech API.'))
                     }
                     return
                 }
@@ -849,37 +843,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 return
             }
 
-            // Neither web-speech nor the native engine needs a server warm-up:
-            // web-speech is built-in, and the native engine loads its model
-            // lazily when listening starts. Mark ready immediately.
-            if (targetProvider === 'web-speech' || targetProvider === 'native') {
-                setProviderReady(true)
-                return
-            }
-
-            // Configure the unified transcription service with the chosen provider.
-            // For desktop-whisper this resolves quickly because the Rust prewarm
-            // already spawned the sidecar; we just hand it the endpoint.
-            setIsInitializingProvider(true)
-            try {
-                await unifiedTranscriptionService.setProvider(targetProvider, {
-                    language: language.split('-')[0],
-                    useVAD: globalSettings?.sermonListener_useVAD,
-                    onProgress: (progress: number) => {
-                        if (!cancelled) setModelLoadingProgress(progress)
-                    },
-                    onStatusChange: (_status: TranscriptionStatus) => {
-                        /* no-op; readiness comes from the Tauri event */
-                    },
-                })
-                // For desktop-whisper we wait for the Rust readiness event
-                // (subscribed below) before flipping providerReady. The
-                // web-speech branch returned earlier and never reaches here.
-            } catch (err) {
-                if (!cancelled) console.error('[useSermonListener] provider init failed:', err)
-            } finally {
-                if (!cancelled) setIsInitializingProvider(false)
-            }
+            // Neither engine needs a warm-up: web speech is built in, and the
+            // native engine loads its model when listening starts.
+            setProviderReady(true)
         }
 
         initialize()
@@ -887,11 +853,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         return () => {
             cancelled = true
         }
-    }, [
-        targetProvider,
-        language,
-        globalSettings?.sermonListener_useVAD,
-    ])
+    }, [targetProvider])
 
     // Initialize semantic detector lazily — only when the user starts listening.
     // This avoids blocking the UI on mount with embedder loading.
@@ -1097,13 +1059,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     break
                 }
                 if (!verseToLabel(verse)) {
-                    setError('Could not resolve current verse label for version switch.')
+                    setError(errorFromMessage('Could not resolve current verse label for version switch.'))
                     settle({ ok: false })
                     break
                 }
                 void lookUp(verse, versionId).then((result) => {
                     if (result.status !== 'found') {
-                        if (result.status === 'missing') setError(`Could not load ${versionId} for ${verse.reference}.`)
+                        if (result.status === 'missing') setError(errorFromMessage(`Could not load ${versionId} for ${verse.reference}.`))
                         settle({ ok: false })
                         return
                     }
@@ -1155,18 +1117,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      */
     const setTranscriptionProvider = useCallback(async (newProvider: TranscriptionProvider): Promise<boolean> => {
         if (isListening) {
-            await unifiedTranscriptionService.stop()
+            await transcriptionEngines[provider].stop()
         }
 
         setIsModelLoading(true)
         setModelLoadingProgress(0)
 
-        // Use global settings for provider configuration
-        const success = await unifiedTranscriptionService.setProvider(newProvider, {
-            language: language.split('-')[0],
-            useVAD: globalSettings?.sermonListener_useVAD,
-            onProgress: setModelLoadingProgress,
-        })
+        const success = await transcriptionEngines[newProvider].isAvailable()
 
         setIsModelLoading(false)
 
@@ -1174,15 +1131,11 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             setProvider(newProvider)
             setIsSupported(true)
         } else {
-            setError('Failed to initialize transcription provider')
+            setError(errorFromMessage('Failed to initialize transcription provider'))
         }
 
         return success
-    }, [
-        isListening,
-        language,
-        globalSettings?.sermonListener_useVAD,
-    ])
+    }, [isListening, provider])
 
     /**
      * Begin the session's archive recording, when the church turned recording
@@ -1230,7 +1183,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const start = useCallback(async (): Promise<boolean> => {
         if (!isSupported) {
             const errorMsg = 'Speech recognition is not supported'
-            setError(errorMsg)
+            setError(errorFromMessage(errorMsg))
             onError?.(errorMsg)
             trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, { reason: 'unsupported' })
             return false
@@ -1264,7 +1217,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     }
                     if (!granted) {
                         const msg = 'Selah needs Screen & System Audio Recording permission to capture system audio. Open System Settings → Privacy & Security → Screen & System Audio Recording, enable Selah, then restart the app.'
-                        setError(msg)
+                        setError(errorFromMessage(msg))
                         onError?.(msg)
                         trackEvent(AnalyticsEventType.SERMON_LISTENER_ERROR, { reason: 'screen_capture_denied' })
                         return false
@@ -1287,7 +1240,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     // that went with the desktop-whisper sidecar, so an early
                     // Start failed silently.)
                     console.log('[useSermonListener] Provider not ready yet, checking:', provider)
-                    const available = await unifiedTranscriptionService.isProviderAvailable(provider)
+                    const available = await transcriptionEngines[provider].isAvailable()
                     if (available) {
                         setProviderReady(true)
                         setError(null)
@@ -1352,36 +1305,33 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 console.warn('[useSermonListener] AudioContext unlock failed:', e)
             }
 
-            // `unifiedTranscriptionService` is a module-level singleton, so its
-            // internal `isListening` can outlive our React state (e.g. after this
-            // provider remounts on navigation). When that happens our state resets
-            // to false but the service still thinks it's running, so start() would
-            // no-op with "Already listening" and the button would stay on "Start".
-            // Reconcile by stopping the stale session before starting fresh.
-            if (unifiedTranscriptionService.getStatus().isListening) {
+            // The engines are module-level singletons, so one can outlive our
+            // React state (e.g. after this provider remounts on navigation).
+            // When that happens our state resets to false but the engine is
+            // still running, and the button would stay on "Start". Reconcile by
+            // stopping the stale capture before starting fresh.
+            const engine = transcriptionEngines[provider]
+            if (engine.isBusy()) {
                 console.warn('[useSermonListener] Reconciling stale listening state before start')
                 try {
-                    await unifiedTranscriptionService.stop()
+                    await engine.stop()
                 } catch (e) {
                     console.warn('[useSermonListener] Failed to stop stale session:', e)
                 }
             }
 
-            const success = await unifiedTranscriptionService.start({
-                provider,
+            const startOptions = {
                 language,
                 captureSource: sermonSettings?.captureSource,
                 microphoneDeviceId: sermonSettings?.selectedMicrophoneId,
                 inputChannel: sermonSettings?.inputChannel,
-                continuous: true,
-                interimResults: true,
-                useVAD: globalSettings?.sermonListener_useVAD,
                 // The Bible-biased prompt steers Whisper toward scripture vocabulary,
                 // which garbles sung lyrics and surfaces spurious verses. When song
                 // auto-detect is on (worship mode), use a neutral prompt so lyrics
                 // transcribe cleanly; keep the scripture bias for sermon mode.
                 initialPrompt: useAppStore.getState().songTracking.autoDetect ? '' : buildBibleInitialPrompt(),
-                onStart: () => {
+            }
+            const onStart = () => {
                     setIsListening(true)
                     setIsStarting(false)
                     setError(null)
@@ -1393,12 +1343,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         language,
                         capture_source: sermonSettings?.captureSource,
                     })
-                },
-                onEnd: () => {
-                    setIsListening(false)
-                },
-                onResult: (text, isFinal, _confidence, whisperSegments) => {
-                    console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal, hasSegments: !!whisperSegments?.length })
+            }
+            const onResult = (text: string, isFinal: boolean, segments?: EngineSegment[]) => {
+                    console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal, hasSegments: !!segments?.length })
 
                     // Clean up repeated phrases in the incoming text
                     let cleanedText = cleanRepeatedPhrases(text)
@@ -1437,17 +1384,17 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         const now = Date.now()
                         const sessionStart = sessionStartTimeRef.current || now
 
-                        if (whisperSegments && whisperSegments.length > 0 && provider === 'native') {
+                        if (segments && segments.length > 0) {
                             // Whisper returns segment timing in seconds relative to the utterance start.
                             // These are already adjusted by the desktop whisper service to be
                             // session-relative (VAD adds vadSpeechStartMs, native adds startOffsetMs).
                             // So we can use them directly — just convert seconds → milliseconds.
-                            const newSegments: TranscriptSegment[] = whisperSegments.map((seg, idx) => {
+                            const newSegments: TranscriptSegment[] = segments.map((seg, idx) => {
                                 return {
                                     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
                                     text: seg.text.trim(),
-                                    startMs: Math.max(0, Math.round(seg.start * 1000)),
-                                    endMs: Math.max(0, Math.round(seg.end * 1000)),
+                                    startMs: seg.startMs,
+                                    endMs: seg.endMs,
                                     source: 'whisper' as const,
                                 }
                             }).filter(seg => seg.text.length > 0)
@@ -1517,10 +1464,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         }, INTERIM_DEBOUNCE_MS)
                     }
                     onTranscriptUpdate?.(cleanedText, !isFinal)
-                },
-                onError: (err, message) => {
-                    const resolvedError = message || err
-                    setError(resolvedError)
+            }
+            const onFailed = (failure: ListeningError) => {
+                    const resolvedError = failure.message
+                    setError(failure)
                     setIsListening(false)
                     setIsStarting(false)
                     onError?.(resolvedError)
@@ -1528,16 +1475,16 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                         provider,
                         message: typeof resolvedError === 'string' ? resolvedError : 'unknown',
                     })
-                },
-                onStatusChange: (status: TranscriptionStatus) => {
-                    setIsListening(status.isListening)
-                },
-                onSpeechStart: () => {
-                    setIsSpeechDetected(true)
-                },
-                onSpeechEnd: () => {
-                    setIsSpeechDetected(false)
-                },
+            }
+
+            const success = await engine.start(startOptions, (event: EngineEvent) => {
+                switch (event.type) {
+                    case 'started': onStart(); break
+                    case 'ended': setIsListening(false); break
+                    case 'result': onResult(event.text, event.isFinal, event.segments); break
+                    case 'failed': onFailed(event.error); break
+                    case 'capture': handleCaptureStatus(event); break
+                }
             })
 
             // Safety net: if the provider resolved without ever firing onStart
@@ -1546,13 +1493,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (success) beginSessionRecording()
             return success
         } catch (err) {
-            // If anything above throws (e.g. unifiedTranscriptionService.start()
+            // If anything above throws (e.g. the engine's start()
             // rejects rather than resolving false), don't leave the button
             // stuck on "Starting…" forever with no recovery but a manual stop().
             console.error('[useSermonListener] start() failed:', err)
             setIsStarting(false)
             setIsListening(false)
-            setError(err instanceof Error ? err.message : String(err))
+            setError(errorFromMessage(err instanceof Error ? err.message : String(err)))
             return false
         } finally {
             startInFlightRef.current = false
@@ -1605,7 +1552,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             ? Date.now() - sessionStartTimeRef.current
             : 0
         if (wasListening) audioFeedbackService.playStop()
-        unifiedTranscriptionService.stop()
+        void transcriptionEngines[provider].stop()
         setIsListening(false)
         setIsStarting(false)
         setInterimTranscript('')
@@ -1724,7 +1671,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             clearTimeout(interimDebounceRef.current)
             interimDebounceRef.current = null
         }
-        unifiedTranscriptionService.clearTranscript()
         clearLiveSermonState().catch((err) => {
             console.warn('[useSermonListener] IDB clear live state failed:', err)
         })

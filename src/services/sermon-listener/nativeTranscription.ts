@@ -37,9 +37,7 @@ export function isModelBusyDrop(message: string): boolean {
 import { isDesktop } from '@/platform'
 import { useAppStore } from '../../store/appStore'
 import { DEFAULT_NATIVE_MODEL_ID } from './nativeModelManager'
-// Type-only, so this does not create a runtime cycle with unifiedTranscription
-// (which imports this module).
-import type { WhisperSegmentTiming } from './unifiedTranscription'
+import type { WhisperSegmentTiming } from './transcriptionEngine'
 
 interface TranscriptionResultEvent {
     text: string

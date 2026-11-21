@@ -47,8 +47,10 @@ export interface CaptureStreamErrorEvent {
      * this. That matters because the frontend forgets the saved preference on
      * it, and a false positive would discard a real choice on a machine where
      * the interface is plugged in and working.
+     *
+     * camelCase on the wire: the Rust struct is `rename_all = "camelCase"`.
      */
-    fell_back_from?: string
+    fellBackFrom?: string
 }
 
 /**

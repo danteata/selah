@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useGlobalSermonListenerSettings } from '../../hooks/useGlobalAppSettings'
-import { unifiedTranscriptionService } from '../../services/sermon-listener'
+import { transcriptionEngines } from '../../services/sermon-listener'
 import type { TranscriptionProvider } from '../../services/sermon-listener'
 import { IconWrapper } from '../utils/IconWrapper'
 import { Check, Shield, Loader2, Monitor } from 'lucide-react'
@@ -28,8 +28,6 @@ export function GlobalSermonListenerSettingsPanel(_props: GlobalSermonListenerSe
     const [defaultLanguage, setDefaultLanguage] = useState('en-US')
 
     const [isSaving, setIsSaving] = useState(false)
-    const [isLoadingProvider, setIsLoadingProvider] = useState(false)
-    const [loadingProgress, setLoadingProgress] = useState(0)
     const [providerError, setProviderError] = useState<string | null>(null)
     const [showSaveSuccess, setShowSaveSuccess] = useState(false)
     const [webSpeechAvailable, setWebSpeechAvailable] = useState(false)
@@ -44,8 +42,8 @@ export function GlobalSermonListenerSettingsPanel(_props: GlobalSermonListenerSe
     }, [settings])
 
     useEffect(() => {
-        unifiedTranscriptionService.isProviderAvailable('web-speech').then(setWebSpeechAvailable)
-        unifiedTranscriptionService.isProviderAvailable('native').then(setNativeWhisperAvailable)
+        transcriptionEngines['web-speech'].isAvailable().then(setWebSpeechAvailable)
+        transcriptionEngines.native.isAvailable().then(setNativeWhisperAvailable)
     }, [])
 
     const handleProviderChange = async (newProvider: TranscriptionProvider) => {
@@ -62,25 +60,8 @@ export function GlobalSermonListenerSettingsPanel(_props: GlobalSermonListenerSe
             return
         }
 
-        // Native engine needs no server init; the model is loaded on start.
-        if (newProvider === 'native') {
-            return
-        }
-
-        setIsLoadingProvider(true)
-        setLoadingProgress(0)
-
-        const success = await unifiedTranscriptionService.setProvider(newProvider, {
-            language: defaultLanguage.split('-')[0],
-            useVAD,
-            onProgress: setLoadingProgress,
-        })
-
-        setIsLoadingProvider(false)
-        if (!success) {
-            setProvider('web-speech')
-            setProviderError(`Failed to initialize transcription. Check settings and try again.`)
-        }
+        // The native engine needs no initialising here; it loads its model
+        // when listening starts.
     }
 
     const saveSettings = async () => {
@@ -158,8 +139,8 @@ export function GlobalSermonListenerSettingsPanel(_props: GlobalSermonListenerSe
                 <label className="block text-sm font-medium mb-3 text-gray-700 dark:text-gray-300">Transcription Provider</label>
                 <div className="space-y-3">
                     <button
-                        onClick={() => !isLoadingProvider && handleProviderChange('web-speech')}
-                        disabled={isLoadingProvider || !webSpeechAvailable}
+                        onClick={() => handleProviderChange('web-speech')}
+                        disabled={!webSpeechAvailable}
                         className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'web-speech'
                             ? 'border-blue-500 bg-blue-500/10 dark:bg-blue-500/20'
                             : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
@@ -181,8 +162,8 @@ export function GlobalSermonListenerSettingsPanel(_props: GlobalSermonListenerSe
                     {/* Native (in-process) engine — desktop only. Whisper GPU + Parakeet. */}
                     {isDesktop() && (
                         <button
-                            onClick={() => !isLoadingProvider && handleProviderChange('native')}
-                            disabled={isLoadingProvider || !nativeWhisperAvailable}
+                            onClick={() => handleProviderChange('native')}
+                            disabled={!nativeWhisperAvailable}
                             className={`w-full p-4 rounded-lg border-2 text-left transition-all ${provider === 'native'
                                 ? 'border-indigo-500 bg-indigo-500/10 dark:bg-indigo-500/20'
                                 : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
@@ -208,21 +189,6 @@ export function GlobalSermonListenerSettingsPanel(_props: GlobalSermonListenerSe
                         </button>
                     )}
                 </div>
-
-                {isLoadingProvider && (
-                    <div className="mt-3">
-                        <div className="flex justify-between text-xs mb-1 text-gray-600 dark:text-gray-400">
-                            <span>Initializing provider...</span>
-                            <span>{Math.round(loadingProgress)}%</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-700">
-                            <div
-                                className="h-full bg-blue-500 rounded-full transition-all"
-                                style={{ width: `${loadingProgress}%` }}
-                            />
-                        </div>
-                    </div>
-                )}
             </div>
 
             {providerError && (
