@@ -295,6 +295,81 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
     })
 })
 
+describe('useSongAutoDetect (a song stepped away from)', () => {
+    const GRACE_SLIDE = {
+        id: 'slide-grace-v1', index: 0, name: 'Amazing Grace - Verse 1', type: 'song', layout: 'default',
+        userId: 'u', churchId: 'c', scheduleId: 's', contents: [''], songId: 'grace', verseIndex: 0, data: GRACE,
+    } as unknown as Slide
+    const OTHER_SLIDE = {
+        id: 'verse-1', index: 1, name: 'Psalm 121:1', type: 'bible', layout: 'bible',
+        userId: 'u', churchId: 'c', scheduleId: 's', contents: ['I will lift up mine eyes'],
+    } as unknown as Slide
+
+    beforeEach(() => {
+        seq = 0
+        h.listener = { isListening: true, transcriptSegments: [] }
+        h.library = [
+            { id: GRACE.id, type: 'song', content: GRACE },
+            { id: CORNERSTONE.id, type: 'song', content: CORNERSTONE },
+        ]
+        vi.resetModules()
+    })
+
+    /** Grace on air and being sung, then something else put up — by the
+     *  listener when `byListener`, else by the operator. */
+    async function stepAwayFromGrace(byListener: boolean) {
+        const { useAppStore, DEFAULT_SONG_TRACKING } = await import('../../store/appStore')
+        const { useSongAutoDetect } = await import('../useSongAutoDetect')
+        const { noteListenerPutOnAir } = await import('../../services/sermon-listener/onAirSource')
+        useAppStore.setState({
+            activeSlides: [GRACE_SLIDE, OTHER_SLIDE],
+            liveSlideId: GRACE_SLIDE.id,
+            songTracking: {
+                ...DEFAULT_SONG_TRACKING,
+                autoDetect: true,
+                status: { ...DEFAULT_SONG_TRACKING.status, songId: 'grace', phase: 'tracking', confidence: 0.9, singing: true, singingSince: 1 },
+            },
+        })
+        const { rerender } = renderHook(() => useSongAutoDetect())
+        act(() => {
+            if (byListener) noteListenerPutOnAir(OTHER_SLIDE.id)
+            useAppStore.getState().setLiveSlide(OTHER_SLIDE.id)
+        })
+        act(() => rerender())
+        return { useAppStore, rerender }
+    }
+
+    const GRACE_LINES = GRACE.sections![0].lines
+
+    it("doesn't bring the song back over the operator's choice while it's still sung", async () => {
+        const { useAppStore, rerender } = await stepAwayFromGrace(false)
+        await singUntilDetected(rerender, [...GRACE_LINES, ...GRACE_LINES])
+        expect(useAppStore.getState().liveSlideId).toBe(OTHER_SLIDE.id)
+    })
+
+    it('brings it back once the singing has stopped and started again', async () => {
+        const { useAppStore, rerender } = await stepAwayFromGrace(false)
+        act(() => useAppStore.setState({
+            songTracking: { ...useAppStore.getState().songTracking, status: { ...useAppStore.getState().songTracking.status, singing: false } },
+        }))
+        await singUntilDetected(rerender, ['and now let us turn to one another and greet our neighbours'])
+        await singUntilDetected(rerender, GRACE_LINES)
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe(GRACE_SLIDE.id))
+    })
+
+    it('brings it straight back over a verse the listener put up itself', async () => {
+        const { useAppStore, rerender } = await stepAwayFromGrace(true)
+        await singUntilDetected(rerender, GRACE_LINES)
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe(GRACE_SLIDE.id))
+    })
+
+    it('still brings up a different song after the operator stepped away', async () => {
+        const { useAppStore, rerender } = await stepAwayFromGrace(false)
+        await singUntilDetected(rerender, CORNERSTONE.sections![0].lines)
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
+    })
+})
+
 describe('useSongAutoDetect (which slide a detected song opens on)', () => {
     // Lyrics only, no stored sections — how most of a library arrives.
     const BLESSED: Song = {

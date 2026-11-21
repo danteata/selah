@@ -10,6 +10,7 @@ import { looksLikeSinging } from '../services/sermon-listener/singingDetection'
 import { SongConfirmationTracker } from '../services/sermon-listener/songConfirmation'
 import { resolveExternalSong } from '../services/sermon-listener/externalLyrics'
 import { isLlmConfigured } from '../services/sermon-listener/llmClient'
+import { wasPutOnAirByListener } from '../services/sermon-listener/onAirSource'
 import { songSlideBlocks } from '../lib/songSections'
 import type { Slide, Song } from '../types'
 
@@ -163,6 +164,35 @@ export function useSongAutoDetect() {
     }, [activeSlides])
     const scopedSongIdsKey = scopedSongIds.join('|')
 
+    /**
+     * The song last stepped away from: on air until something else went up.
+     *
+     * When the operator did that, the same song mustn't come straight back
+     * over their choice while the congregation sings on — only once the
+     * singing has stopped (`gapSeen`) or started again since. When the
+     * listener did it, with a verse it heard, the song can come back on the
+     * usual evidence. Another song can come up either way.
+     */
+    const steppedAwayRef = useRef<{ songId: string; at: number; byOperator: boolean; gapSeen: boolean } | null>(null)
+    const prevLiveSongRef = useRef<string | null>(null)
+    useEffect(() => {
+        const prev = prevLiveSongRef.current
+        prevLiveSongRef.current = liveSongKey
+        if (liveSongKey) {
+            steppedAwayRef.current = null
+            return
+        }
+        if (!liveSlideId) return
+        const byListener = wasPutOnAirByListener(liveSlideId)
+        if (prev) {
+            steppedAwayRef.current = { songId: prev, at: Date.now(), byOperator: !byListener, gapSeen: false }
+        } else if (steppedAwayRef.current && !byListener) {
+            // The operator replaced the listener's verse with a choice of
+            // their own: the screen is theirs now.
+            steppedAwayRef.current.byOperator = true
+        }
+    }, [liveSongKey, liveSlideId])
+
     useEffect(() => {
         const segs = transcriptSegments
         if (!segs) return
@@ -178,6 +208,9 @@ export function useSongAutoDetect() {
         // part of what is being sung now.
         if (cleared) bufferRef.current = []
         if (fresh.length === 0) return
+
+        const steppedAway = steppedAwayRef.current
+        if (steppedAway && !useAppStore.getState().songTracking.status.singing) steppedAway.gapSeen = true
 
         for (const seg of fresh) {
             const text = (seg?.text || '').trim()
@@ -324,6 +357,17 @@ export function useSongAutoDetect() {
                 if (confirmed === liveSongKey) {
                     confirmationRef.current.reset()
                     return
+                }
+                // The operator stepped away from this song while it was being
+                // sung; it waits for the singing to stop and start again.
+                const away = steppedAwayRef.current
+                if (away && away.byOperator && away.songId === confirmed) {
+                    const { singingSince } = useAppStore.getState().songTracking.status
+                    const sungAgain = singingSince !== null && singingSince > away.at
+                    if (!away.gapSeen && !sungAgain) {
+                        console.log('[useSongAutoDetect] holding back the song the operator stepped away from', confirmed)
+                        return
+                    }
                 }
 
                 const song = cachedSongs.get(confirmed)
