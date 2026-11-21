@@ -548,3 +548,24 @@ describe('appStore', () => {
         })
     })
 })
+
+describe('staged slide', () => {
+    beforeEach(() => {
+        useAppStore.getState().signOut()
+    })
+
+    it('is set and cleared without touching what is on air', () => {
+        useAppStore.setState({ liveSlideId: 'a' })
+        useAppStore.getState().setStagedSlide('b')
+        expect(useAppStore.getState().stagedSlideId).toBe('b')
+        expect(useAppStore.getState().liveSlideId).toBe('a')
+        useAppStore.getState().setStagedSlide(null)
+        expect(useAppStore.getState().stagedSlideId).toBeNull()
+    })
+
+    it('is forgotten when the user changes', () => {
+        useAppStore.getState().setStagedSlide('b')
+        useAppStore.getState().clearUserSession()
+        expect(useAppStore.getState().stagedSlideId).toBeNull()
+    })
+})

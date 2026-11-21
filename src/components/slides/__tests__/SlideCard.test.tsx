@@ -240,8 +240,8 @@ describe('SlideCard', () => {
         expect(screen.getByText('Chorus')).toBeInTheDocument()
     })
 
-    it('applies active border styling when isActive is true', () => {
-        const { container } = renderSlideCard({ isActive: true })
+    it('applies staged border styling when isStaged is true', () => {
+        const { container } = renderSlideCard({ isStaged: true })
         const card = container.firstChild as HTMLElement
         expect(card.className).toContain('border-[var(--accent-teal)]')
     })
@@ -258,8 +258,8 @@ describe('SlideCard', () => {
         expect(card.className).toContain('ring-1')
     })
 
-    it('applies sticky positioning when isStickyActive is true', () => {
-        const { container } = renderSlideCard({ isStickyActive: true })
+    it('applies sticky positioning when isStickyStaged is true', () => {
+        const { container } = renderSlideCard({ isStickyStaged: true })
         const card = container.firstChild as HTMLElement
         expect(card.className).toContain('sticky')
         expect(card.className).toContain('z-10')

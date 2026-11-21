@@ -133,6 +133,11 @@ export interface AppState {
      *  it), newest first; empty outside a session. */
     sessionHeardVerses: HeardVerse[]
     liveSlideId: string | null
+    /** The slide this desk has staged to go on air next (see GLOSSARY.md).
+     *  Private to this desk: never persisted, never shared in a live session.
+     *  May name a slide that has since been removed; read it through the
+     *  service order's slides, which drops a stale id. */
+    stagedSlideId: string | null
     // True while the operator has deliberately cleared the live output to a
     // blank screen (e.g. during prayer) — independent of `liveSlideId`, which
     // keeps pointing at whatever slide is queued up so un-clearing restores it.
@@ -258,6 +263,7 @@ const initialState: AppState = {
     sessionDefaultTemplates: null,
     sessionHeardVerses: [],
     liveSlideId: null,
+    stagedSlideId: null,
     liveOutputBlanked: false,
     alternateOutput: DEFAULT_ALTERNATE_OUTPUT,
     alternateSlide: null,
@@ -397,6 +403,7 @@ interface AppStore extends AppState {
     addSharedQueueSlideIds: (slideIds: string[]) => void
     removeSharedQueueSlideIds: (slideIds: string[]) => void
     setLiveSlide: (slideId: string | null) => void
+    setStagedSlide: (slideId: string | null) => void
     setLiveOutputBlanked: (blanked: boolean) => void
     /** Put a slide on the alternate output, or clear it with null. Only used
      *  while its content source is 'independent'. */
@@ -836,6 +843,10 @@ export const useAppStore = create<AppStore>()(
                 })
             },
 
+            setStagedSlide: (slideId) => {
+                set({ stagedSlideId: slideId })
+            },
+
             setLiveOutputBlanked: (blanked) => {
                 set({ liveOutputBlanked: blanked })
             },
@@ -1239,6 +1250,7 @@ export const useAppStore = create<AppStore>()(
                     activeSlides: initialState.activeSlides,
                     liveOutputSlidesId: initialState.liveOutputSlidesId,
                     liveSlideId: initialState.liveSlideId,
+                    stagedSlideId: initialState.stagedSlideId,
                     sharedQueueSlideIds: initialState.sharedQueueSlideIds,
                     sessionDefaultTemplates: initialState.sessionDefaultTemplates,
                     sessionHeardVerses: initialState.sessionHeardVerses,

@@ -35,6 +35,7 @@ vi.mock('../MobileBottomNav', () => ({ MobileBottomNav: () => <nav data-testid="
 vi.mock('../../bible/QuickBibleBar', () => ({ QuickBibleBar: () => <div data-testid="quick-bible" /> }))
 vi.mock('../../sermon-listener/SongTrackerBridge', () => ({ SongTrackerBridge: () => null }))
 vi.mock('../../sermon-listener/HeardVersesPublisher', () => ({ HeardVersesPublisher: () => null }))
+vi.mock('../../preview/StagedSlideShortcut', () => ({ StagedSlideShortcut: () => null }))
 vi.mock('../../sermon-listener/SermonListenerContext', () => ({
     SermonListenerProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     useSermonListenerContext: vi.fn().mockReturnValue(null),

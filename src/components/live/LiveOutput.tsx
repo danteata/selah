@@ -15,9 +15,10 @@ import { useLocalBackground } from '../../hooks/useLocalBackground'
 import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
 import { useAnalytics } from '../../hooks/useAnalytics'
 import { AnalyticsEventType } from '../../services/analytics/types'
-import type { Slide, Scripture, SlideStyle } from '../../types'
+import type { Scripture, SlideStyle } from '../../types'
 import { slideTypes, backgroundTypes } from '../../types'
 import { ScreenPicker } from './ScreenPicker'
+import { liveDeckFor, deckPosition } from './liveDeck'
 import { Modal } from '../modals/Modal'
 import { SlideView } from './SlideView'
 import { useLiveOutputSettings } from '../../hooks/useLiveSync'
@@ -44,7 +45,7 @@ export function LiveOutput() {
     const [showScreenPicker, setShowScreenPicker] = useState(false)
 
     // Center layout mode — how Preview / Program / context are arranged:
-    //  • 'stacked' — Next Up + Active + Sermon aside beside the feed
+    //  • 'stacked' — Next Up + on-air controls + Sermon aside beside the feed
     //  • 'split'   — Preview | Program on top, tabbed context (Verses/Sermon) below
     //  • 'focus'   — the live feed maximized, side controls slimmed, context hidden
     // Held in the store (persisted) so a workspace preset can drive it, and the
@@ -183,24 +184,11 @@ export function LiveOutput() {
         return ''
     }, [isOperator, isContributor, isViewer])
 
-    // Get live output slides
-    const liveOutputSlides = useMemo(() => {
-        if (!liveOutputSlidesId) return []
-
-        const slides = liveOutputSlidesId
-            .map(id => activeSlides.find(slide => slide.id === id))
-            .filter((slide): slide is Slide => slide !== undefined)
-
-        // Prefer session schedule while collaborating; fallback to selected schedule.
-        const effectiveScheduleId = sessionScheduleId || activeSchedule?._id
-        if (effectiveScheduleId) {
-            return slides.filter(slide =>
-                slide.scheduleId === effectiveScheduleId || !slide.scheduleId || slide.scheduleId === ''
-            )
-        }
-        // If no active schedule, show all slides without a scheduleId
-        return slides.filter(slide => !slide.scheduleId || slide.scheduleId === '')
-    }, [liveOutputSlidesId, activeSlides, activeSchedule?._id, sessionScheduleId])
+    // The live deck. Prefer the session's schedule while collaborating.
+    const liveOutputSlides = useMemo(
+        () => liveDeckFor(liveOutputSlidesId, activeSlides, sessionScheduleId || activeSchedule?._id),
+        [liveOutputSlidesId, activeSlides, activeSchedule?._id, sessionScheduleId],
+    )
 
     // Shared queue slides — contributed by non-operators.
     //
@@ -236,11 +224,11 @@ export function LiveOutput() {
         return activeSlides.find(slide => slide.id === liveSlideId)
     }, [activeSlides, liveSlideId])
 
-    // Get next/prev slide indices (used both for hook params and for reading slides)
-    const currentIndex = useMemo(() => {
-        return liveOutputSlides.findIndex(slide => slide.id === liveSlideId)
-    }, [liveOutputSlides, liveSlideId])
-    const nextSlide = liveOutputSlides[currentIndex + 1]
+    // Where on air sits in the deck, and what's either side of it.
+    const { index: currentIndex, previous: prevSlide, nextUp: nextSlide } = useMemo(
+        () => deckPosition(liveOutputSlides, liveSlideId),
+        [liveOutputSlides, liveSlideId],
+    )
     const nextSlideStorageId = nextSlide?.backgroundStorageId || null
 
     // Get file URL for live slide and next slide backgrounds (hooks must be at top level)
@@ -258,7 +246,6 @@ export function LiveOutput() {
     // Determine the background URL for live slide
     const liveSlideBackground = liveSlideFileUrl || liveSlideLocalBg || liveSlideLocalMediaBlobUrl
 
-    const prevSlide = liveOutputSlides[currentIndex - 1]
 
     // Determine the background URL for next slide preview
     const nextSlideBackground = nextSlideFileUrl || nextSlideLocalBg || nextSlideLocalMediaBlobUrl
@@ -753,7 +740,7 @@ export function LiveOutput() {
                 fixed Screen Picker modal below isn't trapped by containment. */}
             <div className="studio-liveoutput flex-1 min-h-0 flex flex-col p-3 lg:p-3.5 gap-2.5" data-layout={layoutMode}>
                 <div className="studio-output-main flex-1 min-h-0 flex gap-4 lg:gap-5">
-                    {/* Left: Next Up + Active Slide controls + Sermon Listener.
+                    {/* Left: Next Up + on-air controls + Sermon Listener.
                         Width/direction come from a container query (see
                         .studio-output-sidecar in index.css) so a narrow panel
                         stacks these above the feed instead of clipping. */}
@@ -786,11 +773,11 @@ export function LiveOutput() {
                             </div>
                         </div>
 
-                        {/* Active Slide Controls — always visible */}
+                        {/* On-air controls — always visible */}
                         <div className="flex-shrink-0 rounded-xl p-3 border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/45">
                             <div className="flex items-center justify-between mb-2">
                                 <div className="min-w-0 flex-1">
-                                    <div className="text-[9px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.16em]">Active</div>
+                                    <div className="text-[9px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.16em]">On air</div>
                                     <div className="text-xs font-bold text-[var(--text-primary)] truncate">
                                         {liveSlide?.name || 'None'}
                                     </div>

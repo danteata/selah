@@ -16,11 +16,11 @@ import { cssFontStack } from '../../lib/fonts'
 
 interface SlideCardProps {
     slide: Slide
-    isActive?: boolean
+    isStaged?: boolean
     isLive?: boolean
     isSelected?: boolean
     selectable?: boolean
-    isStickyActive?: boolean
+    isStickyStaged?: boolean
     onClick: () => void
     onDuplicate: () => void
     onDelete: () => void
@@ -39,11 +39,11 @@ interface SlideCardProps {
 
 export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
     slide,
-    isActive = false,
+    isStaged = false,
     isLive = false,
     isSelected = false,
     selectable = false,
-    isStickyActive = false,
+    isStickyStaged = false,
     onClick,
     onDuplicate,
     onDelete,
@@ -112,17 +112,17 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
             onClick={onClick}
             className={`
         relative group flex-shrink-0 cursor-pointer rounded-xl border transition-all overflow-hidden
-        ${isStickyActive ? 'sticky top-0 z-10 bg-[var(--bg-secondary)]' : ''}
+        ${isStickyStaged ? 'sticky top-0 z-10 bg-[var(--bg-secondary)]' : ''}
         ${isLive
                     ? 'border-red-500/45 bg-red-500/[0.03] shadow-lg shadow-red-500/10'
-                    : isActive
+                    : isStaged
                         ? 'border-[var(--accent-teal)]/45 bg-[var(--accent-teal)]/[0.04] shadow-lg shadow-[var(--accent-teal)]/10'
                         : 'border-[var(--border-subtle)] hover:border-[var(--border-emphasis)] bg-[var(--bg-secondary)]/70 hover:bg-[var(--bg-secondary)]'
                 }
         ${isSelected ? 'ring-1 ring-[var(--accent-teal)]/35' : ''}
       `}
         >
-            {(isLive || isActive) && (
+            {(isLive || isStaged) && (
                 <div className={`absolute inset-y-0 left-0 z-20 w-1 ${isLive ? 'bg-red-500' : 'bg-[var(--accent-teal)]'}`} />
             )}
 
@@ -239,14 +239,14 @@ export const SlideCard = forwardRef<HTMLDivElement, SlideCardProps>(({
                     )
                 )}
 
-                {/* Quick Present button. Always visible on the active/selected
+                {/* Quick Present button. Always visible on the staged
                     card (so it's discoverable and works on touch, where there's
                     no hover); hover-revealed on the others. */}
                 {onGoLive && !isLive && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onGoLive(); }}
                         className={`absolute top-2 right-2 z-10 p-2 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg transition-all transform ${
-                            isActive
+                            isStaged
                                 ? 'opacity-100 scale-100'
                                 : 'opacity-0 group-hover:opacity-100 focus:opacity-100 scale-90 group-hover:scale-100'
                         }`}
