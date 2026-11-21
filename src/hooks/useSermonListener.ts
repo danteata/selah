@@ -2664,17 +2664,18 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             if (!providerReady && provider !== 'web-speech') {
                 setIsInitializingProvider(true)
                 try {
-                    console.log('[useSermonListener] Provider not ready yet, checking via Rust:', provider)
-                    // Use Rust-side health check which CAN reach localhost even when
-                    // the browser can't (macOS WKWebView limitation).
-                    const { invoke } = await import('@tauri-apps/api/core')
-                    const result = await invoke<{ ready: boolean }>('check_whisper_ready')
-                    if (result.ready) {
-                        console.log('[useSermonListener] Whisper server is available (Rust check), marking ready')
+                    // Start was pressed before the availability check on mount
+                    // landed. Ask the same question it asks rather than wait for
+                    // it. (This used to invoke `check_whisper_ready`, a command
+                    // that went with the desktop-whisper sidecar, so an early
+                    // Start failed silently.)
+                    console.log('[useSermonListener] Provider not ready yet, checking:', provider)
+                    const available = await unifiedTranscriptionService.isProviderAvailable(provider)
+                    if (available) {
                         setProviderReady(true)
                         setError(null)
                     } else {
-                        console.log('[useSermonListener] Whisper server not ready yet, will auto-detect')
+                        console.log('[useSermonListener] Provider not available yet')
                         setIsInitializingProvider(false)
                         return false
                     }

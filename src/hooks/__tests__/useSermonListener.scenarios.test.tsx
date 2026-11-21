@@ -267,6 +267,28 @@ beforeEach(() => {
 })
 
 
+describe('sermon listener: starting and stopping', () => {
+    // The one path into start()'s own readiness check: no provider was
+    // available on mount, then one was chosen. That check used to invoke
+    // `check_whisper_ready`, which no longer exists, so Start always failed.
+    it('starts after a provider is chosen when none was available on mount', async () => {
+        h.providerAvailable = false
+        const hook = renderHook(() => useSermonListener({ autoDisplay: true }))
+        await flush()
+        expect(hook.result.current.isSupported).toBe(false)
+
+        h.providerAvailable = true
+        await act(async () => {
+            await hook.result.current.setProvider('native')
+        })
+        let started = false
+        await act(async () => {
+            started = await hook.result.current.start()
+        })
+        expect(started).toBe(true)
+        expect(hook.result.current.isListening).toBe(true)
+    })
+})
 
 describe('sermon listener: explicit references', () => {
     it('hears a spoken reference, makes it current and puts it live', async () => {
