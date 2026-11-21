@@ -328,6 +328,39 @@ describe('sermon listener: starting and stopping', () => {
         expect(h.recordings.started).toHaveLength(0)
         expect(h.recordings.stopped).toBe(0)
     })
+
+    it('a new listening session does not inherit the last one\'s reading context', async () => {
+        const s = await listen()
+        await s.say('Joshua chapter 24 verse 15.')
+        await act(async () => {
+            s.state.stop()
+            s.state.reset()
+        })
+        await act(async () => {
+            await s.state.start()
+        })
+        await s.wait(5 * SECOND)
+        // A bare number is a verse jump only while a chapter is fresh in the
+        // reading context — and the new session has none.
+        await s.say('16.')
+
+        expect(s.heard()).toEqual([])
+        expect(s.live()).toBe('Joshua 24:15')
+        expect(h.readingContexts.at(-1)?.[0]).toBeNull()
+    })
+
+    it('a new listening session does not inherit the last one\'s navigation cooldown', async () => {
+        const s = await listen()
+        await s.say('Turn with me to John 3:16.')
+        await s.wait(4 * SECOND)
+        await s.say('Next verse.')
+        await act(async () => {
+            s.state.reset()
+        })
+        await s.say('We see in Joshua chapter 24 that they served the Lord.')
+
+        expect(s.live()).toBe('Joshua 24:1')
+    })
 })
 
 describe('sermon listener: explicit references', () => {
