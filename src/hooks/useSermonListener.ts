@@ -135,6 +135,8 @@ export interface SermonListenerActions {
     removeVerse: (verse: DetectedVerse) => void
     /** Manually set one detected verse as current */
     setCurrentDetectedVerse: (verse: DetectedVerse) => Promise<void>
+    /** Clear the error being shown, and nothing else */
+    dismissError: () => void
     /** What the team's saved copy is called (empty for the default, dated title) */
     setSavedCopyTitle: (title: string) => void
     /** Open the OS Screen & System Audio Recording settings page (macOS desktop) */
@@ -955,6 +957,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         followerRef.current?.remove(verse.reference)
     }, [])
 
+    const dismissError = useCallback(() => {
+        session.showError(null)
+    }, [session])
+
     const setSavedCopyTitle = useCallback((title: string) => {
         session.setTitle(title)
     }, [session])
@@ -1006,6 +1012,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         displayCurrentVerse,
         removeVerse,
         setCurrentDetectedVerse,
+        dismissError,
         setSavedCopyTitle,
         openScreenCaptureSettings,
     }
