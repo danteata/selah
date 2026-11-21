@@ -37,6 +37,7 @@ import { useAnalytics } from '../../hooks'
 import { AnalyticsEventType } from '../../services/analytics/types'
 import { Modal } from '../modals/Modal'
 import { SLIDE_FONTS, cssFontStack } from '../../lib/fonts'
+import { ClassicWorkspaceSetting } from '../desk/ClassicWorkspaceSetting'
 import { findTemplate } from '../../constants/motionTemplates'
 
 
@@ -199,6 +200,7 @@ export function SettingsModal({ isOpen, onClose, initialTab = 'display' }: Setti
                                 }}
                             />
                         )}
+                        {activeTab === 'display' && <ClassicWorkspaceSetting />}
                         {activeTab === 'live' && (
                             <LiveSessionSettings
                                 settings={settings}

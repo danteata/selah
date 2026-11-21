@@ -135,21 +135,20 @@ describe('appStore — sermon/bible layout', () => {
         })
     })
 
-    describe('workspace mode', () => {
-        it('switches between studio and dashboard modes', () => {
+    describe('classic workspace', () => {
+        it('is off by default and can be switched on and off', () => {
             const store = useAppStore.getState()
+            expect(useAppStore.getState().classicWorkspace).toBe(false)
 
             act(() => {
-                store.setWorkspaceMode('dashboard')
+                store.setClassicWorkspace(true)
             })
-
-            expect(useAppStore.getState().workspaceMode).toBe('dashboard')
+            expect(useAppStore.getState().classicWorkspace).toBe(true)
 
             act(() => {
-                store.setWorkspaceMode('studio')
+                store.setClassicWorkspace(false)
             })
-
-            expect(useAppStore.getState().workspaceMode).toBe('studio')
+            expect(useAppStore.getState().classicWorkspace).toBe(false)
         })
     })
 
@@ -272,12 +271,12 @@ describe('appStore — live output presentation', () => {
         expect(useAppStore.getState().liveOutputSlidesId).toEqual(['slide-1', 'slide-2'])
     })
 
-    it('context panel state persists across workspace mode switches', () => {
+    it('context panel state persists across workspace switches', () => {
         const store = useAppStore.getState()
 
         act(() => {
             store.setActiveNavSection('bible')
-            store.setWorkspaceMode('dashboard')
+            store.setClassicWorkspace(true)
         })
 
         expect(useAppStore.getState().activeNavSection).toBe('bible')

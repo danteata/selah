@@ -9,6 +9,8 @@ const setActiveNavSection = vi.fn()
 let activeNavSection: NavSection | null = null
 let contextPanelOpen = false
 let panelMode: 'docked' | 'floating' = 'docked'
+let classicWorkspace = true
+let isMobile = false
 
 // NB: three levels up — this file sits in components/layout/__tests__. The
 // earlier two-level path silently mocked nothing, so these tests rendered the
@@ -21,12 +23,14 @@ vi.mock('../../../store/appStore', () => ({
             contextPanelOpen,
             activeNavSection,
             panelMode,
+            classicWorkspace,
             toggleQuickBibleBar: vi.fn(),
         }
         return selector ? selector(state) : state
     }),
 }))
 
+vi.mock('../../../hooks/useIsMobile', () => ({ useIsMobile: () => isMobile }))
 vi.mock('../NavRail', () => ({ NavRail: () => <nav data-testid="nav-rail" /> }))
 vi.mock('../TopBar', () => ({ TopBar: () => <header data-testid="top-bar" /> }))
 vi.mock('../StatusBar', () => ({ StatusBar: () => <footer data-testid="status-bar" /> }))
@@ -56,6 +60,8 @@ describe('AppShell', () => {
         activeNavSection = null
         contextPanelOpen = false
         panelMode = 'docked'
+        classicWorkspace = true
+        isMobile = false
     })
 
     it('renders children and shell components', () => {
@@ -136,6 +142,27 @@ describe('AppShell', () => {
             expect(openModal).toHaveBeenCalledWith('settings')
             expect(setActiveNavSection).toHaveBeenCalledWith(null)
             expect(screen.queryByTestId('context-panel')).not.toBeInTheDocument()
+        })
+
+        it('leaves the sidebar out on the docked desk, where sections are panels', () => {
+            classicWorkspace = false
+            activeNavSection = 'bible'
+            contextPanelOpen = true
+
+            renderShell()
+
+            expect(screen.queryByTestId('context-panel')).not.toBeInTheDocument()
+        })
+
+        it('keeps the sidebar on a phone, whichever workspace is chosen', () => {
+            classicWorkspace = false
+            isMobile = true
+            activeNavSection = 'bible'
+            contextPanelOpen = true
+
+            renderShell()
+
+            expect(screen.getByTestId('context-panel')).toBeInTheDocument()
         })
     })
 })

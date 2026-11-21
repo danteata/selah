@@ -198,8 +198,9 @@ export interface AppState {
     splitPanelMode: SplitPanelMode | null
     splitPanelQuery: string | null
 
-    // Workspace mode
-    workspaceMode: 'studio' | 'dashboard'
+    /** Run the old fixed Studio instead of the docked desk. A fallback for
+     *  one release while the desk settles (plan/docked-desk-layout.md). */
+    classicWorkspace: boolean
 
     // Undo/Redo stacks
     pastStates: Array<Partial<AppState>>
@@ -309,8 +310,7 @@ const initialState: AppState = {
     musicPanelQuery: '',
     splitPanelMode: null as SplitPanelMode | null,
     splitPanelQuery: null as string | null,
-    // Workspace mode
-    workspaceMode: 'studio' as 'studio' | 'dashboard',
+    classicWorkspace: false,
     // Undo/Redo
     pastStates: [],
     futureStates: [],
@@ -506,7 +506,7 @@ interface AppStore extends AppState {
     setSplitPanelMode: (mode: SplitPanelMode | null) => void
     setSplitPanelQuery: (query: string | null) => void
     openBibleFromSermon: (verseReference: string) => void
-    setWorkspaceMode: (mode: 'studio' | 'dashboard') => void
+    setClassicWorkspace: (classic: boolean) => void
 }
 
 export const useAppStore = create<AppStore>()(
@@ -1552,8 +1552,8 @@ export const useAppStore = create<AppStore>()(
                 })
             },
 
-            setWorkspaceMode: (mode) => {
-                set({ workspaceMode: mode })
+            setClassicWorkspace: (classic) => {
+                set({ classicWorkspace: classic })
             },
         }),
         {
@@ -1597,7 +1597,7 @@ export const useAppStore = create<AppStore>()(
                 panelMode: state.panelMode,
                 panelPosition: state.panelPosition,
                 activeNavSection: state.activeNavSection,
-                workspaceMode: state.workspaceMode,
+                classicWorkspace: state.classicWorkspace,
                 // Persist the operator's opt-in/lock, but never the live status.
                 songTracking: {
                     enabled: state.songTracking.enabled,
