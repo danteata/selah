@@ -12,6 +12,8 @@ const tracking = (over: Partial<TrackerUpdate> = {}): TrackerUpdate => ({
     reason: 'tracking',
     linesRemaining: 2,
     estimatedLineMs: 4000,
+    sung: false,
+    singing: true,
     ...over,
 })
 

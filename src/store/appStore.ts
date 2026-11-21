@@ -68,6 +68,12 @@ export interface SongTrackingStatus {
     singerLabel: string | null
     /** The expanded arrangement (stable per song) for position chips. */
     arrangement: SongTrackingStep[]
+    /** Whether the tracked song is being sung right now — a line of it heard
+     *  sung within the last few seconds, not merely the tracker holding on. */
+    singing: boolean
+    /** When (ms since epoch) the current stretch of singing began, or null
+     *  before any. Moves only when singing starts again after a gap. */
+    singingSince: number | null
 }
 
 export interface SongTrackingState {
@@ -102,6 +108,8 @@ export const DEFAULT_SONG_TRACKING: SongTrackingState = {
         singerStepIndex: null,
         singerLabel: null,
         arrangement: [],
+        singing: false,
+        singingSince: null,
     },
 }
 

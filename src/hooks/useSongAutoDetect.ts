@@ -205,8 +205,12 @@ export function useSongAutoDetect() {
         // and Lost. Searching is not a reason to replace the song on its own:
         // the song on screen competes for the same evidence (see below), so
         // if it is what is being sung, it wins.
-        const { confidence: trackerConfidence } = useAppStore.getState().songTracking.status
-        const struggling = trackerPhase === 'tracking' && trackerConfidence < STRUGGLING_CONFIDENCE
+        //
+        // A song tracked but not heard sung for a while is the same: the
+        // tracker holds its place through whatever follows, and a few shared
+        // words keep its confidence up.
+        const { confidence: trackerConfidence, singing } = useAppStore.getState().songTracking.status
+        const struggling = trackerPhase === 'tracking' && (trackerConfidence < STRUGGLING_CONFIDENCE || !singing)
         const unplaced = trackerPhase === 'searching'
         const shouldSearch = !liveSongKey || trackerPhase === 'lost' || unplaced || struggling
         if (!shouldSearch) {

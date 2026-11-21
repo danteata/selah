@@ -20,15 +20,17 @@ import type { SongTrackingState } from '../../store/appStore'
  * The test is deliberately narrow. Auto-detect being enabled says the operator
  * expects songs, but says nothing about this moment. A song being *live* says
  * little either — one often stays on screen while the preacher starts talking
- * over it. Requiring the tracker to be actively *tracking* means the incoming
- * audio is matching that song's lyrics line by line, which is the only one of
- * the three that is evidence about the audio itself. When preaching starts the
- * tracker stops matching, and scripture detection resumes on its own.
+ * over it. Nor does the tracker *tracking*: it holds its place through a
+ * sermon, and a few shared words keep it there. What counts is a line of the
+ * song heard sung within the last few seconds (see `SINGING_GAP_MS`), the
+ * only evidence about the audio itself. When preaching starts that stops, and
+ * scripture detection resumes on its own.
  */
 export function isCongregationSinging(songTracking: SongTrackingState): boolean {
     return (
         songTracking.autoDetect &&
         songTracking.status.songId !== null &&
-        songTracking.status.phase === 'tracking'
+        songTracking.status.phase === 'tracking' &&
+        songTracking.status.singing
     )
 }

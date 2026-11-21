@@ -353,6 +353,15 @@ describe('useSongTracker (live wiring)', () => {
         })
     })
 
+    it('publishes whether the song is being sung, and since when', () => {
+        const { rerender } = renderHook(() => useSongTracker())
+        expect(useAppStore.getState().songTracking.status.singing).toBe(false)
+        feed(rerender, 'Amazing grace how sweet the sound')
+        const status = useAppStore.getState().songTracking.status
+        expect(status.singing).toBe(true)
+        expect(status.singingSince).not.toBeNull()
+    })
+
     describe('when something else is on air', () => {
         const VERSE_SLIDE = {
             id: 'scripture-1', index: 99, name: 'John 3:16', type: 'bible', layout: 'bible',
