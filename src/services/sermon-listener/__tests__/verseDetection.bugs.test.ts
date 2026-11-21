@@ -529,3 +529,17 @@ describe('verseDetection — bug hunting', () => {
         expect(match).toBeDefined()
     })
 })
+
+// A quoted phrase resolves to a verse a lookup can find. The table named the
+// book "Psalm", so "The Lord is my shepherd" was listed and never shown.
+describe('quoted phrases resolve to verses that can be looked up', () => {
+    it.each([
+        ['The Lord is my shepherd, I shall not want.', 'Psalms 23:1'],
+        ['Better is one day in your courts than thousands elsewhere.', 'Psalms 84:10'],
+        ['The name of the Lord is a strong tower.', 'Proverbs 18:10'],
+    ])('%s', (text, reference) => {
+        const verse = detectVerses(text).find((v) => v.reference === reference)
+        expect(verse).toBeDefined()
+        expect(verseToLabel(verse!)).not.toBe('')
+    })
+})

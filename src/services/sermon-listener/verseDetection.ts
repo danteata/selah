@@ -910,8 +910,10 @@ export function detectVerses(text: string): DetectedVerse[] {
             optional: ['strong tower', 'strong tell', 'strong fort'],
         },
         {
-            reference: 'Psalm 23:1',
-            book: 'Psalm',
+            // The canonical name: "Psalm" is no book a lookup knows, so this
+            // was listed and never shown, beside a semantic "Psalms 23:1".
+            reference: 'Psalms 23:1',
+            book: 'Psalms',
             chapter: 23,
             verseStart: 1,
             raw: 'The Lord is my shepherd',
@@ -920,8 +922,8 @@ export function detectVerses(text: string): DetectedVerse[] {
             optional: ['shepherd', 'ship', 'shipper'],
         },
         {
-            reference: 'Psalm 84:10',
-            book: 'Psalm',
+            reference: 'Psalms 84:10',
+            book: 'Psalms',
             chapter: 84,
             verseStart: 10,
             raw: 'Better is one day in your courts',
