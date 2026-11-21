@@ -43,6 +43,8 @@ export interface ListeningSnapshot {
     savedTranscriptId: string | null
     /** Bumped when a dev accuracy recording has been written. */
     devRecordingsVersion: number
+    /** Speech is being heard right now (engines that report it). */
+    speechDetected: boolean
 }
 
 /** Settings read afresh at each start. */
@@ -199,6 +201,7 @@ export class ListeningSession {
             error: null,
             savedTranscriptId: null,
             devRecordingsVersion: 0,
+            speechDetected: false,
         }
     }
 
@@ -396,6 +399,7 @@ export class ListeningSession {
     private stopCapture(): void {
         this.clearInterimTimer()
         this.assembler.clearInterim()
+        if (this.snapshot.speechDetected) this.update({ speechDetected: false })
         void this.engine().stop()
         this.connections.captureStopped()
     }
@@ -427,7 +431,7 @@ export class ListeningSession {
                     message: event.error.message,
                 })
                 this.connections.captureStopped()
-                this.update({ status: 'idle', error: event.error })
+                this.update({ status: 'idle', error: event.error, speechDetected: false })
                 if (this.run) this.endRun()
                 else this.releaseAfterFailedStart()
                 return
@@ -436,6 +440,9 @@ export class ListeningSession {
                 return
             case 'capture':
                 this.onCaptureStatus(event)
+                return
+            case 'speech':
+                this.update({ speechDetected: event.active })
         }
     }
 

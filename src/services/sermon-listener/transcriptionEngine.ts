@@ -66,6 +66,8 @@ export type EngineEvent =
     /** The engine stopped with an error. */
     | { type: 'failed'; error: ListeningError }
     | ({ type: 'capture' } & CaptureStatus)
+    /** Speech started or stopped being heard (web speech only, so far). */
+    | { type: 'speech'; active: boolean }
 
 export interface EngineStartOptions {
     language: string
