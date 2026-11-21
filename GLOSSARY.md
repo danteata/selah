@@ -8,8 +8,12 @@ Selah puts lyrics, scripture and media on a church's screens during a service, o
 The feature that listens to the service as it happens and follows along, offering or showing the scripture and lyrics being spoken or sung.
 
 **Listening session**:
-One stretch of the sermon listener running, from start to stop. Nothing the sermon listener has heard carries over from one listening session to the next.
-_Avoid_: recording, listening run
+Everything the sermon listener hears between one clear of the transcript and the next: the transcript, the heard verses, the saved copy. It can span several listening runs. Nothing heard carries over from one listening session to the next.
+_Avoid_: recording
+
+**Listening run**:
+One stretch of actually listening, from Start to Stop, within a listening session. Pausing for a hymn and pressing Start again begins a new run in the same session; restarting a microphone that dropped out does not begin a new run at all.
+_Avoid_: session (for a single Start-to-Stop stretch)
 
 **Utterance**:
 A stretch of speech the transcriber has committed as final text, with its timing in the listening session.
