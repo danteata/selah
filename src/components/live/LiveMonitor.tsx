@@ -149,7 +149,9 @@ export function LiveMonitor({ liveSlide, fit = false }: LiveMonitorProps) {
 
     return (
         <>
-            <div className="relative group flex-1 min-h-0 flex flex-col">
+            {/* Fitted, the picture keeps its minimum height: a short panel
+                scrolls rather than drawing it over the controls below. */}
+            <div className={`relative group flex-1 flex flex-col ${fit ? '' : 'min-h-0'}`}>
                 <div className="flex items-center justify-between mb-2">
                     <div className="text-[10px] font-bold text-red-500 uppercase tracking-[0.18em] flex items-center gap-1.5">
                         <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />

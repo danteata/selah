@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup, act, screen } from '@testing-library/react'
 import { useAppStore } from '../../../store/appStore'
@@ -39,6 +40,28 @@ describe('DeskWorkspace', () => {
         render(<DeskWorkspace />)
         expect(openIds()).toEqual(DEFAULT_PANELS)
         expect(useDeskStore.getState().openPanels.slice().sort()).toEqual(DEFAULT_PANELS)
+    })
+
+    it('keeps hold of the desk under StrictMode', () => {
+        // Development mounts effects twice; onReady fires only once.
+        render(<StrictMode><DeskWorkspace /></StrictMode>)
+        expect(getDeskApi()).not.toBeNull()
+        act(() => hideDeskPanel('dictionary'))
+        expect(openIds()).not.toContain('dictionary')
+    })
+
+    it('flags the dock while a tab is dragged, so the edge drop zones see it', () => {
+        const { container } = render(<DeskWorkspace />)
+        const dock = container.querySelector('.desk-dock') as HTMLElement
+        const tab = container.querySelector('.dv-tab') as HTMLElement
+        act(() => { tab.dispatchEvent(new Event('dragstart', { bubbles: true })) })
+        expect(dock.dataset.dragging).toBe('true')
+        act(() => { tab.dispatchEvent(new Event('dragend', { bubbles: true })) })
+        expect(dock.dataset.dragging).toBeUndefined()
+        // A drag from inside a panel's content isn't a panel drag.
+        const content = container.querySelector('.desk-panel') as HTMLElement
+        act(() => { content.dispatchEvent(new Event('dragstart', { bubbles: true })) })
+        expect(dock.dataset.dragging).toBeUndefined()
     })
 
     it('never closes Live', () => {
