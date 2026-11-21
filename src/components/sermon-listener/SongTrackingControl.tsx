@@ -85,6 +85,16 @@ export function SongTrackingControl() {
                 <span className={`font-medium capitalize flex-shrink-0 ${phaseColor}`}>{status.phase}</span>
             </div>
 
+            {/* Why the slide isn't following, when it's something the
+                operator can act on. */}
+            {status.held && (
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                    {status.held === 'something-else-on-air'
+                        ? 'Standing by — something else is on air. Put a slide of this song up to resume.'
+                        : `No slide for ${status.singerLabel ?? 'this section'} — it can't be shown.`}
+                </p>
+            )}
+
             {/* Arrangement chips (click-to-jump) */}
             {status.arrangement.length > 0 && (
                 <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">

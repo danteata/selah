@@ -13,6 +13,7 @@ import { startKeepAwake, stopKeepAwake } from './keepAwake'
 import { startRecording, stopRecording } from './sessionRecordings'
 import { sessionAudioRecorder } from './sessionAudioRecorder'
 import { writeSessionSidecar } from './devAccuracyReport'
+import { songTraceSince } from './songTrace'
 import { transcriptionEngines } from './engines'
 import { createListeningSession, type ListeningSession, type ListeningSessionDeps } from './listeningSession'
 
@@ -42,7 +43,10 @@ export function appListeningSessionDeps(): ListeningSessionDeps {
                     await sessionAudioRecorder.stop()
                     return sessionId && startedAt ? { sessionId, startedAt } : null
                 },
-                writeSidecar: writeSessionSidecar,
+                // The song follower's decisions ride along, so a recorded
+                // service can be replayed to see why a slide didn't move.
+                writeSidecar: (sidecar) =>
+                    writeSessionSidecar({ ...sidecar, songTrace: songTraceSince(sidecar.startedAt) }),
             }
             : null,
         // System-audio capture on desktop runs through the OS screen-recording

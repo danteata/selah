@@ -11,6 +11,7 @@ import { SongConfirmationTracker } from '../services/sermon-listener/songConfirm
 import { resolveExternalSong } from '../services/sermon-listener/externalLyrics'
 import { isLlmConfigured } from '../services/sermon-listener/llmClient'
 import { wasPutOnAirByListener } from '../services/sermon-listener/onAirSource'
+import { traceSong } from '../services/sermon-listener/songTrace'
 import { songSlideBlocks } from '../lib/songSections'
 import type { Slide, Song } from '../types'
 
@@ -365,10 +366,11 @@ export function useSongAutoDetect() {
                     const { singingSince } = useAppStore.getState().songTracking.status
                     const sungAgain = singingSince !== null && singingSince > away.at
                     if (!away.gapSeen && !sungAgain) {
-                        console.log('[useSongAutoDetect] holding back the song the operator stepped away from', confirmed)
+                        traceSong({ at: Date.now(), source: 'detect', songId: confirmed, text: query, reason: 'held-back-stepped-away', score: match.confidence })
                         return
                     }
                 }
+                traceSong({ at: Date.now(), source: 'detect', songId: confirmed, text: query, reason: 'confirmed', score: match.confidence })
 
                 const song = cachedSongs.get(confirmed)
                 if (song) loadAndDisplay(song, match.sectionId)

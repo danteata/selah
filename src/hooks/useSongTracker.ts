@@ -5,6 +5,7 @@ import { DEFAULT_SONG_TRACKING, type SongTrackingStep, type SongTrackingStatus }
 import { useSermonListenerContext } from '../components/sermon-listener/SermonListenerContext'
 import { SongPositionTracker, type TrackerUpdate } from '../services/sermon-listener/songTracker'
 import { TranscriptLagEstimator, leadDelayMs } from '../services/sermon-listener/songLead'
+import { traceSong, type SlideHeld, type SongTraceEntry } from '../services/sermon-listener/songTrace'
 import type { Slide, Song } from '../types'
 import { sectionsForSong, songSlideBlocks } from '../lib/songSections'
 
@@ -196,11 +197,15 @@ export function useSongTracker() {
     }, [])
 
     /** Publish a tracker update to the operator readout and, when allowed, move
-     *  the live slide to the step the tracker wants shown. */
-    const apply = useCallback((u: TrackerUpdate) => {
+     *  the live slide to the step the tracker wants shown. Every decision is
+     *  traced, with what moved the slide or what held it (see songTrace). */
+    const apply = useCallback((u: TrackerUpdate, source: SongTraceEntry['source'], text?: string) => {
         const deps = applyDepsRef.current
         if (u.singing && !wasSingingRef.current) singingSinceRef.current = Date.now()
         wasSingingRef.current = u.singing
+        const outcome = moveSlide(u)
+        traceSong({ ...describe(u, deps.songKey, source, text), ...outcome })
+        const held = outcome.held === 'something-else-on-air' || outcome.held === 'step-has-no-slide' ? outcome.held : null
         const status: SongTrackingStatus = {
             songId: deps.songKey,
             songTitle: deps.trackedSong?.title ?? null,
@@ -214,23 +219,30 @@ export function useSongTracker() {
             arrangement: deps.arrangement,
             singing: u.singing,
             singingSince: singingSinceRef.current,
+            held,
         }
         deps.setStatus(status)
 
-        const { enabled: on, locked: frozen } = useAppStore.getState().songTracking
-        if (!on || frozen || u.displayStepIndex === null) return
-        // The tracker moves the screen only while its song is on air (or
-        // nothing is). Once anything else goes up — a verse the listener
-        // found, a slide the operator chose — the screen is not the song's to
-        // take back: putting the song back up is the operator's call, or
-        // auto-detect's on fresh evidence. Re-asserting the song here on
-        // every line heard is how a verse got yanked off air mid-sermon.
-        const onAir = useAppStore.getState().liveSlideId
-        if (onAir !== null && !deps.songSlideIds.has(onAir)) return
-        const slideId = deps.stepToSlide.get(u.displayStepIndex)
-        if (!slideId || slideId === onAir) return
-        trackerDrivenSlideRef.current = slideId
-        deps.setLiveSlide(slideId)
+        function moveSlide(update: TrackerUpdate): { movedTo?: string; held?: SlideHeld } {
+            const { enabled: on, locked: frozen } = useAppStore.getState().songTracking
+            if (!on) return { held: 'auto-advance-off' }
+            if (frozen) return { held: 'locked' }
+            if (update.displayStepIndex === null) return { held: 'no-section-to-show' }
+            // The tracker moves the screen only while its song is on air (or
+            // nothing is). Once anything else goes up — a verse the listener
+            // found, a slide the operator chose — the screen is not the song's
+            // to take back: putting the song back up is the operator's call,
+            // or auto-detect's on fresh evidence. Re-asserting the song here
+            // on every line heard is how a verse got yanked off air mid-sermon.
+            const onAir = useAppStore.getState().liveSlideId
+            if (onAir !== null && !deps.songSlideIds.has(onAir)) return { held: 'something-else-on-air' }
+            const slideId = deps.stepToSlide.get(update.displayStepIndex)
+            if (!slideId) return { held: 'step-has-no-slide' }
+            if (slideId === onAir) return { held: 'already-on-air' }
+            trackerDrivenSlideRef.current = slideId
+            deps.setLiveSlide(slideId)
+            return { movedTo: slideId }
+        }
     }, [])
 
     /**
@@ -252,7 +264,7 @@ export function useSongTracker() {
             leadTimerRef.current = null
             const t = trackerRef.current
             if (!t) return
-            apply(t.leadDisplay())
+            apply(t.leadDisplay(), 'clock')
         }
         // Zero: the transcript is already later than the section has left to
         // run — the short-section case the trailing-edge rule can never win —
@@ -275,7 +287,7 @@ export function useSongTracker() {
             trackerRef.current = tracker
             // A new song starts from what is said next.
             cursorRef.current.markSeen(segmentsRef.current)
-            apply(tracker.getState())
+            apply(tracker.getState(), 'state')
         } else {
             trackerRef.current = null
             setStatus({ ...DEFAULT_SONG_TRACKING.status })
@@ -296,7 +308,7 @@ export function useSongTracker() {
         trackerDrivenSlideRef.current = liveSlideId
         // `seekToSection` picks the occurrence nearest the current cursor, so
         // clicking a repeated chorus mid-song doesn't rewind to the first one.
-        apply(tracker.seekToSection(sectionId))
+        apply(tracker.seekToSection(sectionId), 'seek')
     }, [liveSlideId, slideToSection, apply, clearLeadTimer])
 
     // Feed newly-finalized transcript segments into the tracker and apply its
@@ -321,9 +333,14 @@ export function useSongTracker() {
         if (fresh.length === 0) return
 
         let last: TrackerUpdate | null = null
+        let lastText = ''
         for (const seg of fresh) {
             if (!seg?.text) continue
+            // Only the last of a batch is carried out; the rest are traced
+            // as they were judged.
+            if (last) traceSong(describe(last, applyDepsRef.current.songKey, 'final', lastText))
             last = tracker.ingest({ text: seg.text, timeMs: seg.startMs })
+            lastText = seg.text
         }
         // A final for this utterance supersedes whatever interim text we last
         // fed, so the next interim (even if textually identical) is new again.
@@ -335,9 +352,13 @@ export function useSongTracker() {
         if (newest && typeof newest.endMs === 'number') lagRef.current.observe(Date.now(), newest.endMs)
         // A lead put up on the clock that this transcript contradicts — the
         // singers are repeating the section — comes back down.
-        last = tracker.reviewLead(lagRef.current.lagMs) ?? last
+        const retracted = tracker.reviewLead(lagRef.current.lagMs)
+        if (retracted) {
+            traceSong(describe(last, applyDepsRef.current.songKey, 'final', lastText))
+            last = retracted
+        }
 
-        apply(last)
+        apply(last, retracted ? 'review' : 'final', retracted ? undefined : lastText)
         scheduleLead(last)
     }, [transcriptSegments, isListening, enabled, locked, stepToSlide, apply, scheduleLead])
 
@@ -359,9 +380,31 @@ export function useSongTracker() {
             u.reason === 'interim-miss' ||
             u.reason === 'interim-jump-ignored'
         if (ignored) return
-        apply(u)
+        apply(u, 'interim', text)
     }, [interimTranscript, isListening, apply])
 
     // Never leave a timer armed past unmount.
     useEffect(() => clearLeadTimer, [clearLeadTimer])
+}
+
+/** A tracker decision as a trace entry, without its outcome on the slide. */
+function describe(
+    u: TrackerUpdate,
+    songId: string | null,
+    source: SongTraceEntry['source'],
+    text?: string,
+): SongTraceEntry {
+    return {
+        at: Date.now(),
+        source,
+        songId,
+        text,
+        reason: u.reason,
+        phase: u.phase,
+        matchedLine: u.matched?.line,
+        score: u.matched?.score,
+        singer: u.singer ? `${u.singer.stepIndex}:${u.singer.lineIndex}` : undefined,
+        displayStep: u.displayStepIndex,
+        singing: u.singing,
+    }
 }
