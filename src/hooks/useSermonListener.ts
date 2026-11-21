@@ -37,6 +37,7 @@ import { findQueuedBibleSlide } from '../lib/findQueuedBibleSlide'
 import type { Scripture, BibleVersion, Slide } from '../types'
 import type { TranscriptSegment } from '../types/sermon-listener'
 import { isCongregationSinging } from '../services/sermon-listener/worshipMode'
+import { noteListenerPutOnAir } from '../services/sermon-listener/onAirSource'
 import { buildBibleInitialPrompt } from '../services/sermon-listener/bibleInitialPrompt'
 import {
     createScriptureFollower,
@@ -175,6 +176,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const sermonSettings = useAppStore((state) => state.settings.sermonListener)
     const appendActiveSlide = useAppStore((state) => state.appendActiveSlide)
     const setLiveSlide = useAppStore((state) => state.setLiveSlide)
+    // Every slide the listener puts on air goes through here, so a song
+    // stepped away from can tell the listener's verse from the operator's
+    // choice (see onAirSource).
+    const putOnAir = useCallback((slideId: string) => {
+        noteListenerPutOnAir(slideId)
+        setLiveSlide(slideId)
+    }, [setLiveSlide])
     const updateActiveSlide = useAppStore((state) => state.updateActiveSlide)
 
     // Get global settings (system-wide, no churchId needed)
@@ -661,7 +669,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             // Applies the default bible template and includes the verse reference
             const slide = createAutoDetectBibleSlide(scripture)
             appendActiveSlide(slide)
-            setLiveSlide(slide.id)
+            putOnAir(slide.id)
             return slide.id
         }
 
@@ -684,7 +692,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 },
             }
             updateActiveSlide(updated)
-            setLiveSlide(queued.id)
+            putOnAir(queued.id)
 
             // setLiveSlide is a no-op when this slide is already live, so the
             // live window/multi-monitor needs the update pushed explicitly.
@@ -694,9 +702,9 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
             return queued.id
         }
 
-        setLiveSlide(queued.id)
+        putOnAir(queued.id)
         return queued.id
-    }, [createAutoDetectBibleSlide, appendActiveSlide, updateActiveSlide, setLiveSlide])
+    }, [createAutoDetectBibleSlide, appendActiveSlide, updateActiveSlide, putOnAir])
 
     /**
      * Display the current verse on live view
@@ -745,7 +753,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 slideStyle: newSlide.slideStyle,
             }
             updateActiveSlide(updatedSlide)
-            setLiveSlide(existingSlide.id)
+            putOnAir(existingSlide.id)
 
             // Also broadcast to live window / multi-monitor so the update is pushed
             if (typeof window !== 'undefined' && '__TAURI__' in window) {
@@ -757,7 +765,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
         // When skipQueueAppend=true and no existing bible slide, do nothing.
         // The user explicitly wants voice navigation to never spam the queue.
-    }, [createAutoDetectBibleSlide, updateActiveSlide, setLiveSlide, projectScriptureSlide])
+    }, [createAutoDetectBibleSlide, updateActiveSlide, putOnAir, projectScriptureSlide])
 
     /** Carry out what the scripture follower decided. */
     decideRef.current = (decision: FollowerDecision) => {
