@@ -1747,6 +1747,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             if (next) {
                                 const nextVerse: DetectedVerse = {
                                     ...cur,
+                                    // From a book's last chapter, "next chapter" is the next book's first.
+                                    book: next.book,
                                     chapter: next.chapter,
                                     verseStart: 1,
                                     verseEnd: undefined,
@@ -1776,6 +1778,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             if (prev) {
                                 const prevVerse: DetectedVerse = {
                                     ...cur,
+                                    book: prev.book,
                                     chapter: prev.chapter,
                                     verseStart: 1,
                                     verseEnd: undefined,
