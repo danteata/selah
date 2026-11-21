@@ -47,4 +47,49 @@ _Avoid_: order, flow
 
 **On air**:
 The slide currently showing on the output screen.
-_Avoid_: live slide, projected
+_Avoid_: live slide, projected, active
+
+**Schedule**:
+The saved plan of what a service will show, item by item, in order.
+_Avoid_: playlist, service plan
+
+## The operator's desk
+
+**Panel**:
+One thing the operator looks at or works in on the desk, such as the service order, Preview, Live or the Bible. It can be moved, resized, stacked with others as tabs, or closed.
+_Avoid_: widget, pane, card
+
+**Layout**:
+How the panels are arranged on one desk: which are open, where each sits and how big it is.
+_Avoid_: workspace mode, dashboard
+
+**Default layout**:
+The layout Selah starts with and returns to on reset.
+_Avoid_: studio mode
+
+**Classic layout**:
+The built-in layout with the service order on the left, Preview and Live across the top and the library tabbed along the bottom, familiar to operators coming from other presentation software.
+
+**Saved layout**:
+A layout the operator has kept under a name so they can switch back to it in one step.
+_Avoid_: preset, workspace
+
+**Service order**:
+The panel listing the active schedule's slides in the order they will be shown.
+_Avoid_: preview (for this panel), queue, slide list
+
+**Staged slide**:
+The slide the operator has picked to go on air next, waiting for them to send it.
+_Avoid_: active slide, selected slide
+
+**Next up**:
+The slide after the one on air in the service order. Nobody picks it; it is simply what comes next.
+_Avoid_: staged (for this)
+
+**Preview**:
+The panel showing the staged slide, or next up when nothing is staged.
+_Avoid_: next up (for the panel)
+
+**Live**:
+The panel showing what is on air.
+_Avoid_: program, output (for the panel)
