@@ -329,3 +329,17 @@ describe('voiceCommandDetection — BUG HUNTING', () => {
         expect(cmd?.targetVerse).toBe(47)
     })
 })
+
+// The version command's text is what gets cut from the transcript before verse
+// detection. Its capture ran to the end of the text, so cutting it hid
+// everything said after "read it in the NIV" from detection.
+describe('a version change command ends at the version name', () => {
+    it.each([
+        ['Read it in the NIV. We see in Joshua chapter 24 that they served the Lord.', 'Read it in the NIV'],
+        ['Read it in the King James Version. Then Joshua chapter 24 says serve the Lord.', 'Read it in the King James Version'],
+        ['Read that from the NIV and remember Joshua chapter 24.', 'Read that from the NIV'],
+    ])('%s', (text, raw) => {
+        const command = detectVoiceCommands(text).find((c) => c.type === 'change_version')
+        expect(command?.raw).toBe(raw)
+    })
+})

@@ -270,15 +270,16 @@ describe('scripture follower: voice commands', () => {
         expect(f.current()).toBe('John 3:17')
     })
 
-    // Pinned current bug: the change_version command's matched text runs to the
-    // end of the transcript, so speech after it is hidden from detection.
-    it('[current bug] speech after "read it in the NIV" is hidden from detection', async () => {
+    // The change_version command's text ran to the end of the transcript, and
+    // command text is cut from the window before detection — so everything
+    // said after "read it in the NIV" went undetected.
+    it('speech after "read it in the NIV" is still detected', async () => {
         const f = follow()
         await f.say('Turn with me to John 3:16.')
         await f.wait(4 * SECOND)
         await f.say('Read it in the NIV.')
         await f.say(JOSHUA_24)
-        expect(f.heard()).toEqual(['John 3:16'])
+        expect(f.heard()).toEqual(['John 3:16', 'Joshua 24:1'])
     })
 })
 

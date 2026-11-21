@@ -71,16 +71,20 @@ function versionById(id: string): { id: string; name: string } | null {
     return version ? { id: version.id, name: version.name } : null
 }
 
-function findVersionMatch(text: string): { id: string; name: string } | null {
+/** The version named in `text`, and where in `text` its name ends. */
+function findVersionMatch(text: string): { id: string; name: string; end: number } | null {
     const exactMatch = new RegExp(`\\b(${VERSION_CODE_ALT})\\b`, 'i').exec(text)
     if (exactMatch) {
         const version = versionById(exactMatch[1])
-        if (version) return version
+        if (version) return { ...version, end: exactMatch.index + exactMatch[0].length }
     }
 
     const lower = text.toLowerCase()
-    for (const { phrase, id } of VERSION_PHRASES) {
-        if (phrase.test(lower)) return versionById(id)
+    for (const { text: phraseText, phrase, id } of VERSION_PHRASES) {
+        const m = phrase.exec(lower)
+        if (!m) continue
+        const version = versionById(id)
+        if (version) return { ...version, end: lower.indexOf(phraseText, m.index) + phraseText.length }
     }
 
     return null
@@ -101,15 +105,24 @@ function detectVersionChangeCommands(text: string): VoiceCommand[] {
     // This prevents stale earlier mentions from overriding the user's latest command.
     let lastExplicit: VoiceCommand | null = null
     for (const pattern of versionPatterns) {
-        const regex = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`)
+        const regex = new RegExp(pattern.source, `${pattern.flags.replace(/[gd]/g, '')}gd`)
         let match: RegExpExecArray | null
         while ((match = regex.exec(text)) !== null) {
-            const versionText = (match[1] || '').trim().replace(/[.,;!?]+$/, '')
+            const group = match[1] || ''
+            const versionText = group.trim().replace(/[.,;!?]+$/, '')
             const versionMatch = findVersionMatch(versionText)
             if (!versionMatch) continue
+            // The command ends where the version's name does. The capture runs
+            // to the end of the text, and this raw text is what gets cut from
+            // the transcript before verse detection: taken whole, it cut
+            // everything said after "read it in the NIV" along with it.
+            const groupStart = match.indices![1][0] + (group.length - group.trimStart().length)
+            let end = groupStart + versionMatch.end
+            const versionWord = /^\s+version\b/i.exec(text.slice(end))
+            if (versionWord) end += versionWord[0].length
             lastExplicit = {
                 type: 'change_version',
-                raw: match[0].trim(),
+                raw: text.slice(match.index, end).trim(),
                 confidence: 'high',
                 versionId: versionMatch.id,
                 versionName: versionMatch.name,
