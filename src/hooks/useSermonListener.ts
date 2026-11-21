@@ -44,7 +44,7 @@ import type { DetectedVerse } from '../services/sermon-listener'
 import { findQueuedBibleSlide } from '../lib/findQueuedBibleSlide'
 import type { Scripture, BibleVersion, Slide } from '../types'
 import type { TranscriptSegment } from '../types/sermon-listener'
-import { isDuplicateUtterance } from '../services/sermon-listener/transcriptDedup'
+import { TranscriptAssembler } from '../services/sermon-listener/transcriptAssembler'
 import { isCongregationSinging } from '../services/sermon-listener/worshipMode'
 import { buildBibleInitialPrompt } from '../services/sermon-listener/bibleInitialPrompt'
 import { audioFeedbackService } from '../services/sermon-listener/audioFeedback'
@@ -253,9 +253,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     // reads "Start" during that window even though a session is launching.
     const [isStarting, setIsStarting] = useState(false)
     const [isSupported, setIsSupported] = useState(false)
-    const [transcript, setTranscript] = useState('')
-    const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([])
-    const [interimTranscript, setInterimTranscript] = useState('')
     const [currentScripture, setCurrentScripture] = useState<Scripture | null>(null)
     const [error, setError] = useState<ListeningError | null>(null)
     const [isLoading, setIsLoading] = useState(false)
@@ -288,7 +285,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
 
     const currentScriptureRef = useRef<Scripture | null>(null)
     const providerReadyRef = useRef(false)
-    const [rawUtterances, setRawUtterances] = useState<Array<{ text: string; timestamp: number; confidence?: number }>>([])
 
     // Debounce timestamp for SERMON_LISTENER_TRANSCRIPTION — fires at most
     // once every 5s while the listener is active.
@@ -298,28 +294,20 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
     const optionsRef = useRef(options)
     optionsRef.current = options
 
-    // Track transcript buffer for context
-    const transcriptBufferRef = useRef('')
-
-    /**
-     * Append a finalized utterance to the transcript buffer and return the new
-     * full transcript. Callers assign the result to transcriptBufferRef
-     * themselves, synchronously, so the very next line can act on the text that
-     * just arrived — see the note at the call sites.
-     */
-    const appendToTranscriptBuffer = useCallback((chunk: string): string => {
-        const trimmed = chunk.trim()
-        if (!trimmed) return transcriptBufferRef.current
-        return `${transcriptBufferRef.current} ${trimmed}`.trim()
-    }, [])
-
-    // Session-relative timer for segment timestamps
+    // When the current listening run began, for its duration and the free-plan cap.
     const sessionStartTimeRef = useRef<number>(0)
-    const chunkStartTimeRef = useRef<number>(0)
 
-    // Track recent chunks for deduplication
-    const recentChunksRef = useRef<string[]>([])
-    const MAX_RECENT_CHUNKS = 5
+    // The transcript of this listening session, assembled from the engine's
+    // results. One per listening session, like the follower: reset() replaces it.
+    const assemblerRef = useRef<TranscriptAssembler | null>(null)
+    if (!assemblerRef.current) assemblerRef.current = new TranscriptAssembler()
+    const [assembler, setAssembler] = useState<TranscriptAssembler>(assemblerRef.current)
+    const {
+        text: transcript,
+        segments: transcriptSegments,
+        interim: interimTranscript,
+        rawUtterances,
+    } = useSyncExternalStore(assembler.subscribe, assembler.getSnapshot)
 
     // Debounce timer for interim transcript processing
     const interimDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -624,62 +612,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         }
     }, [])
 
-    /**
-     * Check if text is a duplicate or near-duplicate of recent chunks.
-     * Returns true if the text should be skipped. See transcriptDedup.ts for
-     * why worship mode narrows the comparison window.
-     */
-    const isDuplicateText = useCallback((newText: string): boolean => {
-        return isDuplicateUtterance(newText, recentChunksRef.current, {
-            worshipMode: useAppStore.getState().songTracking.autoDetect,
-        })
-    }, [])
-
-    /**
-     * Clean up repeated phrases in text
-     * E.g., "Okay. Okay. Okay." -> "Okay."
-     */
-    const cleanRepeatedPhrases = useCallback((text: string): string => {
-        if (!text) return text
-
-        // Remove immediate repetitions of short phrases (1-5 words)
-        // Pattern: "word. word. word." or "word, word, word,"
-        const patterns = [
-            /(\b[\w']+(?:\s+[\w']+){0,4}?[.,!?]?\s*)\1{2,}/gi,
-            /(\b[\w']+\b\s*)\1{3,}/gi,
-        ]
-
-        let cleaned = text
-        for (const pattern of patterns) {
-            cleaned = cleaned.replace(pattern, '$1')
-        }
-
-        return cleaned
-    }, [])
-
-    /**
-     * Remove overlap between a new chunk and recent context
-     * E.g., recent="For God so", new="God so loved" -> "loved"
-     */
-    const stripOverlap = useCallback((newText: string, recentText: string): string => {
-        if (!newText || !recentText) return newText
-
-        const newWords = newText.split(/\s+/)
-        const recentWords = recentText.split(/\s+/)
-
-        for (let len = Math.min(newWords.length, recentWords.length, 10); len >= 3; len--) {
-            const suffix = recentWords.slice(-len).join(' ').toLowerCase().replace(/[^\w\s]/g, '')
-            const prefix = newWords.slice(0, len).join(' ').toLowerCase().replace(/[^\w\s]/g, '')
-
-            if (suffix === prefix) {
-                const remaining = newWords.slice(len).join(' ')
-                return remaining || newText
-            }
-        }
-
-        return newText
-    }, [])
-
     // Semantic detector ref
     const semanticDetectorRef = useRef<ReturnType<typeof getSemanticDetector> | null>(null)
 
@@ -738,8 +670,10 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                 if (cancelled) return
 
                 if (live) {
-                    if (typeof live.transcript === 'string') setTranscript(live.transcript)
-                    if (Array.isArray(live.segments)) setTranscriptSegments(live.segments as TranscriptSegment[])
+                    assemblerRef.current?.restore({
+                        text: typeof live.transcript === 'string' ? live.transcript : undefined,
+                        segments: Array.isArray(live.segments) ? live.segments as TranscriptSegment[] : undefined,
+                    })
                     followerRef.current?.restore({
                         ...(Array.isArray(live.detectedVerses) ? { heardVerses: live.detectedVerses as DetectedVerse[] } : {}),
                         ...(live.currentVerse ? { currentVerse: live.currentVerse as DetectedVerse } : {}),
@@ -747,7 +681,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                             ? { activeBibleVersion: live.activeBibleVersion }
                             : {}),
                     })
-                    transcriptBufferRef.current = live.transcript || ''
                 }
 
                 if (saved.length > 0) {
@@ -1106,8 +1039,8 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      * are given to the provider once, at start; this reads only refs, so a
      * setting changed mid-service applies to the next utterance.
      */
-    const hear = useCallback((text: string, latestChunk?: string) => {
-        followerRef.current?.hear(text, { latestChunk, committed: text === transcriptBufferRef.current.trim() })
+    const hear = useCallback((text: string, latestChunk: string, committed: boolean) => {
+        followerRef.current?.hear(text, { latestChunk, committed })
     }, [])
 
     /**
@@ -1168,7 +1101,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         const sessionId = recordingSessionIdRef.current
         if (!sessionId) return
         recordingSessionIdRef.current = null
-        const liveText = transcriptBufferRef.current.trim()
+        const liveText = (assemblerRef.current?.getSnapshot().text ?? '').trim()
         void stopSermonRecording().then(() => {
             if (!liveText) return
             void setSermonRecordingTranscript(sessionId, liveText).catch((err: unknown) => {
@@ -1337,7 +1270,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     setError(null)
                     audioFeedbackService.playStart()
                     sessionStartTimeRef.current = Date.now()
-                    chunkStartTimeRef.current = 0
+                    assemblerRef.current?.startRun(sessionStartTimeRef.current)
                     trackEvent(AnalyticsEventType.SERMON_LISTENER_STARTED, {
                         provider,
                         language,
@@ -1345,125 +1278,46 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
                     })
             }
             const onResult = (text: string, isFinal: boolean, segments?: EngineSegment[]) => {
-                    console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal, hasSegments: !!segments?.length })
+                console.log('[useSermonListener] onResult called:', { text: text.substring(0, 50), isFinal, hasSegments: !!segments?.length })
+                const assembled = assemblerRef.current!.take({ text, isFinal, segments }, {
+                    now: Date.now(),
+                    provider,
+                    worshipMode: useAppStore.getState().songTracking.autoDetect,
+                })
+                const { chunk } = assembled
 
-                    // Clean up repeated phrases in the incoming text
-                    let cleanedText = cleanRepeatedPhrases(text)
-
-                    // Strip overlap with the very last chunk to avoid stuttering/repetitions (common in ASR)
-                    if (isFinal && recentChunksRef.current.length > 0) {
-                        cleanedText = stripOverlap(cleanedText, recentChunksRef.current[recentChunksRef.current.length - 1])
+                if (assembled.kind === 'interim') {
+                    // Verse detection waits for the words to settle.
+                    if (interimDebounceRef.current) clearTimeout(interimDebounceRef.current)
+                    interimDebounceRef.current = setTimeout(() => {
+                        hear(assembled.hear, chunk, assembled.committed)
+                        interimDebounceRef.current = null
+                    }, INTERIM_DEBOUNCE_MS)
+                } else {
+                    if (assembled.kind === 'duplicate') {
+                        console.log('[useSermonListener] Skipping duplicate text:', chunk.substring(0, 50))
+                    } else if (interimDebounceRef.current) {
+                        // The final supersedes the interim pass still waiting.
+                        clearTimeout(interimDebounceRef.current)
+                        interimDebounceRef.current = null
                     }
+                    // The follower hears the transcript as it now stands, with
+                    // the newest utterance — the only place commands are read.
+                    hear(assembled.hear, chunk, assembled.committed)
+                    if (assembled.kind === 'duplicate') return
 
-                    // Skip transcript append for duplicates, but still process commands in the chunk.
-                    if (isDuplicateText(cleanedText)) {
-                        console.log('[useSermonListener] Skipping duplicate text:', cleanedText.substring(0, 50))
-                        hear(transcriptBufferRef.current, cleanedText)
-                        return
+                    // Throttled transcript event — final results only.
+                    if (lastTranscriptEventRef.current && Date.now() - lastTranscriptEventRef.current > 5000) {
+                        trackEvent(AnalyticsEventType.SERMON_LISTENER_TRANSCRIPTION, {
+                            length: assembled.hear.length,
+                            provider,
+                        })
+                        lastTranscriptEventRef.current = Date.now()
+                    } else if (!lastTranscriptEventRef.current) {
+                        lastTranscriptEventRef.current = Date.now()
                     }
-
-                    if (isFinal) {
-                        // Add to recent chunks for deduplication
-                        recentChunksRef.current.push(cleanedText)
-                        if (recentChunksRef.current.length > MAX_RECENT_CHUNKS) {
-                            recentChunksRef.current.shift()
-                        }
-
-                        // Track raw utterance for learning
-                        setRawUtterances(prev => [...prev, { text: cleanedText, timestamp: Date.now() }].slice(-200))
-
-                        // Cancel any pending interim debounce
-                        if (interimDebounceRef.current) {
-                            clearTimeout(interimDebounceRef.current)
-                            interimDebounceRef.current = null
-                        }
-
-                        setInterimTranscript('')
-
-                        // Build timestamped segment(s)
-                        const now = Date.now()
-                        const sessionStart = sessionStartTimeRef.current || now
-
-                        if (segments && segments.length > 0) {
-                            // Whisper returns segment timing in seconds relative to the utterance start.
-                            // These are already adjusted by the desktop whisper service to be
-                            // session-relative (VAD adds vadSpeechStartMs, native adds startOffsetMs).
-                            // So we can use them directly — just convert seconds → milliseconds.
-                            const newSegments: TranscriptSegment[] = segments.map((seg, idx) => {
-                                return {
-                                    id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
-                                    text: seg.text.trim(),
-                                    startMs: seg.startMs,
-                                    endMs: seg.endMs,
-                                    source: 'whisper' as const,
-                                }
-                            }).filter(seg => seg.text.length > 0)
-
-                            // The buffer is advanced HERE, not inside the state
-                            // updater below. React runs updaters during the
-                            // render that follows this callback, so a buffer
-                            // written in there is still one utterance behind when
-                            // the follower reads it a few lines down — and
-                            // empty for the first utterance of a session, which
-                            // `if (!text) return` then dropped entirely. That is
-                            // why an opening "Psalm 27 verse 1" was never
-                            // detected and why every later detection trailed the
-                            // speaker by a chunk.
-                            transcriptBufferRef.current = appendToTranscriptBuffer(
-                                newSegments.map(s => s.text).join(' '),
-                            )
-                            setTranscript(transcriptBufferRef.current)
-                            setTranscriptSegments(prev => [...prev, ...newSegments])
-                        } else {
-                            // Web Speech or no segment timing — use wall-clock offsets.
-                            // chunkStartTimeRef tracks when the current chunk started (set on first
-                            // interim, or falls back to sessionStart for immediate finals).
-                            const segmentStart = chunkStartTimeRef.current || now
-                            const segment: TranscriptSegment = {
-                                id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `seg-${now}-${Math.random().toString(36).slice(2, 9)}`,
-                                text: cleanedText,
-                                startMs: Math.max(0, segmentStart - sessionStart),
-                                endMs: Math.max(0, now - sessionStart),
-                                source: provider === 'native' ? 'whisper' : 'web-speech',
-                            }
-
-                            // Advanced outside the updater — same reason as the
-                            // whisper-segment branch above.
-                            transcriptBufferRef.current = appendToTranscriptBuffer(segment.text)
-                            setTranscript(transcriptBufferRef.current)
-                            setTranscriptSegments(prev => [...prev, segment])
-                        }
-
-                        const newFullTranscript = `${transcriptBufferRef.current}`.trim()
-                        hear(newFullTranscript, cleanedText)
-                        chunkStartTimeRef.current = 0
-                        // Debounced transcript event — fire only on final results so
-                        // we don't flood Amplitude with interim chunks.
-                        if (lastTranscriptEventRef.current && Date.now() - lastTranscriptEventRef.current > 5000) {
-                            trackEvent(AnalyticsEventType.SERMON_LISTENER_TRANSCRIPTION, {
-                                length: newFullTranscript.length,
-                                provider,
-                            })
-                            lastTranscriptEventRef.current = Date.now()
-                        } else if (!lastTranscriptEventRef.current) {
-                            lastTranscriptEventRef.current = Date.now()
-                        }
-                    } else {
-                        setInterimTranscript(cleanedText)
-                        if (chunkStartTimeRef.current === 0) {
-                            chunkStartTimeRef.current = Date.now()
-                        }
-                        const rollingContext = `${transcriptBufferRef.current} ${cleanedText}`.trim()
-                        // Debounce interim verse detection to reduce processing load
-                        if (interimDebounceRef.current) {
-                            clearTimeout(interimDebounceRef.current)
-                        }
-                        interimDebounceRef.current = setTimeout(() => {
-                            hear(rollingContext, cleanedText)
-                            interimDebounceRef.current = null
-                        }, INTERIM_DEBOUNCE_MS)
-                    }
-                    onTranscriptUpdate?.(cleanedText, !isFinal)
+                }
+                onTranscriptUpdate?.(chunk, !isFinal)
             }
             const onFailed = (failure: ListeningError) => {
                     const resolvedError = failure.message
@@ -1513,10 +1367,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         language,
         onError,
         onTranscriptUpdate,
-        cleanRepeatedPhrases,
-        isDuplicateText,
-        stripOverlap,
-        appendToTranscriptBuffer,
         sermonSettings?.captureSource,
         sermonSettings?.selectedMicrophoneId,
         sermonSettings?.inputChannel,
@@ -1555,7 +1405,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         void transcriptionEngines[provider].stop()
         setIsListening(false)
         setIsStarting(false)
-        setInterimTranscript('')
+        assemblerRef.current?.clearInterim()
         setIsSpeechDetected(false)
         stopKeepAwake().catch((err: unknown) => {
             console.warn('[useSermonListener] Keep-awake release failed (non-fatal):', err)
@@ -1649,16 +1499,13 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
      * Reset state
      */
     const reset = useCallback(() => {
-        setTranscript('')
-        setTranscriptSegments([])
-        setInterimTranscript('')
         setCurrentScripture(null)
         setError(null)
         setIsSpeechDetected(false)
         setIsLoading(false)
-        setRawUtterances([])
-        transcriptBufferRef.current = ''
-        recentChunksRef.current = []
+        // A new transcript for the new listening session.
+        assemblerRef.current = new TranscriptAssembler()
+        setAssembler(assemblerRef.current)
         // A new scripture follower for the new listening session: nothing the
         // last one remembered — what was heard, the reading context, the
         // cooldowns — carries over, and its results still in flight are dropped.
@@ -1666,7 +1513,6 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         followerRef.current = createFollower()
         setFollower(followerRef.current)
         sessionStartTimeRef.current = 0
-        chunkStartTimeRef.current = 0
         if (interimDebounceRef.current) {
             clearTimeout(interimDebounceRef.current)
             interimDebounceRef.current = null
