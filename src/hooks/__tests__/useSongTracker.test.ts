@@ -362,6 +362,21 @@ describe('useSongTracker (live wiring)', () => {
         expect(status.singingSince).not.toBeNull()
     })
 
+    it('traces each decision with what held the slide, and says so on the readout', async () => {
+        const { songTraceSince, clearSongTrace } = await import('../../services/sermon-listener/songTrace')
+        clearSongTrace()
+        // A section whose slide was deleted from the deck.
+        useAppStore.setState({ activeSlides: songSlides().filter((sl) => sl.id !== 'slide-c1') })
+        const { rerender } = renderHook(() => useSongTracker())
+        feed(rerender, 'Amazing grace how sweet the sound')
+        feed(rerender, 'My chains are gone I have been set free')
+
+        const finals = songTraceSince(0).filter((e) => e.source === 'final')
+        expect(finals[0]).toMatchObject({ reason: 'acquired', matchedLine: 'Amazing grace how sweet the sound', movedTo: 'slide-v1' })
+        expect(finals[1]).toMatchObject({ held: 'step-has-no-slide' })
+        expect(useAppStore.getState().songTracking.status.held).toBe('step-has-no-slide')
+    })
+
     describe('when something else is on air', () => {
         const VERSE_SLIDE = {
             id: 'scripture-1', index: 99, name: 'John 3:16', type: 'bible', layout: 'bible',
@@ -389,6 +404,7 @@ describe('useSongTracker (live wiring)', () => {
             feed(rerender, 'My chains are gone I have been set free')
 
             expect(useAppStore.getState().liveSlideId).toBe('scripture-1')
+            expect(useAppStore.getState().songTracking.status.held).toBe('something-else-on-air')
         })
 
         it('drives the song again once a slide of it is back on air', () => {

@@ -74,6 +74,9 @@ export interface SongTrackingStatus {
     /** When (ms since epoch) the current stretch of singing began, or null
      *  before any. Moves only when singing starts again after a gap. */
     singingSince: number | null
+    /** Why the tracker's latest decision left the slide on air as it was,
+     *  when that's worth telling the operator; null otherwise. */
+    held: 'something-else-on-air' | 'step-has-no-slide' | null
 }
 
 export interface SongTrackingState {
@@ -110,6 +113,7 @@ export const DEFAULT_SONG_TRACKING: SongTrackingState = {
         arrangement: [],
         singing: false,
         singingSince: null,
+        held: null,
     },
 }
 

@@ -218,6 +218,9 @@ export interface TrackerUpdate {
      *  through a gap, so the tracker carries on from there when singing
      *  resumes. */
     singing: boolean
+    /** The best line this ingest's words matched, whether or not it was
+     *  accepted; null when nothing was scored. For the trace. */
+    matched: { stepIndex: number; lineIndex: number; line: string; score: number } | null
 }
 
 /** Score a finalized line must reach to count as heard being sung. */
@@ -393,6 +396,8 @@ export class SongPositionTracker {
     private sungNow = false
     /** Audio time (ms) of the latest finalized text. */
     private lastHeardMs: number | null = null
+    /** Best candidate of the ingest in progress (see TrackerUpdate.matched). */
+    private matchedNow: Candidate | null = null
 
     // Pending non-adjacent jump target awaiting hysteresis confirmation.
     private pendingJump: { stepIndex: number; lineIndex: number; count: number } | null = null
@@ -561,8 +566,13 @@ export class SongPositionTracker {
     /** Feed a transcript chunk; returns the resulting display decision. */
     ingest(chunk: TrackerChunk): TrackerUpdate {
         this.sungNow = false
+        this.matchedNow = null
         if (!chunk.interim && chunk.timeMs !== undefined) this.lastHeardMs = chunk.timeMs
-        return this.ingestChunk(chunk)
+        const update = this.ingestChunk(chunk)
+        // Both describe this ingest only; a later seek or clock lead isn't one.
+        this.sungNow = false
+        this.matchedNow = null
+        return update
     }
 
     private ingestChunk(chunk: TrackerChunk): TrackerUpdate {
@@ -615,6 +625,7 @@ export class SongPositionTracker {
     /** Searching / Lost: scan every step's lines to (re)acquire position. */
     private handleAcquire(query: string, chunk: TrackerChunk): TrackerUpdate {
         const best = this.bestCandidate(query, this.allCandidateCoords(), this.phase === 'searching')
+        this.matchedNow = best
         if (best && best.score >= this.config.searchThreshold) {
             this.singerStep = best.stepIndex
             this.singerLine = best.lineIndex
@@ -635,6 +646,7 @@ export class SongPositionTracker {
     private handleTracking(query: string, chunk: TrackerChunk): TrackerUpdate {
         const interim = chunk.interim === true
         const best = this.bestCandidate(query, this.trackingCandidateCoords())
+        this.matchedNow = best
 
         if (!best || best.score < this.config.trackThreshold) {
             // An interim miss is not evidence of anything: the utterance is
@@ -986,6 +998,14 @@ export class SongPositionTracker {
             estimatedLineMs: this.estimatedLineMs(),
             sung: this.sungNow,
             singing: this.isSinging(),
+            matched: this.matchedNow
+                ? {
+                      stepIndex: this.matchedNow.stepIndex,
+                      lineIndex: this.matchedNow.lineIndex,
+                      line: this.steps[this.matchedNow.stepIndex]?.lines[this.matchedNow.lineIndex] ?? '',
+                      score: this.matchedNow.score,
+                  }
+                : null,
         }
     }
 }

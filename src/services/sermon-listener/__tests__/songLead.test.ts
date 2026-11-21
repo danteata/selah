@@ -14,6 +14,7 @@ const tracking = (over: Partial<TrackerUpdate> = {}): TrackerUpdate => ({
     estimatedLineMs: 4000,
     sung: false,
     singing: true,
+    matched: null,
     ...over,
 })
 

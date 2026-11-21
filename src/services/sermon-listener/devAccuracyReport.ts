@@ -17,6 +17,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { appDataDir, join } from '@tauri-apps/api/path'
 import { detectVerses, type DetectedVerse } from './verseDetection'
+import type { SongTraceEntry } from './songTrace'
 
 const RECORDINGS_DIR = 'dev-sermon-recordings'
 
@@ -26,6 +27,8 @@ export interface SessionSidecar {
     stoppedAt: number
     liveDetectedVerses: DetectedVerse[]
     rawUtterances: Array<{ text: string; timestamp: number; confidence?: number }>
+    /** The song follower's decisions during the session (see songTrace). */
+    songTrace?: SongTraceEntry[]
 }
 
 async function recordingsDir(): Promise<string> {
