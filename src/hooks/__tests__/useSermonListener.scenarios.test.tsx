@@ -42,6 +42,8 @@ const h = vi.hoisted(() => {
         llmConfigured: false,
         llmDelay: 0,
         llmResult: [] as unknown[],
+        /** The team's saved copy, as the fake transcript store received it. */
+        savedCopy: { creates: [] as Array<Record<string, unknown>>, updates: [] as Array<[string, Record<string, unknown>]> },
     }
 })
 
@@ -145,6 +147,24 @@ vi.mock('../useIndexedDB', () => ({
 }))
 
 vi.mock('../useAnalytics', () => ({ useAnalytics: () => ({ trackEvent: () => {} }) }))
+vi.mock('../useTranscripts', () => ({
+    useTranscripts: () => ({
+        transcripts: [],
+        isLoading: false,
+        createTranscript: async (data: Record<string, unknown>) => {
+            h.savedCopy.creates.push(data)
+            return `copy-${h.savedCopy.creates.length}`
+        },
+        updateTranscript: async (id: string, data: Record<string, unknown>) => {
+            h.savedCopy.updates.push([id, data])
+            return id
+        },
+        deleteTranscript: async () => null,
+    }),
+}))
+vi.mock('../../services/sermon-listener/sessionAudioRecorder', () => ({
+    sessionAudioRecorder: { start: async () => null, stop: async () => {}, getSessionId: () => null, getStartedAt: () => null },
+}))
 vi.mock('../../providers/LicenseProvider', () => ({
     useEntitlements: () => ({ isPro: true, startProCheckout: async () => {} }),
 }))
@@ -183,6 +203,7 @@ vi.mock('../../services/sermon-listener/sessionRecordings', () => ({
 vi.mock('sonner', () => ({ toast: Object.assign(() => {}, { error: () => {}, warning: () => {}, success: () => {} }) }))
 
 import { useSermonListener, type SermonListenerOptions } from '../useSermonListener'
+import { resetListeningSessionForTests } from '../../services/sermon-listener/appListeningSession'
 import { useAppStore } from '../../store/appStore'
 
 const SECOND = 1000
@@ -300,6 +321,9 @@ beforeEach(() => {
     h.llmConfigured = false
     h.llmDelay = 0
     h.llmResult = []
+    h.savedCopy = { creates: [], updates: [] }
+    // One listening session per app; a fresh app per test.
+    resetListeningSessionForTests()
 })
 
 afterEach(() => {
@@ -320,19 +344,10 @@ function setSermonSettings(patch: Record<string, unknown>) {
 }
 
 describe('sermon listener: starting and stopping', () => {
-    // The one path into start()'s own readiness check: no provider was
-    // available on mount, then one was chosen. That check used to invoke
-    // `check_whisper_ready`, which no longer exists, so Start always failed.
-    it('starts after a provider is chosen when none was available on mount', async () => {
-        h.providerAvailable = false
+    // Start pressed before the engine check on mount had answered used to be
+    // refused as "not supported".
+    it('a Start pressed before the engine check has answered waits for it', async () => {
         const hook = renderHook(() => useSermonListener({ autoDisplay: true }))
-        await flush()
-        expect(hook.result.current.isSupported).toBe(false)
-
-        h.providerAvailable = true
-        await act(async () => {
-            await hook.result.current.setProvider('native')
-        })
         let started = false
         await act(async () => {
             started = await hook.result.current.start()
@@ -365,6 +380,22 @@ describe('sermon listener: starting and stopping', () => {
 
         expect(h.recordings.stopped).toBe(1)
         expect(h.recordings.attached).toHaveLength(1)
+    })
+
+    // The panel used to do this, so it stopped whenever the panel was hidden,
+    // made a duplicate on every remount, and missed a stop by voice or tray.
+    it('the team\'s saved copy is made with no panel open, however the run ends', async () => {
+        const s = await listen()
+        await s.say('Turn with me to John 3:16.')
+        await s.say('Stop listening.')
+        await s.wait(0)
+
+        expect(h.savedCopy.creates).toHaveLength(1)
+        expect(h.savedCopy.creates[0]).toMatchObject({
+            transcript: 'Turn with me to John 3:16. Stop listening.',
+            detectedVerses: [expect.objectContaining({ reference: 'John 3:16' })],
+        })
+        expect(s.state.savedTranscriptId).toBe('copy-1')
     })
 
     it('records nothing unless the church turned recording on', async () => {

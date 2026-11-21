@@ -1,29 +1,19 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, type ReactNode } from 'react'
 import { useSermonListener, type UseSermonListenerReturn } from '../../hooks/useSermonListener'
 import { useAppStore } from '../../store/appStore'
 
 const SermonListenerContext = createContext<UseSermonListenerReturn | null>(null)
 
+/**
+ * The app's one sermon listener, for every panel, indicator and control.
+ *
+ * It used to be withheld while the `sermon_listener` flag loaded, or when it
+ * was off — and every panel then made a listener of its own, all sharing one
+ * microphone and one engine. The flag never turned the listener off; it only
+ * hid it from everything but the panels. Now there is exactly one.
+ */
 export function SermonListenerProvider({ children }: { children: ReactNode }) {
-    const [isEnabled, setIsEnabled] = useState(false)
-    const [isLoading, setIsLoading] = useState(true)
-
-    useEffect(() => {
-        const check = async () => {
-            try {
-                const { featureFlags } = await import('../../services/feature-flags')
-                const enabled = await featureFlags.isEnabled('sermon_listener', true)
-                setIsEnabled(enabled)
-            } catch {
-                setIsEnabled(true)
-            } finally {
-                setIsLoading(false)
-            }
-        }
-        check()
-    }, [])
-
     const enableVoiceCommands = useAppStore(
         (s) => s.settings.sermonListener?.enableVoiceCommands ?? true,
     )
@@ -56,14 +46,6 @@ export function SermonListenerProvider({ children }: { children: ReactNode }) {
             unlisten?.()
         }
     }, [isListening, start, stop])
-
-    if (isLoading) {
-        return <>{children}</>
-    }
-
-    if (!isEnabled) {
-        return <>{children}</>
-    }
 
     return (
         <SermonListenerContext.Provider value={sermonListener}>
