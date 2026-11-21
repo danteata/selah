@@ -166,13 +166,38 @@ describe('scripture follower: explicit references', () => {
         expect(f.shown()).toEqual(['Joshua 24:15'])
     })
 
-    // Pinned, not endorsed: the command path has no specificity guard.
-    it('the same mention phrased as a command does revert to verse 1', async () => {
+    // The command path had no specificity guard, so a chapter mentioned in
+    // passing put verse 1 back up over the verse being read.
+    it('the same mention phrased as a command does not revert to verse 1 either', async () => {
         const f = follow()
         await f.say('Joshua chapter 24 verse 15.')
         await f.wait(10 * SECOND)
         await f.say('As for me and my house, Joshua chapter 24, we will serve the Lord.')
+        expect(f.current()).toBe('Joshua 24:15')
+        expect(f.shown()).toEqual(['Joshua 24:15'])
+    })
+
+    it('an explicit "open" still moves to the chapter', async () => {
+        const f = follow()
+        await f.say('Joshua chapter 24 verse 15.')
+        await f.wait(10 * SECOND)
+        await f.say('Open Joshua 24.')
         expect(f.current()).toBe('Joshua 24:1')
+    })
+
+    // Almost any spoken reference also reads as a command, and commands put
+    // the passage up whatever auto-display said.
+    it('a reference only mentioned follows auto-display', async () => {
+        const f = follow({ autoDisplay: false })
+        await f.say('Turn with me to John 3:16.')
+        expect(f.current()).toBe('John 3:16')
+        expect(f.lookUps()).toEqual(['John 3:16→nothing'])
+    })
+
+    it('a reference asked for goes up even with auto-display off', async () => {
+        const f = follow({ autoDisplay: false })
+        await f.say('Go to John 3:16.')
+        expect(f.lookUps()).toEqual(['John 3:16→project'])
     })
 
     it('a verse that completes the reference a command just set is not held back by the cooldown ("Hebrews 13" … "Five.")', async () => {
@@ -200,6 +225,9 @@ describe('scripture follower: voice commands', () => {
         await f.say('Joshua 24.')
         await f.say('Verse 15.')
         expect(f.current()).toBe('Joshua 24:15')
+        // The bare chapter's verse 1 was a placeholder; the verse announced
+        // replaces it, in the list and on the slide.
+        expect(f.heard()).toEqual(['Joshua 24:15'])
         expect(f.lookUps().at(-1)).toBe('Joshua 24:15→refresh-live')
         expect(f.readingContexts.at(-1)).toEqual(['Joshua', 24, 15])
     })

@@ -182,7 +182,8 @@ describe('voiceCommandDetection', () => {
             expect(cmds[0].type).toBe('go_to_reference')
             expect(cmds[0].book).toBe('Psalms')
             expect(cmds[0].chapter).toBe(23)
-            expect(cmds[0].verse).toBe(1)
+            // No verse was said; a bare chapter is a placeholder, not verse 1.
+            expect(cmds[0].verse).toBeUndefined()
             expect(cmds[0].confidence).toBe('medium')
         })
 
