@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery } from 'convex/react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, Command, LayoutGrid, Rows3, Users, Plus, Check, Loader2, Shield } from 'lucide-react'
+import { Sun, Moon, ChevronDown, LogOut, User, Search, Calendar, Command, Users, Plus, Check, Loader2, Shield } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useUserRole } from '../../hooks/useUserRole'
 import { useConvexConnection } from '../../providers/ConvexConnectionProvider'
@@ -11,6 +11,7 @@ import { LiveSessionControls } from '../live/LiveSessionControls'
 import { UpdatePrompt } from '../updates/UpdatePrompt'
 import { PresenceAvatars } from '../live/PresenceAvatars'
 import { DeskPhones } from '../live/DeskPhones'
+import { LayoutMenu } from '../desk/LayoutMenu'
 import { isTauri } from '../../platform'
 import type { Schedule } from '../../types'
 
@@ -34,8 +35,7 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
     const [showScheduleMenu, setShowScheduleMenu] = useState(false)
     const setCommandBarOpen = useAppStore((s) => s.setCommandBarOpen)
     const openModal = useAppStore((s) => s.openModal)
-    const workspaceMode = useAppStore((s) => s.workspaceMode)
-    const setWorkspaceMode = useAppStore((s) => s.setWorkspaceMode)
+    const classicWorkspace = useAppStore((s) => s.classicWorkspace)
     const scheduleMenuRef = useRef<HTMLDivElement>(null)
 
     const {
@@ -222,18 +222,8 @@ export function TopBar({ isDark, onToggleTheme, user, showAdminPanel, onToggleAd
                     Settings was the only place an update could be discovered. */}
                 <UpdatePrompt />
 
-                {/* Workspace Mode Toggle */}
-                <button
-                    onClick={() => setWorkspaceMode(workspaceMode === 'studio' ? 'dashboard' : 'studio')}
-                    className={`hidden sm:inline-flex phone:hidden p-1.5 rounded-lg transition-all ${
-                        workspaceMode === 'dashboard'
-                            ? 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)]'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
-                    }`}
-                    title={workspaceMode === 'studio' ? 'Switch to dashboard layout' : 'Switch to studio layout'}
-                >
-                    {workspaceMode === 'studio' ? <LayoutGrid className="w-4 h-4" /> : <Rows3 className="w-4 h-4" />}
-                </button>
+                {/* The desk's Layout menu (not in the classic workspace) */}
+                {!classicWorkspace && <LayoutMenu />}
 
                 {/* Admin Panel Toggle */}
                 {canAccessAdmin && onToggleAdminPanel && (

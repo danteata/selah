@@ -1,6 +1,6 @@
 /**
  * Studio Mode layout types
- * Replaces the old react-grid-layout panel system with a fixed studio layout
+ * Navigation sections and the classic Studio's sidebar state
  */
 
 export type NavSection =

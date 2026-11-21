@@ -11,6 +11,7 @@ import { SongTrackerBridge } from '../sermon-listener/SongTrackerBridge'
 import { StagedSlideShortcut } from '../preview/StagedSlideShortcut'
 import { OutputFeeds } from '../live/OutputFeeds'
 import { useAppStore } from '../../store/appStore'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { isInlineNavSection } from '../../types/studio'
 import type { Schedule } from '../../types'
 
@@ -61,8 +62,14 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [toggleQuickBibleBar])
 
+    // On the docked desk, sections are panels of their own; the ContextPanel
+    // sidebar is only for the classic workspace and phones.
+    const classicWorkspace = useAppStore((s) => s.classicWorkspace)
+    const isMobile = useIsMobile()
+    const sidebarInUse = classicWorkspace || isMobile
+
     // Determine if context panel is actually showing inline content
-    const panelVisible = contextPanelOpen && isInlineNavSection(activeNavSection)
+    const panelVisible = sidebarInUse && contextPanelOpen && isInlineNavSection(activeNavSection)
 
     return (
         <SermonListenerProvider>

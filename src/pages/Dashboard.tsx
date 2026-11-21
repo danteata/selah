@@ -18,7 +18,7 @@ import type { CountdownData } from '../components/countdown/AddCountdownModal'
 import { Modal } from '../components/modals/Modal'
 import { AppShell } from '../components/layout/AppShell'
 import { StudioWorkspace } from '../components/layout/StudioWorkspace'
-import { DashboardLayout } from '../components/dashboard'
+import { DeskWorkspace } from '../components/desk/DeskWorkspace'
 import { CommandBar } from '../components/layout/CommandBar'
 import { useUserRole } from '../hooks/useUserRole'
 import { SaveAsTemplateModal } from '../components/modals/SaveAsTemplateModal'
@@ -51,14 +51,6 @@ const BibleVersionUploader = lazy(() => import('../components/admin').then((m) =
 const GlobalSermonListenerSettingsPanel = lazy(() => import('../components/admin').then((m) => ({ default: m.GlobalSermonListenerSettingsPanel })))
 const PromoCodeManager = lazy(() => import('../components/admin').then((m) => ({ default: m.PromoCodeManager })))
 
-
-// Custom event to focus quick actions search
-const FOCUS_QUICK_ACTIONS_EVENT = 'selah:focus-quick-actions'
-
-// eslint-disable-next-line react-refresh/only-export-components -- dev-only fast refresh; event helper colocated with the dashboard that listens for it
-export function focusQuickActionsSearch() {
-    window.dispatchEvent(new CustomEvent(FOCUS_QUICK_ACTIONS_EVENT))
-}
 
 export default function Dashboard() {
     const { user: clerkUser } = useClerk()
@@ -152,10 +144,9 @@ export default function Dashboard() {
     const [showAdminPanel, setShowAdminPanel] = useState(false)
     const [adminTab, setAdminTab] = useState<'bible' | 'sermon-settings' | 'promos'>('bible')
 
-    const workspaceMode = useAppStore((s) => s.workspaceMode)
+    const classicWorkspace = useAppStore((s) => s.classicWorkspace)
 
     // Sermon listener visibility for dashboard mode
-    const [showSermonListener, setShowSermonListener] = useState(true)
 
     // Templates hook for creating custom templates
     const { createTemplate } = useTemplates()
@@ -286,9 +277,10 @@ export default function Dashboard() {
         openModal('shortcuts')
     }, [openModal])
 
-    // Focus quick actions search
+    // ⌘/ searches. It focused Quick Actions' search box, which went with the
+    // Dashboard grid; the command bar searches everything Quick Actions did.
     const focusSearch = useCallback(() => {
-        focusQuickActionsSearch()
+        useAppStore.getState().setCommandBarOpen(true)
     }, [])
 
     // Global keyboard shortcuts
@@ -477,14 +469,7 @@ export default function Dashboard() {
         >
             <SubscriptionBanner />
 
-            {workspaceMode === 'dashboard' ? (
-                <DashboardLayout
-                    showSermonListener={showSermonListener}
-                    onSermonListenerToggle={() => setShowSermonListener(prev => !prev)}
-                />
-            ) : (
-                <StudioWorkspace />
-            )}
+            {classicWorkspace ? <StudioWorkspace /> : <DeskWorkspace />}
 
             <CommandBar />
 
