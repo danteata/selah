@@ -251,6 +251,20 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
         expect(useAppStore.getState().liveSlideId).toBe(GRACE_SLIDE.id)
     })
 
+    it("doesn't let a scrap of the old song undo the new one's progress", async () => {
+        // The regression: a window matching the song on air reset every
+        // rival, so a line that happened to match it between two lines of
+        // the new song sent the new song back to zero.
+        const { useAppStore, rerender } = await withGraceLive(0.4)
+        await singUntilDetected(rerender, [
+            CORNERSTONE_LINES[0],
+            'Amazing grace how sweet the sound that saved a wretch like me',
+            CORNERSTONE_LINES[1],
+            CORNERSTONE_LINES[2],
+        ])
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
+    })
+
     it('leaves a song the tracker is following well alone', async () => {
         const { useAppStore, rerender } = await withGraceLive(0.9)
         await singUntilDetected(rerender, CORNERSTONE_LINES)
