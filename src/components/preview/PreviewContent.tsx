@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Trash2, LayoutGrid, BookOpen, BookA, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, Layers, type LucideIcon } from 'lucide-react'
+import { Trash2, PanelBottom, LayoutGrid, BookOpen, BookA, ChevronRight, ChevronDown, CheckSquare, Square, MinusSquare, Rows3, Plus, GripVertical, AlertTriangle, Music, AlignJustify, Clock, FileText, ListX, Zap, Layers, type LucideIcon } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { useSlideCreation, useLibrary, useScripture, useLiveSession, useVerseNavigationShortcuts } from '../../hooks'
 import type { Slide, Scripture, BibleVerse } from '../../types'
@@ -35,7 +35,7 @@ export function PreviewContent() {
     const setEditingSlide = useAppStore((state) => state.setEditingSlide)
     const openModal = useAppStore((state) => state.openModal)
 
-    const { createTextSlide, duplicateSlide } = useSlideCreation()
+    const { createTextSlide, createLowerThirdSlide, duplicateSlide } = useSlideCreation()
     const { addToLibrary, isInLibrary } = useLibrary()
     const { fetchScripture } = useScripture()
     const {
@@ -157,6 +157,14 @@ export function PreviewContent() {
             openModal('editor')
         }
     }, [createTextSlide, appendActiveSlide, setEditingSlide, openModal, setStagedSlide])
+
+    // A lower third opens in its own editor and joins the service order when
+    // saved (useQuickActionHandlers.handleSlideEditorSave), as it did from
+    // Quick Actions.
+    const handleCreateLowerThird = useCallback(() => {
+        setEditingSlide(createLowerThirdSlide())
+        openModal('lowerThirdEditor')
+    }, [createLowerThirdSlide, setEditingSlide, openModal])
 
     const handleDuplicateSlide = useCallback((slide: Slide) => {
         const newSlide = duplicateSlide(slide)
@@ -694,7 +702,7 @@ export function PreviewContent() {
                         <button
                             onClick={() => handleDeleteSongGroup(item)}
                             className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/10 rounded flex-shrink-0 transition-colors"
-                            title="Delete song from queue"
+                            title="Remove song from the service order"
                         >
                             <Trash2 className="w-4 h-4" />
                         </button>
@@ -716,7 +724,7 @@ export function PreviewContent() {
                 <div className="flex items-center gap-2">
                     <Rows3 className="w-4 h-4 text-[var(--accent-teal)]" />
                     <h2 className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">
-                        Slide Queue
+                        Service order
                     </h2>
                     <span className="text-[10px] font-medium text-[var(--text-muted)] tabular-nums">
                         {slides.length}
@@ -774,7 +782,7 @@ export function PreviewContent() {
                         <button
                             onClick={handleClearQueue}
                             className="p-1.5 text-[var(--text-muted)] hover:text-[var(--accent-rose)] hover:bg-[var(--accent-rose)]/10 rounded-lg transition-colors"
-                            title="Clear entire queue"
+                            title="Clear the service order"
                         >
                             <ListX className="w-4 h-4" />
                         </button>
@@ -873,7 +881,7 @@ export function PreviewContent() {
                     <div className="py-20 flex flex-col items-center opacity-40">
                         <EmptyState
                             icon="i-bx-slideshow"
-                            sub="Queue Empty"
+                            sub="Nothing in the service order"
                             desc="Add slides to get started"
                             actionText="Create Slide"
                             action={handleCreateNewSlide}
@@ -906,10 +914,10 @@ export function PreviewContent() {
                             <div className="p-2 bg-amber-500/10 rounded-full">
                                 <AlertTriangle className="w-5 h-5 text-amber-500" />
                             </div>
-                            <h3 className="font-semibold text-[var(--text-primary)]">Clear Queue?</h3>
+                            <h3 className="font-semibold text-[var(--text-primary)]">Clear the service order?</h3>
                         </div>
                         <p className="text-sm text-[var(--text-secondary)] mb-5">
-                            Remove {slides.length} slide{slides.length === 1 ? '' : 's'} from the queue? This cannot be undone.
+                            Remove {slides.length} slide{slides.length === 1 ? '' : 's'} from the service order? This cannot be undone.
                         </p>
                         <div className="flex justify-end gap-2">
                             <button
@@ -960,14 +968,22 @@ export function PreviewContent() {
                 </div>
             )}
 
-            {/* Quick Add Footer */}
-            <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+            {/* Add: the slides made from scratch here rather than found in the
+                library (Bible, songs and media have their own panels). */}
+            <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] flex gap-2" role="group" aria-label="Add to the service order">
                 <button
                     onClick={handleCreateNewSlide}
-                    className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-[var(--bg-tertiary)] hover:bg-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-lg text-xs font-medium transition-all border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30"
+                    className="flex-1 min-w-0 flex items-center justify-center gap-2 py-2 px-3 bg-[var(--bg-tertiary)] hover:bg-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-lg text-xs font-medium transition-all border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30"
                 >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add New Slide
+                    <Plus className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">Text slide</span>
+                </button>
+                <button
+                    onClick={handleCreateLowerThird}
+                    className="flex-1 min-w-0 flex items-center justify-center gap-2 py-2 px-3 bg-[var(--bg-tertiary)] hover:bg-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-lg text-xs font-medium transition-all border border-[var(--border-default)] hover:border-[var(--accent-teal)]/30"
+                >
+                    <PanelBottom className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">Lower third</span>
                 </button>
             </div>
         </div>
