@@ -160,7 +160,8 @@ describe('voiceCommandDetection — BUG HUNTING', () => {
     it('a bare chapter-only reference still fires normally when no verse is mentioned', () => {
         const cmds = detectVoiceCommands('Turn to Psalm 23')
         const ref = cmds.find(c => c.type === 'go_to_reference')
-        expect(ref?.verse).toBe(1)
+        expect(ref).toMatchObject({ book: 'Psalms', chapter: 23 })
+        expect(ref?.verse).toBeUndefined()
     })
 
     // -----------------------------------------------------------------------
@@ -241,7 +242,7 @@ describe('voiceCommandDetection — BUG HUNTING', () => {
         const cmds = detectVoiceCommands('Psalm hundred and forty seven.')
         const ref = cmds.find(c => c.type === 'go_to_reference' && c.book === 'Psalms')
         expect(ref?.chapter).toBe(147)
-        expect(ref?.verse).toBe(1)
+        expect(ref?.verse).toBeUndefined()
     })
 
     it('"Psalm one hundred and fifty" resolves a leading-ones-word compound chapter number', () => {
@@ -276,7 +277,7 @@ describe('voiceCommandDetection — BUG HUNTING', () => {
         const cmds = detectVoiceCommands('Psalm chapter twenty five')
         const ref = cmds.find(c => c.type === 'go_to_reference' && c.book === 'Psalms')
         expect(ref?.chapter).toBe(25)
-        expect(ref?.verse).toBe(1)
+        expect(ref?.verse).toBeUndefined()
     })
 
     it('"John chapter three sixteen" still splits into chapter 3 verse 16 (not a valid compound number)', () => {

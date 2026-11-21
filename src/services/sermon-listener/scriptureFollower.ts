@@ -531,7 +531,7 @@ export class ScriptureFollower {
     private runCommand(cmd: VoiceCommand): boolean {
         const now = Date.now()
         const current = () => this.snapshot.currentVerse || this.options.world.liveVerse()
-        const navigateTo = (verse: DetectedVerse, then: 'refresh-live' | 'project', supersedes?: string | null) => {
+        const navigateTo = (verse: DetectedVerse, then: 'refresh-live' | 'project' | 'nothing', supersedes?: string | null) => {
             this.update({ currentVerse: verse })
             this.readingContext = updateContextFromVerse(verse)
             this.navigationCooldownUntil = now + COMMAND_COOLDOWN_MS
@@ -589,6 +589,16 @@ export class ScriptureFollower {
             case 'go_to_reference': {
                 const { book, chapter, verse } = cmd
                 if (book && chapter && chapter >= 1) {
+                    // A chapter mentioned in passing ("…Joshua chapter 24, we
+                    // will serve…") must not revert the more specific verse of
+                    // it being read — the guard detected verses already get.
+                    // An explicit "open Joshua 24" is high confidence and
+                    // passes it.
+                    const chapterOnly: DetectedVerse = {
+                        raw: `${book} ${chapter}`, reference: `${book} ${chapter}:1`, book, chapter, verseStart: 1,
+                        startIndex: 0, endIndex: 0, confidence: cmd.confidence,
+                    }
+                    if (verse == null && isSpecificityDowngrade(this.snapshot.currentVerse, chapterOnly)) return true
                     const goto: DetectedVerse = {
                         book,
                         chapter,
@@ -611,7 +621,12 @@ export class ScriptureFollower {
                     // ALREADY live, so an announcement made before anything is
                     // on screen — the first thing a preacher does — displayed
                     // nothing. A named passage deserves its own queue entry.
-                    navigateTo(goto, 'project', supersedes)
+                    //
+                    // Put up when asked for ("open", "go to", "turn to" — high
+                    // confidence); a reference only mentioned goes up when
+                    // auto-display is on, like any other heard verse.
+                    const putUp = cmd.confidence === 'high' || this.options.settings().autoDisplay
+                    navigateTo(goto, putUp ? 'project' : 'nothing', supersedes)
                 }
                 return true
             }

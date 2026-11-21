@@ -549,7 +549,10 @@ function detectGoToReferenceCommands(text: string): VoiceCommand[] {
                     confidence: 'high',
                     book,
                     chapter,
-                    verse: 1,
+                    // No verse was said. Left empty, not 1: the follower
+                    // treats a bare chapter as a placeholder for the verse
+                    // about to be announced, and a 1 here made it a reference
+                    // the speaker never made.
                 })
             }
         }
@@ -579,7 +582,10 @@ function detectGoToReferenceCommands(text: string): VoiceCommand[] {
                     confidence: 'medium',
                     book,
                     chapter,
-                    verse: 1,
+                    // No verse was said. Left empty, not 1: the follower
+                    // treats a bare chapter as a placeholder for the verse
+                    // about to be announced, and a 1 here made it a reference
+                    // the speaker never made.
                 })
             }
         }

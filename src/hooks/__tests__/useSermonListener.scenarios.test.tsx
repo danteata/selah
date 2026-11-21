@@ -511,15 +511,16 @@ describe('sermon listener: explicit references', () => {
         expect(s.live()).toBeNull()
     })
 
-    // Current behaviour, pinned rather than endorsed: almost any spoken
-    // reference ("John 3:16 says", "turn with me to …") is also read as a
-    // go-to command, and commands put the passage up whatever auto-display says.
-    it('a reference phrased as a go-to command goes live even with auto-display off', async () => {
+    // Almost any spoken reference ("John 3:16 says", "turn with me to …") is
+    // also read as a go-to command, and commands put the passage up whatever
+    // auto-display said. Only one asked for ("go to", "open") does now.
+    it('a reference only mentioned stays off the screen with auto-display off', async () => {
         const s = await listen({ autoDisplay: false })
         await s.say('Turn with me to John 3:16.')
 
         expect(s.heard()).toEqual(['John 3:16'])
-        expect(s.live()).toBe('John 3:16')
+        expect(s.current()).toBe('John 3:16')
+        expect(s.live()).toBeNull()
     })
 
     it('a verse that cannot be found is listed but nothing goes live', async () => {
