@@ -93,8 +93,14 @@ export class TranscriptAssembler {
     private snapshot: TranscriptSnapshot = { text: '', segments: [], interim: '', rawUtterances: [] }
     private readonly listeners = new Set<() => void>()
     private recentChunks: string[] = []
-    /** When the engine last started capturing; wall-clock segment times count from here. */
+    /** When the listening run began; segment times count from here. */
     private runStartedAt = 0
+    /**
+     * Added to the times the native engine gives its own segments, which count
+     * from the start of its capture — not of the run, once a capture has been
+     * restarted inside the run.
+     */
+    private captureOffsetMs = 0
     /** When the utterance now being recognised began (its first interim). */
     private chunkStartedAt = 0
 
@@ -107,9 +113,16 @@ export class TranscriptAssembler {
         }
     }
 
-    /** The engine started capturing. */
-    startRun(now: number): void {
+    /** A listening run began (`captureStartedAt` when the capture began earlier, as after a clear). */
+    startRun(now: number, captureStartedAt = now): void {
         this.runStartedAt = now
+        this.captureOffsetMs = captureStartedAt - now
+        this.chunkStartedAt = 0
+    }
+
+    /** The capture was restarted inside the run: its times start from zero again. */
+    resumeCapture(now: number): void {
+        this.captureOffsetMs = now - (this.runStartedAt || now)
         this.chunkStartedAt = 0
     }
 
@@ -152,7 +165,13 @@ export class TranscriptAssembler {
         if (result.segments && result.segments.length > 0) {
             // The native engine times its own segments.
             added = result.segments
-                .map((seg) => ({ id: newId(now), text: seg.text.trim(), startMs: seg.startMs, endMs: seg.endMs, source: 'whisper' as const }))
+                .map((seg) => ({
+                    id: newId(now),
+                    text: seg.text.trim(),
+                    startMs: Math.max(0, seg.startMs + this.captureOffsetMs),
+                    endMs: Math.max(0, seg.endMs + this.captureOffsetMs),
+                    source: 'whisper' as const,
+                }))
                 .filter((seg) => seg.text.length > 0)
         } else {
             // Otherwise wall-clock: from when the utterance's first interim

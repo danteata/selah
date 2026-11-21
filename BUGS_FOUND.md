@@ -6,7 +6,7 @@
 > as `[KNOWN BUG]` so that fixing the bug in the future requires
 > intentionally updating the test.
 
-## Summary: 23 Confirmed Bugs (8 historical + 15 newly discovered)
+## Summary: 31 Confirmed Bugs (8 historical + 23 newly discovered)
 
 | # | Component | Bug | Severity | File |
 |---|-----------|-----|----------|------|
@@ -33,6 +33,14 @@
 | 21 | `useSermonListener` | (FIXED) Navigation cooldown blocked auto-display of a verse continuing the SAME reference a voice command had just set | ~~Medium~~ | `src/hooks/useSermonListener.ts` |
 | 22 | `useSermonListener` / `verseDetection` | (FIXED) Regex verse detection scanned the entire ever-growing session transcript on every utterance, so an old verse could never genuinely go silent — and its own reference-based dedup made a real re-mention invisible — letting an old, already-shown verse randomly hijack whatever chapter was currently live | ~~**High**~~ | `src/hooks/useSermonListener.ts` |
 | 23 | `useSermonListener` | (FIXED) Reactivation logic only ever refreshed the "last seen" timestamp of ONE still-matching reference per tick (`reActivatedRefs[0]`/`semanticReActivatedRefs[0]`), letting every other one go falsely "silent" and later hijack the live display even though it was still being matched the whole time | ~~**High**~~ | `src/hooks/useSermonListener.ts` |
+| 24 | `voiceCommandDetection` / `scriptureFollower` | **[KNOWN BUG]** A `change_version` command's matched text runs to the end of the transcript, and command text is cut from the whole detection window — so nothing said after "read it in the NIV" is detected until it scrolls out of the window | **High** | `src/services/sermon-listener/voiceCommandDetection.ts` |
+| 25 | `verseDetection` | **[KNOWN BUG]** "The Lord is my shepherd" is detected as "Psalm 23:1" — a book name no lookup knows — so it is listed but can never be shown, and sits beside the semantic path's "Psalms 23:1" | Medium | `src/services/sermon-listener/verseDetection.ts` |
+| 26 | `voiceCommandDetection` / `scriptureFollower` | **[KNOWN BUG]** Almost any spoken reference ("John 3:16 says…") also reads as a go-to command, and commands put the passage up whatever auto-display says, with no guard against reverting a specific verse to verse 1 | Medium | `src/services/sermon-listener/scriptureFollower.ts` |
+| 27 | `useSongTracker` / `useSongAutoDetect` | **NEW** New segments are found by count ("fewer than before means a new session"), so after a clear while stopped the first new segments are skipped, and segments restored after a reload are ingested again as new | Medium | `src/hooks/useSongTracker.ts`, `src/hooks/useSongAutoDetect.ts` |
+| 28 | `SermonListenerPanel` | **NEW** The error banner's "Dismiss" calls `reset()`, which clears the whole transcript and the heard verses | **High** | `src/components/sermon-listener/SermonListenerPanel.tsx` |
+| 29 | `useSermonListener` | **NEW** `isSpeechDetected` is always false: web speech reports speech start/end but nothing forwards it, and the native engine has no such event | Low | `src/services/sermon-listener/webSpeechEngine.ts` |
+| 30 | `SermonListenerProvider` | **NEW** The `sermon_listener` feature flag never turned the listener off (every panel made its own listener when it was off). With one listener per app it now gates nothing — it should become a real off switch or be removed | Low | `src/components/sermon-listener/SermonListenerContext.tsx` |
+| 31 | `transcriptionErrors` | **NEW** "Model … is not downloaded" from the native engine is classified as an internal error, not as `model_not_found`, so the banner doesn't say to download the model | Low | `src/services/sermon-listener/transcriptionErrors.ts` |
 
 ---
 
