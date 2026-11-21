@@ -105,6 +105,43 @@ describe('useSongTracker (live wiring)', () => {
         })
     })
 
+    // Segments were found by count. A clear while stopped grew back past the
+    // old count before the tracker looked, so the first lines were skipped.
+    it('after a clear while stopped, the first lines sung are followed', () => {
+        const { rerender } = renderHook(() => useSongTracker())
+        feed(rerender, 'Some words before the song')
+        feed(rerender, 'More words before the song')
+        // Cleared while stopped…
+        h.listener = { ...h.listener, isListening: false, transcriptSegments: [] }
+        act(() => rerender())
+        // …and the first result after Start brings two segments at once — as
+        // many as were there before the clear.
+        h.listener = {
+            ...h.listener,
+            isListening: true,
+            transcriptSegments: [
+                { id: 'new-1', text: 'Amazing grace how sweet the sound', startMs: 1000, endMs: 1500, source: 'whisper' },
+                { id: 'new-2', text: 'That saved a wretch like me', startMs: 2000, endMs: 2500, source: 'whisper' },
+            ],
+        }
+        act(() => rerender())
+
+        expect(useAppStore.getState().liveSlideId).toBe('slide-v1')
+        expect(useAppStore.getState().songTracking.status.phase).toBe('tracking')
+    })
+
+    // Restored segments used to be fed in as new singing on the next Start.
+    it('segments restored after a reload are not taken for singing', () => {
+        h.listener = { ...h.listener, isListening: false }
+        const { rerender } = renderHook(() => useSongTracker())
+        feed(rerender, 'Amazing grace how sweet the sound')
+        feed(rerender, 'That saved a wretch like me')
+        h.listener = { ...h.listener, isListening: true }
+        act(() => rerender())
+
+        expect(useAppStore.getState().liveSlideId).toBeNull()
+    })
+
     it('locks on and sets the live slide to the sung section', () => {
         const { rerender } = renderHook(() => useSongTracker())
         feed(rerender, 'Amazing grace how sweet the sound')

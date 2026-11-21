@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { SegmentCursor } from '../services/sermon-listener/segmentCursor'
 import { useAppStore } from '../store/appStore'
 import { useSermonListenerContext } from '../components/sermon-listener/SermonListenerContext'
 import { useSlideCreation } from './useSlideCreation'
@@ -105,7 +106,8 @@ export function useSongAutoDetect() {
     const trackerPhase = useAppStore((s) => s.songTracking.status.phase)
     const { createSongSlides } = useSlideCreation()
 
-    const processedCountRef = useRef(0)
+    // Which transcript segments have already been read into the buffer.
+    const cursorRef = useRef(new SegmentCursor())
     const bufferRef = useRef<string[]>([])
     // Monotonic count of all words ever seen — the window position fed to the
     // confirmation tracker so overlapping re-scores of one phrase aren't
@@ -161,22 +163,29 @@ export function useSongAutoDetect() {
     const scopedSongIdsKey = scopedSongIds.join('|')
 
     useEffect(() => {
-        if (!autoDetect || !isListening) return
         const segs = transcriptSegments
         if (!segs) return
+        // Segments from while auto-detect was off or listening was stopped —
+        // restored after a reload, say — aren't singing to search for.
+        if (!autoDetect || !isListening) {
+            cursorRef.current.markSeen(segs)
+            return
+        }
 
-        if (segs.length < processedCountRef.current) processedCountRef.current = 0
-        if (segs.length === processedCountRef.current) return
+        const { fresh, cleared } = cursorRef.current.take(segs)
+        // A cleared transcript is a new session; the last one's words aren't
+        // part of what is being sung now.
+        if (cleared) bufferRef.current = []
+        if (fresh.length === 0) return
 
-        for (let i = processedCountRef.current; i < segs.length; i++) {
-            const text = (segs[i]?.text || '').trim()
+        for (const seg of fresh) {
+            const text = (seg?.text || '').trim()
             if (text) {
                 const words = text.split(/\s+/)
                 bufferRef.current.push(...words)
                 wordsSeenRef.current += words.length
             }
         }
-        processedCountRef.current = segs.length
         if (bufferRef.current.length > MATCH_WINDOW_WORDS * 2) {
             bufferRef.current = bufferRef.current.slice(-MATCH_WINDOW_WORDS * 2)
         }
