@@ -536,7 +536,9 @@ function SermonListenerPanelInner({
                                 )}
                             </div>
                             <button
-                                onClick={() => sermonListener.reset && sermonListener.reset()}
+                                // Clears the message only. It used to call reset(),
+                                // which wiped the transcript and the heard verses.
+                                onClick={() => sermonListener.dismissError()}
                                 className="text-xs underline opacity-70 hover:opacity-100 flex-shrink-0"
                             >
                                 Dismiss

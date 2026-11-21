@@ -472,6 +472,21 @@ describe('sermon listener: what the capture stream reports', () => {
         expect(useAppStore.getState().settings.sermonListener?.inputChannel).toBeUndefined()
     })
 
+    it('dismissing an error clears the message and keeps the transcript', async () => {
+        const s = await listen()
+        await s.say('Turn with me to John 3:16.')
+        await act(async () => {
+            h.transcription.emit!({ type: 'capture', status: 'lost', attempt: 1, message: 'unplugged' })
+        })
+        expect(s.state.error).not.toBeNull()
+        await act(async () => {
+            s.state.dismissError()
+        })
+        expect(s.state.error).toBeNull()
+        expect(s.state.transcript).toBe('Turn with me to John 3:16.')
+        expect(s.heard()).toEqual(['John 3:16'])
+    })
+
     it('an engine failure ends listening and says what kind it was', async () => {
         const s = await listen()
         await act(async () => {
