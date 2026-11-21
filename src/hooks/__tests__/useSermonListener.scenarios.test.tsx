@@ -659,14 +659,14 @@ describe('sermon listener: carrying out commands and wiring', () => {
         expect(s.state.lastVoiceCommand?.type).toBe('change_version')
     })
 
-    // Current bug, pinned: the famous-phrase table names the book "Psalm",
-    // which no lookup knows, so the verse is listed but can never be shown.
-    it('[current bug] "the Lord is my shepherd" is heard as Psalm 23:1 and never shown', async () => {
+    // The quoted-phrase table named the book "Psalm", which no lookup knows,
+    // so the verse was listed but could never be shown.
+    it('"the Lord is my shepherd" is heard as Psalms 23:1 and shown', async () => {
         const s = await listen()
         await s.say('The Lord is my shepherd, I shall not want.')
 
-        expect(s.heard()).toEqual(['Psalm 23:1'])
-        expect(s.live()).toBeNull()
+        expect(s.heard()).toEqual(['Psalms 23:1'])
+        expect(s.live()).toBe('Psalms 23:1')
     })
 
     it('"display it" puts the current verse up when auto-display is off', async () => {
