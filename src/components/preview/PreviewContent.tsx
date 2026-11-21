@@ -10,7 +10,10 @@ import { SongVerseBrowser } from '../slides/SongVerseBrowser'
 import { groupQueueItems, queueSlidesFor, type SongGroupItem } from './groupQueueItems'
 
 export function PreviewContent() {
-    const [activeSlide, setActiveSlide] = useState<Slide | undefined>()
+    // The staged slide lives in the store so Preview and the Enter shortcut
+    // can reach it wherever they sit on the desk.
+    const stagedSlideId = useAppStore((state) => state.stagedSlideId)
+    const setStagedSlideId = useAppStore((state) => state.setStagedSlide)
 
     const alternateSlide = useAppStore((state) => state.alternateSlide)
     const setAlternateSlide = useAppStore((state) => state.setAlternateSlide)
@@ -46,7 +49,7 @@ export function PreviewContent() {
         sessionScheduleId,
     } = useLiveSession()
     const slidesGridRef = useRef<HTMLDivElement>(null)
-    const activeSlideRef = useRef<HTMLDivElement>(null)
+    const stagedSlideRef = useRef<HTMLDivElement>(null)
     const liveSlideRef = useRef<HTMLDivElement>(null)
     const userClickedSlideRef = useRef(false)
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
@@ -69,16 +72,6 @@ export function PreviewContent() {
     useEffect(() => {
         localStorage.setItem('selah-queue-density', density)
     }, [density])
-
-    // Auto-scroll to active slide ONLY when user explicitly clicked it.
-    // Voice commands and auto-advance should not cause jumpy scrolling.
-    useEffect(() => {
-        if (userClickedSlideRef.current && activeSlide && activeSlideRef.current) {
-            activeSlideRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-            userClickedSlideRef.current = false
-        }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the slide id only; content edits to the same slide must not re-scroll
-    }, [activeSlide?.id])
 
     // Keep the LIVE slide centered in the queue so the operator always sees it
     // and its neighbouring queued slides. This fires on every live change —
@@ -109,6 +102,27 @@ export function PreviewContent() {
     // normal single row, matching prior behavior exactly.
     const queueItems = useMemo(() => groupQueueItems(slides), [slides])
 
+    // Read through the service order's slides, so a staged slide that has
+    // been removed (or belongs to another schedule) reads as nothing staged.
+    const stagedSlide = useMemo(
+        () => (stagedSlideId ? slides.find((slide) => slide.id === stagedSlideId) : undefined),
+        [slides, stagedSlideId],
+    )
+    const setStagedSlide = useCallback(
+        (slide: Slide | undefined) => setStagedSlideId(slide?.id ?? null),
+        [setStagedSlideId],
+    )
+
+    // Auto-scroll to the staged slide ONLY when the user explicitly clicked it.
+    // Voice commands and auto-advance should not cause jumpy scrolling.
+    useEffect(() => {
+        if (userClickedSlideRef.current && stagedSlide && stagedSlideRef.current) {
+            stagedSlideRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+            userClickedSlideRef.current = false
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the slide id only; content edits to the same slide must not re-scroll
+    }, [stagedSlide?.id])
+
     const [expandedSongGroups, setExpandedSongGroups] = useState<Set<string>>(new Set())
     const toggleSongGroupExpanded = useCallback((key: string) => {
         setExpandedSongGroups((prev) => {
@@ -123,58 +137,42 @@ export function PreviewContent() {
     const canGoLive = !isConnected || isOperator || (isContributor && isOpen)
     const canQueueSlide = isConnected && isContributor && !isStrict
 
-    // Enter promotes the previewed (active) slide to live — the keyboard
-    // counterpart to the always-visible Live button. Ignored while typing or
-    // when a button/link is focused (so it doesn't double-fire with a click).
-    useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key !== 'Enter') return
-            const el = document.activeElement as HTMLElement | null
-            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'BUTTON' || el.tagName === 'A' || el.isContentEditable)) return
-            if (!activeSlide || !canGoLive || liveSlideId === activeSlide.id) return
-            e.preventDefault()
-            void setSharedLiveSlide(activeSlide.id)
-        }
-        window.addEventListener('keydown', onKeyDown)
-        return () => window.removeEventListener('keydown', onKeyDown)
-    }, [activeSlide, canGoLive, liveSlideId, setSharedLiveSlide])
-
     const handleDeleteSlide = useCallback((slideId: string) => {
         const slide = slides.find(s => s.id === slideId)
         if (slide) {
             removeActiveSlide(slide)
-            if (activeSlide?.id === slideId) {
-                setActiveSlide(undefined)
+            if (stagedSlide?.id === slideId) {
+                setStagedSlide(undefined)
             }
         }
-    }, [slides, activeSlide, removeActiveSlide])
+    }, [slides, stagedSlide, removeActiveSlide, setStagedSlide])
 
     const handleCreateNewSlide = useCallback(() => {
         const newSlide = createTextSlide()
         if (newSlide) {
-            setActiveSlide(newSlide)
+            setStagedSlide(newSlide)
             appendActiveSlide(newSlide)
             // Open the editor modal to allow editing the new slide
             setEditingSlide(newSlide)
             openModal('editor')
         }
-    }, [createTextSlide, appendActiveSlide, setEditingSlide, openModal])
+    }, [createTextSlide, appendActiveSlide, setEditingSlide, openModal, setStagedSlide])
 
     const handleDuplicateSlide = useCallback((slide: Slide) => {
         const newSlide = duplicateSlide(slide)
         if (newSlide) {
-            setActiveSlide(newSlide)
+            setStagedSlide(newSlide)
         }
-    }, [duplicateSlide])
+    }, [duplicateSlide, setStagedSlide])
 
     const handleSlideClick = useCallback((slide: Slide) => {
         if (bulkSelectMode) {
             toggleSlideSelection(slide.id)
         } else {
             userClickedSlideRef.current = true
-            setActiveSlide(slide)
+            setStagedSlide(slide)
         }
-    }, [bulkSelectMode, toggleSlideSelection])
+    }, [bulkSelectMode, toggleSlideSelection, setStagedSlide])
 
     const handleDeleteSelected = useCallback(() => {
         if (selectedSlideIds.length === 0) return
@@ -210,9 +208,9 @@ export function PreviewContent() {
             setLiveSlide('')
         }
         clearSelectedSlides()
-        setActiveSlide(undefined)
+        setStagedSlide(undefined)
         setShowClearConfirm(false)
-    }, [slides, activeSlides, setActiveSlides, liveSlideId, setLiveSlide, clearSelectedSlides])
+    }, [slides, activeSlides, setActiveSlides, liveSlideId, setLiveSlide, clearSelectedSlides, setStagedSlide])
 
     const cancelClearQueue = useCallback(() => {
         setShowClearConfirm(false)
@@ -239,10 +237,10 @@ export function PreviewContent() {
     const handleDeleteSongGroup = useCallback((item: SongGroupItem) => {
         const groupIds = new Set(item.verses.map((v) => v.slide.id))
         item.verses.forEach(({ slide }) => removeActiveSlide(slide))
-        if (activeSlide && groupIds.has(activeSlide.id)) {
-            setActiveSlide(undefined)
+        if (stagedSlide && groupIds.has(stagedSlide.id)) {
+            setStagedSlide(undefined)
         }
-    }, [removeActiveSlide, activeSlide])
+    }, [removeActiveSlide, stagedSlide, setStagedSlide])
 
     // Whether every verse of a group is currently selected (bulk mode).
     const isSongGroupSelected = useCallback((item: SongGroupItem) =>
@@ -281,9 +279,9 @@ export function PreviewContent() {
 
     // Parse scripture reference from bible slide
     const scriptureRef = useMemo(() => {
-        if (!activeSlide || activeSlide.type !== 'bible') return null
+        if (!stagedSlide || stagedSlide.type !== 'bible') return null
 
-        const data = activeSlide.data as Scripture | undefined
+        const data = stagedSlide.data as Scripture | undefined
         if (!data) return null
 
         // Parse labelShortFormat (e.g., "43:3:16-18" for John 3:16-18)
@@ -314,7 +312,7 @@ export function PreviewContent() {
             endVerse,
             version: data.version || 'KJV',
         }
-    }, [activeSlide])
+    }, [stagedSlide])
 
     // Fetch the passage and its neighbouring verses when the scripture
     // reference changes. Nothing here reads the results any more, but the
@@ -345,14 +343,14 @@ export function PreviewContent() {
 
     // Handle verse selection for bible slides
     const handleVerseSelect = useCallback(async (verseNum: number) => {
-        if (!scriptureRef || !activeSlide) return
+        if (!scriptureRef || !stagedSlide) return
 
         const label = `${scriptureRef.bookIndex}:${scriptureRef.chapter}:${verseNum}`
         const result = await fetchScripture(label, scriptureRef.version)
         if (result && Array.isArray(result.content)) {
             const verse = result.content[0] as BibleVerse
             const updatedSlide: Slide = {
-                ...activeSlide,
+                ...stagedSlide,
                 name: `${scriptureRef.bookName} ${scriptureRef.chapter}:${verseNum}`,
                 data: {
                     label: `${scriptureRef.bookName} ${scriptureRef.chapter}:${verseNum}`,
@@ -370,9 +368,9 @@ export function PreviewContent() {
                 s.id === updatedSlide.id ? updatedSlide : s
             )
             setActiveSlides(updatedSlides)
-            setActiveSlide(updatedSlide)
+            setStagedSlide(updatedSlide)
         }
-    }, [scriptureRef, activeSlide, fetchScripture, activeSlides, setActiveSlides, setActiveSlide])
+    }, [scriptureRef, stagedSlide, fetchScripture, activeSlides, setActiveSlides, setStagedSlide])
 
     // Navigate to previous/next verse
     const navigateVerse = useCallback((direction: 'prev' | 'next') => {
@@ -395,7 +393,7 @@ export function PreviewContent() {
     useVerseNavigationShortcuts(
         () => navigateVerse('next'),
         () => navigateVerse('prev'),
-        { enabled: activeSlide?.type === 'bible' }
+        { enabled: stagedSlide?.type === 'bible' }
     )
 
     const handleSelectVerseFromBrowser = useCallback((slideId: string) => {
@@ -411,7 +409,7 @@ export function PreviewContent() {
         <div
             key={slide.id}
             data-slide-index={index}
-            ref={liveSlideId === slide.id ? liveSlideRef : activeSlide?.id === slide.id ? activeSlideRef : undefined}
+            ref={liveSlideId === slide.id ? liveSlideRef : stagedSlide?.id === slide.id ? stagedSlideRef : undefined}
             // Double-click / double-tap a queued slide to send it live (single
             // click still just previews). Gated by collaboration mode.
             onDoubleClick={() => { if (canGoLive && liveSlideId !== slide.id) void setSharedLiveSlide(slide.id) }}
@@ -446,7 +444,7 @@ export function PreviewContent() {
                 <div className="flex-1 min-w-0">
                     <SlideCard
                         slide={slide}
-                        isActive={activeSlide?.id === slide.id}
+                        isStaged={stagedSlide?.id === slide.id}
                         isLive={liveSlideId === slide.id}
                         isSelected={selectedSlideIds.includes(slide.id)}
                         selectable={bulkSelectMode}
@@ -465,7 +463,7 @@ export function PreviewContent() {
                             ? () => setAlternateSlide(alternateSlide?.id === slide.id ? null : slide)
                             : undefined}
                         isOnAlternate={alternateSlide?.id === slide.id}
-                        isStickyActive={activeSlide?.id === slide.id}
+                        isStickyStaged={stagedSlide?.id === slide.id}
                     />
                 </div>
             </div>
@@ -501,14 +499,14 @@ export function PreviewContent() {
     // but dense enough to scan a long queue. See the `density` state above.
     const renderCompactRow = (slide: Slide, index: number) => {
         const isLive = liveSlideId === slide.id
-        const isActive = activeSlide?.id === slide.id
+        const isStaged = stagedSlide?.id === slide.id
         const isSelected = selectedSlideIds.includes(slide.id)
         const TypeIcon = compactTypeIcon(slide.type)
         return (
             <div
                 key={slide.id}
                 data-slide-index={index}
-                ref={isLive ? liveSlideRef : isActive ? activeSlideRef : undefined}
+                ref={isLive ? liveSlideRef : isStaged ? stagedSlideRef : undefined}
                 onClick={() => handleSlideClick(slide)}
                 onDoubleClick={() => { if (canGoLive && !isLive) void setSharedLiveSlide(slide.id) }}
                 className={`group flex items-center gap-2 pl-1.5 pr-1.5 py-1.5 rounded-lg border cursor-pointer transition-colors ${
@@ -519,7 +517,7 @@ export function PreviewContent() {
                         : ''
                 } ${
                     isLive ? 'border-red-500/50 bg-red-500/10'
-                        : isActive ? 'border-[var(--accent-teal)]/50 bg-[var(--accent-teal)]/5'
+                        : isStaged ? 'border-[var(--accent-teal)]/50 bg-[var(--accent-teal)]/5'
                             : isSelected ? 'border-[var(--accent-teal)]/40 bg-[var(--accent-teal)]/5'
                                 : 'border-transparent hover:bg-[var(--bg-tertiary)]/50'
                 }`}
