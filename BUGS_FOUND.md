@@ -40,7 +40,7 @@
 | 28 | `SermonListenerPanel` | (FIXED) The error banner's "Dismiss" called `reset()`, which cleared the whole transcript and the heard verses | ~~**High**~~ | `src/components/sermon-listener/SermonListenerPanel.tsx` |
 | 29 | `useSermonListener` | (FIXED on the web) `isSpeechDetected` was always false: web speech reports speech start/end but nothing forwarded it. The native engine still has no such event | ~~Low~~ | `src/services/sermon-listener/webSpeechEngine.ts` |
 | 30 | `SermonListenerProvider` | **NEW** The `sermon_listener` feature flag never turned the listener off (every panel made its own listener when it was off). With one listener per app it now gates nothing — it should become a real off switch or be removed | Low | `src/components/sermon-listener/SermonListenerContext.tsx` |
-| 31 | `transcriptionErrors` | **NEW** "Model … is not downloaded" from the native engine is classified as an internal error, not as `model_not_found`, so the banner doesn't say to download the model | Low | `src/services/sermon-listener/transcriptionErrors.ts` |
+| 31 | `transcriptionErrors` | (FIXED) "Model … is not downloaded", "Unknown model" and "No transcription model is loaded" from the native engine were classified as internal errors, not `model_not_found`, so the banner didn't say to download the model | ~~Low~~ | `src/services/sermon-listener/transcriptionErrors.ts` |
 
 ---
 
