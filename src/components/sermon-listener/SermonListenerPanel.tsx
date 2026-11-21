@@ -11,7 +11,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useConfirmDialog } from '../modals/ConfirmDialog'
 import { Modal } from '../modals/Modal'
 import type { UseSermonListenerReturn } from '../../hooks/useSermonListener'
-import { useSermonListenerContext } from './SermonListenerContext'
+import { useSermonListenerContext, useSermonListenerEnabled } from './SermonListenerContext'
 import { SermonListenerWizard, isSermonListenerWizardComplete } from './SermonListenerWizard'
 import { useTranscripts } from '../../hooks/useTranscripts'
 import { useAppStore } from '../../store/appStore'
@@ -64,6 +64,15 @@ function AudioLevelMeter({ isSpeechDetected }: { isSpeechDetected: boolean }) {
 
 export function SermonListenerPanel(props: SermonListenerPanelProps) {
     const contextState = useSermonListenerContext()
+    const enabled = useSermonListenerEnabled()
+
+    if (enabled === false) {
+        return (
+            <div className="flex h-full items-center justify-center p-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                The sermon listener is turned off for this app.
+            </div>
+        )
+    }
 
     // There is one listener, in the SermonListenerProvider. A panel never makes
     // its own: two would share one microphone and one engine with no idea of
