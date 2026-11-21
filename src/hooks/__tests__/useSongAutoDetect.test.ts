@@ -32,25 +32,29 @@ vi.mock('../useIndexedDB', () => ({
     }),
 }))
 
-vi.mock('../useSlideCreation', () => ({
-    useSlideCreation: () => ({
-        createSongSlides: (song: Song): Slide[] =>
-            (song.sections ?? []).map((s, i) => ({
-                id: `slide-${song.id}-${s.id}`,
-                index: i,
-                name: `${song.title} - ${s.label}`,
-                type: 'song',
-                layout: 'default',
-                userId: 'u',
-                churchId: 'c',
-                scheduleId: 's',
-                contents: [s.lines.join('\n')],
-                songId: song._id || song.id,
-                verseIndex: i,
-                data: song,
-            })) as Slide[],
-    }),
-}))
+// One slide per slide block, numbered the way the real builder numbers them.
+vi.mock('../useSlideCreation', async () => {
+    const { songSlideBlocks } = await import('../../lib/songSections')
+    return {
+        useSlideCreation: () => ({
+            createSongSlides: (song: Song): Slide[] =>
+                songSlideBlocks(song).map((b, i) => ({
+                    id: `slide-${song.id}-${b.sectionId ?? i}`,
+                    index: i,
+                    name: `${song.title} - ${b.label}`,
+                    type: 'song',
+                    layout: 'default',
+                    userId: 'u',
+                    churchId: 'c',
+                    scheduleId: 's',
+                    contents: [b.text],
+                    songId: song._id || song.id,
+                    verseIndex: i,
+                    data: song,
+                })) as Slide[],
+        }),
+    }
+})
 
 // The online-lookup path is off by default; stub the LLM client so importing
 // this hook doesn't drag the provider stack into the test.
@@ -280,5 +284,58 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
         const { useAppStore, rerender } = await withGraceLive(0.4)
         await singUntilDetected(rerender, GRACE.sections![0].lines)
         expect(useAppStore.getState().liveSlideId).toBe(GRACE_SLIDE.id)
+    })
+})
+
+describe('useSongAutoDetect (which slide a detected song opens on)', () => {
+    // Lyrics only, no stored sections — how most of a library arrives.
+    const BLESSED: Song = {
+        id: 'blessed',
+        _id: 'blessed',
+        title: 'Blessed Assurance',
+        artist: 'Traditional',
+        lyrics: [
+            'Verse 1',
+            'Blessed assurance Jesus is mine',
+            'Oh what a foretaste of glory divine',
+            'Heir of salvation purchase of God',
+            'Born of his spirit washed in his blood',
+            '',
+            'Chorus',
+            'This is my story this is my song',
+            'Praising my saviour all the day long',
+        ].join('\n'),
+    }
+
+    beforeEach(() => {
+        seq = 0
+        h.listener = { isListening: true, transcriptSegments: [] }
+        h.library = [{ id: BLESSED.id, type: 'song', content: BLESSED }]
+        vi.resetModules()
+    })
+
+    it('opens on the section being sung, for a song with no stored sections', async () => {
+        // The regression: the section was looked up in the song's stored
+        // sections, which a lyrics-only song doesn't have, so it always opened
+        // on its first slide.
+        const { useAppStore, DEFAULT_SONG_TRACKING } = await import('../../store/appStore')
+        const { useSongAutoDetect } = await import('../useSongAutoDetect')
+        const { sectionsForSong } = await import('../../lib/songSections')
+        useAppStore.setState({
+            activeSlides: [],
+            liveSlideId: null,
+            songTracking: { ...DEFAULT_SONG_TRACKING, autoDetect: true, status: { ...DEFAULT_SONG_TRACKING.status } },
+        })
+        const chorus = sectionsForSong(BLESSED).find((s) => s.type === 'chorus')!
+
+        const { rerender } = renderHook(() => useSongAutoDetect())
+        await singUntilDetected(rerender, [
+            'This is my story this is my song',
+            'Praising my saviour all the day long',
+            'This is my story this is my song',
+            'Praising my saviour all the day long',
+        ])
+
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe(`slide-blessed-${chorus.id}`))
     })
 })
