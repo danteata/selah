@@ -30,10 +30,16 @@ const h = vi.hoisted(() => {
         idbLive: null as Record<string, unknown> | null,
         /** Labels fetchScripture refuses, to simulate a verse that isn't found. */
         missing: new Set<string>(),
+        /** Per-label lookup delay in ms, to reproduce lookups finishing out of order. */
+        lookupDelay: new Map<string, number>(),
         slideCounter: 0,
         recordings: { started: [] as string[], stopped: 0, attached: [] as Array<[string, string]> },
         recordingResult: '/tmp/rec.wav' as string | null,
         providerAvailable: true,
+        semanticDelay: 0,
+        llmConfigured: false,
+        llmDelay: 0,
+        llmResult: [] as unknown[],
     }
 })
 
@@ -41,7 +47,10 @@ vi.mock('../../services/sermon-listener', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../../services/sermon-listener')>()
     const fakeDetector = {
         initialize: async () => ({ ready: true }),
-        addText: async () => h.semanticQueue.shift() ?? null,
+        addText: async () => {
+            if (h.semanticDelay) await new Promise((r) => setTimeout(r, h.semanticDelay))
+            return h.semanticQueue.shift() ?? null
+        },
         setReadingContext: (book: string | null, chapter?: number, verse?: number) => {
             h.readingContexts.push([book, chapter, verse])
         },
@@ -82,6 +91,8 @@ vi.mock('../useScripture', async () => {
                 const [, bookNum, chapter, start, end] = m
                 const name = NUMBER_TO_BOOK[Number(bookNum)]
                 const human = `${name} ${chapter}:${start}${end ? `-${end}` : ''}`
+                const delay = h.lookupDelay.get(human)
+                if (delay) await new Promise((r) => setTimeout(r, delay))
                 if (h.missing.has(human)) return null
                 const verses = []
                 for (let v = Number(start); v <= Number(end ?? start); v++) {
@@ -147,7 +158,13 @@ vi.mock('../../services/sermon-listener/nativeAudioCapture', () => ({
 vi.mock('../../services/visualizer/nativeAudioFeatures', () => ({
     startNativeAudioFeatures: async () => () => {},
 }))
-vi.mock('../../services/sermon-listener/llmClient', () => ({ isLlmConfigured: () => false }))
+vi.mock('../../services/sermon-listener/llmClient', () => ({ isLlmConfigured: () => h.llmConfigured }))
+vi.mock('../../services/sermon-listener/llmVerseExtraction', () => ({
+    extractVersesWithLLM: async () => {
+        if (h.llmDelay) await new Promise((r) => setTimeout(r, h.llmDelay))
+        return { newVerses: h.llmResult }
+    },
+}))
 vi.mock('../../services/sermon-listener/sessionRecordings', () => ({
     startRecording: async (id: string) => {
         h.recordings.started.push(id)
@@ -194,6 +211,16 @@ async function listen(options: SermonListenerOptions = {}) {
                 h.transcription.opts!.onResult!(text, true)
             })
             await flush()
+            if (process.env.SCENARIO_DEBUG) {
+                console.error(`said ${JSON.stringify(text.slice(0, 50))} q=${h.semanticQueue.length} → heard=${JSON.stringify(api.heard())} current=${api.current()} live=${api.live()} scripture=${hook.result.current.currentScripture?.label}`)
+            }
+        },
+        /** A provisional (interim) result, which is acted on after a short debounce. */
+        async sayInterim(text: string) {
+            await act(async () => {
+                h.transcription.opts!.onResult!(text, false)
+            })
+            await flush()
         },
         /** The next semantic search returns these matches. */
         semanticWillMatch(...matches: Array<Partial<SemanticVerseMatch> & { reference: string; score: number }>) {
@@ -218,6 +245,9 @@ async function listen(options: SermonListenerOptions = {}) {
         heard() {
             return hook.result.current.detectedVerses.map((v) => v.reference)
         },
+        heardVerse(reference: string) {
+            return hook.result.current.detectedVerses.find((v) => v.reference === reference)
+        },
         current() {
             return hook.result.current.currentVerse?.reference ?? null
         },
@@ -225,6 +255,11 @@ async function listen(options: SermonListenerOptions = {}) {
             const s = useAppStore.getState()
             const slide = s.activeSlides.find((x) => x.id === s.liveSlideId)
             return (slide?.data as Scripture | undefined)?.label ?? null
+        },
+        liveVersion() {
+            const st = useAppStore.getState()
+            const slide = st.activeSlides.find((x) => x.id === st.liveSlideId)
+            return (slide?.data as Scripture | undefined)?.version ?? null
         },
         queued() {
             return useAppStore.getState().activeSlides.map((s) => (s.data as Scripture | undefined)?.label)
@@ -249,10 +284,15 @@ beforeEach(() => {
     h.readingContexts = []
     h.idbLive = null
     h.missing = new Set()
+    h.lookupDelay = new Map()
     h.slideCounter = 0
     h.recordings = { started: [], stopped: 0, attached: [] }
     h.recordingResult = '/tmp/rec.wav'
     h.providerAvailable = true
+    h.semanticDelay = 0
+    h.llmConfigured = false
+    h.llmDelay = 0
+    h.llmResult = []
 })
 
 afterEach(() => {
@@ -262,6 +302,7 @@ afterEach(() => {
 
 beforeEach(() => {
     // The hook narrates every utterance; keep test output to the failures.
+    if (process.env.SCENARIO_DEBUG) return
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
@@ -530,10 +571,220 @@ describe('sermon listener: re-hearing a verse', () => {
 
         // Long enough that John 3:16 has scrolled out of the detection window
         // and been silent for over a minute.
-        await s.wait(61 * SECOND)
-        await s.say('x '.repeat(800))
+        await s.say(FILLER)
         await s.wait(61 * SECOND)
         await s.say('Go back to John 3:16 with me.')
+
+        expect(s.current()).toBe('John 3:16')
+        expect(s.live()).toBe('John 3:16')
+    })
+})
+
+// Phrased so only the detection path sees them, not the voice-command path.
+const JOSHUA_24 = 'We see in Joshua chapter 24 that they served the Lord.'
+const JUDGES_2 = 'We see in Judges chapter 2 that they forgot the Lord.'
+// Long enough to push an earlier mention out of the 1500-character window,
+// and without repeats: the listener collapses a phrase said over and over.
+const FILLER = Array.from({ length: 1700 / 7 }, (_, i) =>
+    ['and', 'then', 'they', 'went', 'home', 'quietly', 'again', 'after', 'supper', 'with', 'friends', 'talking'][i % 12] + ['', 'ly', 's', 'ed'][Math.floor(i / 12) % 4],
+).join(' ')
+
+function verse(reference: string, confidence: 'high' | 'medium' | 'low' = 'high') {
+    const [, book, chapter, start] = /^(.+) (\d+):(\d+)$/.exec(reference)!
+    return {
+        raw: reference, reference, book, chapter: Number(chapter), verseStart: Number(start),
+        startIndex: 0, endIndex: 0, confidence,
+    }
+}
+
+describe('sermon listener: behaviour the restructuring must keep', () => {
+    it('"read it in the NIV" switches the version and rewrites the live slide in it', async () => {
+        const s = await listen()
+        await s.say('Turn with me to John 3:16.')
+        await s.wait(4 * SECOND)
+        await s.say('Read it in the NIV.')
+
+        expect(s.state.activeBibleVersion).toBe('NIV')
+        expect(s.live()).toBe('John 3:16')
+        expect(s.liveVersion()).toBe('NIV')
+        expect(s.queued()).toEqual(['John 3:16'])
+        expect(s.state.lastVoiceCommand?.type).toBe('change_version')
+    })
+
+    // Current bug, pinned so the restructuring neither fixes nor worsens it
+    // silently: the change_version command's matched text runs to the end of
+    // the transcript, and command text is cut from the whole detection window,
+    // so nothing said after "read it in the NIV" is detected until it scrolls
+    // out of the window.
+    it('[current bug] speech after "read it in the NIV" is hidden from detection', async () => {
+        const s = await listen()
+        await s.say('Turn with me to John 3:16.')
+        await s.wait(4 * SECOND)
+        await s.say('Read it in the NIV.')
+        await s.say(JOSHUA_24)
+
+        expect(s.heard()).toEqual(['John 3:16'])
+        expect(s.live()).toBe('John 3:16')
+    })
+
+    // Current bug, pinned: the famous-phrase table names the book "Psalm",
+    // which no lookup knows, so the verse is listed but can never be shown.
+    it('[current bug] "the Lord is my shepherd" is heard as Psalm 23:1 and never shown', async () => {
+        const s = await listen()
+        await s.say('The Lord is my shepherd, I shall not want.')
+
+        expect(s.heard()).toEqual(['Psalm 23:1'])
+        expect(s.live()).toBeNull()
+    })
+
+    it('"display it" puts the current verse up when auto-display is off', async () => {
+        const s = await listen({ autoDisplay: false })
+        await s.say(JOSHUA_24)
+        expect(s.live()).toBeNull()
+        await s.say('Display it.')
+
+        expect(s.live()).toBe('Joshua 24:1')
+    })
+
+    it('"previous verse" steps back in place', async () => {
+        const s = await listen()
+        await s.say('Turn with me to John 3:16.')
+        await s.wait(4 * SECOND)
+        await s.say('Previous verse.')
+
+        expect(s.current()).toBe('John 3:15')
+        expect(s.live()).toBe('John 3:15')
+        expect(s.queued()).toEqual(['John 3:15'])
+    })
+
+    it('"verse 5" with nothing heard yet follows the bible slide already on screen', async () => {
+        const s = await listen()
+        const content = [{ book: '43', chapter: '3', verse: '16', scripture: 'text' }]
+        useAppStore.setState({
+            activeSlides: [{
+                id: 'from-bible-tab', type: 'bible', name: 'John 3:16', contents: ['John 3:16'],
+                data: { label: 'John 3:16', labelShortFormat: 'John 3:16', version: 'KJV', content },
+            } as unknown as Slide],
+            liveSlideId: 'from-bible-tab',
+        })
+        await s.say('Verse 5.')
+
+        expect(s.current()).toBe('John 3:5')
+        expect(s.live()).toBe('John 3:5')
+        expect(s.queued()).toEqual(['John 3:5'])
+    })
+
+    it('a semantic match cannot collapse a range already on screen', async () => {
+        const s = await listen()
+        await s.say('We see in Psalm 34 verses 7 through 8 that the angel of the Lord is near.')
+        expect(s.live()).toBe('Psalms 34:7-8')
+
+        await s.wait(5 * SECOND)
+        s.semanticWillMatch({ reference: 'Psalms 34:7', score: 0.70, text: 'the angel of the lord encampeth round about them' })
+        await s.say('The angel of the Lord encamps round about them that fear him.')
+
+        expect(s.current()).toBe('Psalms 34:7-8')
+        expect(s.live()).toBe('Psalms 34:7-8')
+    })
+
+    it('a semantic result that lands after a newer explicit reference is listed but not shown', async () => {
+        const s = await listen()
+        h.semanticDelay = SECOND
+        s.semanticWillMatch({ reference: 'John 3:16', score: 0.82, text: 'for god so loved the world, the scripture says' })
+        await s.say('The scripture says for God so loved the world that he gave his only son.')
+        await s.say(JOSHUA_24)
+        await s.wait(2 * SECOND)
+
+        expect(s.heard()).toContain('John 3:16')
+        expect(s.current()).toBe('Joshua 24:1')
+        expect(s.live()).toBe('Joshua 24:1')
+    })
+
+    it('a weaker semantic match in a chapter already heard is not added', async () => {
+        const s = await listen()
+        s.semanticWillMatch({ reference: 'Psalms 23:1', score: 0.80, text: 'the scripture says the shepherd provides' })
+        await s.say('The scripture says the shepherd provides everything his sheep need.')
+        await s.wait(5 * SECOND)
+        s.semanticWillMatch({ reference: 'Psalms 23:4', score: 0.82, text: 'the scripture says even in the dark valley' })
+        await s.say('The scripture says even in the darkest valley he is with us.')
+
+        expect(s.heard()).toEqual(['Psalms 23:1'])
+    })
+
+    it('no semantic search runs while the congregation is singing', async () => {
+        const s = await listen()
+        const st = useAppStore.getState()
+        useAppStore.setState({
+            songTracking: { ...st.songTracking, autoDetect: true, status: { ...st.songTracking.status, songId: 'song', phase: 'tracking' } },
+        })
+        s.semanticWillMatch({ reference: 'John 3:16', score: 0.82, text: 'for god so loved the world, the scripture says' })
+        await s.say('The scripture says for God so loved the world that he gave his only son.')
+
+        expect(s.heard()).toEqual([])
+        expect(h.semanticQueue).toHaveLength(1)
+    })
+
+    it('the LLM pass adds and shows a verse the local detectors missed', async () => {
+        const s = await listen()
+        h.llmConfigured = true
+        h.llmResult = [verse('Romans 8:28')]
+        await s.say('All things work together for good to them that love God.')
+        expect(s.heard()).toEqual([])
+        await s.wait(4 * SECOND)
+
+        expect(s.heard()).toEqual(['Romans 8:28'])
+        expect(s.live()).toBe('Romans 8:28')
+    })
+
+    it('an LLM answer that lands after a newer explicit reference is listed but not shown', async () => {
+        const s = await listen()
+        h.llmConfigured = true
+        h.llmDelay = 2 * SECOND
+        h.llmResult = [verse('Romans 8:28')]
+        await s.say('All things work together for good to them that love God.')
+        await s.wait(3600)
+        await s.say(JOSHUA_24)
+        await s.wait(2 * SECOND)
+
+        expect(s.heard()).toContain('Romans 8:28')
+        expect(s.current()).toBe('Joshua 24:1')
+        expect(s.live()).toBe('Joshua 24:1')
+    })
+
+    it('a provisional result is acted on after a short pause', async () => {
+        const s = await listen()
+        await s.sayInterim(JOSHUA_24)
+        expect(s.heard()).toEqual([])
+        await s.wait(400)
+
+        expect(s.current()).toBe('Joshua 24:1')
+        expect(s.live()).toBe('Joshua 24:1')
+    })
+
+    it('choosing a heard verse makes it current without putting it up', async () => {
+        const s = await listen()
+        await s.say(JOSHUA_24)
+        await s.say(JUDGES_2)
+        await act(async () => {
+            await s.state.setCurrentDetectedVerse(s.heardVerse('Joshua 24:1')!)
+        })
+
+        expect(s.current()).toBe('Joshua 24:1')
+        expect(s.state.currentScripture?.label).toBe('Joshua 24:1')
+        expect(s.live()).toBe('Judges 2:1')
+    })
+
+    it('a semantic verse heard again after a silence comes back on screen', async () => {
+        const s = await listen()
+        s.semanticWillMatch({ reference: 'John 3:16', score: 0.82, text: 'for god so loved the world, the scripture says' })
+        await s.say('The scripture says for God so loved the world that he gave his only son.')
+        await s.say('Turn with me to Romans 8:28.')
+        expect(s.live()).toBe('Romans 8:28')
+
+        await s.say(FILLER)
+        await s.wait(61 * SECOND)
+        s.semanticWillMatch({ reference: 'John 3:16', score: 0.80, text: 'for god so loved the world, the scripture says' })
+        await s.say('The scripture says for God so loved the world, remember.')
 
         expect(s.current()).toBe('John 3:16')
         expect(s.live()).toBe('John 3:16')
