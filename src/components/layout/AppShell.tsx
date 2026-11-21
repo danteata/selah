@@ -9,6 +9,7 @@ import { SermonListenerProvider } from '../sermon-listener/SermonListenerContext
 import { HeardVersesPublisher } from '../sermon-listener/HeardVersesPublisher'
 import { SongTrackerBridge } from '../sermon-listener/SongTrackerBridge'
 import { StagedSlideShortcut } from '../preview/StagedSlideShortcut'
+import { OutputFeeds } from '../live/OutputFeeds'
 import { useAppStore } from '../../store/appStore'
 import { isInlineNavSection } from '../../types/studio'
 import type { Schedule } from '../../types'
@@ -68,6 +69,7 @@ export function AppShell({ isDark, onToggleTheme, activeSchedule, user, children
         <SongTrackerBridge />
         <HeardVersesPublisher />
         <StagedSlideShortcut />
+        <OutputFeeds />
         <div className={`studio-shell ${isDark ? 'dark' : ''}`}>
             {/* Subtle Background Elements */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">

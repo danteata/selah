@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, act } from '@testing-library/react'
 import type { Slide } from '../../../types'
 import { useAppStore } from '../../../store/appStore'
 
@@ -73,25 +73,25 @@ describe('StagedSlideShortcut', () => {
         render(<StagedSlideShortcut />)
         pressEnter({ shiftKey: true })
         pressEnter({ metaKey: true })
-        useAppStore.setState({ commandBarOpen: true })
+        act(() => { useAppStore.setState({ commandBarOpen: true }) })
         pressEnter()
         expect(h.session.setLiveSlide).not.toHaveBeenCalled()
     })
 
     it('does nothing when the staged slide is already on air, or nothing is staged', () => {
         render(<StagedSlideShortcut />)
-        useAppStore.setState({ stagedSlideId: 'a' })
+        act(() => { useAppStore.setState({ stagedSlideId: 'a' }) })
         pressEnter()
-        useAppStore.setState({ stagedSlideId: null })
+        act(() => { useAppStore.setState({ stagedSlideId: null }) })
         pressEnter()
         expect(h.session.setLiveSlide).not.toHaveBeenCalled()
     })
 
     it('does nothing when the staged slide has left the service order', () => {
         render(<StagedSlideShortcut />)
-        useAppStore.setState({ stagedSlideId: 'other' })
+        act(() => { useAppStore.setState({ stagedSlideId: 'other' }) })
         pressEnter()
-        useAppStore.setState({ stagedSlideId: 'gone' })
+        act(() => { useAppStore.setState({ stagedSlideId: 'gone' }) })
         pressEnter()
         expect(h.session.setLiveSlide).not.toHaveBeenCalled()
     })
@@ -105,7 +105,7 @@ describe('StagedSlideShortcut', () => {
 
     it("uses the session's schedule while collaborating", () => {
         Object.assign(h.session, { isConnected: true, isOperator: true, sessionScheduleId: 'elsewhere' })
-        useAppStore.setState({ stagedSlideId: 'other' })
+        act(() => { useAppStore.setState({ stagedSlideId: 'other' }) })
         render(<StagedSlideShortcut />)
         pressEnter()
         expect(h.session.setLiveSlide).toHaveBeenCalledWith('other')
