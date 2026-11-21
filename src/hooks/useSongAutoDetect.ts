@@ -10,7 +10,8 @@ import { looksLikeSinging } from '../services/sermon-listener/singingDetection'
 import { SongConfirmationTracker } from '../services/sermon-listener/songConfirmation'
 import { resolveExternalSong } from '../services/sermon-listener/externalLyrics'
 import { isLlmConfigured } from '../services/sermon-listener/llmClient'
-import type { Song } from '../types'
+import { songSlideBlocks } from '../lib/songSections'
+import type { Slide, Song } from '../types'
 
 /**
  * Automatic song detection (Phase 2 "Searching").
@@ -240,21 +241,29 @@ export function useSongAutoDetect() {
         const loadAndDisplay = (song: Song, sectionId: string) => {
             const store = useAppStore.getState()
             const songKey = song._id || song.id
-            const sectionIndex = (song.sections ?? []).findIndex((s) => s.id === sectionId)
+            // A slide's verseIndex counts the song's slides, not its stored
+            // sections — and most songs store no sections at all, so looking
+            // the section up there found nothing and every song opened on its
+            // first slide, whatever was being sung. Find the slide by its
+            // section, the way the tracker does.
+            const slideFor = (slides: Slide[]) => {
+                const blocks = songSlideBlocks((slides[0]?.data as Song | undefined) ?? song)
+                const at = blocks.findIndex((b) => b.sectionId === sectionId)
+                return slides.find((s) => s.verseIndex === at) ?? slides[0]
+            }
 
             const existing = store.activeSlides.filter(
                 (s) => s.type === 'song' && (s.songId ?? '') === songKey,
             )
             if (existing.length > 0) {
-                const target = existing.find((s) => s.verseIndex === sectionIndex) ?? existing[0]
-                store.setLiveSlide(target.id)
+                store.setLiveSlide(slideFor(existing).id)
                 return
             }
 
             const slides = createSongSlidesRef.current(song)
             if (slides.length === 0) return
             store.appendActiveSlides(slides)
-            const target = slides.find((s) => s.verseIndex === sectionIndex) ?? slides[0]
+            const target = slideFor(slides)
             if (target) store.setLiveSlide(target.id)
             // Appending and going live are two separate store writes, and the
             // observed failure is a song that lands in the queue with nothing
