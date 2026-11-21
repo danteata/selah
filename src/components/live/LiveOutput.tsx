@@ -1,538 +1,46 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Monitor, ChevronUp, ChevronDown, Radio, Presentation, Crown, Shield, Lightbulb, Check, X, Plus, Eye, EyeOff, Rows3, Columns2, Maximize2, Layers } from 'lucide-react'
+import { Rows3, Columns2, Maximize2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import { useNativeMultiMonitor } from '../../hooks/useNativeMultiMonitor'
-import { useNdiOutput, NDI_LIVE_WINDOW_MISSING } from '../../hooks/useNdiOutput'
-import { proGateMessage } from '../../providers/entitlementState'
-import { useAlternateOutput } from '../../hooks/useAlternateOutput'
-import type { PushStats } from '../../services/ndi-output/pushChannel'
-import { useEntitlements } from '../../providers/LicenseProvider'
-import { toast } from 'sonner'
-import { useLiveSession, useVerseNavigationShortcuts, useClaimLiveNavigation, shouldIgnoreShortcut, VERSE_NAV_PRIORITY } from '../../hooks'
-import { withScripture } from '../../hooks/useSlideCreation'
-import { useFileUrl } from '../../hooks/useTemplates'
-import { useLocalBackground } from '../../hooks/useLocalBackground'
-import { useLocalMediaBlobUrl } from '../../hooks/useLocalMediaBlobUrl'
-import { useAnalytics } from '../../hooks/useAnalytics'
-import { AnalyticsEventType } from '../../services/analytics/types'
-import type { Scripture, SlideStyle } from '../../types'
-import { slideTypes, backgroundTypes } from '../../types'
-import { ScreenPicker } from './ScreenPicker'
-import { liveDeckFor, deckPosition } from './liveDeck'
-import { Modal } from '../modals/Modal'
-import { SlideView } from './SlideView'
-import { useLiveOutputSettings } from '../../hooks/useLiveSync'
-import { BibleVerseNavigator, type BibleVerseNavigatorHandle } from '../bible/BibleVerseNavigator'
 import { SermonListenerPanel } from '../sermon-listener/SermonListenerPanel'
 import { PanelErrorBoundary } from '../offline/PanelErrorBoundary'
 import { ContextSectionContent } from '../layout/ContextPanel'
-import type { MediaProgress } from './MediaContent'
-import { Play, Pause, Volume2, VolumeX, RotateCcw, Repeat } from 'lucide-react'
-import { countdownDurationSeconds, formatCountdownTime, isCountdownPaused, pauseCountdown, resumeCountdown, useCountdownSeconds } from '../../utils/countdown'
+import { useOnAir } from './useOnAir'
+import { useLiveShortcuts } from './useLiveShortcuts'
+import { LiveHeader } from './LiveHeader'
+import { LiveMonitor } from './LiveMonitor'
+import { OnAirControls } from './OnAirControls'
+import { LiveVerseNavigator } from './LiveVerseNavigator'
+import { SuggestedQueue } from './SuggestedQueue'
+import { OutputThumbnail } from './OutputThumbnail'
 
-// Shared with the projector so both format time the same way.
-const formatSecondsToTime = formatCountdownTime
+const LAYOUT_OPTIONS = [
+    { id: 'stacked' as const, label: 'Stacked', Icon: Rows3 },
+    { id: 'split' as const, label: 'Split', Icon: Columns2 },
+    { id: 'focus' as const, label: 'Focus', Icon: Maximize2 },
+]
 
+/**
+ * The classic workspace's centre: everything about what's on air in one
+ * panel, arranged by one of three layout modes. The docked desk uses
+ * LivePanel and PreviewPanel instead; this stays for the "Use classic
+ * workspace" fallback and goes with it (plan/docked-desk-layout.md, slice 6).
+ */
 export function LiveOutput() {
-    const { trackEvent } = useAnalytics()
     const activeNavSection = useAppStore((s) => s.activeNavSection)
     const contextPanelOpen = useAppStore((s) => s.contextPanelOpen)
     const lastContentSection = useAppStore((s) => s.lastContentSection)
-
-    // Hide sermon listener panel when the ContextPanel sidebar is already showing it
+    // Hide the sermon listener here when the ContextPanel sidebar already shows it.
     const sermonShownInSidebar = activeNavSection === 'sermon' && contextPanelOpen
 
-    const [showScreenPicker, setShowScreenPicker] = useState(false)
-
-    // Center layout mode — how Preview / Program / context are arranged:
+    // How the centre is arranged:
     //  • 'stacked' — Next Up + on-air controls + Sermon aside beside the feed
-    //  • 'split'   — Preview | Program on top, tabbed context (Verses/Sermon) below
-    //  • 'focus'   — the live feed maximized, side controls slimmed, context hidden
-    // Held in the store (persisted) so a workspace preset can drive it, and the
-    // header picker and preset stay in sync.
+    //  • 'split'   — Next Up | feed on top, verses and sermon below
+    //  • 'focus'   — the feed maximized, side controls slimmed, context hidden
     const layoutMode = useAppStore((s) => s.liveOutputLayout)
     const setLayoutMode = useAppStore((s) => s.setLiveOutputLayout)
 
-    // Countdown preview state
+    const onAir = useOnAir()
+    useLiveShortcuts(onAir)
 
-    // Live media transport state — self-reported by the operator's own muted
-    // preview player (see MediaContent's onProgress), used to drive the seek
-    // bar. Not synced across windows; only explicit operator actions are.
-    const [liveMediaProgress, setLiveMediaProgress] = useState<MediaProgress | null>(null)
-
-    // Ref to the live bible verse navigator — lets the global
-    // useVerseNavigationShortcuts hook trigger the navigator's `navigateVerse`
-    // function (N / P / ← / →) without the navigator needing its own listener.
-    const verseNavigatorRef = useRef<BibleVerseNavigatorHandle | null>(null)
-
-    const {
-        isPresenting,
-        isDesktop,
-        detectMonitors,
-        openLiveWindow,
-        closeLiveWindow,
-        sendSlideToLive,
-    } = useNativeMultiMonitor()
-
-    const {
-        isAvailable: ndiAvailable,
-        isRunning: ndiRunning,
-        startOutput: ndiStart,
-        stopOutput: ndiStop,
-        state: ndiState,
-    } = useNdiOutput()
-    const ndiSending = (ndiState?.framesSent ?? 0) > 0
-    const { isPro, isUnverified, startProCheckout, refresh: refreshEntitlements } = useEntitlements()
-
-    /**
-     * Shown instead of the Pro upsell when the licence simply couldn't be checked
-     * — the case where the same account works on one machine and not another,
-     * because that one has a cached licence and this one never fetched it.
-     */
-    const showProGate = useCallback((feature: string) => {
-        const { title, description, retryable } = proGateMessage(
-            isUnverified ? 'unverified' : 'verified',
-            feature,
-        )
-        if (retryable) {
-            toast.warning(title, {
-                description,
-                duration: 14000,
-                action: { label: 'Try again', onClick: () => void refreshEntitlements() },
-            })
-            return
-        }
-        toast.warning(title, {
-            description,
-            duration: 10000,
-            action: { label: 'Upgrade', onClick: () => void startProCheckout() },
-        })
-    }, [isUnverified, refreshEntitlements, startProCheckout])
-
-
-    const alternate = useAlternateOutput()
-
-    // Independent of the program output's NDI feed: this one carries the graphics
-    // channel's own slide, with alpha, as a second source.
-    const handleAlternateToggle = useCallback(() => {
-        if (alternate.config.enabled) {
-            void alternate.disable()
-            return
-        }
-        if (!isPro) {
-            showProGate('The alternate output')
-            return
-        }
-        void alternate.enable().then((error: string | null) => {
-            if (!error) {
-                toast.success('Alternate output on', {
-                    description: `Take "${alternate.config.sourceName}" in your switcher.`,
-                })
-                return
-            }
-            toast.error('Alternate output could not start', { description: error, duration: 12000 })
-        })
-    }, [alternate, isPro, showProGate])
-
-    const activeSchedule = useAppStore((state) => state.activeSchedule)
-    const activeSlides = useAppStore((state) => state.activeSlides)
-    const liveOutputSlidesId = useAppStore((state) => state.liveOutputSlidesId)
-    const sharedQueueSlideIds = useAppStore((state) => state.sharedQueueSlideIds)
-    const liveSlideId = useAppStore((state) => state.liveSlideId)
-    const setLiveSlide = useAppStore((state) => state.setLiveSlide)
-    const liveOutputBlanked = useAppStore((state) => state.liveOutputBlanked)
-    const setLiveOutputBlanked = useAppStore((state) => state.setLiveOutputBlanked)
-    // Exactly what the projector is sent, so the monitor draws what it draws.
-    const outputSettings = useLiveOutputSettings()
-    // Next Up shows what's coming even while the output is cleared, and
-    // without the visualizer's motion.
-    const nextUpSettings = useMemo(
-        () => ({ ...outputSettings, visualizerEnabled: false, liveOutputBlanked: false }),
-        [outputSettings]
-    )
-
-    // Clear stale transport-bar progress from whatever media slide was
-    // previously live (adjusted during render, not in an effect).
-    const [progressFor, setProgressFor] = useState(liveSlideId)
-    if (progressFor !== liveSlideId) {
-        setProgressFor(liveSlideId)
-        setLiveMediaProgress(null)
-    }
-
-    // Shared live session — operator controls
-    const {
-        isOperator,
-        isContributor,
-        isViewer,
-        isConnected,
-        isOpen,
-        isStrict,
-        sessionScheduleId,
-        setLiveSlide: setLiveSlideShared,
-        syncSlideContent,
-        addToQueue,
-        removeFromQueue,
-        acceptFromQueue,
-        toggleBlank,
-    } = useLiveSession()
-
-    // Role badge label
-    const roleLabel = useMemo(() => {
-        if (isOperator) return 'Operator'
-        if (isContributor) return 'Contributor'
-        if (isViewer) return 'Viewer'
-        return ''
-    }, [isOperator, isContributor, isViewer])
-
-    // The live deck. Prefer the session's schedule while collaborating.
-    const liveOutputSlides = useMemo(
-        () => liveDeckFor(liveOutputSlidesId, activeSlides, sessionScheduleId || activeSchedule?._id),
-        [liveOutputSlidesId, activeSlides, activeSchedule?._id, sessionScheduleId],
-    )
-
-    // Shared queue slides — contributed by non-operators.
-    //
-    // We keep the entry even if the slide isn't in `activeSlides` so the
-    // operator always sees a contributor's queue update — including for
-    // slides the contributor just created locally that haven't yet
-    // round-tripped through Convex. When the slide data is missing we
-    // render a lightweight placeholder instead of silently dropping the
-    // entry (which is what previously made the queue look "stuck" on the
-    // operator's side).
-    const sharedQueueSlides = useMemo(() => {
-        if (!sharedQueueSlideIds || sharedQueueSlideIds.length === 0) return []
-        return sharedQueueSlideIds
-            .map((id, idx) => {
-                const slide = activeSlides.find(s => s.id === id)
-                if (slide) {
-                    return {
-                        queueKey: `${id}-${idx}`,
-                        slideId: id,
-                        slide,
-                    }
-                }
-                return {
-                    queueKey: `${id}-${idx}`,
-                    slideId: id,
-                    slide: null,
-                }
-            })
-    }, [sharedQueueSlideIds, activeSlides])
-
-    // Get live slide
-    const liveSlide = useMemo(() => {
-        return activeSlides.find(slide => slide.id === liveSlideId)
-    }, [activeSlides, liveSlideId])
-
-    // Where on air sits in the deck, and what's either side of it.
-    const { index: currentIndex, previous: prevSlide, nextUp: nextSlide } = useMemo(
-        () => deckPosition(liveOutputSlides, liveSlideId),
-        [liveOutputSlides, liveSlideId],
-    )
-    const nextSlideStorageId = nextSlide?.backgroundStorageId || null
-
-    // Get file URL for live slide and next slide backgrounds (hooks must be at top level)
-    const liveSlideFileUrl = useFileUrl(liveSlide?.backgroundStorageId || null)
-    const nextSlideFileUrl = useFileUrl(nextSlideStorageId)
-
-    // Resolve local file paths on desktop
-    const liveSlideLocalBg = useLocalBackground(liveSlide?.background, liveSlide?.localFilePath)
-    const nextSlideLocalBg = useLocalBackground(nextSlide?.background, nextSlide?.localFilePath)
-
-    // Resolve local IndexedDB-backed media library items on web
-    const liveSlideLocalMediaBlobUrl = useLocalMediaBlobUrl(liveSlide?.localMediaId)
-    const nextSlideLocalMediaBlobUrl = useLocalMediaBlobUrl(nextSlide?.localMediaId)
-
-    // Determine the background URL for live slide
-    const liveSlideBackground = liveSlideFileUrl || liveSlideLocalBg || liveSlideLocalMediaBlobUrl
-
-
-    // Determine the background URL for next slide preview
-    const nextSlideBackground = nextSlideFileUrl || nextSlideLocalBg || nextSlideLocalMediaBlobUrl
-
-    // Blank the live output to a plain black screen without touching
-    // liveSlideId, so the queue position/selected slide is preserved and
-    // un-blanking simply resumes showing it. Reaches the actual output
-    // window via useLiveSync (native IPC + localStorage/BroadcastChannel),
-    // and — when in a collaboration session — via the shared `isBlank` flag
-    // so other connected viewers see the same thing (toggleBlank no-ops on
-    // its own if not applicable, mirroring handleSetLiveSlide below).
-    const handleToggleBlank = useCallback(() => {
-        const next = !liveOutputBlanked
-        setLiveOutputBlanked(next)
-        void toggleBlank(next)
-    }, [liveOutputBlanked, setLiveOutputBlanked, toggleBlank])
-
-    const handleSetLiveSlide = useCallback((slideId: string) => {
-        if (isConnected && !isOperator && !isOpen) {
-            return
-        }
-
-        setLiveSlide(slideId)
-
-        if (isConnected) {
-            setLiveSlideShared(slideId)
-        }
-
-        // Send to live window via native API
-        const slide = activeSlides.find(s => s.id === slideId)
-        if (slide) {
-            trackEvent(AnalyticsEventType.SLIDE_DISPLAYED, {
-                slide_type: slide.type || 'unknown',
-                source: isConnected ? 'collaboration' : 'local',
-                layout: slide.layout || 'full_text',
-            })
-            if (slide.layout === 'lower_third' || slide.layout === 'lower-third') {
-                trackEvent(AnalyticsEventType.LOWER_THIRD_DISPLAYED, {
-                    slide_id: slide.id,
-                    title: slide.title,
-                })
-            }
-            if (isDesktop) {
-                sendSlideToLive(slideId, slide as unknown as Record<string, unknown>)
-            }
-            // Broadcast to other windows (for web mode)
-            window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: slide }))
-        }
-    }, [setLiveSlide, activeSlides, isDesktop, sendSlideToLive, isConnected, isOperator, isOpen, setLiveSlideShared, trackEvent])
-
-    const handleSuggestNext = useCallback(async (slideId: string) => {
-        if (!isConnected || isOperator) return
-        try {
-            await addToQueue([slideId])
-        } catch (err) {
-            console.error('[LiveOutput] Failed to queue slide:', err)
-        }
-    }, [isConnected, isOperator, addToQueue])
-
-    // Arrow key navigation. While mounted this is the only ↑/↓ handler — the
-    // Dashboard's schedule-order fallback stands down (useClaimLiveNavigation).
-    useClaimLiveNavigation()
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.ctrlKey || e.metaKey || e.altKey || shouldIgnoreShortcut(e)) return
-            if (e.key === 'ArrowDown' && nextSlide) {
-                e.preventDefault()
-                handleSetLiveSlide(nextSlide.id)
-            } else if (e.key === 'ArrowUp' && prevSlide) {
-                e.preventDefault()
-                handleSetLiveSlide(prevSlide.id)
-            }
-        }
-
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [nextSlide, prevSlide, handleSetLiveSlide])
-
-    // Verse navigation (N / P / ← / →). Only active when a bible slide is
-    // currently live so it never silently swallows keystrokes for non-bible
-    // slides. Does NOT touch ArrowUp/ArrowDown, which are reserved for the
-    // slide queue above.
-    useVerseNavigationShortcuts(
-        () => verseNavigatorRef.current?.navigateVerse('next'),
-        () => verseNavigatorRef.current?.navigateVerse('prev'),
-        { enabled: liveSlide?.type === 'bible', priority: VERSE_NAV_PRIORITY.live }
-    )
-
-    // "B" is bound once, in Dashboard, which is always mounted. Binding it
-    // here as well made the two toggles cancel out whenever both were up.
-
-    // Number shortcuts (Ctrl/Cmd + 0-9)
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (shouldIgnoreShortcut(e)) return
-            if (e.ctrlKey || e.metaKey) {
-                const num = parseInt(e.key, 10)
-                if (!isNaN(num) && num >= 0 && num <= 9) {
-                    e.preventDefault()
-                    const targetIndex = num === 0 ? liveOutputSlides.length - 1 : num - 1
-                    const targetSlide = liveOutputSlides[targetIndex]
-                    if (targetSlide?._id) {
-                        handleSetLiveSlide(targetSlide.id)
-                    }
-                }
-            }
-        }
-
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [liveOutputSlides, handleSetLiveSlide])
-
-    const liveOutputMonitorId = useAppStore((state) => state.settings.liveOutputMonitorId)
-
-    // Handle open live with screen picker or auto-open
-    const handleOpenLive = useCallback(async () => {
-        const showPicker = async () => {
-            await detectMonitors()
-            setShowScreenPicker(true)
-        }
-
-        if (!liveOutputMonitorId) {
-            await showPicker()
-            return
-        }
-
-        // The saved display may have been unplugged or renumbered since, and a
-        // web popup can be blocked. Both used to fail silently — PRESENT did
-        // nothing and the picker never appeared. Fall back to the picker.
-        let opened = false
-        try {
-            opened = await openLiveWindow({
-                monitor_id: liveOutputMonitorId,
-                fullscreen: true,
-                ...(isDesktop ? { decorations: false, always_on_top: true } : {}),
-                initial_slide_id: liveSlideId || undefined,
-            })
-        } catch (err) {
-            console.error('[LiveOutput] Failed to open the output on the saved display:', err)
-        }
-        if (!opened) {
-            toast.error(
-                isDesktop
-                    ? "Couldn't open the output on the saved display. Pick a screen."
-                    : "Couldn't open the output window — allow pop-ups for this site, or pick a screen."
-            )
-            await showPicker()
-        }
-    }, [liveOutputMonitorId, isDesktop, openLiveWindow, detectMonitors, liveSlideId])
-
-    // NDI network streaming is Pro-only; free users get an upsell.
-    const handleNdiToggle = useCallback(() => {
-        if (ndiRunning) {
-            void ndiStop()
-            return
-        }
-        if (!isPro) {
-            showProGate('NDI output')
-            return
-        }
-        // The backend refuses for reasons the operator can act on — no Screen
-        // Recording permission, no live output window open, no capture support on
-        // this platform. `void ndiStart()` used to drop those on the floor as an
-        // uncaught promise, so the most useful sentence in the feature only ever
-        // appeared in the devtools console.
-        void ndiStart().then((refusal) => {
-            if (!refusal) return
-            toast.error('NDI output could not start', {
-                description: refusal.message,
-                duration: 12000,
-                // Nobody should have to know that NDI mirrors the live output
-                // window, or that the order matters — offer the missing step.
-                action: refusal.code === NDI_LIVE_WINDOW_MISSING
-                    ? { label: 'Open live output', onClick: () => void handleOpenLive() }
-                    : undefined,
-            })
-        })
-    }, [ndiRunning, isPro, showProGate, ndiStart, ndiStop, handleOpenLive])
-
-    // Handle screen selection
-    const handleScreenSelect = useCallback(async (screenId: string) => {
-        if (isDesktop) {
-            await openLiveWindow({
-                monitor_id: screenId,
-                fullscreen: true,
-                decorations: false,
-                always_on_top: true,
-                initial_slide_id: liveSlideId || undefined,
-            })
-        } else {
-            // Web mode: use Presentation API or popup window
-            await openLiveWindow({
-                monitor_id: screenId,
-                fullscreen: true,
-                initial_slide_id: liveSlideId || undefined,
-            })
-        }
-        setShowScreenPicker(false)
-    }, [isDesktop, openLiveWindow, liveSlideId])
-
-    // The countdown on the live slide, from the slide's own clock
-    // (utils/countdown) — the same one the projector reads.
-    const previewCountdownSeconds = useCountdownSeconds(liveSlide)
-    const countdownPaused = !!liveSlide && isCountdownPaused(liveSlide)
-
-    // Analytics: a countdown going live, and reaching zero (once each).
-    const countdownTrackedRef = useRef<{ started?: string; completed?: string }>({})
-    useEffect(() => {
-        if (liveSlide?.type !== 'countdown' || countdownTrackedRef.current.started === liveSlide.id) return
-        countdownTrackedRef.current = { started: liveSlide.id }
-        trackEvent(AnalyticsEventType.COUNTDOWN_STARTED, {
-            slide_id: liveSlide.id,
-            duration_seconds: countdownDurationSeconds(liveSlide),
-        })
-    }, [liveSlide, trackEvent])
-    useEffect(() => {
-        if (liveSlide?.type !== 'countdown' || previewCountdownSeconds > 0) return
-        if (countdownTrackedRef.current.completed === liveSlide.id) return
-        countdownTrackedRef.current.completed = liveSlide.id
-        trackEvent(AnalyticsEventType.COUNTDOWN_COMPLETED, {
-            slide_id: liveSlide.id,
-            duration_seconds: countdownDurationSeconds(liveSlide),
-        })
-    }, [liveSlide, previewCountdownSeconds, trackEvent])
-
-    // Pause/resume changes the slide's clock, which reaches the projector
-    // (and a live session) the way any slide edit does.
-    const handleToggleCountdown = useCallback(() => {
-        if (!liveSlide || liveSlide.type !== 'countdown') return
-        const now = Date.now()
-        const updated = isCountdownPaused(liveSlide) ? resumeCountdown(liveSlide, now) : pauseCountdown(liveSlide, now)
-        useAppStore.getState().updateActiveSlide(updated)
-    }, [liveSlide])
-
-    // Handle stop presenting
-    const handleStopLive = useCallback(async () => {
-        await closeLiveWindow()
-    }, [closeLiveWindow])
-
-    // Handle verse selection from BibleVerseNavigator
-    const handleVerseSelect = useCallback((scripture: Scripture) => {
-        if (!liveSlide || liveSlide.type !== 'bible') return
-
-        // scripture.content already holds exactly the verses the navigator
-        // selected (single verse, shift-clicked set, or dragged span).
-        const updatedSlide = withScripture(liveSlide, scripture)
-
-        const updateActiveSlide = useAppStore.getState().updateActiveSlide
-        updateActiveSlide(updatedSlide)
-
-        window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
-
-        if (isDesktop) {
-            sendSlideToLive(liveSlide.id, updatedSlide as unknown as Record<string, unknown>)
-        }
-
-        void syncSlideContent(updatedSlide)
-    }, [liveSlide, isDesktop, sendSlideToLive, syncSlideContent])
-
-    // Push a media transport-control change (play/pause/seek/mute/loop) to
-    // the live output window, through the same mutate-and-push channel used
-    // for every other live slide edit.
-    const handleMediaTransportChange = useCallback((patch: Partial<SlideStyle>) => {
-        if (!liveSlide) return
-
-        const updatedSlide = {
-            ...liveSlide,
-            slideStyle: {
-                ...liveSlide.slideStyle,
-                ...patch,
-            },
-        }
-
-        const updateActiveSlide = useAppStore.getState().updateActiveSlide
-        updateActiveSlide(updatedSlide)
-
-        window.dispatchEvent(new CustomEvent('broadcast-slide', { detail: updatedSlide }))
-
-        if (isDesktop) {
-            sendSlideToLive(liveSlide.id, updatedSlide as unknown as Record<string, unknown>)
-        }
-    }, [liveSlide, isDesktop, sendSlideToLive])
-
-    // ── Extracted center-area pieces ─────────────────────────────────────
-    // Defined once so the layout modes can place them in different spots (in
-    // the aside for 'stacked', in the tabbed bottom for 'split', hidden for
-    // 'focus') without duplicating markup.
     const sermonBox = !sermonShownInSidebar ? (
         <div className="studio-output-sermon min-h-0 flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-2 overflow-hidden">
             <div className="mb-2 flex items-center justify-between px-1">
@@ -551,20 +59,6 @@ export function LiveOutput() {
         </div>
     ) : null
 
-    const verseNav = liveSlide?.type === 'bible' ? (
-        <BibleVerseNavigator
-            ref={verseNavigatorRef}
-            currentSlide={liveSlide}
-            onVerseSelect={handleVerseSelect}
-        />
-    ) : null
-
-    // Layout picker shown in the header — three arrangements of the center.
-    const LAYOUT_OPTIONS = [
-        { id: 'stacked' as const, label: 'Stacked', Icon: Rows3 },
-        { id: 'split' as const, label: 'Split', Icon: Columns2 },
-        { id: 'focus' as const, label: 'Focus', Icon: Maximize2 },
-    ]
     const layoutPicker = (
         <div className="hidden sm:flex items-center gap-0.5 p-0.5 rounded-lg bg-[var(--bg-tertiary)]/60 border border-[var(--border-subtle)] flex-shrink-0">
             {LAYOUT_OPTIONS.map(({ id, label, Icon }) => (
@@ -586,16 +80,14 @@ export function LiveOutput() {
     )
 
     // Split-layout context — both surfaces visible at once, no tabs. The verse
-    // navigator sits as a short strip directly under the Preview | Program row
-    // (only when a scripture is live); the Sermon Listener fills the rest as a
-    // wider-but-shorter panel. Both stay in view.
+    // navigator sits as a short strip directly under the top row (only when
+    // scripture is on air); the Sermon Listener fills the rest.
     const splitContext = (
         <div className="studio-output-context flex-1 min-h-0 flex flex-col gap-3">
-            {verseNav && (
-                <div className="flex-shrink-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 overflow-hidden">
-                    {verseNav}
-                </div>
-            )}
+            <LiveVerseNavigator
+                liveSlide={onAir.liveSlide}
+                className="flex-shrink-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 overflow-hidden"
+            />
             {sermonShownInSidebar ? (
                 // The sermon listener has taken the sidebar — show whatever it
                 // displaced there (Bible, Songs, Media, …) in this freed slot, so
@@ -617,127 +109,11 @@ export function LiveOutput() {
 
     return (
         <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
-            {/* Header - Broadcast Controls */}
-            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/35">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                        <span className={`shrink-0 w-2 h-2 rounded-full ${liveSlide ? 'bg-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.55)]' : 'bg-[var(--text-muted)]/60'}`} />
-                        <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)] truncate" title="Program Output">
-                            Program Output
-                        </h2>
-                    </div>
-                    {liveOutputBlanked && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-amber-500/10 text-amber-500 rounded-full border border-amber-500/20">
-                            <EyeOff className="w-2.5 h-2.5" />
-                            OUTPUT CLEARED
-                        </span>
-                    )}
-                    {isConnected && roleLabel && (
-                        <span className={`flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold rounded-full border ${isOperator
-                            ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                            : isContributor
-                                ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                                : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-                            }`}>
-                            {isOperator && <Crown className="w-2.5 h-2.5" />}
-                            {isContributor && <Shield className="w-2.5 h-2.5" />}
-                            {roleLabel}
-                        </span>
-                    )}
-                    {ndiRunning && (
-                        /* "Active" used to mean nothing more than "the sender was
-                           created", which is how a black feed still read as ACTIVE.
-                           It now follows the frames the sender has really pushed. */
-                        ndiSending ? (
-                            <span
-                                title={`Sending ${ndiState?.framesSent?.toLocaleString() ?? 0} frames`}
-                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] rounded-full border border-[var(--accent-teal)]/20"
-                            >
-                                NDI ACTIVE
-                            </span>
-                        ) : (
-                            <span
-                                title="The NDI source is announced but no frames have been captured yet — receivers will show black."
-                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-amber-500/10 text-amber-500 rounded-full border border-amber-500/20"
-                            >
-                                NDI — NO FRAMES
-                            </span>
-                        )
-                    )}
-                    {alternate.config.enabled && (
-                        <span
-                            title={`${alternate.textOnly
-                                ? "Alternate output: text only — this slide's background isn't drawn on this feed"
-                                : alternate.slide
-                                    ? 'Alternate output'
-                                    : 'Alternate output is on with nothing on it'}${alternate.config.destination.kind === 'ndi'
-                                ? ` (${alternateHealth(alternate.stats)})`
-                                : ''}`}
-                            className={`flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full border ${
-                                alternate.framesSent > 0
-                                    ? 'bg-[var(--accent-indigo)]/10 text-[var(--accent-indigo)] border-[var(--accent-indigo)]/20'
-                                    : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                            }`}
-                        >
-                            {alternate.slide ? (alternate.textOnly ? 'ALT — TEXT ONLY' : 'ALT LIVE') : 'ALT EMPTY'}
-                        </span>
-                    )}
-                </div>
+            <LiveHeader title="Program Output" isOnAir={!!onAir.liveSlide}>
+                {layoutPicker}
+            </LiveHeader>
 
-                <div className="flex items-center gap-2 flex-shrink-0">
-                    {layoutPicker}
-                    {ndiAvailable && (
-                        <button
-                            onClick={handleNdiToggle}
-                            className={`p-1.5 rounded-lg transition-colors ${ndiRunning ? 'text-[var(--accent-teal)] bg-[var(--accent-teal)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
-                            title={isPro ? 'NDI Output' : 'NDI Output (Pro)'}
-                        >
-                            <Radio className="w-4 h-4" />
-                        </button>
-                    )}
-                    {ndiAvailable && (
-                        <button
-                            onClick={handleAlternateToggle}
-                            className={`p-1.5 rounded-lg transition-colors ${alternate.config.enabled ? 'text-[var(--accent-indigo)] bg-[var(--accent-indigo)]/10' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'}`}
-                            title={isPro
-                                ? 'Alternate output — a second output on a monitor or over NDI'
-                                : 'Alternate output (Pro)'}
-                        >
-                            <Layers className="w-4 h-4" />
-                        </button>
-                    )}
-                    <button
-                        onClick={handleToggleBlank}
-                        className={`flex items-center gap-1.5 p-1.5 rounded-lg transition-colors ${liveOutputBlanked
-                            ? 'text-amber-500 bg-amber-500/10 hover:bg-amber-500/20'
-                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
-                            }`}
-                        title={liveOutputBlanked ? 'Resume output (B)' : 'Clear output to black (B)'}
-                    >
-                        {liveOutputBlanked ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                    </button>
-                    {isPresenting ? (
-                        <button
-                            onClick={handleStopLive}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-red-500/20 whitespace-nowrap flex-shrink-0"
-                        >
-                            STOP
-                        </button>
-                    ) : (
-                        <button
-                            onClick={handleOpenLive}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-teal)] hover:brightness-110 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-[var(--accent-teal)]/20 whitespace-nowrap flex-shrink-0"
-                        >
-                            <Presentation className="w-4 h-4 shrink-0" />
-                            PRESENT
-                        </button>
-                    )}
-                </div>
-            </div>
-
-            {/* Main Content — Next Up + Controls on left, Live Feed on right.
-                This wrapper (not the panel root) is the query container so the
-                fixed Screen Picker modal below isn't trapped by containment. */}
+            {/* This wrapper (not the panel root) is the query container. */}
             <div className="studio-liveoutput flex-1 min-h-0 flex flex-col p-3 lg:p-3.5 gap-2.5" data-layout={layoutMode}>
                 <div className="studio-output-main flex-1 min-h-0 flex gap-4 lg:gap-5">
                     {/* Left: Next Up + on-air controls + Sermon Listener.
@@ -745,298 +121,31 @@ export function LiveOutput() {
                         .studio-output-sidecar in index.css) so a narrow panel
                         stacks these above the feed instead of clipping. */}
                     <aside className="studio-output-sidecar flex-shrink-0 flex gap-3 order-1">
-                        {/* Next Up Preview — 16:9. When the panel is narrow the
-                            aside stacks above the feed; there Next Up widens to
-                            fill the row (see .studio-output-nextup in index.css). */}
                         <div className="studio-output-nextup flex flex-col min-w-0">
                             <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Next Up</div>
-                            <div className="aspect-video rounded-xl overflow-hidden relative border border-[var(--border-subtle)] bg-black/30 shadow-sm">
-                                {nextSlide ? (
-                                    // A thumbnail of the projector: same renderer, no
-                                    // motion, text kept readable at this size.
-                                    <SlideView
-                                        slide={nextSlide}
-                                        settings={nextUpSettings}
-                                        backgroundUrl={nextSlideBackground}
-                                        animate={false}
-                                        clock={false}
-                                        muted
-                                        showMissingMedia
-                                        minTextPx={10}
-                                        className="w-full h-full"
-                                    />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-black/30 text-[var(--text-muted)] italic text-[10px] text-center leading-tight px-2">
-                                        End of Schedule
-                                    </div>
-                                )}
-                            </div>
+                            <OutputThumbnail slide={onAir.nextUp} emptyText="End of Schedule" />
                         </div>
-
-                        {/* On-air controls — always visible */}
-                        <div className="flex-shrink-0 rounded-xl p-3 border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/45">
-                            <div className="flex items-center justify-between mb-2">
-                                <div className="min-w-0 flex-1">
-                                    <div className="text-[9px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.16em]">On air</div>
-                                    <div className="text-xs font-bold text-[var(--text-primary)] truncate">
-                                        {liveSlide?.name || 'None'}
-                                    </div>
-                                </div>
-                                <div className="text-right flex-shrink-0 ml-2">
-                                    <div className="text-[9px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.16em]">Pos</div>
-                                    <div className="text-xs font-mono text-[var(--text-primary)]">
-                                        {currentIndex >= 0 ? `${currentIndex + 1}/${liveOutputSlides.length}` : '-/-'}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="flex gap-1.5">
-                                <button
-                                    onClick={() => prevSlide && handleSetLiveSlide(prevSlide.id)}
-                                    disabled={!prevSlide || (!isOperator && isConnected && !isOpen)}
-                                    className="flex-1 py-1.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] disabled:opacity-25 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-xs font-medium border border-[var(--border-subtle)]"
-                                >
-                                    <ChevronUp className="w-4 h-4 mx-auto" />
-                                </button>
-                                {isConnected && !isOperator && !isStrict && nextSlide && (
-                                    <button
-                                        onClick={() => handleSuggestNext(nextSlide.id)}
-                                        className="flex-1 py-1.5 bg-[var(--accent-teal)]/15 hover:bg-[var(--accent-teal)] text-[var(--accent-teal)] hover:text-white rounded-lg text-[10px] font-medium transition-colors flex items-center justify-center gap-1"
-                                        title={isOpen ? 'Add this slide to the shared queue' : 'Suggest this slide for the operator to review'}
-                                    >
-                                        {isOpen ? (
-                                            <>
-                                                <Plus className="w-3 h-3" />
-                                                Add
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Lightbulb className="w-3 h-3" />
-                                                Suggest
-                                            </>
-                                        )}
-                                    </button>
-                                )}
-                                <button
-                                    onClick={() => nextSlide && handleSetLiveSlide(nextSlide.id)}
-                                    disabled={!nextSlide || (!isOperator && isConnected && !isOpen)}
-                                    className="flex-1 py-1.5 bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] disabled:opacity-25 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors text-xs font-medium border border-[var(--border-subtle)]"
-                                >
-                                    <ChevronDown className="w-4 h-4 mx-auto" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Sermon Listener sits in the aside only in 'stacked'.
-                            In 'split' it moves to the tabbed context below; in
-                            'focus' it's hidden (still available in the sidebar). */}
+                        <OnAirControls onAir={onAir} />
+                        {/* The sermon sits in the aside only in 'stacked'; 'split'
+                            moves it below, 'focus' hides it (the sidebar has it). */}
                         {layoutMode === 'stacked' && sermonBox}
                     </aside>
 
-                    {/* Right: Live Feed + contextual Bible navigator */}
+                    {/* Right: the feed, its transport, and the verse navigator */}
                     <div className="flex-1 min-w-0 flex flex-col gap-3 order-2">
-                        <div className="relative group flex-1 min-h-0 flex flex-col">
-                            <div className="flex items-center justify-between mb-2">
-                                <div className="text-[10px] font-bold text-red-500 uppercase tracking-[0.18em] flex items-center gap-1.5">
-                                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-                                    Live Output
-                                </div>
-                                <div className="text-[10px] font-medium text-[var(--text-muted)]">
-                                    {liveSlide ? liveSlide.name : 'No slide on air'}
-                                </div>
-                            </div>
-                            <div className={`flex-1 min-h-0 studio-live-monitor ${liveSlide ? 'is-live' : ''}`}>
-                                {liveSlide ? (
-                                    <SlideView
-                                        slide={liveSlide}
-                                        settings={outputSettings}
-                                        backgroundUrl={liveSlideBackground}
-                                        muted
-                                        showMissingMedia
-                                        onMediaProgress={setLiveMediaProgress}
-                                        className="w-full h-full"
-                                    >
-                                        {liveSlide.type === 'countdown' && (
-                                            <button
-                                                type="button"
-                                                onClick={handleToggleCountdown}
-                                                className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-medium hover:bg-black/80 transition-colors"
-                                                aria-label={countdownPaused ? 'Resume countdown' : 'Pause countdown'}
-                                            >
-                                                {countdownPaused ? '▶ Resume' : '⏸ Pause'}
-                                            </button>
-                                        )}
-                                    </SlideView>
-                                ) : (
-                                    <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a]">
-                                        <div className="w-16 h-16 rounded-full bg-[var(--accent-teal)]/5 flex items-center justify-center border border-[var(--accent-teal)]/10">
-                                            <Monitor className="w-8 h-8 text-[var(--accent-teal)]/20" />
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-sm font-semibold text-[var(--text-primary)] opacity-40">Selah</p>
-                                            <p className="text-[10px] text-[var(--text-muted)] mt-1">Nothing is live yet</p>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Media transport controls — only when a media video (local or embedded) is live */}
-                        {liveSlide?.type === slideTypes.media &&
-                            (liveSlide.backgroundType === backgroundTypes.video || liveSlide.backgroundType === backgroundTypes.external) && (
-                                <div className="flex-shrink-0">
-                                <div className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.18em] mb-2">Media Controls</div>
-                                <div className="rounded-xl p-2.5 border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/45 flex items-center gap-2">
-                                    <button
-                                        onClick={() => handleMediaTransportChange({ isMediaPlaying: liveSlide.slideStyle?.isMediaPlaying === false })}
-                                        className="p-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] text-[var(--text-primary)] flex-shrink-0"
-                                        title={liveSlide.slideStyle?.isMediaPlaying === false ? 'Play' : 'Pause'}
-                                    >
-                                        {liveSlide.slideStyle?.isMediaPlaying === false
-                                            ? <Play className="w-4 h-4" />
-                                            : <Pause className="w-4 h-4" />}
-                                    </button>
-
-                                    {liveSlide.backgroundType === backgroundTypes.video && (
-                                        <>
-                                            <button
-                                                onClick={() => handleMediaTransportChange({ mediaSeekPosition: 0, mediaSeekNonce: Date.now(), isMediaPlaying: true })}
-                                                className="p-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] text-[var(--text-primary)] flex-shrink-0"
-                                                title="Restart"
-                                            >
-                                                <RotateCcw className="w-4 h-4" />
-                                            </button>
-                                            <input
-                                                type="range"
-                                                min={0}
-                                                max={liveMediaProgress?.duration || 0}
-                                                step={0.1}
-                                                value={liveMediaProgress?.currentTime || 0}
-                                                onChange={(e) => handleMediaTransportChange({ mediaSeekPosition: Number(e.target.value), mediaSeekNonce: Date.now() })}
-                                                className="flex-1 accent-[var(--accent-teal)] min-w-0"
-                                            />
-                                            <span className="text-[10px] font-mono text-[var(--text-muted)] tabular-nums flex-shrink-0 w-20 text-right">
-                                                {formatSecondsToTime(Math.floor(liveMediaProgress?.currentTime || 0))} / {formatSecondsToTime(Math.floor(liveMediaProgress?.duration || 0))}
-                                            </span>
-                                            <button
-                                                onClick={() => handleMediaTransportChange({ repeatMedia: !(liveSlide.slideStyle?.repeatMedia ?? false) })}
-                                                className={`p-2 rounded-lg flex-shrink-0 hover:brightness-110 ${liveSlide.slideStyle?.repeatMedia ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--bg-elevated)] text-[var(--text-primary)]'}`}
-                                                title="Loop"
-                                            >
-                                                <Repeat className="w-4 h-4" />
-                                            </button>
-                                        </>
-                                    )}
-
-                                    <button
-                                        onClick={() => handleMediaTransportChange({ isMediaMuted: !(liveSlide.slideStyle?.isMediaMuted ?? false) })}
-                                        className="p-2 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--border-default)] text-[var(--text-primary)] flex-shrink-0"
-                                        title={liveSlide.slideStyle?.isMediaMuted ? 'Unmute' : 'Mute'}
-                                    >
-                                        {liveSlide.slideStyle?.isMediaMuted
-                                            ? <VolumeX className="w-4 h-4" />
-                                            : <Volume2 className="w-4 h-4" />}
-                                    </button>
-                                </div>
-                                </div>
-                            )}
-
-                        {/* Verse navigator sits under the feed only in 'stacked';
-                            'split' moves it into the tabbed context below. */}
-                        {layoutMode === 'stacked' && verseNav}
+                        <LiveMonitor liveSlide={onAir.liveSlide} />
+                        {/* Under the feed in 'stacked'; below the top row in
+                            'split'; mounted but hidden in 'focus', so its keys
+                            still step the passage. */}
+                        {layoutMode === 'stacked' && <LiveVerseNavigator liveSlide={onAir.liveSlide} />}
+                        {layoutMode === 'focus' && <LiveVerseNavigator liveSlide={onAir.liveSlide} className="hidden" />}
                     </div>
                 </div>
 
-                {/* Split layout: tabbed context (Verses / Sermon) below the top row. */}
                 {layoutMode === 'split' && splitContext}
 
-                {/* Shared Queue — contributions from non-operators */}
-                {isConnected && sharedQueueSlides.length > 0 && (
-                    <div className="flex-shrink-0 space-y-1.5">
-                        <div className="flex items-center justify-between">
-                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                                Suggested ({sharedQueueSlides.length})
-                            </div>
-                            {isOperator && (
-                                <button
-                                    onClick={() => {
-                                        const queueIds = sharedQueueSlides.map(s => s.slideId)
-                                        acceptFromQueue(queueIds)
-                                    }}
-                                    className="text-[10px] font-medium text-[var(--accent-teal)] hover:text-[var(--accent-teal)]/80 transition-colors"
-                                >
-                                    Accept All
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex gap-2 overflow-x-auto pb-1">
-                            {sharedQueueSlides.map((entry) => (
-                                <div
-                                    key={entry.queueKey}
-                                    className="flex-shrink-0 w-32 bg-gray-800/50 border border-blue-500/20 rounded-lg p-2 group relative"
-                                >
-                                    {entry.slide ? (
-                                        <>
-                                            <div className="text-[10px] text-white/70 truncate">{entry.slide.name}</div>
-                                            <div className="text-[8px] text-blue-400 mt-0.5">
-                                                {entry.slide.type === 'bible' ? 'Bible' : entry.slide.type === 'song' ? 'Song' : entry.slide.type === 'hymn' ? 'Hymn' : entry.slide.type === 'dictionary' ? 'Definition' : 'Slide'}
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div className="text-[10px] text-white/40 truncate italic">Pending slide</div>
-                                            <div className="text-[8px] text-blue-400/60 mt-0.5">Syncing…</div>
-                                        </>
-                                    )}
-                                    {isOperator && (
-                                        <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={() => acceptFromQueue([entry.slideId])}
-                                                className="p-0.5 bg-[var(--accent-teal)]/20 text-[var(--accent-teal)] rounded hover:bg-[var(--accent-teal)]/30"
-                                                title="Accept slide"
-                                            >
-                                                <Check className="w-2.5 h-2.5" />
-                                            </button>
-                                            <button
-                                                onClick={() => removeFromQueue([entry.slideId])}
-                                                className="p-0.5 bg-rose-500/20 text-rose-400 rounded hover:bg-rose-500/30"
-                                                title="Dismiss slide"
-                                            >
-                                                <X className="w-2.5 h-2.5" />
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                <SuggestedQueue />
             </div>
-
-            {/* Screen Picker Modal */}
-            {/* ScreenPicker draws its own panel and has no key handling, so
-                Escape here is Modal's alone. */}
-            <Modal
-                isOpen={showScreenPicker}
-                onClose={() => setShowScreenPicker(false)}
-                closeOnBackdrop={false}
-                ariaLabel="Select display"
-                overlayClassName="bg-black/80 backdrop-blur-sm"
-                zIndexClassName="z-[100]"
-                className="max-w-full"
-            >
-                <ScreenPicker
-                    onSelect={handleScreenSelect}
-                    onClose={() => setShowScreenPicker(false)}
-                />
-            </Modal>
         </div>
     )
-}
-
-/** "1,234 frames at 30 fps, 2 dropped, 1 late" — the alternate NDI feed's health, for its badge. */
-function alternateHealth(stats: PushStats): string {
-    const parts = [`${stats.sent.toLocaleString()} frames sent${stats.fps ? ` at ${stats.fps} fps` : ''}`]
-    if (stats.replacedUnsent) parts.push(`${stats.replacedUnsent.toLocaleString()} dropped`)
-    if (stats.lateTicks) parts.push(`${stats.lateTicks.toLocaleString()} late`)
-    return parts.join(', ')
 }
