@@ -487,6 +487,20 @@ describe('sermon listener: what the capture stream reports', () => {
         expect(s.heard()).toEqual(['John 3:16'])
     })
 
+    // Web speech reported speech starting and stopping; nothing passed it on,
+    // so the "speech detected" indicators never lit.
+    it('shows when speech is being heard, until listening stops', async () => {
+        const s = await listen()
+        await act(async () => {
+            h.transcription.emit!({ type: 'speech', active: true })
+        })
+        expect(s.state.isSpeechDetected).toBe(true)
+        await act(async () => {
+            s.state.stop()
+        })
+        expect(s.state.isSpeechDetected).toBe(false)
+    })
+
     it('an engine failure ends listening and says what kind it was', async () => {
         const s = await listen()
         await act(async () => {

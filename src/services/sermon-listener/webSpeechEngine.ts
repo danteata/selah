@@ -42,6 +42,8 @@ export function createWebSpeechEngine(service: Pick<SpeechRecognitionService, 'i
                 onResult: (text, isFinal) => {
                     onEvent({ type: 'result', text, isFinal })
                 },
+                onSpeechStart: () => onEvent({ type: 'speech', active: true }),
+                onSpeechEnd: () => onEvent({ type: 'speech', active: false }),
                 onError: (code, message) => {
                     listening = false
                     onEvent({ type: 'failed', error: errorFromMessage(message || code) })

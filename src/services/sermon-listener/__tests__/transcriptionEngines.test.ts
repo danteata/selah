@@ -151,6 +151,15 @@ describe('web speech engine', () => {
         expect(engine.isBusy()).toBe(false)
     })
 
+    it('reports when speech starts and stops being heard', async () => {
+        const { fake, engine } = webFake()
+        const events: EngineEvent[] = []
+        await engine.start(OPTIONS, (e) => events.push(e))
+        fake.options!.onSpeechStart!()
+        fake.options!.onSpeechEnd!()
+        expect(events).toEqual([{ type: 'speech', active: true }, { type: 'speech', active: false }])
+    })
+
     it('a stop before recognition has started wins: it is stopped as soon as it starts', async () => {
         const { fake, engine } = webFake()
         const events: EngineEvent[] = []

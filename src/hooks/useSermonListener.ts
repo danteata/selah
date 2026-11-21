@@ -205,6 +205,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         error,
         savedTranscriptId,
         devRecordingsVersion,
+        speechDetected: isSpeechDetected,
     } = useSyncExternalStore(session.subscribe, session.getSnapshot)
     const isListening = status === 'listening'
     const isStarting = status === 'starting'
@@ -999,8 +1000,7 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         semanticDetectionEnabled: enableSemanticDetection,
         semanticDetectorReady,
         isSemanticSearching,
-        // Neither engine reports speech activity yet.
-        isSpeechDetected: false,
+        isSpeechDetected,
         captureSource,
         activeBibleVersion,
         lastVoiceCommand,
