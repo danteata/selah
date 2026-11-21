@@ -3160,6 +3160,25 @@ export function useSermonListener(options: SermonListenerOptions = {}): UseSermo
         recentChunksRef.current = []
         detectedRefsRef.current = new Set()
         announcedChapterDefaultsRef.current = new Map()
+        // Everything the scripture follower remembers goes too. A new session
+        // that inherited the last one's reading context resolved "verse 16"
+        // into the old chapter, and an inherited cooldown held its first
+        // verse off the screen.
+        lastMatchTimeRef.current = new Map()
+        reactivationCooldownRef.current = new Map()
+        lastScoreByReferenceRef.current = new Map()
+        activeReferenceContextRef.current = null
+        semanticDetectorRef.current?.setReadingContext(null)
+        versionSwitchCooldownUntilRef.current = 0
+        navigationCooldownUntilRef.current = 0
+        // A semantic or LLM result still in flight belongs to the old session.
+        regexVerseDetectionRef.current++
+        if (llmDebounceRef.current) {
+            clearTimeout(llmDebounceRef.current)
+            llmDebounceRef.current = null
+        }
+        llmAbortRef.current?.abort()
+        llmAbortRef.current = null
         sessionStartTimeRef.current = 0
         chunkStartTimeRef.current = 0
         if (interimDebounceRef.current) {
