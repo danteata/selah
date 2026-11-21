@@ -34,3 +34,17 @@ _Avoid_: active reference
 **Song follower**:
 The part of the sermon listener that recognises which song is being sung and keeps up with where the congregation is in it.
 _Avoid_: song auto-detect
+
+## Songs and the screen
+
+**Section**:
+One named part of a song's lyrics, such as Verse 1, Chorus or Bridge. Each section is one slide.
+_Avoid_: verse (for anything but a verse section), slide (for the lyrics themselves)
+
+**Arrangement**:
+The order a song's sections are sung in, where a section may come round more than once.
+_Avoid_: order, flow
+
+**On air**:
+The slide currently showing on the output screen.
+_Avoid_: live slide, projected
