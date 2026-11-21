@@ -353,6 +353,62 @@ describe('useSongTracker (live wiring)', () => {
         })
     })
 
+    describe('when something else is on air', () => {
+        const VERSE_SLIDE = {
+            id: 'scripture-1', index: 99, name: 'John 3:16', type: 'bible', layout: 'bible',
+            userId: 'u', churchId: 'c', scheduleId: 's', contents: ['For God so loved the world'],
+        } as unknown as Slide
+
+        function stepAwayTo(rerender: () => void, slide: Slide) {
+            act(() => {
+                useAppStore.setState({ activeSlides: [...useAppStore.getState().activeSlides, slide] })
+                useAppStore.getState().setLiveSlide(slide.id)
+            })
+            act(() => rerender())
+        }
+
+        // The regression: the tracker put its song back on air with every
+        // line it matched, so a verse shown after a song came straight down.
+        it('does not take the screen back from a verse', () => {
+            const { rerender } = renderHook(() => useSongTracker())
+            feed(rerender, 'Amazing grace how sweet the sound')
+            expect(useAppStore.getState().liveSlideId).toBe('slide-v1')
+
+            stepAwayTo(rerender, VERSE_SLIDE)
+            feed(rerender, 'That saved a wretch like me')
+            feed(rerender, 'Was blind but now I see')
+            feed(rerender, 'My chains are gone I have been set free')
+
+            expect(useAppStore.getState().liveSlideId).toBe('scripture-1')
+        })
+
+        it('drives the song again once a slide of it is back on air', () => {
+            const { rerender } = renderHook(() => useSongTracker())
+            feed(rerender, 'Amazing grace how sweet the sound')
+            stepAwayTo(rerender, VERSE_SLIDE)
+            feed(rerender, 'That saved a wretch like me')
+
+            act(() => useAppStore.getState().setLiveSlide('slide-c1'))
+            act(() => rerender())
+            feed(rerender, 'And like a flood His mercy reigns')
+
+            expect(useAppStore.getState().liveSlideId).toBe('slide-v2')
+        })
+
+        it('keeps following the song stepped away from, not the first in the deck', () => {
+            const other = songSlides().map((sl) => ({ ...sl, id: `other-${sl.id}`, songId: 'other' }))
+            useAppStore.setState({ activeSlides: [...other, ...songSlides()] })
+            const { rerender } = renderHook(() => useSongTracker())
+            act(() => useAppStore.getState().setLiveSlide('slide-v1'))
+            act(() => rerender())
+            expect(useAppStore.getState().songTracking.status.songId).toBe('song1')
+
+            stepAwayTo(rerender, VERSE_SLIDE)
+
+            expect(useAppStore.getState().songTracking.status.songId).toBe('song1')
+        })
+    })
+
     it('finds the slide for a section after a chorus written out twice', () => {
         // V1, C, V2, C, V3: five slides, three sections. By place, the second
         // chorus slide stood for Verse 3, and Verse 3's own slide for nothing.

@@ -59,6 +59,9 @@ export function useSongTracker() {
     // The live slide the tracker itself last drove — used to tell tracker-driven
     // changes apart from manual operator changes.
     const trackerDrivenSlideRef = useRef<string | null>(null)
+    // The song most recently on air. While something else is on air — a
+    // verse, an announcement — that song is still the one to follow.
+    const lastOnAirSongRef = useRef<string | null>(null)
     const segmentsRef = useRef<typeof transcriptSegments>(transcriptSegments)
     const lastInterimRef = useRef('')
     const leadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -84,13 +87,18 @@ export function useSongTracker() {
     /**
      * Resolve the song currently on the live output and the maps needed to
      * project arrangement steps onto real slides. The tracked song owns the live
-     * slide, else it's the first song present.
+     * slide; else it's the song last on air, if it's still in the deck; else
+     * the first song present.
+     *
+     * Falling straight to the first song meant stepping away from the third
+     * song of a set to show a verse swapped the tracker onto the first.
      */
-    const { trackedSong, songKey, stepToSlide, slideToSection, sectionLabels, arrangement } =
+    const { trackedSong, songKey, songSlideIds, stepToSlide, slideToSection, sectionLabels, arrangement } =
         useMemo(() => {
             const empty = {
                 trackedSong: null as Song | null,
                 songKey: null as string | null,
+                songSlideIds: new Set<string>(),
                 stepToSlide: new Map<number, string>(),
                 slideToSection: new Map<string, string>(),
                 sectionLabels: new Map<string, string>(),
@@ -108,7 +116,9 @@ export function useSongTracker() {
             if (songSlides.length === 0) return empty
 
             const owningLive = songSlides.find((s) => s.id === liveSlideId)
-            const key = (owningLive ?? songSlides[0]).songId ?? null
+            if (owningLive) lastOnAirSongRef.current = owningLive.songId ?? null
+            const lastOnAir = songSlides.find((s) => (s.songId ?? null) === lastOnAirSongRef.current)
+            const key = (owningLive ?? lastOnAir ?? songSlides[0]).songId ?? null
             const group = songSlides.filter((s) => (s.songId ?? null) === key)
             const stored = group[0].data as Song
             // One normalized object, so every consumer below and the tracker
@@ -157,14 +167,22 @@ export function useSongTracker() {
                 })
             }
 
-            return { trackedSong: song, songKey: key, stepToSlide, slideToSection, sectionLabels, arrangement }
+            return {
+                trackedSong: song,
+                songKey: key,
+                songSlideIds: new Set(group.map((sl) => sl.id)),
+                stepToSlide,
+                slideToSection,
+                sectionLabels,
+                arrangement,
+            }
         }, [activeSlides, liveSlideId])
 
     // Latest values the timer callback needs, without making it a dependency of
     // every effect that schedules one.
-    const applyDepsRef = useRef({ stepToSlide, arrangement, sectionLabels, songKey, trackedSong, setLiveSlide, setStatus })
+    const applyDepsRef = useRef({ stepToSlide, songSlideIds, arrangement, sectionLabels, songKey, trackedSong, setLiveSlide, setStatus })
     useEffect(() => {
-        applyDepsRef.current = { stepToSlide, arrangement, sectionLabels, songKey, trackedSong, setLiveSlide, setStatus }
+        applyDepsRef.current = { stepToSlide, songSlideIds, arrangement, sectionLabels, songKey, trackedSong, setLiveSlide, setStatus }
     })
 
     const clearLeadTimer = useCallback(() => {
@@ -194,8 +212,16 @@ export function useSongTracker() {
 
         const { enabled: on, locked: frozen } = useAppStore.getState().songTracking
         if (!on || frozen || u.displayStepIndex === null) return
+        // The tracker moves the screen only while its song is on air (or
+        // nothing is). Once anything else goes up — a verse the listener
+        // found, a slide the operator chose — the screen is not the song's to
+        // take back: putting the song back up is the operator's call, or
+        // auto-detect's on fresh evidence. Re-asserting the song here on
+        // every line heard is how a verse got yanked off air mid-sermon.
+        const onAir = useAppStore.getState().liveSlideId
+        if (onAir !== null && !deps.songSlideIds.has(onAir)) return
         const slideId = deps.stepToSlide.get(u.displayStepIndex)
-        if (!slideId || slideId === useAppStore.getState().liveSlideId) return
+        if (!slideId || slideId === onAir) return
         trackerDrivenSlideRef.current = slideId
         deps.setLiveSlide(slideId)
     }, [])
