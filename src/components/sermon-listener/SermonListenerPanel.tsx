@@ -20,7 +20,7 @@ import { Mic, Square, BookOpen, Loader2, Save, FileText, ChevronDown, ChevronUp,
 import type { VoiceCommand } from '../../services/sermon-listener/voiceCommandDetection'
 import type { TranscriptSummary } from '../../hooks/useTranscripts'
 import { useSermonCorrections, type SermonCorrection } from '../../hooks/useSermonCorrections'
-import { classifyTranscriptionError, getUserAction, transcriptionErrorCodes, isRetryableError } from '../../services/sermon-listener/transcriptionErrors'
+import { getUserAction, transcriptionErrorCodes } from '../../services/sermon-listener/transcriptionErrors'
 import { generateSermonNotes } from '../../services/sermon-listener/sermonNotes'
 import { SongTrackingControl } from './SongTrackingControl'
 import { sessionAudioRecorder } from '../../services/sermon-listener/sessionAudioRecorder'
@@ -629,15 +629,15 @@ function SermonListenerPanelInner({
 
             {/* Error message with structured actions */}
             {error && (() => {
-                const errorCode = classifyTranscriptionError(error)
+                const errorCode = error.code
                 const userAction = getUserAction(errorCode)
-                const isRetryable = isRetryableError(errorCode)
+                const isRetryable = error.retryable
                 return (
                     <div className={`p-3 rounded-lg ${isRetryable ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : 'bg-red-100 dark:bg-red-900/30 text-red-500'}`}>
                         <div className="flex items-start gap-2">
                             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium">{error}</p>
+                                <p className="text-sm font-medium">{error.message}</p>
                                 {isRetryable && (
                                     <p className="text-xs mt-0.5 opacity-75">Transcription will retry automatically.</p>
                                 )}

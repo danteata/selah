@@ -9,8 +9,8 @@ export {
     NUMBER_TO_BOOK,
 } from './verseDetection'
 export type { DetectedVerse } from './verseDetection'
-export { unifiedTranscriptionService } from './unifiedTranscription'
-export type { TranscriptionProvider, UnifiedTranscriptionOptions, TranscriptionStatus, WhisperSegmentTiming } from './unifiedTranscription'
+export { transcriptionEngines } from './engines'
+export type { TranscriptionProvider, TranscriptionEngine, EngineEvent, ListeningError, WhisperSegmentTiming } from './transcriptionEngine'
 
 // Local embeddings for semantic verse detection
 export {
