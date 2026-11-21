@@ -205,7 +205,7 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
         vi.resetModules()
     })
 
-    async function withGraceLive(confidence: number) {
+    async function withGraceLive(confidence: number, phase: 'searching' | 'tracking' = 'tracking') {
         const { useAppStore, DEFAULT_SONG_TRACKING } = await import('../../store/appStore')
         const { useSongAutoDetect } = await import('../useSongAutoDetect')
         useAppStore.setState({
@@ -214,7 +214,7 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
             songTracking: {
                 ...DEFAULT_SONG_TRACKING,
                 autoDetect: true,
-                status: { ...DEFAULT_SONG_TRACKING.status, songId: 'grace', phase: 'tracking', confidence },
+                status: { ...DEFAULT_SONG_TRACKING.status, songId: 'grace', phase, confidence },
             },
         })
         const { rerender } = renderHook(() => useSongAutoDetect())
@@ -234,6 +234,21 @@ describe('useSongAutoDetect (moving on from the song on screen)', () => {
         const { useAppStore, rerender } = await withGraceLive(0.4)
         await singUntilDetected(rerender, CORNERSTONE_LINES)
         await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
+    })
+
+    it('replaces a song the tracker never found its place in', async () => {
+        // The regression: a wrong song put up stayed Searching — nothing sung
+        // matched it — and auto-detect only looked again for Lost or
+        // weak-Tracking, so the wrong song stayed on screen for good.
+        const { useAppStore, rerender } = await withGraceLive(0, 'searching')
+        await singUntilDetected(rerender, CORNERSTONE_LINES)
+        await waitFor(() => expect(useAppStore.getState().liveSlideId).toBe('slide-cornerstone-v1'))
+    })
+
+    it('keeps a song still being searched for when it is the one being sung', async () => {
+        const { useAppStore, rerender } = await withGraceLive(0, 'searching')
+        await singUntilDetected(rerender, GRACE.sections![0].lines)
+        expect(useAppStore.getState().liveSlideId).toBe(GRACE_SLIDE.id)
     })
 
     it('leaves a song the tracker is following well alone', async () => {

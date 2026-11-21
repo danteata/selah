@@ -191,13 +191,23 @@ export function useSongAutoDetect() {
         }
 
         // (Re)search for a song when nothing is displayed, when the tracker
-        // has lost the displayed one, or when it is barely holding on to it —
-        // a new song has most likely started. While the current song is
-        // tracking well, stay quiet: the tracker is busy finding the right
-        // verse within it, and we must not fight that.
+        // has lost the displayed one, when it never found its place in it, or
+        // when it is barely holding on to it — a new song has most likely
+        // started. While the current song is tracking well, stay quiet: the
+        // tracker is busy finding the right verse within it, and we must not
+        // fight that.
+        //
+        // A song still Searching is one the tracker has never placed a line
+        // of. Leaving that out was how a wrong song stuck: auto-detect put it
+        // up, nothing sung matched it, so it never reached Tracking — and the
+        // only states that let auto-detect look again were Tracking-but-weak
+        // and Lost. Searching is not a reason to replace the song on its own:
+        // the song on screen competes for the same evidence (see below), so
+        // if it is what is being sung, it wins.
         const { confidence: trackerConfidence } = useAppStore.getState().songTracking.status
         const struggling = trackerPhase === 'tracking' && trackerConfidence < STRUGGLING_CONFIDENCE
-        const shouldSearch = !liveSongKey || trackerPhase === 'lost' || struggling
+        const unplaced = trackerPhase === 'searching'
+        const shouldSearch = !liveSongKey || trackerPhase === 'lost' || unplaced || struggling
         if (!shouldSearch) {
             confirmationRef.current.reset()
             unmatchedRef.current = 0
