@@ -344,6 +344,27 @@ describe('sermon listener: reading context and voice commands', () => {
         expect(s.queued()).toEqual(['John 3:17'])
     })
 
+    it('"next chapter" from the last chapter of a book moves into the next book', async () => {
+        const s = await listen()
+        await s.say('Genesis 50 verse 26.')
+        await s.wait(4 * SECOND)
+        await s.say('Next chapter.')
+
+        expect(s.current()).toBe('Exodus 1:1')
+        expect(s.state.currentVerse?.book).toBe('Exodus')
+        expect(s.live()).toBe('Exodus 1:1')
+    })
+
+    it('"previous chapter" from the first chapter of a book moves into the book before', async () => {
+        const s = await listen()
+        await s.say('Exodus 1 verse 5.')
+        await s.wait(4 * SECOND)
+        await s.say('Previous chapter.')
+
+        expect(s.current()).toBe('Genesis 50:1')
+        expect(s.live()).toBe('Genesis 50:1')
+    })
+
     it('a chapter-only mention does not revert a specific verse (Joshua 24:15 → 24:1)', async () => {
         const s = await listen()
         await s.say('Joshua chapter 24 verse 15.')
