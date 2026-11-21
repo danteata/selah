@@ -212,8 +212,8 @@ export interface TrackerUpdate {
     /** True on the ingest of finalized text that placed a line at or above
      *  {@link SUNG_LINE_SCORE}: evidence the song is being sung right now. */
     sung: boolean
-    /** Whether the song is being sung: tracking, with a line heard sung (or
-     *  the song acquired) within {@link SINGING_GAP_MS} of the latest
+    /** Whether the song is being sung: tracking, with a line heard sung
+     *  within {@link SINGING_GAP_MS} of the latest
      *  finalized text. Says nothing about *where* — the cursor stays put
      *  through a gap, so the tracker carries on from there when singing
      *  resumes. */
@@ -223,8 +223,16 @@ export interface TrackerUpdate {
     matched: { stepIndex: number; lineIndex: number; line: string; score: number } | null
 }
 
-/** Score a finalized line must reach to count as heard being sung. */
-export const SUNG_LINE_SCORE = 0.6
+/**
+ * Score a finalized line must reach to count as heard being sung.
+ *
+ * Preaching quotes songs: "you are wondering whether God has heard you"
+ * contains "You have heard me" whole. At 0.6, a sermon on prayer after a song
+ * about prayer read as singing for half its windows; at 0.65, a quarter, with
+ * no loss of the real song's singing (singingFlow.eval). Higher starts
+ * missing real singing.
+ */
+export const SUNG_LINE_SCORE = 0.65
 
 /**
  * How long without a line heard being sung before the singing is over.
@@ -389,8 +397,8 @@ export class SongPositionTracker {
      *  see {@link reviewLead}. */
     private noPredictStep = -1
 
-    /** Audio time (ms) of the last line heard being sung, or of acquiring
-     *  the song; null when unknown (after a seek, before acquiring). */
+    /** Audio time (ms) of the last line heard being sung; null when none
+     *  has been (after a seek, before acquiring). */
     private lastSungMs: number | null = null
     /** Whether the ingest in progress placed a line heard being sung. */
     private sungNow = false
@@ -635,7 +643,7 @@ export class SongPositionTracker {
             this.noteMatchTime(chunk, best.stepIndex, best.lineIndex, false)
             this.pendingJump = null
             this.phase = 'tracking'
-            this.noteSung(chunk, best.score, true)
+            this.noteSung(chunk, best.score)
             const changed = this.recomputeDisplay()
             return this.snapshot(changed, 'acquired')
         }
@@ -690,7 +698,7 @@ export class SongPositionTracker {
                 // Not yet confirmed — treat as a soft miss, hold position. It
                 // is still a line of this song sung clearly, somewhere else in
                 // it: a leader doubling back is still singing.
-                this.noteSung(chunk, best.score, false)
+                this.noteSung(chunk, best.score)
                 return this.snapshot(false, 'jump-pending')
             }
         }
@@ -703,7 +711,7 @@ export class SongPositionTracker {
         this.confidence = best.score
         if (!interim) this.consecutiveMisses = 0
         this.noteMatchTime(chunk, best.stepIndex, best.lineIndex, interim)
-        if (!interim) this.noteSung(chunk, best.score, false)
+        if (!interim) this.noteSung(chunk, best.score)
         this.phase = 'tracking'
 
         const changed = this.recomputeDisplay()
@@ -795,13 +803,14 @@ export class SongPositionTracker {
         return Math.max(0, step.lines.length - 1 - Math.max(this.singerLine, this.tailLine))
     }
 
-    /** Note a finalized line placed at `score`. Acquiring starts the singing
-     *  clock whatever the score, so a song acquired on a middling line and
-     *  never heard clearly again still runs out. */
-    private noteSung(chunk: TrackerChunk, score: number, acquired: boolean): void {
-        const sung = score >= this.config.sungScore
-        if (sung) this.sungNow = true
-        if ((sung || acquired) && chunk.timeMs !== undefined) this.lastSungMs = chunk.timeMs
+    /** Note a finalized line placed at `score`. Only a line heard clearly
+     *  counts — not merely acquiring the song: after a sermon knocks the
+     *  tracker into Lost, a passing 0.5 re-acquire used to restart the
+     *  singing clock on preaching. */
+    private noteSung(chunk: TrackerChunk, score: number): void {
+        if (score < this.config.sungScore) return
+        this.sungNow = true
+        if (chunk.timeMs !== undefined) this.lastSungMs = chunk.timeMs
     }
 
     private handleMiss(): TrackerUpdate {
