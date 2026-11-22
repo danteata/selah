@@ -288,10 +288,18 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $ORT_VERSION = "1.24.2"
-          $url = "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-win-x64-$ORT_VERSION.zip"
+          # Microsoft's NuGet package of the same official build. The GitHub
+          # release zip went with github.com/microsoft/onnxruntime, which has
+          # answered 404 since November 2026. Pinned by hash: a NuGet package
+          # version is immutable, so a different download is a different file.
+          $ORT_SHA256 = "782564D3D68E87269EA1812CC94710AD06FE014FAF093F01A6F89D0BD58719D3"
+          $url = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$ORT_VERSION/microsoft.ml.onnxruntime.$ORT_VERSION.nupkg"
           Invoke-WebRequest -Uri $url -OutFile ort.zip
+          $hash = (Get-FileHash ort.zip -Algorithm SHA256).Hash
+          if ($hash -ne $ORT_SHA256) { throw "Microsoft.ML.OnnxRuntime $ORT_VERSION hash $hash, expected $ORT_SHA256" }
           Expand-Archive -Path ort.zip -DestinationPath ort-dist -Force
-          $ortLib = (Resolve-Path "ort-dist/onnxruntime-win-x64-$ORT_VERSION/lib").Path
+          # onnxruntime.dll and its import library onnxruntime.lib, side by side.
+          $ortLib = (Resolve-Path "ort-dist/runtimes/win-x64/native").Path
           if (-not (Test-Path (Join-Path $ortLib 'onnxruntime.dll'))) {
             throw "onnxruntime.dll not found in $ortLib"
           }
