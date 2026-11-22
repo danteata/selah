@@ -5,7 +5,7 @@
 # on a phone.
 [package]
 name = "selah-mobile"
-version = "0.1.44"
+version = "0.1.45"
 description = "Selah for phones"
 license = "MIT"
 edition = "2021"
