@@ -1,4 +1,4 @@
-## Selah 0.1.45
+## Selah 0.1.46
 
 Arrange the desk the way you're used to: Studio and Dashboard are now one desk of panels you can move, stack and resize, with a Classic layout for anyone coming from EasyWorship. Song following and the Sermon Listener make far fewer wrong calls.
 
